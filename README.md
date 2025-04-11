@@ -1,0 +1,2 @@
+# Obsidian
+SCHOOL PROJECT
