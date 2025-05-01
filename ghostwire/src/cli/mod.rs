@@ -2,6 +2,7 @@ pub mod commands;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
+use crate::cli::commands::Command;
 
 #[derive(Parser)]
 #[command(name = "ghostwire")]

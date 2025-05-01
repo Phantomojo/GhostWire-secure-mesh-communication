@@ -1,9 +1,9 @@
 mod core;
 mod cli;
-mod ioc;
-mod messaging;
-mod trust;
-mod tor_integration;
+// mod ioc;
+// mod messaging;
+// mod trust;
+// mod tor_integration;
 
 use clap::Parser;
 use cli::GhostWireCli;
