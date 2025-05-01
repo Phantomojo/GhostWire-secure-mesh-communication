@@ -85,7 +85,7 @@ struct GhostWireBehaviour {
 
 impl GhostWireBehaviour {
     async fn new() -> Result<Self> {
-        let protocols = iter::once((GhostWireProtocol(), Default::default()));
+        let protocols = iter::once((GhostWireProtocol(), libp2p::request_response::ProtocolSupport::Full));
         let cfg = RequestResponseConfig::default();
         let request_response = RequestResponse::new(GhostWireCodec(), protocols, cfg);
 
@@ -132,7 +132,9 @@ impl Networking {
             match self.swarm.next().await {
                 Some(event) => {
                     info!("Swarm event: {:?}", event);
-                    if let Err(e) = self.event_sender.send(event) {
+                    // Convert event to expected type or handle error
+                    let send_result = self.event_sender.send(event.map_err(|e| e.into()));
+                    if let Err(e) = send_result {
                         error!("Failed to send swarm event: {:?}", e);
                     }
                 }
@@ -151,7 +153,7 @@ impl Networking {
     }
 
     pub async fn send_response(&mut self, channel: libp2p::request_response::ResponseChannel<Bytes>, response: Bytes) -> Result<()> {
-        self.swarm.behaviour_mut().request_response.send_response(channel, response)?;
+        self.swarm.behaviour_mut().request_response.send_response(channel, response).map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
     }
 }

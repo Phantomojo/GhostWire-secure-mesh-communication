@@ -100,9 +100,9 @@ impl Command for Whisper {
                             Ok(plaintext) => {
                                 let msg_str = String::from_utf8_lossy(&plaintext);
                                 info!("Decrypted message from {}: {}", peer, msg_str);
-                                // Echo back the request as response for now
+                                // Use public method to send response instead of accessing private field
                                 let mut net = networking.lock().await;
-                                if let Err(e) = net.swarm.behaviour_mut().request_response.send_response(channel.clone(), request.clone()) {
+                                if let Err(e) = net.send_response(channel.clone(), request.clone()).await {
                                     eprintln!("Failed to send response: {:?}", e);
                                 }
                             }
