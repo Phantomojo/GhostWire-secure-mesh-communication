@@ -149,6 +149,11 @@ impl Networking {
     pub async fn send_message(&mut self, peer: &PeerId, data: Vec<u8>) -> Result<RequestId> {
         Ok(self.swarm.behaviour_mut().request_response.send_request(peer, data.into()))
     }
+
+    pub async fn send_response(&mut self, channel: libp2p::request_response::ResponseChannel<Bytes>, response: Bytes) -> Result<()> {
+        self.swarm.behaviour_mut().request_response.send_response(channel, response)?;
+        Ok(())
+    }
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for GhostWireBehaviour {

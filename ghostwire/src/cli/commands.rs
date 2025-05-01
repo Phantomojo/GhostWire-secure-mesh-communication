@@ -6,23 +6,51 @@ use libp2p::swarm::SwarmEvent;
 use log::info;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use clap::Args;
 
+#[derive(Args)]
 pub struct Whisper {
-    recipient: String,
-    message: String,
+    #[arg(help = "Recipient peer ID")]
+    pub recipient: String,
+    #[arg(help = "Message to send")]
+    pub message: String,
 }
 
-impl Whisper {
-    pub fn new(recipient: String, message: String) -> Self {
-        Self { recipient, message }
-    }
+#[derive(Args)]
+pub struct Cloak {
+    #[arg(long, help = "Enable or disable cloak")]
+    pub enable: bool,
 }
 
-pub struct Cloak;
-pub struct Drop;
-pub struct Fetch;
-pub struct Peers;
-pub struct Trust;
+#[derive(Args)]
+pub struct Drop {
+    #[arg(help = "IOC file to share")]
+    pub ioc_file: String,
+}
+
+#[derive(Args)]
+pub struct Fetch {
+    #[arg(long, help = "Category filter (IP/hash/domain)")]
+    pub category: Option<String>,
+    #[arg(long, help = "Reputation filter (high/low)")]
+    pub reputation: Option<String>,
+}
+
+#[derive(Args)]
+pub struct Peers {
+    #[arg(long, help = "List peers")]
+    pub list: bool,
+    #[arg(long, help = "Show status")]
+    pub status: bool,
+}
+
+#[derive(Args)]
+pub struct Trust {
+    #[arg(long, help = "Peer ID to view or update")]
+    pub peer_id: Option<String>,
+    #[arg(long, help = "Score to update")]
+    pub score: Option<i32>,
+}
 
 #[async_trait::async_trait]
 pub trait Command {
@@ -90,46 +118,6 @@ impl Command for Whisper {
             }
         }
 
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Command for Cloak {
-    async fn execute(&self) -> Result<()> {
-        println!("Cloak command placeholder");
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Command for Drop {
-    async fn execute(&self) -> Result<()> {
-        println!("Drop command placeholder");
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Command for Fetch {
-    async fn execute(&self) -> Result<()> {
-        println!("Fetch command placeholder");
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Command for Peers {
-    async fn execute(&self) -> Result<()> {
-        println!("Peers command placeholder");
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Command for Trust {
-    async fn execute(&self) -> Result<()> {
-        println!("Trust command placeholder");
         Ok(())
     }
 }
