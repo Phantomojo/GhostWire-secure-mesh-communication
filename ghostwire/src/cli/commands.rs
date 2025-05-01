@@ -4,35 +4,6 @@ use crate::core::networking::{Networking};
 use tokio::sync::mpsc;
 use libp2p::swarm::SwarmEvent;
 use log::info;
-
-pub struct Whisper {
-    recipient: String,
-    message: String,
-}
-
-impl Whisper {
-    pub fn new(recipient: String, message: String) -> Self {
-        Self { recipient, message }
-    }
-}
-
-pub struct Cloak;
-pub struct Drop;
-pub struct Fetch;
-pub struct Peers;
-pub struct Trust;
-
-#[async_trait::async_trait]
-pub trait Command {
-    async fn execute(&self) -> Result<()>;
-}
-
-use anyhow::Result;
-use crate::core::encryption::Encryption;
-use crate::core::networking::{Networking};
-use tokio::sync::mpsc;
-use libp2p::swarm::SwarmEvent;
-use log::info;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
