@@ -3,6 +3,10 @@ pub mod commands;
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use crate::cli::commands::Command;
+use crate::core::identity::EphemeralIdentity;
+use crate::core::store::MessageCache;
+use crate::core::transport::MockTransport;
+use crate::core::encryption::Encryption;
 
 #[derive(Parser)]
 #[command(name = "ghostwire")]
@@ -23,14 +27,14 @@ pub enum Commands {
 }
 
 impl GhostWireCli {
-    pub async fn execute(&self) -> Result<()> {
+    pub async fn execute(&self, identity: &EphemeralIdentity, cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()> {
         match &self.command {
-            Commands::Whisper(cmd) => cmd.execute().await,
-            Commands::Cloak(cmd) => cmd.execute().await,
-            Commands::Drop(cmd) => cmd.execute().await,
-            Commands::Fetch(cmd) => cmd.execute().await,
-            Commands::Peers(cmd) => cmd.execute().await,
-            Commands::Trust(cmd) => cmd.execute().await,
+            Commands::Whisper(cmd) => cmd.execute(identity, cache, transport, encryption).await,
+            Commands::Cloak(cmd) => cmd.execute(identity, cache, transport, encryption).await,
+            Commands::Drop(cmd) => cmd.execute(identity, cache, transport, encryption).await,
+            Commands::Fetch(cmd) => cmd.execute(identity, cache, transport, encryption).await,
+            Commands::Peers(cmd) => cmd.execute(identity, cache, transport, encryption).await,
+            Commands::Trust(cmd) => cmd.execute(identity, cache, transport, encryption).await,
         }
     }
 }

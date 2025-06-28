@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-cyber-black text-cyber-green font-cyber;
+    font-family: 'Courier New', monospace;
+  }
+}
+
+@layer components {
+  .cyber-button {
+    @apply bg-cyber-dark border border-cyber-green text-cyber-green px-4 py-2 rounded-none hover:bg-cyber-green hover:text-cyber-black transition-all duration-200 font-cyber;
+  }
+  
+  .cyber-input {
+    @apply bg-cyber-dark border border-cyber-gray text-cyber-green px-3 py-2 rounded-none focus:border-cyber-green focus:outline-none font-cyber;
+  }
+  
+  .cyber-card {
+    @apply bg-cyber-dark border border-cyber-gray p-4;
+  }
+  
+  .cyber-sidebar {
+    @apply bg-cyber-dark border-r border-cyber-gray;
+  }
+  
+  .cyber-glow {
+    @apply animate-glow;
+  }
+} 

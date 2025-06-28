@@ -1,130 +1,70 @@
-use anyhow::Result;
 use crate::core::encryption::Encryption;
-use crate::core::networking::{Networking};
-use tokio::sync::mpsc;
-use libp2p::swarm::SwarmEvent;
-use log::info;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::core::identity::EphemeralIdentity;
+use crate::core::store::MessageCache;
+use crate::core::transport::{MockTransport, Transport};
+use anyhow::Result;
 use clap::Args;
 
 #[derive(Args)]
 pub struct Whisper {
     #[arg(help = "Recipient peer ID")]
-    pub recipient: String,
+    recipient: String,
     #[arg(help = "Message to send")]
-    pub message: String,
+    message: String,
 }
 
 #[derive(Args)]
 pub struct Cloak {
-    #[arg(long, help = "Enable or disable cloak")]
-    pub enable: bool,
+    #[arg(help = "File to cloak")]
+    file: String,
 }
 
 #[derive(Args)]
 pub struct Drop {
-    #[arg(help = "IOC file to share")]
-    pub ioc_file: String,
+    #[arg(help = "Message ID to drop")]
+    message_id: String,
 }
 
 #[derive(Args)]
 pub struct Fetch {
-    #[arg(long, help = "Category filter (IP/hash/domain)")]
-    pub category: Option<String>,
-    #[arg(long, help = "Reputation filter (high/low)")]
-    pub reputation: Option<String>,
+    #[arg(help = "Message ID to fetch")]
+    message_id: String,
 }
 
 #[derive(Args)]
-pub struct Peers {
-    #[arg(long, help = "List peers")]
-    pub list: bool,
-    #[arg(long, help = "Show status")]
-    pub status: bool,
-}
+pub struct Peers {}
 
 #[derive(Args)]
 pub struct Trust {
-    #[arg(long, help = "Peer ID to view or update")]
-    pub peer_id: Option<String>,
-    #[arg(long, help = "Score to update")]
-    pub score: Option<i32>,
+    #[arg(help = "Peer ID to trust")]
+    peer_id: String,
 }
 
 #[async_trait::async_trait]
 pub trait Command {
-    async fn execute(&self) -> Result<()>;
+    async fn execute(&self, identity: &EphemeralIdentity, cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 impl Command for Whisper {
-    async fn execute(&self) -> Result<()> {
-        // Initialize encryption engine
-        let encryption = Encryption::new()?;
-
-        // Setup channel for networking events
-        let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
-
-        // Initialize networking
-        let networking = Arc::new(Mutex::new(Networking::new(event_sender).await?));
-
-        // Start networking in background task
-        let networking_clone = networking.clone();
-        tokio::spawn(async move {
-            let mut net = networking_clone.lock().await;
-            if let Err(e) = net.start().await {
-                eprintln!("Networking error: {:?}", e);
-            }
-        });
-
-        // Send encrypted message to recipient peer
-        let peer_id = self.recipient.parse()?;
-        {
-            let mut net = networking.lock().await;
-            let encrypted_message = encryption.encrypt(self.message.as_bytes());
-            let request_id = net.send_message(&peer_id, encrypted_message).await?;
-            info!("Sent message with request id: {:?}", request_id);
-        }
-
-        // Process networking events and handle incoming messages
-        while let Some(event) = event_receiver.recv().await {
-            info!("Network event: {:?}", event);
-            // Handle incoming messages and decrypt them
-            if let libp2p::swarm::SwarmEvent::Behaviour(libp2p::request_response::RequestResponseEvent::Message { peer, message }) = &event {
-                match message {
-                    libp2p::request_response::RequestResponseMessage::Request { request, channel, .. } => {
-                        info!("Received request from {}: {:?}", peer, request);
-                        // Decrypt the incoming message
-                        match encryption.decrypt(&request) {
-                            Ok(plaintext) => {
-                                let msg_str = String::from_utf8_lossy(&plaintext);
-                                info!("Decrypted message from {}: {}", peer, msg_str);
-                                // Use public method to send response instead of accessing private field
-                                let mut net = networking.lock().await;
-                                if let Err(e) = net.send_response(channel.clone(), request.clone()).await {
-                                    eprintln!("Failed to send response: {:?}", e);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to decrypt message from {}: {:?}", peer, e);
-                            }
-                        }
-                    }
-                    libp2p::request_response::RequestResponseMessage::Response { response, .. } => {
-                        info!("Received response from {}: {:?}", peer, response);
-                    }
-                }
-            }
-        }
-
+    async fn execute(&self, identity: &EphemeralIdentity, cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()> {
+        println!("Sending encrypted message to {}", self.recipient);
+        
+        // Encrypt the message
+        let encrypted_payload = encryption.encrypt(self.message.as_bytes());
+        println!("Encrypted payload: {} bytes", encrypted_payload.len());
+        
+        // Send via transport
+        transport.send(&self.recipient, &encrypted_payload).await?;
+        
+        println!("Message sent successfully!");
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl Command for Cloak {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
         println!("Cloak command placeholder");
         Ok(())
     }
@@ -132,7 +72,7 @@ impl Command for Cloak {
 
 #[async_trait::async_trait]
 impl Command for Drop {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
         println!("Drop command placeholder");
         Ok(())
     }
@@ -140,7 +80,7 @@ impl Command for Drop {
 
 #[async_trait::async_trait]
 impl Command for Fetch {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
         println!("Fetch command placeholder");
         Ok(())
     }
@@ -148,7 +88,7 @@ impl Command for Fetch {
 
 #[async_trait::async_trait]
 impl Command for Peers {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
         println!("Peers command placeholder");
         Ok(())
     }
@@ -156,7 +96,7 @@ impl Command for Peers {
 
 #[async_trait::async_trait]
 impl Command for Trust {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
         println!("Trust command placeholder");
         Ok(())
     }
