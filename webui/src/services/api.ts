@@ -1,7 +1,6 @@
 // API service for connecting to GhostWire backend
 
 const API_BASE_URL = 'http://localhost:3001/api';
-const WS_URL = 'ws://localhost:3001/ws';
 
 export interface Message {
   id: string;
@@ -46,25 +45,43 @@ export interface NetworkInfo {
   timestamp: string;
 }
 
+async function reportFrontendError(errorMsg: string) {
+  try {
+    const hostname = window.location.hostname;
+    const userAgent = navigator.userAgent;
+    const fullMsg = `Frontend error on ${hostname} [${userAgent}]: ${errorMsg}`;
+    await fetch('http://192.168.100.242:3001/api/report_error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: fullMsg })
+    });
+  } catch {}
+}
+
 // REST API functions
 export const api = {
   // Send a message
   async sendMessage(recipient: string, message: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/send_message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ recipient, message }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to send message: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to send message');
+    try {
+      const response = await fetch(`${API_BASE_URL}/send_message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipient, message }),
+      });
+      if (!response.ok) {
+        await reportFrontendError(`sendMessage failed: ${response.statusText}`);
+        throw new Error(`Failed to send message: ${response.statusText}`);
+      }
+      const data = await response.json();
+      if (!data.success) {
+        await reportFrontendError(`sendMessage failed: ${data.error}`);
+        throw new Error(data.error || 'Failed to send message');
+      }
+    } catch (e: any) {
+      await reportFrontendError(`sendMessage exception: ${e}`);
+      throw e;
     }
   },
 
@@ -228,6 +245,7 @@ export class WebSocketService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private wsUrl: string | null = null;
 
   constructor(
     private onMessage: (message: Message) => void,
@@ -236,34 +254,46 @@ export class WebSocketService {
     private onError: (error: string) => void
   ) {}
 
-  connect() {
+  async connect() {
     try {
-      this.ws = new WebSocket(WS_URL);
-      
+      if (!this.wsUrl) {
+        // Dynamically fetch backend IP and port
+        const info = await api.getNetworkInfo();
+        // Use window.location.hostname for frontend IP, but backend IP for LAN
+        const wsHost = info.local_ip || window.location.hostname;
+        // Try to get the port from the API base URL
+        let port = 3001;
+        try {
+          const url = new URL((api as any).API_BASE_URL || 'http://localhost:3001/api');
+          port = parseInt(url.port) || 3001;
+        } catch {}
+        this.wsUrl = `ws://${wsHost}:${port}/ws`;
+      }
+      this.ws = new WebSocket(this.wsUrl);
       this.ws.onopen = () => {
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
       };
-
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           this.handleMessage(data);
         } catch (error) {
+          reportFrontendError(`WebSocket message parse error: ${error}`);
           console.error('Failed to parse WebSocket message:', error);
         }
       };
-
       this.ws.onclose = () => {
         console.log('WebSocket disconnected');
         this.attemptReconnect();
       };
-
       this.ws.onerror = (error) => {
+        reportFrontendError(`WebSocket error: ${error}`);
         console.error('WebSocket error:', error);
         this.onError('WebSocket connection error');
       };
     } catch (error) {
+      reportFrontendError(`WebSocket connect exception: ${error}`);
       console.error('Failed to create WebSocket:', error);
       this.onError('Failed to connect to server');
     }

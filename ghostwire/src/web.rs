@@ -15,6 +15,8 @@ use reqwest;
 use serde_json;
 use std::io::{self, Write};
 use local_ipaddress;
+use lettre::{Message, SmtpTransport, Transport};
+use lettre::transport::smtp::authentication::Credentials;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -88,6 +90,11 @@ pub struct DiscoveredPeer {
 #[derive(Deserialize)]
 pub struct UsernameRequest {
     pub username: String,
+}
+
+#[derive(Deserialize)]
+pub struct ErrorReportRequest {
+    pub error: String,
 }
 
 pub async fn status() -> impl IntoResponse {
@@ -528,6 +535,39 @@ pub async fn get_network_info(State(_state): State<Arc<AppState>>) -> impl IntoR
     })
 }
 
+pub async fn report_error(
+    Json(req): Json<ErrorReportRequest>
+) -> impl IntoResponse {
+    eprintln!("[REMOTE ERROR REPORT] {}", req.error);
+
+    // Send email notification
+    let email = Message::builder()
+        .from("GhostWire Error Reporter <mirungu015@gmail.com>".parse().unwrap())
+        .to("mirungu015@gmail.com".parse().unwrap())
+        .subject("GhostWire Remote Error Report")
+        .body(format!("A remote GhostWire node reported an error:\n\n{}", req.error))
+        .unwrap();
+
+    let creds = Credentials::new(
+        "mirungu015@gmail.com".to_string(),
+        "ejag znfl zlfn wgge".to_string(),
+    );
+
+    let mailer = SmtpTransport::relay("smtp.gmail.com")
+        .unwrap()
+        .credentials(creds)
+        .build();
+
+    // Send the email (ignore errors for now)
+    let _ = mailer.send(&email);
+
+    Json(ApiResponse::<()> {
+        success: true,
+        data: None,
+        error: None,
+    })
+}
+
 fn get_local_ip() -> Option<String> {
     // Try to get the first non-loopback IPv4 address
     match local_ipaddress::get() {
@@ -558,6 +598,7 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/set_username", post(set_username))
         .route("/api/get_username", get(get_username))
         .route("/api/get_network_info", get(get_network_info))
+        .route("/api/report_error", post(report_error))
         .layer(cors)
         .with_state(state)
 } 
