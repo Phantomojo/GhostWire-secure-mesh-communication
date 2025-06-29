@@ -35,4 +35,10 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Vite build
+webui/dist/
+
+# TypeScript
+*.tsbuildinfo 

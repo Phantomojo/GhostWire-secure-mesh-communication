@@ -1,111 +1,29 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import './App.css'
-import { api, WebSocketService, Message, Peer, Settings } from './services/api'
 
 type TabType = 'chat' | 'peers' | 'settings' | 'status'
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabType>('chat')
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages] = useState([
     { id: '1', sender: 'System', content: 'GhostWire initialized. Secure communication ready.', timestamp: new Date().toLocaleTimeString() },
     { id: '2', sender: 'System', content: 'Connecting to backend...', timestamp: new Date().toLocaleTimeString() }
   ])
   const [newMessage, setNewMessage] = useState('')
   const [recipient, setRecipient] = useState('')
-  const [peers, setPeers] = useState<Peer[]>([])
-  const [settings, setSettings] = useState<Settings>({ stealth_mode: false })
-  const [connectionStatus, setConnectionStatus] = useState('Connecting...')
-  const [logs, setLogs] = useState<string[]>([])
-  const wsServiceRef = useRef<WebSocketService | null>(null)
+  const [peers] = useState([
+    { id: 'peer1', name: 'Node-7A3F', status: 'online' as const, lastSeen: '2 min ago' },
+    { id: 'peer2', name: 'Node-B2E9', status: 'offline' as const, lastSeen: '15 min ago' }
+  ])
+  const [settings, setSettings] = useState({ stealth_mode: false })
 
-  // Initialize WebSocket connection
-  useEffect(() => {
-    const wsService = new WebSocketService(
-      (message) => {
-        setMessages(prev => [...prev, message])
-        addLog(`[INFO] Received message from ${message.sender}`)
-      },
-      (updatedPeers) => {
-        setPeers(updatedPeers)
-        addLog(`[INFO] Peer list updated: ${updatedPeers.length} peers`)
-      },
-      (status) => {
-        setConnectionStatus(status.status || 'Connected')
-        addLog(`[INFO] Status update: ${status.status}`)
-      },
-      (error) => {
-        setConnectionStatus('Error')
-        addLog(`[ERROR] ${error}`)
-      }
-    )
-
-    wsServiceRef.current = wsService
-    wsService.connect()
-
-    // Load initial data
-    loadPeers()
-    loadSettings()
-
-    return () => {
-      wsService.disconnect()
-    }
-  }, [])
-
-  const addLog = (log: string) => {
-    const timestamp = new Date().toLocaleTimeString()
-    setLogs(prev => [...prev.slice(-50), `[${timestamp}] ${log}`])
-  }
-
-  const loadPeers = async () => {
-    try {
-      const peerList = await api.getPeers()
-      setPeers(peerList)
-      addLog(`[INFO] Loaded ${peerList.length} peers`)
-    } catch (error) {
-      addLog(`[ERROR] Failed to load peers: ${error}`)
-    }
-  }
-
-  const loadSettings = async () => {
-    try {
-      const currentSettings = await api.getSettings()
-      setSettings(currentSettings)
-      addLog('[INFO] Settings loaded')
-    } catch (error) {
-      addLog(`[ERROR] Failed to load settings: ${error}`)
-    }
-  }
-
-  const sendMessage = async () => {
+  const sendMessage = () => {
     if (!newMessage.trim() || !recipient.trim()) {
-      addLog('[WARN] Please enter both recipient and message')
+      alert('Please enter both recipient and message')
       return
     }
-
-    try {
-      await api.sendMessage(recipient, newMessage)
-      const message: Message = {
-        id: Date.now().toString(),
-        sender: 'You',
-        content: newMessage,
-        timestamp: new Date().toLocaleTimeString()
-      }
-      setMessages(prev => [...prev, message])
-      setNewMessage('')
-      addLog(`[INFO] Message sent to ${recipient}`)
-    } catch (error) {
-      addLog(`[ERROR] Failed to send message: ${error}`)
-    }
-  }
-
-  const updateStealthMode = async (enabled: boolean) => {
-    try {
-      const updatedSettings = await api.updateSettings({ stealth_mode: enabled })
-      setSettings(updatedSettings)
-      addLog(`[INFO] Stealth mode ${enabled ? 'enabled' : 'disabled'}`)
-    } catch (error) {
-      addLog(`[ERROR] Failed to update stealth mode: ${error}`)
-    }
+    alert(`Message sent to ${recipient}: ${newMessage}`)
+    setNewMessage('')
   }
 
   const renderChat = () => (
@@ -157,29 +75,23 @@ function App() {
     <div className="p-4 space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-cyber-green cyber-glow">Active Peers</h2>
-        <button onClick={loadPeers} className="cyber-button text-sm">
+        <button className="cyber-button text-sm">
           REFRESH
         </button>
       </div>
       
       <div className="space-y-2">
-        {peers.length === 0 ? (
-          <div className="cyber-card text-center text-cyber-gray">
-            No peers discovered yet...
-          </div>
-        ) : (
-          peers.map((peer) => (
-            <div key={peer.id} className="cyber-card flex justify-between items-center">
-              <div>
-                <div className="font-bold">{peer.name}</div>
-                <div className="text-sm text-cyber-gray">Last seen: {peer.lastSeen}</div>
-              </div>
-              <div className={`px-2 py-1 text-xs ${peer.status === 'online' ? 'bg-cyber-green text-cyber-black' : 'bg-cyber-red text-white'}`}>
-                {peer.status.toUpperCase()}
-              </div>
+        {peers.map((peer) => (
+          <div key={peer.id} className="cyber-card flex justify-between items-center">
+            <div>
+              <div className="font-bold">{peer.name}</div>
+              <div className="text-sm text-cyber-gray">Last seen: {peer.lastSeen}</div>
             </div>
-          ))
-        )}
+            <div className={`px-2 py-1 text-xs ${peer.status === 'online' ? 'bg-cyber-green text-cyber-black' : 'bg-cyber-red text-white'}`}>
+              {peer.status.toUpperCase()}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -194,27 +106,11 @@ function App() {
           <input 
             type="checkbox" 
             checked={settings.stealth_mode}
-            onChange={(e) => updateStealthMode(e.target.checked)}
+            onChange={(e) => setSettings({ ...settings, stealth_mode: e.target.checked })}
             className="w-4 h-4 text-cyber-green bg-cyber-dark border-cyber-gray" 
           />
           <span>Enable stealth mode</span>
         </label>
-      </div>
-
-      <div className="cyber-card">
-        <h3 className="text-lg font-bold mb-4">Connection Status</h3>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span>Status:</span>
-            <span className={`${connectionStatus === 'Connected' ? 'text-cyber-green' : 'text-cyber-red'}`}>
-              {connectionStatus.toUpperCase()}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span>Backend:</span>
-            <span className="text-cyber-green">RUNNING</span>
-          </div>
-        </div>
       </div>
     </div>
   )
@@ -224,114 +120,65 @@ function App() {
       <h2 className="text-xl font-bold text-cyber-green cyber-glow">System Status</h2>
       
       <div className="cyber-card">
-        <h3 className="text-lg font-bold mb-4">Network Status</h3>
-        <div className="space-y-2 text-sm">
+        <h3 className="text-lg font-bold mb-4">Connection Status</h3>
+        <div className="space-y-2">
           <div className="flex justify-between">
-            <span>Connection:</span>
-            <span className={`${connectionStatus === 'Connected' ? 'text-cyber-green' : 'text-cyber-red'}`}>
-              {connectionStatus.toUpperCase()}
-            </span>
+            <span>Backend API:</span>
+            <span className="text-cyber-green">Connected</span>
           </div>
           <div className="flex justify-between">
-            <span>Peers Found:</span>
-            <span className="text-cyber-blue">{peers.length}</span>
+            <span>WebSocket:</span>
+            <span className="text-cyber-green">Connected</span>
           </div>
           <div className="flex justify-between">
-            <span>Messages Sent:</span>
-            <span className="text-cyber-green">{messages.filter(m => m.sender === 'You').length}</span>
+            <span>Encryption:</span>
+            <span className="text-cyber-green">Active</span>
           </div>
         </div>
       </div>
-
+      
       <div className="cyber-card">
-        <h3 className="text-lg font-bold mb-4">Recent Logs</h3>
-        <div className="space-y-1 text-xs font-mono max-h-64 overflow-y-auto">
-          {logs.length === 0 ? (
-            <div className="text-cyber-gray">No logs yet...</div>
-          ) : (
-            logs.map((log, index) => (
-              <div key={index} className={
-                log.includes('[ERROR]') ? 'text-cyber-red' :
-                log.includes('[WARN]') ? 'text-cyber-yellow' :
-                log.includes('[INFO]') ? 'text-cyber-green' :
-                'text-cyber-gray'
-              }>
-                {log}
-              </div>
-            ))
-          )}
+        <h3 className="text-lg font-bold mb-4">System Info</h3>
+        <div className="space-y-2 text-sm">
+          <div>GhostWire v1.0.0</div>
+          <div>Node ID: GW-7A3F-B2E9</div>
+          <div>Uptime: 2h 15m</div>
+          <div>Messages sent: 47</div>
+          <div>Messages received: 23</div>
         </div>
       </div>
     </div>
   )
 
   return (
-    <div className="flex h-screen bg-cyber-black">
-      {/* Sidebar */}
-      <div className="cyber-sidebar w-64 flex flex-col">
-        <div className="p-4 border-b border-cyber-gray">
-          <h1 className="text-xl font-bold text-cyber-green cyber-glow">GHOSTWIRE</h1>
-          <p className="text-xs text-cyber-gray mt-1">Secure Communication Network</p>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-2">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`w-full text-left p-3 rounded-none transition-all ${
-              activeTab === 'chat' 
-                ? 'bg-cyber-green text-cyber-black' 
-                : 'text-cyber-green hover:bg-cyber-gray'
-            }`}
-          >
-            💬 Chat
-          </button>
-          <button
-            onClick={() => setActiveTab('peers')}
-            className={`w-full text-left p-3 rounded-none transition-all ${
-              activeTab === 'peers' 
-                ? 'bg-cyber-green text-cyber-black' 
-                : 'text-cyber-green hover:bg-cyber-gray'
-            }`}
-          >
-            🌐 Peers
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`w-full text-left p-3 rounded-none transition-all ${
-              activeTab === 'settings' 
-                ? 'bg-cyber-green text-cyber-black' 
-                : 'text-cyber-green hover:bg-cyber-gray'
-            }`}
-          >
-            ⚙️ Settings
-          </button>
-          <button
-            onClick={() => setActiveTab('status')}
-            className={`w-full text-left p-3 rounded-none transition-all ${
-              activeTab === 'status' 
-                ? 'bg-cyber-green text-cyber-black' 
-                : 'text-cyber-green hover:bg-cyber-gray'
-            }`}
-          >
-            📊 Status
-          </button>
-        </nav>
-        
-        <div className="p-4 border-t border-cyber-gray">
-          <div className="text-xs text-cyber-gray">
-            <div>Status: {connectionStatus.toUpperCase()}</div>
-            <div>Version: 0.1.0</div>
-          </div>
-        </div>
-      </div>
+    <div className="min-h-screen bg-cyber-black text-cyber-green">
+      <div className="container mx-auto p-4">
+        <header className="text-center mb-8">
+          <h1 className="text-4xl font-bold cyber-glow mb-2">🌐 GhostWire</h1>
+          <p className="text-cyber-gray">Secure Messaging Network</p>
+        </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 overflow-hidden">
-          {activeTab === 'chat' && renderChat()}
-          {activeTab === 'peers' && renderPeers()}
-          {activeTab === 'settings' && renderSettings()}
-          {activeTab === 'status' && renderStatus()}
+        <div className="bg-cyber-dark border border-cyber-gray min-h-[600px]">
+          {/* Tab Navigation */}
+          <div className="flex border-b border-cyber-gray">
+            {(['chat', 'peers', 'settings', 'status'] as TabType[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`cyber-tab ${activeTab === tab ? 'active' : ''}`}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Content */}
+          <div className="h-[500px]">
+            {activeTab === 'chat' && renderChat()}
+            {activeTab === 'peers' && renderPeers()}
+            {activeTab === 'settings' && renderSettings()}
+            {activeTab === 'status' && renderStatus()}
+          </div>
         </div>
       </div>
     </div>

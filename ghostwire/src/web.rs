@@ -1,7 +1,7 @@
 use axum::{Router, routing::{post, get, put}, extract::State, response::IntoResponse, Json};
 use axum::extract::ws::{WebSocketUpgrade, WebSocket};
 use axum::http::{HeaderValue, Method};
-use axum::response::Response;
+use axum::response::{Response, Html};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
@@ -121,6 +121,142 @@ async fn handle_socket(mut socket: WebSocket) {
     }
 }
 
+pub async fn root() -> impl IntoResponse {
+    Html(r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GhostWire - Secure Messaging</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #00ff00;
+        }
+        .endpoint {
+            background: #2a2a2a;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #333;
+        }
+        .method {
+            color: #ffff00;
+            font-weight: bold;
+        }
+        .url {
+            color: #00ffff;
+            font-family: monospace;
+        }
+        .description {
+            color: #cccccc;
+            margin-top: 5px;
+        }
+        .terminal {
+            background: #000;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border: 1px solid #00ff00;
+        }
+        .terminal pre {
+            margin: 0;
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 GhostWire Secure Messaging</h1>
+        
+        <div class="status">
+            <h3>✅ Server Status: Online</h3>
+            <p>GhostWire API is running successfully on port 3000</p>
+        </div>
+
+        <h3>🔗 Available API Endpoints:</h3>
+        
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/status</div>
+            <div class="description">Check server status</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/peers</div>
+            <div class="description">Get list of connected peers</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">POST</div>
+            <div class="url">/api/send_message</div>
+            <div class="description">Send encrypted message to peer</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/settings</div>
+            <div class="description">Get current settings</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">PUT</div>
+            <div class="url">/api/settings</div>
+            <div class="description">Update settings</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">WS</div>
+            <div class="url">/ws</div>
+            <div class="description">WebSocket connection for real-time messaging</div>
+        </div>
+
+        <div class="terminal">
+            <h4>🧪 Test Commands:</h4>
+            <pre>curl http://127.0.0.1:3000/api/status
+curl http://127.0.0.1:3000/api/peers</pre>
+        </div>
+
+        <div class="status">
+            <h4>🔧 Next Steps:</h4>
+            <p>• Start the React frontend: <code>cd webui && npm run dev</code></p>
+            <p>• Use CLI commands: <code>cargo run -- whisper &lt;peer&gt; &lt;message&gt;</code></p>
+            <p>• Connect via WebSocket for real-time messaging</p>
+        </div>
+    </div>
+</body>
+</html>
+    "#)
+}
+
 pub fn app(state: Arc<AppState>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -128,6 +264,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        .route("/", get(root))
         .route("/api/status", get(status))
         .route("/api/send_message", post(send_message))
         .route("/api/peers", get(get_peers))

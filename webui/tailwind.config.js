@@ -9,11 +9,10 @@ export default {
       colors: {
         'cyber-black': '#0a0a0a',
         'cyber-dark': '#1a1a1a',
-        'cyber-gray': '#2a2a2a',
-        'cyber-green': '#00ff41',
-        'cyber-blue': '#0080ff',
-        'cyber-purple': '#8000ff',
-        'cyber-red': '#ff0040',
+        'cyber-gray': '#333333',
+        'cyber-green': '#00ff00',
+        'cyber-blue': '#00ffff',
+        'cyber-red': '#ff0000',
         'cyber-yellow': '#ffff00',
       },
       fontFamily: {
@@ -26,8 +25,8 @@ export default {
       },
       keyframes: {
         glow: {
-          '0%': { boxShadow: '0 0 5px #00ff41, 0 0 10px #00ff41, 0 0 15px #00ff41' },
-          '100%': { boxShadow: '0 0 10px #00ff41, 0 0 20px #00ff41, 0 0 30px #00ff41' },
+          '0%': { boxShadow: '0 0 5px #00ff00, 0 0 10px #00ff00, 0 0 15px #00ff00' },
+          '100%': { boxShadow: '0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 30px #00ff00' },
         }
       }
     },
