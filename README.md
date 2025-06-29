@@ -1,355 +1,250 @@
-# 🌐 GhostWire - Secure Messaging Network
+# �� GhostWire - Secure Multi-PC Messaging Network
 
-```
-██╗    ██╗ ██████╗ ███████╗██╗  ██╗███████╗██╗    ██╗██╗██████╗ ███████╗
-██║    ██║██╔════╝ ██╔════╝██║  ██║██╔════╝██║    ██║██║██╔══██╗██╔════╝
-██║ █╗ ██║██║  ███╗███████╗███████║█████╗  ██║ █╗ ██║██║██████╔╝█████╗  
-██║███╗██║██║   ██║╚════██║██╔══██║██╔══╝  ██║███╗██║██║██╔══██╗██╔══╝  
-╚███╔███╔╝╚██████╔╝███████║██║  ██║██║     ╚███╔███╔╝██║██║  ██║███████╗
- ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝      ╚══╝╚══╝ ╚═╝╚═╝  ╚═╝╚══════╝
-```
-
-> **Stealth Communication Protocol** | **End-to-End Encryption** | **Zero-Knowledge Architecture**
-
-[![GitHub stars](https://img.shields.io/github/stars/Phantomojo/Obsidian?style=social&label=Stars)](https://github.com/Phantomojo/Obsidian/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/Phantomojo/Obsidian?style=social&label=Forks)](https://github.com/Phantomojo/Obsidian/network)
-[![GitHub issues](https://img.shields.io/github/issues/Phantomojo/Obsidian?label=Issues)](https://github.com/Phantomojo/Obsidian/issues)
-[![GitHub license](https://img.shields.io/github/license/Phantomojo/Obsidian?label=License)](https://github.com/Phantomojo/Obsidian/blob/main/LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://rustup.rs/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Multi-PC](https://img.shields.io/badge/Multi--PC-Ready-purple.svg)](https://github.com/Phantomojo/Obsidian)
+[![Auto-Discovery](https://img.shields.io/badge/Auto--Discovery-Enabled-cyan.svg)](https://github.com/Phantomojo/Obsidian)
 
----
+> **🔐 End-to-End Encrypted • 🛡️ Zero-Knowledge • ⚡ Real-time • 🌐 Multi-PC Ready**
 
-## 🚀 Quick Start
+GhostWire is a revolutionary secure messaging system that enables **automatic peer discovery** and **encrypted communication** across multiple PCs on the same network. Built with Rust for performance and React for a modern UI.
 
-### ⚡ One-Command Setup (Universal)
+## 🚀 Features
+
+### 🔍 **Automatic Peer Discovery**
+- **Network Scanning**: Automatically finds other GhostWire nodes on your local network
+- **Username-Based**: See "Alice" and "Bob" instead of IP addresses
+- **Real-time Updates**: Instantly discover new peers as they join the network
+- **Cross-Platform**: Works on Windows, macOS, Linux, and WSL
+
+### 🔐 **Military-Grade Security**
+- **ChaCha20-Poly1305**: State-of-the-art encryption for messages
+- **Ed25519**: Secure key generation and verification
+- **Zero-Knowledge**: No central server stores your messages
+- **End-to-End**: Only you and your recipient can read messages
+
+### ⚡ **Real-time Communication**
+- **WebSocket**: Instant message delivery
+- **Multi-PC Support**: Connect multiple computers seamlessly
+- **Auto-Reconnection**: Automatically reconnects if connection is lost
+- **Status Monitoring**: Real-time connection status and peer health
+
+### 🎯 **Universal Installation**
+- **One-Command Setup**: `./install.sh` works on any OS
+- **Auto-Port Detection**: Automatically finds available ports
+- **Network Configuration**: Detects your IP and configures networking
+- **Windows Support**: PowerShell script for easy Windows deployment
+
+## 🛠️ Quick Start
+
+### **Universal Installation (All Platforms)**
 
 ```bash
-# Clone and run GhostWire in one command
-curl -sSL https://raw.githubusercontent.com/Phantomojo/Obsidian/main/install.sh | bash
+# Download and run the universal installer
+curl -fsSL https://raw.githubusercontent.com/Phantomojo/Obsidian/main/install.sh | bash
 ```
 
-### 🔧 Manual Setup
+### **Windows Quick Start**
+
+```powershell
+# Run the PowerShell script
+.\start-all.ps1
+```
+
+### **Manual Installation**
 
 ```bash
 # Clone the repository
 git clone https://github.com/Phantomojo/Obsidian.git
 cd Obsidian
 
-# Start GhostWire (auto-detects OS and sets up environment)
-./start-ghostwire.sh
+# Install Rust (if not installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install Node.js (if not installed)
+# Download from https://nodejs.org/
+
+# Build and run
+cd ghostwire && cargo run -- --host 0.0.0.0 --port 3001
+cd ../webui && npm install && npm run dev
 ```
 
----
+## 🌐 Multi-PC Setup
 
-## 🎯 Features
+### **Automatic Setup**
+1. **Run the installer** on each PC: `./install.sh`
+2. **Each PC gets unique ports** automatically
+3. **Set usernames** in the Peers tab
+4. **Click "SCAN NETWORK"** to discover other PCs
+5. **Start chatting** - it's that simple!
 
-### 🔐 **Core Security**
-- **End-to-End Encryption** using ChaCha20-Poly1305
-- **Zero-Knowledge Architecture** - no data stored on servers
-- **Perfect Forward Secrecy** with ephemeral key exchange
-- **Stealth Mode** - traffic obfuscation and timing protection
-- **Identity Verification** - cryptographic peer authentication
+### **Manual Multi-PC Setup**
 
-### 🌐 **Network Features**
-- **P2P Messaging** - direct peer-to-peer communication
-- **WebSocket Real-time** - instant message delivery
-- **Cross-Platform** - Windows, Linux, macOS, WSL2
-- **Web UI** - modern React interface with cyber theme
-- **CLI Interface** - command-line messaging and control
+#### **PC 1 (Port 3001)**
+```bash
+cd ghostwire
+cargo run -- --host 0.0.0.0 --port 3001
+```
 
-### 🛡️ **Advanced Capabilities**
-- **Threat Intelligence Sharing** - secure information exchange
-- **Crisis Communication** - resilient during network disruptions
-- **Message Persistence** - encrypted local storage
-- **Peer Discovery** - automatic network node detection
-- **Stealth Routing** - traffic obfuscation and routing
+#### **PC 2 (Port 3002)**
+```bash
+cd ghostwire
+cargo run -- --host 0.0.0.0 --port 3002
+```
 
----
+#### **Frontend Configuration**
+Update `webui/src/services/api.ts` on each PC:
+```typescript
+// PC 1
+const API_BASE_URL = 'http://localhost:3001/api';
+
+// PC 2  
+const API_BASE_URL = 'http://localhost:3002/api';
+```
+
+## 🔍 Network Discovery
+
+### **Automatic Discovery**
+- **Network Scanner**: Scans your local network (192.168.1.x)
+- **Port Detection**: Checks ports 3001-3005 for GhostWire nodes
+- **Username Retrieval**: Gets usernames from discovered nodes
+- **Auto-Connection**: Automatically connects to found peers
+
+### **Manual Discovery**
+```bash
+# Run the network discovery script
+./discover-peers.sh
+```
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web UI        │    │   Rust Backend  │    │   Core Engine   │
-│   (React)       │◄──►│   (Axum)        │◄──►│   (Encryption)  │
-│   Port: 5173    │    │   Port: 3000    │    │   (Transport)   │
+│   PC 1          │    │   PC 2          │    │   PC 3          │
+│  (Port 3001)    │    │  (Port 3002)    │    │  (Port 3003)    │
+│                 │    │                 │    │                 │
+│  ┌───────────┐  │    │  ┌───────────┐  │    │  ┌───────────┐  │
+│  │ Frontend  │  │    │  │ Frontend  │  │    │  │ Frontend  │  │
+│  │ (React)   │  │    │  │ (React)   │  │    │  │ (React)   │  │
+│  └───────────┘  │    │  └───────────┘  │    │  └───────────┘  │
+│        │        │    │        │        │    │        │        │
+│  ┌───────────┐  │    │  ┌───────────┐  │    │  ┌───────────┐  │
+│  │ Backend   │◄─┼────┼─►│ Backend   │◄─┼────┼─►│ Backend   │  │
+│  │ (Rust)    │  │    │  │ (Rust)    │  │    │  │ (Rust)    │  │
+│  └───────────┘  │    │  └───────────┘  │    │  └───────────┘  │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   WebSocket     │    │   REST API      │    │   P2P Network   │
-│   Real-time     │    │   Endpoints     │    │   Discovery     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-### **Data Flow**
-```
-Message → Encryption → Transport → Network → Decryption → Display
-   ↑                                                           ↓
-   └─────────────── Secure Channel ───────────────────────────┘
-```
+## 🔧 API Endpoints
 
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/status` | Check server status |
+| `GET` | `/api/peers` | Get list of connected peers |
+| `POST` | `/api/send_message` | Send encrypted message |
+| `GET` | `/api/settings` | Get current settings |
+| `PUT` | `/api/settings` | Update settings |
+| `GET` | `/api/public_key` | Get server's public key |
+| `GET` | `/api/scan_network` | Scan for other GhostWire nodes |
+| `POST` | `/api/register_peer` | Register with another node |
+| `GET` | `/api/get_username` | Get current username |
+| `POST` | `/api/set_username` | Set username |
+| `WS` | `/ws` | WebSocket for real-time messaging |
 
-## 🛠️ Technology Stack
+## 🛡️ Security Features
 
-### **Backend (Rust)**
-- **Axum** - High-performance web framework
-- **Tokio** - Async runtime for networking
-- **Ring** - Cryptography library (by BoringSSL)
-- **Serde** - Serialization framework
-- **Clap** - Command-line argument parsing
+### **Encryption**
+- **ChaCha20-Poly1305**: High-performance authenticated encryption
+- **Ed25519**: Elliptic curve digital signatures
+- **Key Derivation**: Secure key generation from random entropy
+- **Perfect Forward Secrecy**: Each session uses unique keys
 
-### **Frontend (React + TypeScript)**
-- **React 18** - Modern UI framework
-- **TypeScript** - Type-safe development
-- **Tailwind CSS** - Utility-first styling
-- **Vite** - Fast build tool
-- **WebSocket** - Real-time communication
+### **Network Security**
+- **Local Network Only**: No internet exposure required
+- **Firewall Friendly**: Uses standard HTTP/WebSocket ports
+- **No Central Server**: Decentralized peer-to-peer architecture
+- **Zero Data Collection**: No logs, no tracking, no metadata
 
-### **Security**
-- **ChaCha20-Poly1305** - Authenticated encryption
-- **Ed25519** - Digital signatures
-- **X25519** - Key exchange
-- **Argon2** - Password hashing
-- **Random** - Cryptographically secure random generation
+## 🚀 Performance
 
----
+- **Rust Backend**: Sub-millisecond message processing
+- **React Frontend**: Smooth 60fps UI updates
+- **WebSocket**: Real-time bidirectional communication
+- **Auto-Scaling**: Handles multiple concurrent connections
 
-## 📖 Usage
+## 📱 Browser Support
 
-### **Web Interface**
-```bash
-# Start the backend
-cd ghostwire && cargo run
-
-# Start the frontend (in another terminal)
-cd webui && npm run dev
-
-# Access the interface
-# Backend: http://127.0.0.1:3000
-# Frontend: http://localhost:5173
-```
-
-### **CLI Commands**
-```bash
-# Send a message
-cargo run -- whisper <peer_id> <message>
-
-# List peers
-cargo run -- peers
-
-# Generate new identity
-cargo run -- identity generate
-
-# Check system status
-cargo run -- status
-
-# Enable stealth mode
-cargo run -- stealth enable
-```
-
-### **API Endpoints**
-```bash
-# Server status
-curl http://127.0.0.1:3000/api/status
-
-# Get peers
-curl http://127.0.0.1:3000/api/peers
-
-# Send message
-curl -X POST http://127.0.0.1:3000/api/send_message \
-  -H "Content-Type: application/json" \
-  -d '{"recipient":"peer1","message":"Hello, GhostWire!"}'
-
-# Get settings
-curl http://127.0.0.1:3000/api/settings
-
-# Update settings
-curl -X PUT http://127.0.0.1:3000/api/settings \
-  -H "Content-Type: application/json" \
-  -d '{"stealth_mode":true}'
-
-# WebSocket connection
-wscat -c ws://127.0.0.1:3000/ws
-```
-
----
+- **Chrome/Edge**: Full support
+- **Firefox**: Full support  
+- **Safari**: Full support
+- **Mobile Browsers**: Responsive design
 
 ## 🔧 Development
 
-### **Prerequisites**
-- **Rust** (1.70+) - [Install Rust](https://rustup.rs/)
-- **Node.js** (18+) - [Install Node.js](https://nodejs.org/)
-- **Git** - [Install Git](https://git-scm.com/)
-
-### **Build from Source**
+### **Backend Development**
 ```bash
-# Clone repository
-git clone https://github.com/Phantomojo/Obsidian.git
-cd Obsidian
-
-# Build backend
 cd ghostwire
-cargo build --release
-
-# Build frontend
-cd ../webui
-npm install
-npm run build
-
-# Run tests
-cargo test
-npm test
+cargo run -- --host 0.0.0.0 --port 3001
 ```
 
-### **Development Workflow**
+### **Frontend Development**
 ```bash
-# Start development servers
-./dev-start.sh
-
-# Run in watch mode
-cargo watch -x run  # Backend
-npm run dev         # Frontend
+cd webui
+npm run dev
 ```
 
-### **Code Quality**
+### **Testing**
 ```bash
-# Format code
-cargo fmt
-npm run format
+# Backend tests
+cd ghostwire && cargo test
 
-# Lint code
-cargo clippy
-npm run lint
-
-# Type check
-npm run type-check
+# Frontend tests
+cd webui && npm test
 ```
 
----
+## 📦 Dependencies
 
-## 🚨 Security Considerations
+### **Backend (Rust)**
+- `axum`: Web framework
+- `tokio`: Async runtime
+- `ring`: Cryptography
+- `serde`: Serialization
+- `reqwest`: HTTP client
 
-### **Encryption**
-- All messages are encrypted end-to-end
-- Keys are never transmitted in plain text
-- Perfect forward secrecy prevents key compromise
-- Zero-knowledge architecture ensures no data leaks
-- Cryptographic identity verification
-
-### **Network Security**
-- Traffic obfuscation in stealth mode
-- Timing attack protection
-- Man-in-the-middle attack prevention
-- Denial of service resistance
-- Peer authentication and verification
-
-### **Privacy**
-- No message logging
-- No metadata collection
-- No user tracking
-- Ephemeral message support
-- Local-only data storage
-
----
-
-## 🌟 Roadmap
-
-### **Phase 1: Core Features** ✅
-- [x] Basic messaging system
-- [x] Web UI with cyber theme
-- [x] CLI interface
-- [x] REST API
-- [x] WebSocket real-time communication
-
-### **Phase 2: Advanced Security** 🚧
-- [ ] Stealth mode implementation
-- [ ] Traffic obfuscation
-- [ ] Advanced encryption protocols
-- [ ] Identity management system
-- [ ] Peer discovery and verification
-
-### **Phase 3: Network Features** 📋
-- [ ] P2P network implementation
-- [ ] Distributed message routing
-- [ ] Crisis communication protocols
-- [ ] Threat intelligence sharing
-- [ ] Cross-platform deployment
-
-### **Phase 4: Enterprise Features** 📋
-- [ ] Multi-user support
-- [ ] Group messaging
-- [ ] File sharing
-- [ ] Message persistence
-- [ ] Advanced analytics
-
----
+### **Frontend (React)**
+- `react`: UI framework
+- `typescript`: Type safety
+- `tailwindcss`: Styling
+- `vite`: Build tool
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
-
-### **Development Setup**
-```bash
-# Fork and clone
-git clone https://github.com/YOUR_USERNAME/Obsidian.git
-cd Obsidian
-
-# Create feature branch
-git checkout -b feature/amazing-feature
-
-# Make changes and test
-cargo test
-npm test
-
-# Commit and push
-git commit -m "Add amazing feature"
-git push origin feature/amazing-feature
-
-# Create pull request
-```
-
-### **Code Style**
-- Follow Rust formatting guidelines (`cargo fmt`)
-- Use TypeScript for frontend code
-- Write comprehensive tests
-- Document public APIs
-- Follow security best practices
-
----
+1. **Fork** the repository
+2. **Create** a feature branch
+3. **Make** your changes
+4. **Test** thoroughly
+5. **Submit** a pull request
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
+## 🌟 Star History
 
-## 🌟 Acknowledgments
+[![Star History Chart](https://api.star-history.com/svg?repos=Phantomojo/Obsidian&type=Date)](https://star-history.com/#Phantomojo/Obsidian&Date)
 
-- **BoringSSL** - Cryptography library
-- **Axum** - Web framework
-- **React** - UI framework
-- **Tailwind CSS** - Styling framework
-- **Vite** - Build tool
+## 🔗 Links
 
----
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/Phantomojo/Obsidian/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Phantomojo/Obsidian/discussions)
-- **Security**: [Security Policy](SECURITY.md)
-- **Documentation**: [Wiki](https://github.com/Phantomojo/Obsidian/wiki)
+- **GitHub**: https://github.com/Phantomojo/Obsidian
+- **Issues**: https://github.com/Phantomojo/Obsidian/issues
+- **Discussions**: https://github.com/Phantomojo/Obsidian/discussions
 
 ---
 
-<div align="center">
+**🌐 GhostWire - Secure Multi-PC Communication for the Digital Age**
 
-**🌐 GhostWire - Secure Communication for the Digital Age**
-
-*"In the shadows of the network, we speak freely."*
+*Built with ❤️ using Rust and React*
 
 ```
 ██╗    ██╗ ██████╗ ███████╗██╗  ██╗███████╗██╗    ██╗██╗██████╗ ███████╗
@@ -360,4 +255,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
  ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝      ╚══╝╚══╝ ╚═╝╚═╝  ╚═╝╚══════╝
 ```
 
-</div>
+</rewritten_file>
