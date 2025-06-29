@@ -1,4 +1,5 @@
 @echo off
+cd /d %~dp0
 chcp 65001 >nul
 
 REM 🌐 GhostWire - Windows Multi-PC Startup
@@ -9,9 +10,7 @@ set BACKEND_PORT=3001
 set FRONTEND_PORT=5173
 
 REM === Update frontend config for backend port ===
-cd webui
-powershell -Command "(Get-Content src/services/api.ts) -replace 'localhost:3001', 'localhost:%BACKEND_PORT%' | Set-Content src/services/api.ts"
-cd ..
+powershell -Command "(Get-Content webui\src\services\api.ts) -replace 'localhost:3001', 'localhost:%BACKEND_PORT%' | Set-Content webui\src\services\api.ts"
 
 REM === Start backend ===
 echo Starting GhostWire backend on port %BACKEND_PORT% ...
