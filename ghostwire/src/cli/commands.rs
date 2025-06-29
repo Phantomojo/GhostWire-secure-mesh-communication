@@ -1,7 +1,7 @@
 use crate::core::encryption::Encryption;
 use crate::core::identity::EphemeralIdentity;
 use crate::core::store::MessageCache;
-use crate::core::transport::{MockTransport, Transport};
+use crate::core::transport::MockTransport;
 use anyhow::Result;
 use clap::Args;
 
@@ -47,7 +47,7 @@ pub trait Command {
 
 #[async_trait::async_trait]
 impl Command for Whisper {
-    async fn execute(&self, identity: &EphemeralIdentity, cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()> {
+    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()> {
         println!("Sending encrypted message to {}", self.recipient);
         
         // Encrypt the message

@@ -1,11 +1,13 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
+    #[serde(with = "uuid::serde::compact")]
     pub id: Uuid,
+    pub sender: String,
+    pub recipient: String,
+    pub content: String,
     pub timestamp: u64,
-    pub payload: Vec<u8>, // Encrypted
-    pub signature: Vec<u8>,
-    // Optionally: ephemeral sender ID, TTL, etc.
+    pub encrypted: bool,
 } 

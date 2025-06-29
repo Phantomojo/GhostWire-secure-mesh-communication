@@ -1,13 +1,13 @@
-use anyhow::Result;
 use async_trait::async_trait;
+use crate::core::message::Message;
+use anyhow::Result;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[async_trait]
-pub trait Transport {
-    async fn send(&self, peer_id: &str, data: &[u8]) -> Result<()>;
-    async fn receive(&self) -> Option<(String, Vec<u8>)>;
-    fn name(&self) -> &'static str;
+pub trait Transport: Send + Sync {
+    async fn send_message(&self, message: &Message) -> Result<()>;
+    async fn receive_message(&self) -> Result<Option<Message>>;
 }
 
 pub struct MockTransport {
@@ -31,22 +31,24 @@ impl MockTransport {
     pub fn peer_id(&self) -> &str {
         &self.peer_id
     }
+    
+    // Add send method for CLI compatibility
+    pub async fn send(&self, peer_id: &str, data: &[u8]) -> Result<()> {
+        println!("MockTransport: Sending {} bytes to {}", data.len(), peer_id);
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl Transport for MockTransport {
-    async fn send(&self, peer_id: &str, data: &[u8]) -> Result<()> {
-        println!("MockTransport: Sending {} bytes to peer {}", data.len(), peer_id);
+    async fn send_message(&self, message: &Message) -> Result<()> {
+        println!("MockTransport: Sending message with ID: {}", message.id);
         Ok(())
     }
-
-    async fn receive(&self) -> Option<(String, Vec<u8>)> {
+    
+    async fn receive_message(&self) -> Result<Option<Message>> {
         // In a real implementation, this would receive from the queue
-        None
-    }
-
-    fn name(&self) -> &'static str {
-        "mock"
+        Ok(None)
     }
 }
 
@@ -58,5 +60,29 @@ impl Clone for MockTransport {
             message_queue: receiver,
             _sender: sender,
         }
+    }
+}
+
+pub struct LocalTransport {
+    // For now, this is a simple local transport
+}
+
+impl LocalTransport {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[async_trait]
+impl Transport for LocalTransport {
+    async fn send_message(&self, message: &Message) -> Result<()> {
+        // For now, just log the message
+        println!("[LOCAL] Sending message with ID: {}", message.id);
+        Ok(())
+    }
+    
+    async fn receive_message(&self) -> Result<Option<Message>> {
+        // For now, return None (no messages to receive)
+        Ok(None)
     }
 } 

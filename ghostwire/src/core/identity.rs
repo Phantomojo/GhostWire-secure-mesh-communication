@@ -1,5 +1,6 @@
 use anyhow::Result;
-use rand::Rng;
+use ring::rand::{SystemRandom, SecureRandom};
+use serde::{Serialize, Deserialize};
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
@@ -9,14 +10,12 @@ pub struct EphemeralIdentity {
 impl EphemeralIdentity {
     pub fn new() -> Result<Self> {
         let mut secret_key = vec![0u8; 32];
-        let mut rng = rand::thread_rng();
-        for byte in &mut secret_key {
-            *byte = rng.gen();
-        }
-        
-        let identity_id = format!("id_{}", rng.gen::<u64>());
-        
-        Ok(Self {
+        let rng = SystemRandom::new();
+        rng.fill(&mut secret_key).map_err(|e| anyhow::anyhow!("RNG error: {:?}", e))?;
+        let mut id_bytes = [0u8; 8];
+        rng.fill(&mut id_bytes).map_err(|e| anyhow::anyhow!("RNG error: {:?}", e))?;
+        let identity_id = format!("id_{:x}", u64::from_le_bytes(id_bytes));
+        Ok(EphemeralIdentity {
             identity_id,
             secret_key,
         })
@@ -40,5 +39,18 @@ impl EphemeralIdentity {
     pub fn public_key_bytes(&self) -> Vec<u8> {
         // Return a simple public key for demo
         self.secret_key.clone()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    pub id: String,
+}
+
+impl Identity {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Identity {
+            id: uuid::Uuid::new_v4().to_string(),
+        })
     }
 } 

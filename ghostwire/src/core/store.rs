@@ -27,4 +27,12 @@ impl MessageCache {
         let q = self.queue.lock().unwrap();
         q.is_empty()
     }
+}
+
+pub struct MessageStore;
+
+impl MessageStore {
+    pub fn new() -> Self {
+        MessageStore
+    }
 } 

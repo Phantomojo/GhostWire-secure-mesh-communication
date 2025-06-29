@@ -1,7 +1,7 @@
 // API service for connecting to GhostWire backend
 
-const API_BASE_URL = 'http://localhost:3000/api';
-const WS_URL = 'ws://localhost:3000/ws';
+const API_BASE_URL = 'http://localhost:3001/api';
+const WS_URL = 'ws://localhost:3001/ws';
 
 export interface Message {
   id: string;
@@ -26,6 +26,26 @@ export interface SendMessageRequest {
   message: string;
 }
 
+export interface DiscoveredPeer {
+  ip: string;
+  port: number;
+  username: string;
+  node_id: string;
+  public_key: string;
+  last_seen: string;
+  status: string;
+}
+
+export interface NetworkScanResult {
+  discovered_peers: DiscoveredPeer[];
+  scan_time: string;
+}
+
+export interface NetworkInfo {
+  local_ip: string;
+  timestamp: string;
+}
+
 // REST API functions
 export const api = {
   // Send a message
@@ -41,6 +61,11 @@ export const api = {
     if (!response.ok) {
       throw new Error(`Failed to send message: ${response.statusText}`);
     }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to send message');
+    }
   },
 
   // Get list of peers
@@ -52,7 +77,11 @@ export const api = {
     }
     
     const data = await response.json();
-    return data.peers || [];
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to get peers');
+    }
+    
+    return data.data?.peers || [];
   },
 
   // Get settings
@@ -63,7 +92,12 @@ export const api = {
       throw new Error(`Failed to get settings: ${response.statusText}`);
     }
     
-    return response.json();
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to get settings');
+    }
+    
+    return data.data || { stealth_mode: false };
   },
 
   // Update settings
@@ -80,7 +114,111 @@ export const api = {
       throw new Error(`Failed to update settings: ${response.statusText}`);
     }
     
-    return response.json();
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to update settings');
+    }
+    
+    return data.data || settings;
+  },
+
+  // Register this peer with another node for discovery
+  async registerWithPeer(peerAddress: string, peerId: string, peerName: string, publicKey: string): Promise<void> {
+    // Get our own network info to provide the correct IP
+    const networkInfo = await this.getNetworkInfo();
+    const myAddress = `${networkInfo.local_ip}:3001`;
+    
+    const response = await fetch(`http://${peerAddress}/api/register_peer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        peer_id: peerId,
+        peer_name: peerName,
+        public_key: publicKey,
+        address: myAddress
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to register with peer: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to register with peer');
+    }
+  },
+
+  // Scan network for other GhostWire nodes
+  async scanNetwork(): Promise<NetworkScanResult> {
+    const response = await fetch(`${API_BASE_URL}/scan_network`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to scan network: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to scan network');
+    }
+    
+    return data.data;
+  },
+
+  // Set username
+  async setUsername(username: string): Promise<string> {
+    const response = await fetch(`${API_BASE_URL}/set_username`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to set username: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to set username');
+    }
+    
+    return data.data;
+  },
+
+  // Get current username
+  async getUsername(): Promise<string> {
+    const response = await fetch(`${API_BASE_URL}/get_username`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get username: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to get username');
+    }
+    
+    return data.data;
+  },
+
+  // Get network information (local IP)
+  async getNetworkInfo(): Promise<NetworkInfo> {
+    const response = await fetch(`${API_BASE_URL}/get_network_info`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get network info: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to get network info');
+    }
+    
+    return data.data;
   },
 };
 

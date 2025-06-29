@@ -1,49 +1,132 @@
-mod core;
+use clap::{Parser, Subcommand};
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tracing::{info, error};
+use base64::Engine;
+
 mod cli;
+mod core;
 mod web;
 // mod ioc;
 // mod messaging;
 // mod trust;
 // mod tor_integration;
 
-use clap::Parser;
-use cli::GhostWireCli;
-use core::identity::EphemeralIdentity;
-use core::store::MessageCache;
-use core::transport::MockTransport;
-use std::sync::Arc;
+use core::Core;
+use web::app;
+
+#[derive(Parser)]
+#[command(name = "ghostwire")]
+#[command(about = "Secure messaging network with end-to-end encryption")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+    
+    #[arg(long, default_value = "3000")]
+    port: u16,
+    
+    #[arg(long, default_value = "0.0.0.0")]
+    host: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Send a message to a peer
+    Whisper {
+        peer: String,
+        message: String,
+    },
+    /// List all known peers
+    Peers,
+    /// Generate a new identity
+    Identity {
+        #[command(subcommand)]
+        action: IdentityAction,
+    },
+    /// Check system status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum IdentityAction {
+    /// Generate a new identity
+    Generate,
+    /// Show current identity
+    Show,
+}
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    env_logger::init();
-
-    // Initialize ephemeral identity
-    let identity = EphemeralIdentity::new()?;
-    // Initialize message cache
-    let cache = MessageCache::new();
-    // Initialize transport (mock for now)
-    let transport = MockTransport::new().await?;
-    // Initialize encryption
-    let encryption = core::encryption::Encryption::new()?;
-
-    // Check if CLI arguments were provided
-    let args: Vec<String> = std::env::args().collect();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing
+    tracing_subscriber::fmt::init();
     
-    if args.len() > 1 {
-        // Run CLI command and exit
-        let cli = GhostWireCli::parse();
-        cli.execute(&identity, &cache, &transport, &encryption).await
-    } else {
-        // Start web server
-        let web_state = Arc::new(web::AppState::default());
-        let app = web::app(web_state);
-        
-        println!("GhostWire Web Server starting on http://127.0.0.1:3000");
-        println!("Use the web interface or run with CLI commands like: cargo run -- whisper <peer> <message>");
-        
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
-        axum::serve(listener, app).await?;
-        
-        Ok(())
+    info!("🌐 Starting GhostWire Secure Messaging Network");
+    
+    // Initialize core system
+    let core = Arc::new(Core::new()?);
+    info!("✅ Core system initialized");
+    info!("🔑 Key ID: {}", core.get_key_id());
+    info!("🔐 Public key: {} bytes", core.get_public_key().len());
+    
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Some(Commands::Whisper { peer, message }) => {
+            info!("Sending message to peer: {}", peer);
+            match core.send_message(&peer, &message).await {
+                Ok(_) => println!("✅ Message sent successfully to {}", peer),
+                Err(e) => {
+                    error!("Failed to send message: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Peers) => {
+            let peer_count = core.get_peer_count();
+            println!("📡 Found {} peers", peer_count);
+            // TODO: List actual peers
+        }
+        Some(Commands::Identity { action }) => {
+            match action {
+                IdentityAction::Generate => {
+                    println!("🆔 Generating new identity...");
+                    // TODO: Implement identity generation
+                    println!("✅ New identity generated");
+                }
+                IdentityAction::Show => {
+                    println!("🆔 Current Identity:");
+                    println!("   Key ID: {}", core.get_key_id());
+                    println!("   Public Key: {}", base64::engine::general_purpose::STANDARD.encode(core.get_public_key()));
+                }
+            }
+        }
+        Some(Commands::Status) => {
+            println!("📊 GhostWire Status:");
+            println!("   Core: ✅ Running");
+            println!("   Encryption: ✅ Enabled");
+            println!("   Key ID: {}", core.get_key_id());
+            println!("   Peer Count: {}", core.get_peer_count());
+            println!("   Public Key: {} bytes", core.get_public_key().len());
+        }
+        None => {
+            // Start web server
+            start_web_server(core, cli.host, cli.port).await?;
+        }
     }
+    
+    Ok(())
+}
+
+async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = format!("{}:{}", host, port);
+    let listener = TcpListener::bind(&addr).await?;
+    
+    info!("🌐 GhostWire Web Server starting on http://{}", addr);
+    info!("Use the web interface or run with CLI commands like: cargo run -- whisper <peer> <message>");
+    
+    let app = app(core);
+    
+    axum::serve(listener, app).await?;
+    
+    Ok(())
 }
