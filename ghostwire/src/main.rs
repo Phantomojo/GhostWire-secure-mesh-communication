@@ -14,6 +14,7 @@ mod web;
 
 use core::Core;
 use web::app;
+use web::get_local_ip;
 
 #[derive(Parser)]
 #[command(name = "ghostwire")]
@@ -118,15 +119,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let addr = format!("{}:{}", host, port);
-    let listener = TcpListener::bind(&addr).await?;
-    
-    info!("🌐 GhostWire Web Server starting on http://{}", addr);
-    info!("Use the web interface or run with CLI commands like: cargo run -- whisper <peer> <message>");
-    
+    let mut chosen_port = port;
+    let mut listener = None;
+    for p in port..=port+10 {
+        let addr = format!("{}:{}", host, p);
+        match TcpListener::bind(&addr).await {
+            Ok(l) => {
+                chosen_port = p;
+                listener = Some(l);
+                break;
+            },
+            Err(_) => continue,
+        }
+    }
+    let listener = listener.ok_or("No free port found in range")?;
+
+    let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    tracing::info!("🌐 GhostWire Web Server starting on http://{}:{} (LAN IP: {})", host, chosen_port, local_ip);
+    tracing::info!("Use the web interface or run with CLI commands like: cargo run -- whisper <peer> <message>");
+
     let app = app(core);
-    
     axum::serve(listener, app).await?;
-    
     Ok(())
 }

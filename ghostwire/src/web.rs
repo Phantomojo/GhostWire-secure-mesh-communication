@@ -13,6 +13,8 @@ use chrono;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use reqwest;
 use serde_json;
+use std::io::{self, Write};
+use local_ipaddress;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -477,9 +479,16 @@ pub async fn set_username(
     State(_state): State<Arc<AppState>>, 
     Json(req): Json<UsernameRequest>
 ) -> impl IntoResponse {
-    // TODO: Store username in persistent storage
+    // Store username in persistent storage (username.txt)
+    let result = fs::write("username.txt", &req.username);
+    if let Err(e) = result {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to save username: {}", e)),
+        });
+    }
     println!("Username set to: {}", req.username);
-    
     Json(ApiResponse {
         success: true,
         data: Some(format!("Username set to: {}", req.username)),
@@ -488,9 +497,11 @@ pub async fn set_username(
 }
 
 pub async fn get_username(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // TODO: Get username from persistent storage
-    let username = "GhostUser".to_string(); // Default username
-    
+    // Get username from persistent storage (username.txt)
+    let username = match fs::read_to_string("username.txt") {
+        Ok(name) => name.trim().to_string(),
+        Err(_) => "GhostUser".to_string(),
+    };
     Json(ApiResponse {
         success: true,
         data: Some(username),
@@ -518,9 +529,11 @@ pub async fn get_network_info(State(_state): State<Arc<AppState>>) -> impl IntoR
 }
 
 fn get_local_ip() -> Option<String> {
-    // For now, return a default IP that will work for testing
-    // In production, you'd implement proper network interface enumeration
-    Some("192.168.1.100".to_string())
+    // Try to get the first non-loopback IPv4 address
+    match local_ipaddress::get() {
+        Some(ip) => Some(ip),
+        None => Some("127.0.0.1".to_string()),
+    }
 }
 
 pub fn app(core: Arc<Core>) -> Router {
