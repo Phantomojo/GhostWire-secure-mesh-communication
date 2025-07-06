@@ -21,8 +21,75 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 reqwest = { version = "0.11", features = ["json"] }
 local-ip-address = "0.5"
+hostname = "0.4"
 lettre = { version = "0.11", features = ["smtp-transport", "builder"] }
-lettre-transport-tls = "0.11"
+futures-util = "0.3"
+rand = "0.8"
+thiserror = "1.0"
+
+# Mesh networking dependencies
+meshtastic = { path = "../meshtastic-rust", features = ["serde", "bluetooth-le"] }
+libp2p = { version = "0.53", features = ["tokio", "tcp", "noise", "macros"] }
+libp2p-core = "0.41"
+libp2p-swarm = "0.42"
+libp2p-identify = "0.42"
+libp2p-ping = "0.42"
+libp2p-kad = "0.42"
+libp2p-mdns = "0.42"
+libp2p-gossipsub = "0.42"
+libp2p-relay = "0.42"
+libp2p-autonat = "0.42"
+libp2p-upnp = "0.42"
+libp2p-webrtc = "0.42"
+libp2p-quic = "0.42"
+libp2p-noise = "0.42"
+libp2p-secio = "0.42"
+libp2p-mplex = "0.42"
+libp2p-yamux = "0.42"
+libp2p-websocket = "0.42"
+libp2p-dns = "0.42"
+libp2p-tcp = "0.42"
+libp2p-udp = "0.42"
+libp2p-wasm-ext = "0.42"
+libp2p-floodsub = "0.42"
+libp2p-pubsub = "0.42"
+libp2p-rendezvous = "0.42"
+libp2p-delegated-routing = "0.42"
+libp2p-ipfs = "0.42"
+libp2p-ipfs-gossipsub = "0.42"
+libp2p-ipfs-kad = "0.42"
+libp2p-ipfs-mdns = "0.42"
+libp2p-ipfs-ping = "0.42"
+libp2p-ipfs-relay = "0.42"
+libp2p-ipfs-autonat = "0.42"
+libp2p-ipfs-upnp = "0.42"
+libp2p-ipfs-webrtc = "0.42"
+libp2p-ipfs-quic = "0.42"
+libp2p-ipfs-noise = "0.42"
+libp2p-ipfs-secio = "0.42"
+libp2p-ipfs-mplex = "0.42"
+libp2p-ipfs-yamux = "0.42"
+libp2p-ipfs-websocket = "0.42"
+libp2p-ipfs-dns = "0.42"
+libp2p-ipfs-tcp = "0.42"
+libp2p-ipfs-udp = "0.42"
+libp2p-ipfs-wasm-ext = "0.42"
+libp2p-ipfs-floodsub = "0.42"
+libp2p-ipfs-pubsub = "0.42"
+libp2p-ipfs-rendezvous = "0.42"
+libp2p-ipfs-delegated-routing = "0.42"
+
+# Additional mesh networking utilities
+tokio-serial = "5.4"
+tokio-util = "0.7"
+prost = "0.12"
+log = "0.4"
+
+[features]
+p2p = []
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[profile.dev]
+debug = 1

@@ -5,7 +5,7 @@ use axum::response::Html;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
-use crate::core::Core;
+use crate::core::{Core, MeshStats, MeshNode, MeshTopology};
 use base64::engine::general_purpose;
 use base64::Engine;
 use uuid;
@@ -14,9 +14,10 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use reqwest;
 use serde_json;
 use std::io::{self, Write};
-use local_ipaddress;
+use std::fs;
 use lettre::{Message, SmtpTransport, Transport};
 use lettre::transport::smtp::authentication::Credentials;
+use local_ip_address;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +40,7 @@ pub struct PeersResponse {
     pub peers: Vec<PeerInfo>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PeerInfo {
     pub id: String,
@@ -95,6 +97,31 @@ pub struct UsernameRequest {
 #[derive(Deserialize)]
 pub struct ErrorReportRequest {
     pub error: String,
+}
+
+#[derive(Deserialize)]
+pub struct MeshConnectRequest {
+    pub address: String,
+}
+
+#[derive(Deserialize)]
+pub struct MeshMessageRequest {
+    pub content: String,
+}
+
+#[derive(Serialize)]
+pub struct MeshStatsResponse {
+    pub stats: MeshStats,
+}
+
+#[derive(Serialize)]
+pub struct MeshTopologyResponse {
+    pub topology: MeshTopology,
+}
+
+#[derive(Serialize)]
+pub struct MeshNodeResponse {
+    pub nodes: Vec<MeshNode>,
 }
 
 pub async fn status() -> impl IntoResponse {
@@ -380,6 +407,7 @@ curl -X POST http://127.0.0.1:3000/api/send_message \
     "#)
 }
 
+#[allow(dead_code)]
 pub async fn register_peer(
     State(_state): State<Arc<AppState>>, 
     Json(req): Json<PeerDiscoveryRequest>
@@ -394,6 +422,7 @@ pub async fn register_peer(
     })
 }
 
+#[allow(dead_code)]
 pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let mut discovered_peers = Vec::new();
@@ -482,6 +511,7 @@ pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoRespo
     })
 }
 
+#[allow(dead_code)]
 pub async fn set_username(
     State(_state): State<Arc<AppState>>, 
     Json(req): Json<UsernameRequest>
@@ -503,6 +533,7 @@ pub async fn set_username(
     })
 }
 
+#[allow(dead_code)]
 pub async fn get_username(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Get username from persistent storage (username.txt)
     let username = match fs::read_to_string("username.txt") {
@@ -516,6 +547,7 @@ pub async fn get_username(State(_state): State<Arc<AppState>>) -> impl IntoRespo
     })
 }
 
+#[allow(dead_code)]
 pub async fn get_network_info(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     
@@ -568,12 +600,127 @@ pub async fn report_error(
     })
 }
 
-fn get_local_ip() -> Option<String> {
-    // Try to get the first non-loopback IPv4 address
-    match local_ipaddress::get() {
-        Some(ip) => Some(ip),
-        None => Some("127.0.0.1".to_string()),
+// Mesh networking endpoints
+pub async fn init_mesh(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.core.init_mesh().await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Mesh networking initialized"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to initialize mesh: {}", e)),
+        }),
     }
+}
+
+pub async fn start_mesh(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MeshConnectRequest>,
+) -> impl IntoResponse {
+    match state.core.start_mesh(&req.address).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Mesh network started"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to start mesh: {}", e)),
+        }),
+    }
+}
+
+pub async fn connect_meshtastic(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MeshConnectRequest>,
+) -> impl IntoResponse {
+    match state.core.connect_meshtastic(&req.address).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Connected to Meshtastic device"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to connect to Meshtastic: {}", e)),
+        }),
+    }
+}
+
+pub async fn send_mesh_message(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MeshMessageRequest>,
+) -> impl IntoResponse {
+    match state.core.send_mesh_message(&req.content).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Message sent through mesh"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to send mesh message: {}", e)),
+        }),
+    }
+}
+
+pub async fn get_mesh_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.core.get_mesh_stats().await {
+        Some(stats) => Json(ApiResponse {
+            success: true,
+            data: Some(MeshStatsResponse { stats }),
+            error: None,
+        }),
+        None => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Mesh networking not initialized".to_string()),
+        }),
+    }
+}
+
+pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.core.get_mesh_topology().await {
+        Some(topology) => Json(ApiResponse {
+            success: true,
+            data: Some(MeshTopologyResponse { topology }),
+            error: None,
+        }),
+        None => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Mesh networking not initialized".to_string()),
+        }),
+    }
+}
+
+pub async fn get_mesh_nodes(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.core.get_mesh_topology().await {
+        Some(topology) => {
+            let nodes: Vec<MeshNode> = topology.nodes.values().cloned().collect();
+            Json(ApiResponse {
+                success: true,
+                data: Some(MeshNodeResponse { nodes }),
+                error: None,
+            })
+        }
+        None => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Mesh networking not initialized".to_string()),
+        }),
+    }
+}
+
+pub fn get_local_ip() -> Option<String> {
+    // Try to get the first non-loopback IPv4 address
+    local_ip_address::local_ip().map(|ip| ip.to_string()).ok()
 }
 
 pub fn app(core: Arc<Core>) -> Router {
@@ -599,6 +746,14 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/get_username", get(get_username))
         .route("/api/get_network_info", get(get_network_info))
         .route("/api/report_error", post(report_error))
+        // Mesh networking routes
+        .route("/api/mesh/init", post(init_mesh))
+        .route("/api/mesh/start", post(start_mesh))
+        .route("/api/mesh/connect_meshtastic", post(connect_meshtastic))
+        .route("/api/mesh/send_message", post(send_mesh_message))
+        .route("/api/mesh/stats", get(get_mesh_stats))
+        .route("/api/mesh/topology", get(get_mesh_topology))
+        .route("/api/mesh/nodes", get(get_mesh_nodes))
         .layer(cors)
         .with_state(state)
 } 

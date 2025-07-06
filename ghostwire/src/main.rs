@@ -5,6 +5,8 @@ use tracing::{info, error};
 use base64::Engine;
 use std::env;
 use reqwest;
+use web::get_local_ip;
+use hostname;
 
 mod cli;
 mod core;
@@ -16,8 +18,8 @@ mod web;
 
 use core::Core;
 use web::app;
-use web::get_local_ip;
 
+#[allow(dead_code)]
 #[derive(Parser)]
 #[command(name = "ghostwire")]
 #[command(about = "Secure messaging network with end-to-end encryption")]
@@ -32,6 +34,7 @@ struct Cli {
     host: String,
 }
 
+#[allow(dead_code)]
 #[derive(Subcommand)]
 enum Commands {
     /// Send a message to a peer
@@ -50,6 +53,7 @@ enum Commands {
     Status,
 }
 
+#[allow(dead_code)]
 #[derive(Subcommand)]
 enum IdentityAction {
     /// Generate a new identity

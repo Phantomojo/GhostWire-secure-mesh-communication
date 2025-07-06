@@ -1,13 +1,8 @@
 // API service for connecting to GhostWire backend
 
-const API_BASE_URL = 'http://localhost:3001/api';
+import type { User, Chat, Message, Contact, Group } from '../types';
 
-export interface Message {
-  id: string;
-  sender: string;
-  content: string;
-  timestamp: string;
-}
+const API_BASE_URL = 'http://localhost:3001/api';
 
 export interface Peer {
   id: string;
@@ -342,4 +337,44 @@ export class WebSocketService {
       console.error('WebSocket is not connected');
     }
   }
+}
+
+export async function getUser(): Promise<User> {
+  const res = await fetch(`${API_BASE_URL}/user`);
+  if (!res.ok) throw new Error('Failed to fetch user');
+  return res.json();
+}
+
+export async function getChats(): Promise<Chat[]> {
+  const res = await fetch(`${API_BASE_URL}/chats`);
+  if (!res.ok) throw new Error('Failed to fetch chats');
+  return res.json();
+}
+
+export async function getMessages(chatId: string): Promise<Message[]> {
+  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages`);
+  if (!res.ok) throw new Error('Failed to fetch messages');
+  return res.json();
+}
+
+export async function getContacts(): Promise<Contact[]> {
+  const res = await fetch(`${API_BASE_URL}/contacts`);
+  if (!res.ok) throw new Error('Failed to fetch contacts');
+  return res.json();
+}
+
+export async function getGroups(): Promise<Group[]> {
+  const res = await fetch(`${API_BASE_URL}/groups`);
+  if (!res.ok) throw new Error('Failed to fetch groups');
+  return res.json();
+}
+
+export async function sendMessage(chatId: string, text: string): Promise<Message> {
+  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error('Failed to send message');
+  return res.json();
 } 

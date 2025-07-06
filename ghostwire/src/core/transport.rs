@@ -85,4 +85,20 @@ impl Transport for LocalTransport {
         // For now, return None (no messages to receive)
         Ok(None)
     }
+}
+
+// --- P2P Networking Scaffold ---
+#[cfg(feature = "p2p")]
+pub mod p2p {
+    // Placeholder for libp2p-based transport
+    pub fn start_p2p_node() {
+        // TODO: Implement P2P node startup using libp2p
+        println!("[P2P] Starting P2P node (libp2p placeholder)");
+    }
+}
+
+// Abstraction for message transport
+pub trait MessageTransport {
+    fn send_message(&self, recipient: &str, message: &[u8]) -> Result<(), String>;
+    fn receive_message(&self) -> Option<(String, Vec<u8>)>;
 } 

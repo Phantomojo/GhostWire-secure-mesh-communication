@@ -1,4 +1,28 @@
-# �� GhostWire - Secure Multi-PC Messaging Network
+# GhostWire
+
+**Decentralized, Secure, and Stealth Social Networking & Chat**
+
+GhostWire is a next-generation, privacy-first, decentralized social networking and chat platform. It empowers users to communicate and organize securely, even under surveillance, censorship, or network disruptions.
+
+## Mission
+Empower users to communicate and organize securely, even under surveillance, censorship, or network disruptions.
+
+## Core Features
+- End-to-end encrypted messaging and social networking
+- Zero-trust architecture: no server or relay can decrypt or correlate user data
+- Stealth/Disguised chats and panic mode for sensitive situations
+- Peer-to-peer and federated networking for resilience
+- Offline and mesh networking support
+- Open source, extensible, and community-driven
+
+## Roadmap
+See [ROADMAP.md](./ROADMAP.md) for upcoming features and development priorities.
+
+---
+
+*This project is in active development. Contributions and feedback are welcome!*
+
+#  GhostWire - Secure Multi-PC Messaging Network
 
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://rustup.rs/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)

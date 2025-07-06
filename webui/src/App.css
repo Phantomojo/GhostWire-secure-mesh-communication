@@ -1,1 +1,24 @@
 /* App-specific styles - most styling handled by Tailwind CSS */ 
+
+/* Custom tweaks for chat UI */
+.stealth {
+  filter: blur(3px) grayscale(1);
+  pointer-events: none;
+}
+
+/* Hide scrollbars for chat list and messages */
+::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e0e7ef;
+  border-radius: 3px;
+}
+
+/* Responsive tweaks */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 60px !important;
+  }
+} 
