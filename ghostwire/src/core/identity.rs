@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ring::rand::{SystemRandom, SecureRandom};
 use serde::{Serialize, Deserialize};
+use libp2p::identity::{Keypair, PublicKey};
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
@@ -42,15 +43,34 @@ impl EphemeralIdentity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Clone for EphemeralIdentity {
+    fn clone(&self) -> Self {
+        EphemeralIdentity {
+            identity_id: self.identity_id.clone(),
+            secret_key: self.secret_key.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Identity {
     pub id: String,
+    #[serde(skip_serializing, skip_deserializing)]
+    keypair: Keypair,
 }
 
 impl Identity {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Identity {
-            id: uuid::Uuid::new_v4().to_string(),
-        })
+        let keypair = Keypair::generate_ed25519();
+        let id = uuid::Uuid::new_v4().to_string();
+        Ok(Identity { id, keypair })
+    }
+
+    pub fn keypair(&self) -> &Keypair {
+        &self.keypair
+    }
+
+    pub fn public_key(&self) -> PublicKey {
+        self.keypair.public()
     }
 } 

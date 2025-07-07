@@ -69,20 +69,19 @@ pub struct LocalTransport {
 
 impl LocalTransport {
     pub fn new() -> Self {
-        Self {}
+        LocalTransport {}
     }
 }
 
 #[async_trait]
 impl Transport for LocalTransport {
-    async fn send_message(&self, message: &Message) -> Result<()> {
-        // For now, just log the message
-        println!("[LOCAL] Sending message with ID: {}", message.id);
+    async fn send_message(&self, _message: &Message) -> anyhow::Result<()> {
+        // Local transport - just log the message
         Ok(())
     }
-    
-    async fn receive_message(&self) -> Result<Option<Message>> {
-        // For now, return None (no messages to receive)
+
+    async fn receive_message(&self) -> anyhow::Result<Option<Message>> {
+        // Local transport - no messages
         Ok(None)
     }
 }

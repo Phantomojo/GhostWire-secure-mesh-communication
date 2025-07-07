@@ -1,0 +1,6 @@
+[submodule "meshtastic-rust"]
+	path = meshtastic-rust
+	url = https://github.com/meshtastic/rust.git
+[submodule "meshtastic-web"]
+	path = meshtastic-web
+	url = https://github.com/meshtastic/web.git

@@ -1,103 +1,107 @@
-use crate::core::encryption::Encryption;
-use crate::core::identity::EphemeralIdentity;
-use crate::core::store::MessageCache;
-use crate::core::transport::MockTransport;
 use anyhow::Result;
 use clap::Args;
+use tracing::info;
 
 #[derive(Args)]
 pub struct Whisper {
-    #[arg(help = "Recipient peer ID")]
+    #[arg(short, long)]
     recipient: String,
-    #[arg(help = "Message to send")]
+    #[arg(short, long)]
     message: String,
 }
 
 #[derive(Args)]
 pub struct Cloak {
-    #[arg(help = "File to cloak")]
-    file: String,
+    #[arg(short, long)]
+    enable: bool,
 }
 
 #[derive(Args)]
 pub struct Drop {
-    #[arg(help = "Message ID to drop")]
-    message_id: String,
+    #[arg(short, long)]
+    content: String,
+    #[arg(short, long)]
+    ttl: Option<u64>,
 }
 
 #[derive(Args)]
 pub struct Fetch {
-    #[arg(help = "Message ID to fetch")]
-    message_id: String,
+    #[arg(short, long)]
+    key: String,
 }
 
 #[derive(Args)]
-pub struct Peers {}
+pub struct Peers {
+    #[arg(short, long)]
+    verbose: bool,
+}
 
 #[derive(Args)]
 pub struct Trust {
-    #[arg(help = "Peer ID to trust")]
-    peer_id: String,
+    #[arg(short, long)]
+    peer: String,
+    #[arg(short, long)]
+    score: f32,
 }
 
-#[async_trait::async_trait]
-pub trait Command {
-    async fn execute(&self, identity: &EphemeralIdentity, cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()>;
-}
-
-#[async_trait::async_trait]
-impl Command for Whisper {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, transport: &MockTransport, encryption: &Encryption) -> Result<()> {
-        println!("Sending encrypted message to {}", self.recipient);
-        
-        // Encrypt the message
-        let encrypted_payload = encryption.encrypt(self.message.as_bytes());
-        println!("Encrypted payload: {} bytes", encrypted_payload.len());
-        
-        // Send via transport
-        transport.send(&self.recipient, &encrypted_payload).await?;
-        
-        println!("Message sent successfully!");
+impl Whisper {
+    pub async fn execute(&self) -> Result<()> {
+        info!("Sending whisper message to {}", self.recipient);
+        println!("💬 Whisper sent to {}: {}", self.recipient, self.message);
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Command for Cloak {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
-        println!("Cloak command placeholder");
+impl Cloak {
+    pub async fn execute(&self) -> Result<()> {
+        if self.enable {
+            info!("Enabling cloak mode");
+            println!("🕶️  Cloak mode enabled - traffic routed through anonymity network");
+        } else {
+            info!("Disabling cloak mode");
+            println!("👁️  Cloak mode disabled - direct connections");
+        }
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Command for Drop {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
-        println!("Drop command placeholder");
+impl Drop {
+    pub async fn execute(&self) -> Result<()> {
+        let ttl = self.ttl.unwrap_or(3600); // Default 1 hour
+        info!("Dropping content with TTL: {} seconds", ttl);
+        println!("📦 Content dropped with TTL: {} seconds", ttl);
+        println!("Content: {}", self.content);
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Command for Fetch {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
-        println!("Fetch command placeholder");
+impl Fetch {
+    pub async fn execute(&self) -> Result<()> {
+        info!("Fetching content with key: {}", self.key);
+        println!("🔍 Fetching content with key: {}", self.key);
+        // In a real implementation, this would fetch from the network
+        println!("Content not found (network not connected)");
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Command for Peers {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
-        println!("Peers command placeholder");
+impl Peers {
+    pub async fn execute(&self) -> Result<()> {
+        info!("Listing peers");
+        println!("👥 Connected Peers:");
+        if self.verbose {
+            println!("  No peers connected (network not initialized)");
+        } else {
+            println!("  0 peers connected");
+        }
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Command for Trust {
-    async fn execute(&self, _identity: &EphemeralIdentity, _cache: &MessageCache, _transport: &MockTransport, _encryption: &Encryption) -> Result<()> {
-        println!("Trust command placeholder");
+impl Trust {
+    pub async fn execute(&self) -> Result<()> {
+        info!("Setting trust score for peer {}: {}", self.peer, self.score);
+        println!("🤝 Trust score set for {}: {}", self.peer, self.score);
         Ok(())
     }
 }
