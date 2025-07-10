@@ -125,7 +125,7 @@ pub async fn status() -> impl IntoResponse {
 }
 
 pub async fn send_message(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>, 
     Json(req): Json<SendMessageRequest>,
 ) -> impl IntoResponse {
     // Create a proper Message object
@@ -607,8 +607,8 @@ pub async fn report_error(
 pub async fn init_mesh(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: This endpoint requires a mutable reference to core. Refactor AppState/core to allow this.
     Json(ApiResponse::<()> {
-        success: false,
-        data: None,
+            success: false,
+            data: None,
         error: Some("Mesh initialization not supported in current API state".to_string()),
     })
 }

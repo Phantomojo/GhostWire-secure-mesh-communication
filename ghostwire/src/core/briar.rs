@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn, debug};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::core::transport::Transport;
 
 /// Briar-inspired secure messaging system
 /// Focuses on metadata resistance and peer-to-peer communication
@@ -386,27 +387,29 @@ impl BriarManager {
 }
 
 #[async_trait]
-impl super::transport::Transport for BriarManager {
-    async fn send_message(&self, message: &Message) -> Result<()> {
+impl Transport for BriarManager {
+    fn name(&self) -> &'static str { "briar" }
+    fn description(&self) -> &'static str { "Briar-inspired secure messaging transport" }
+    fn feature_flag(&self) -> Option<&'static str> { Some("briar-transport") }
+    async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
         // Convert Message to BriarMessage and send
         let mut manager = BriarManager::new(self.identity.clone()).await?;
         manager.send_message(&message.recipient, &message.content, MessageType::Text).await?;
         Ok(())
     }
-
-    async fn receive_message(&self) -> Result<Option<Message>> {
+    async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
         // Check message queue for incoming messages
         let mut queue = self.message_queue.write().await;
         if let Some(briar_msg) = queue.pop() {
             let mut manager = BriarManager::new(self.identity.clone()).await?;
             if let Some(content) = manager.receive_message(briar_msg).await? {
-                let message = Message {
-                    id: Uuid::new_v4(),
-                    sender: "briar-contact".to_string(), // Would be actual sender ID
+                let message = crate::core::message::Message {
+                    id: uuid::Uuid::new_v4(),
+                    sender: "briar-contact".to_string(),
                     recipient: self.identity.id.clone(),
                     content,
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs(),
                     encrypted: true,
@@ -416,4 +419,7 @@ impl super::transport::Transport for BriarManager {
         }
         Ok(None)
     }
-} 
+}
+// Registration example (in main/core):
+// #[cfg(feature = "briar-transport")]
+// registry.register(BriarManager::new(...)); 

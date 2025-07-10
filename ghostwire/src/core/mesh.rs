@@ -95,16 +95,16 @@ impl MeshTransport {
             gossipsub::MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
         ).map_err(|e| anyhow::anyhow!(e))?;
-        
+
         let identify = IdentifyBehaviour::new(IdentifyConfig::new(
             "/ghostwire/mesh/1.0.0".to_string(),
             local_key.public(),
         ));
-        
+
         let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
-        
+
         let mdns = MdnsBehaviour::new(MdnsConfig::default(), local_peer_id)?;
-        
+
         let behaviour = MeshBehaviour {
             gossipsub,
             identify,
@@ -174,15 +174,15 @@ impl MeshTransport {
                                     match event {
                                         GossipsubEvent::Message { propagation_source, message_id, message } => {
                                             self.handle_gossipsub_message(propagation_source, message_id, message).await?;
-                                        }
+                        }
                                         _ => {}
                                     }
                                 }
                                 MeshBehaviourEvent::Identify(event) => {
                                     match event {
                                         IdentifyEvent::Received { peer_id, info, .. } => {
-                                            self.handle_identify_info(peer_id, info).await?;
-                                        }
+                            self.handle_identify_info(peer_id, info).await?;
+                        }
                                         _ => {}
                                     }
                                 }
@@ -190,8 +190,8 @@ impl MeshTransport {
                                     match event {
                                         KadEvent::OutboundQueryProgressed { result, .. } => {
                                             if let QueryResult::Bootstrap(result) = result {
-                                                info!("Kademlia bootstrap completed: {:?}", result);
-                                            }
+                            info!("Kademlia bootstrap completed: {:?}", result);
+                        }
                                         }
                                         _ => {}
                                     }
@@ -199,20 +199,20 @@ impl MeshTransport {
                                 MeshBehaviourEvent::Mdns(event) => {
                                     match event {
                                         MdnsEvent::Discovered(list) => {
-                                            for (peer_id, multiaddr) in list {
-                                                info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
-                                                self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
-                                            }
-                                        }
+                            for (peer_id, multiaddr) in list {
+                                info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
+                                self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
+                            }
+                        }
                                         MdnsEvent::Expired(list) => {
-                                            for (peer_id, multiaddr) in list {
-                                                info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
-                                                self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
+                            for (peer_id, multiaddr) in list {
+                                info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
+                                self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                             }
                         }
                         _ => {}
@@ -299,12 +299,14 @@ impl MeshTransport {
 
 #[async_trait]
 impl super::transport::Transport for MeshTransport {
+    fn name(&self) -> &'static str { "mesh" }
+    fn description(&self) -> &'static str { "libp2p-based mesh networking transport" }
+    fn feature_flag(&self) -> Option<&'static str> { Some("mesh-transport") }
     async fn send_message(&self, message: &Message) -> Result<()> {
         // This would be implemented to send via the transport
         // For now, we'll use the broadcast mechanism
-        Ok(())
+        self.broadcast_message(message).await
     }
-
     async fn receive_message(&self) -> Result<Option<Message>> {
         // This would be implemented to receive from the transport
         // For now, return None

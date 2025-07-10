@@ -79,6 +79,11 @@ tokio-fs = "0.1"
 clap = { version = "4.0", features = ["derive"] }
 hostname = "0.3"
 
+matrix-sdk = { version = "0.7", optional = true }
+serialport = { version = "4.2", optional = true }
+# Enable these features for real Matrix/Meshtastic bridging
+# cargo build --features matrix-bridge,meshtastic-bridge
+
 [dev-dependencies]
 tokio-test = "0.4"
 
@@ -87,3 +92,8 @@ debug = 1
 
 [patch.crates-io]
 libp2p-mdns = { path = "vendor/libp2p-mdns-0.48.0" }
+
+[features]
+default = []
+matrix-bridge = ["matrix-sdk"]
+meshtastic-bridge = ["serialport"]

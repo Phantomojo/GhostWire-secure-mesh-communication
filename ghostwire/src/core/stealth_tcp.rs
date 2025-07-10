@@ -6,6 +6,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn, error, debug};
 use crate::core::security::{SecurityManager, ThreatLevel, SecurityEvent, EntityType};
 use serde::{Serialize, Deserialize};
+use crate::core::message::Message;
+use crate::core::transport::Transport;
+use anyhow::Result;
+use async_trait::async_trait;
 
 // Enhanced stealth handshake with multiple layers
 const MAGIC_BYTES: &[u8] = b"GWSTH"; // GhostWire Stealth Handshake
@@ -402,3 +406,21 @@ impl Default for ConnectionStats {
         }
     }
 } 
+
+#[async_trait]
+impl Transport for StealthTCPProvider {
+    fn name(&self) -> &'static str { "stealth_tcp" }
+    fn description(&self) -> &'static str { "Stealth TCP transport with advanced security" }
+    fn feature_flag(&self) -> Option<&'static str> { Some("stealth-tcp-transport") }
+    async fn send_message(&self, _message: &Message) -> Result<()> {
+        // TODO: Implement actual message sending over StealthTCP
+        Ok(())
+    }
+    async fn receive_message(&self) -> Result<Option<Message>> {
+        // TODO: Implement actual message receiving over StealthTCP
+        Ok(None)
+    }
+}
+// Registration example (in main/core):
+// #[cfg(feature = "stealth-tcp-transport")]
+// registry.register(StealthTCPProvider::new(...)); 

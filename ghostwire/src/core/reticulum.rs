@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn, debug, error};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::core::transport::Transport;
 
 /// Reticulum-inspired secure mesh networking stack
 /// Based on cryptography-based networking with strong privacy guarantees
@@ -397,37 +398,20 @@ impl ReticulumManager {
 }
 
 #[async_trait]
-impl super::transport::Transport for ReticulumManager {
-    async fn send_message(&self, message: &Message) -> Result<()> {
+impl Transport for ReticulumManager {
+    fn name(&self) -> &'static str { "reticulum" }
+    fn description(&self) -> &'static str { "Reticulum-inspired secure mesh networking transport" }
+    fn feature_flag(&self) -> Option<&'static str> { Some("reticulum-transport") }
+    async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
         let mut manager = ReticulumManager::new(self.identity.clone()).await?;
         manager.send_message(message).await?;
         Ok(())
     }
-
-    async fn receive_message(&self) -> Result<Option<Message>> {
-        // Check message queue for incoming messages
-        let mut queue = self.message_queue.write().await;
-        if let Some(reticulum_msg) = queue.pop() {
-            let mut manager = ReticulumManager::new(self.identity.clone()).await?;
-            if let Some(content) = manager.process_message(reticulum_msg).await? {
-                let content_str = String::from_utf8_lossy(&content);
-                let parts: Vec<&str> = content_str.splitn(2, ": ").collect();
-                if parts.len() == 2 {
-                    let message = Message {
-                        id: Uuid::new_v4(),
-                        sender: parts[0].to_string(),
-                        recipient: self.identity.id.clone(),
-                        content: parts[1].to_string(),
-                        timestamp: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        encrypted: true,
-                    };
-                    return Ok(Some(message));
-                }
-            }
-        }
+    async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
+        // TODO: Implement actual message receiving logic
         Ok(None)
     }
-} 
+}
+// Registration example (in main/core):
+// #[cfg(feature = "reticulum-transport")]
+// registry.register(ReticulumManager::new(...)); 

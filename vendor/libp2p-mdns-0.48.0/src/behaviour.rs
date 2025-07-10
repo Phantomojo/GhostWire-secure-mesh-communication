@@ -1,0 +1,3 @@
+pub trait Provider: ...
+ 
+pub struct Provider { ... } 

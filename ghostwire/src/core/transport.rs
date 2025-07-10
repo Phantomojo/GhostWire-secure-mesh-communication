@@ -1,103 +1,57 @@
 use async_trait::async_trait;
 use crate::core::message::Message;
 use anyhow::Result;
-use tokio::sync::mpsc;
-use uuid::Uuid;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[async_trait]
 pub trait Transport: Send + Sync {
+    /// Unique name/id for the transport (e.g., "mesh", "stealth_tcp", "briar")
+    fn name(&self) -> &'static str;
+    /// Human-readable description
+    fn description(&self) -> &'static str { "" }
+    /// Feature flag (for conditional compilation)
+    fn feature_flag(&self) -> Option<&'static str> { None }
+    /// Send a message
     async fn send_message(&self, message: &Message) -> Result<()>;
+    /// Receive a message
     async fn receive_message(&self) -> Result<Option<Message>>;
 }
 
-pub struct MockTransport {
-    peer_id: String,
-    message_queue: mpsc::UnboundedReceiver<(String, Vec<u8>)>,
-    _sender: mpsc::UnboundedSender<(String, Vec<u8>)>,
+/// Registry for all available transports (built-in and plugins)
+pub struct TransportRegistry {
+    transports: HashMap<String, Arc<dyn Transport>>,
 }
 
-impl MockTransport {
-    pub async fn new() -> Result<Self> {
-        let peer_id = Uuid::new_v4().to_string();
-        let (sender, receiver) = mpsc::unbounded_channel();
-        
-        Ok(Self {
-            peer_id,
-            message_queue: receiver,
-            _sender: sender,
-        })
-    }
-
-    pub fn peer_id(&self) -> &str {
-        &self.peer_id
-    }
-    
-    // Add send method for CLI compatibility
-    pub async fn send(&self, peer_id: &str, data: &[u8]) -> Result<()> {
-        println!("MockTransport: Sending {} bytes to {}", data.len(), peer_id);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Transport for MockTransport {
-    async fn send_message(&self, message: &Message) -> Result<()> {
-        println!("MockTransport: Sending message with ID: {}", message.id);
-        Ok(())
-    }
-    
-    async fn receive_message(&self) -> Result<Option<Message>> {
-        // In a real implementation, this would receive from the queue
-        Ok(None)
-    }
-}
-
-impl Clone for MockTransport {
-    fn clone(&self) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
+impl TransportRegistry {
+    pub fn new() -> Self {
         Self {
-            peer_id: self.peer_id.clone(),
-            message_queue: receiver,
-            _sender: sender,
+            transports: HashMap::new(),
         }
     }
-}
 
-pub struct LocalTransport {
-    // For now, this is a simple local transport
-}
+    /// Register a transport (built-in or plugin)
+    pub fn register<T: Transport + 'static>(&mut self, transport: T) {
+        self.transports.insert(transport.name().to_string(), Arc::new(transport));
+    }
 
-impl LocalTransport {
-    pub fn new() -> Self {
-        LocalTransport {}
+    /// Get a transport by name
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Transport>> {
+        self.transports.get(name).cloned()
+    }
+
+    /// List all registered transports
+    pub fn list(&self) -> Vec<String> {
+        self.transports.keys().cloned().collect()
     }
 }
 
-#[async_trait]
-impl Transport for LocalTransport {
-    async fn send_message(&self, _message: &Message) -> anyhow::Result<()> {
-        // Local transport - just log the message
-        Ok(())
-    }
+// Feature flag scaffolding for modular transports
+// Example usage (in main or core):
+// #[cfg(feature = "mesh-transport")]
+// registry.register(MeshTransport::new(...));
+// #[cfg(feature = "stealth-tcp-transport")]
+// registry.register(StealthTCPProvider::new(...));
 
-    async fn receive_message(&self) -> anyhow::Result<Option<Message>> {
-        // Local transport - no messages
-        Ok(None)
-    }
-}
-
-// --- P2P Networking Scaffold ---
-#[cfg(feature = "p2p")]
-pub mod p2p {
-    // Placeholder for libp2p-based transport
-    pub fn start_p2p_node() {
-        // TODO: Implement P2P node startup using libp2p
-        println!("[P2P] Starting P2P node (libp2p placeholder)");
-    }
-}
-
-// Abstraction for message transport
-pub trait MessageTransport {
-    fn send_message(&self, recipient: &str, message: &[u8]) -> Result<(), String>;
-    fn receive_message(&self) -> Option<(String, Vec<u8>)>;
-} 
+// TODO: Refactor all transport implementations to use this registry and trait interface. 
