@@ -4,43 +4,43 @@ use tracing::info;
 
 #[derive(Args)]
 pub struct Whisper {
-    #[arg(short, long)]
+    #[arg(short = 'w', long)]
     recipient: String,
-    #[arg(short, long)]
+    #[arg(short = 'm', long)]
     message: String,
 }
 
 #[derive(Args)]
 pub struct Cloak {
-    #[arg(short, long)]
+    #[arg(short = 'c', long)]
     enable: bool,
 }
 
 #[derive(Args)]
 pub struct Drop {
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     content: String,
-    #[arg(short, long)]
+    #[arg(short = 't', long)]
     ttl: Option<u64>,
 }
 
 #[derive(Args)]
 pub struct Fetch {
-    #[arg(short, long)]
+    #[arg(short = 'k', long)]
     key: String,
 }
 
 #[derive(Args)]
 pub struct Peers {
-    #[arg(short, long)]
+    #[arg(short = 'v', long)]
     verbose: bool,
 }
 
 #[derive(Args)]
 pub struct Trust {
-    #[arg(short, long)]
+    #[arg(short = 'p', long)]
     peer: String,
-    #[arg(short, long)]
+    #[arg(short = 's', long)]
     score: f32,
 }
 

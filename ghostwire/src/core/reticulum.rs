@@ -402,7 +402,7 @@ impl Transport for ReticulumManager {
     fn name(&self) -> &'static str { "reticulum" }
     fn description(&self) -> &'static str { "Reticulum-inspired secure mesh networking transport" }
     fn feature_flag(&self) -> Option<&'static str> { Some("reticulum-transport") }
-    async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
+    async fn send_message(&mut self, message: &crate::core::message::Message) -> anyhow::Result<()> {
         let mut manager = ReticulumManager::new(self.identity.clone()).await?;
         manager.send_message(message).await?;
         Ok(())
@@ -411,7 +411,7 @@ impl Transport for ReticulumManager {
         // TODO: Implement actual message receiving logic
         Ok(None)
     }
-}
+} 
 // Registration example (in main/core):
 // #[cfg(feature = "reticulum-transport")]
 // registry.register(ReticulumManager::new(...)); 

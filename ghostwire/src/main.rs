@@ -27,10 +27,10 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
     
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = "127.0.0.1")]
     host: String,
     
-    #[arg(short, long, default_value_t = 8080)]
+    #[arg(long, default_value_t = 8080)]
     port: u16,
     
     #[arg(long)]

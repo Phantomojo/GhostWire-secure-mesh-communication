@@ -412,7 +412,7 @@ impl Transport for StealthTCPProvider {
     fn name(&self) -> &'static str { "stealth_tcp" }
     fn description(&self) -> &'static str { "Stealth TCP transport with advanced security" }
     fn feature_flag(&self) -> Option<&'static str> { Some("stealth-tcp-transport") }
-    async fn send_message(&self, _message: &Message) -> Result<()> {
+    async fn send_message(&mut self, _message: &Message) -> Result<()> {
         // TODO: Implement actual message sending over StealthTCP
         Ok(())
     }

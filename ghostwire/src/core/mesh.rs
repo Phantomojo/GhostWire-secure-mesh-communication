@@ -1,15 +1,18 @@
 use libp2p::{
     core::{upgrade, transport::Transport},
-    gossipsub::{self, Behaviour as GossipsubBehaviour, Config as GossipsubConfig, MessageId, Event as GossipsubEvent, Message as GossipsubMessage, IdentTopic as Topic},
-    identify::{Behaviour as IdentifyBehaviour, Config as IdentifyConfig, Event as IdentifyEvent, Info as IdentifyInfo},
-    kad::{Behaviour as KadBehaviour, store::MemoryStore, Event as KadEvent, QueryResult},
-    mdns::{Behaviour as MdnsBehaviour, Config as MdnsConfig, Event as MdnsEvent},
-    identity::{Keypair, PublicKey},
+    gossipsub::{Behaviour as Gossipsub, Event as GossipsubEvent, Message as GossipsubMessage, ValidationMode, MessageAuthenticity, Config as GossipsubConfig, Topic, MessageId},
+    identify::{Behaviour as Identify, Event as IdentifyEvent, Info as IdentifyInfo, Config as IdentifyConfig},
+    mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent},
     noise::{Config as NoiseConfig},
     swarm::{Swarm, SwarmEvent, NetworkBehaviour, Config as SwarmConfig},
     yamux::Config as YamuxConfig,
-    Multiaddr, PeerId, Transport as Libp2pTransport,
+    identity::{Keypair, PublicKey},
+    Multiaddr, PeerId,
 };
+use libp2p::kad::{Behaviour as Kad, Event as KadEvent, QueryResult};
+use libp2p::kad::store::MemoryStore;
+use libp2p::tcp::Transport as TcpTransport;
+use libp2p::gossipsub::IdentTopic;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -49,13 +52,12 @@ pub struct MeshTopology {
     pub local_node_id: String,
 }
 
-/// Mesh networking behavior combining libp2p protocols
 #[derive(NetworkBehaviour)]
 pub struct MeshBehaviour {
-    pub gossipsub: GossipsubBehaviour,
-    pub identify: IdentifyBehaviour,
-    pub kad: KadBehaviour<MemoryStore>,
-    pub mdns: MdnsBehaviour,
+    pub gossipsub: Gossipsub,
+    pub kad: Kad<MemoryStore>,
+    pub identify: Identify,
+    pub mdns: Mdns,
 }
 
 /// Mesh transport implementation with enhanced security
@@ -83,7 +85,7 @@ impl MeshTransport {
         );
         
         // Use a simpler transport setup that works with the current libp2p version
-        let transport = libp2p::tcp::Transport::default()
+        let transport = TcpTransport::<libp2p_tcp::tokio::Tcp>::new(libp2p_tcp::Config::default().nodelay(true))
             .upgrade(libp2p::core::upgrade::Version::V1)
             .authenticate(libp2p::noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -91,19 +93,19 @@ impl MeshTransport {
 
         // Create network behavior with enhanced security
         let gossipsub_config = GossipsubConfig::default();
-        let gossipsub = GossipsubBehaviour::new(
-            gossipsub::MessageAuthenticity::Signed(local_key.clone()),
+        let gossipsub = Gossipsub::new(
+            MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
         ).map_err(|e| anyhow::anyhow!(e))?;
 
-        let identify = IdentifyBehaviour::new(IdentifyConfig::new(
+        let identify = Identify::new(IdentifyConfig::new(
             "/ghostwire/mesh/1.0.0".to_string(),
             local_key.public(),
         ));
 
-        let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
+        let kad = Kad::new(local_peer_id, MemoryStore::new(local_peer_id));
 
-        let mdns = MdnsBehaviour::new(MdnsConfig::default(), local_peer_id)?;
+        let mdns = Mdns::new(MdnsConfig::default(), local_peer_id)?;
 
         let behaviour = MeshBehaviour {
             gossipsub,
@@ -116,7 +118,7 @@ impl MeshTransport {
 
         Ok(Self {
             swarm,
-            node_id,
+            node_id: node_id.clone(),
             local_peer_id,
             security_manager,
             stealth_provider,
@@ -254,7 +256,7 @@ impl MeshTransport {
     }
 
     pub async fn broadcast_message(&mut self, message: &Message) -> Result<()> {
-        let topic = Topic::new("ghostwire-messages");
+        let topic = IdentTopic::new("ghostwire-messages");
         let data = serde_json::to_vec(message)?;
         self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data)?;
         info!("Broadcasted message to topic: {}", topic);
@@ -302,14 +304,10 @@ impl super::transport::Transport for MeshTransport {
     fn name(&self) -> &'static str { "mesh" }
     fn description(&self) -> &'static str { "libp2p-based mesh networking transport" }
     fn feature_flag(&self) -> Option<&'static str> { Some("mesh-transport") }
-    async fn send_message(&self, message: &Message) -> Result<()> {
-        // This would be implemented to send via the transport
-        // For now, we'll use the broadcast mechanism
+    async fn send_message(&mut self, message: &Message) -> Result<()> {
         self.broadcast_message(message).await
     }
     async fn receive_message(&self) -> Result<Option<Message>> {
-        // This would be implemented to receive from the transport
-        // For now, return None
         Ok(None)
     }
 }

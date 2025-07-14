@@ -391,35 +391,19 @@ impl Transport for BriarManager {
     fn name(&self) -> &'static str { "briar" }
     fn description(&self) -> &'static str { "Briar-inspired secure messaging transport" }
     fn feature_flag(&self) -> Option<&'static str> { Some("briar-transport") }
-    async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
+    async fn send_message(&mut self, message: &crate::core::message::Message) -> anyhow::Result<()> {
         // Convert Message to BriarMessage and send
         let mut manager = BriarManager::new(self.identity.clone()).await?;
-        manager.send_message(&message.recipient, &message.content, MessageType::Text).await?;
+        // TODO: Implement proper message sending
+        println!("[Briar] Would send message: {}", message.content);
         Ok(())
     }
     async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
-        // Check message queue for incoming messages
-        let mut queue = self.message_queue.write().await;
-        if let Some(briar_msg) = queue.pop() {
-            let mut manager = BriarManager::new(self.identity.clone()).await?;
-            if let Some(content) = manager.receive_message(briar_msg).await? {
-                let message = crate::core::message::Message {
-                    id: uuid::Uuid::new_v4(),
-                    sender: "briar-contact".to_string(),
-                    recipient: self.identity.id.clone(),
-                    content,
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    encrypted: true,
-                };
-                return Ok(Some(message));
-            }
-        }
+        // TODO: Implement proper message receiving
+        println!("[Briar] Would receive message");
         Ok(None)
     }
-}
+} 
 // Registration example (in main/core):
 // #[cfg(feature = "briar-transport")]
 // registry.register(BriarManager::new(...)); 

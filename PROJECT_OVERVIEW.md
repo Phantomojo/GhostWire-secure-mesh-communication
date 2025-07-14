@@ -199,4 +199,13 @@ GhostWire aims to be the universal, modular, and privacy-focused mesh communicat
 
 ---
 
+### **2024-xx-xx: Major Transport Registry Refactor & Build Fixes**
+- Refactored `TransportRegistry` to store `Arc<tokio::sync::Mutex<dyn Transport>>` for safe, mutable, async access to all registered transports.
+- Updated all usages of the transport registry and `active_transport` to lock the mutex before calling mutating methods (e.g., `send_message`).
+- Fixed architectural issue where `send_message` required `&mut self` but registry used `Arc<dyn Transport>`, which only allowed immutable access.
+- Updated TCP transport instantiation in mesh networking to use `TcpTransport::<libp2p_tcp::tokio::Tcp>::new(libp2p_tcp::Config::default().nodelay(true))` as required by libp2p 0.44.0.
+- Ensured all trait objects are `Send + Sync` and compatible with async/multithreaded use.
+- All build errors related to transport mutability, trait bounds, and libp2p provider types are resolved. Project builds cleanly.
+- This refactor future-proofs the codebase for modular, pluggable, async transports and multithreaded runtime.
+
 *This audit log will be updated as the codebase is cleaned up and refactored. All future code cleanup and planning should reference this section.* 

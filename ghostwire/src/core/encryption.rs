@@ -1,3 +1,6 @@
+//! Encryption: key revocation, rotation announcements, CRLs.
+//! Next: integrate with key manager and web API.
+
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
 use ring::aead::{self, UnboundKey, AES_256_GCM};
@@ -59,6 +62,24 @@ pub struct PeerKey {
     pub trust_score: f32,
 }
 
+/// Struct for tracking revoked keys.
+#[derive(Default, Clone)]
+pub struct RevocationList {
+    pub revoked_keys: Vec<String>,
+}
+
+/// Trait for announcing key rotations.
+pub trait KeyRotationAnnouncer {
+    /// Announce a key rotation event.
+    fn announce_rotation(&self, key_id: &str);
+}
+
+/// Default stub: no-op.
+pub struct NoOpKeyRotationAnnouncer;
+impl KeyRotationAnnouncer for NoOpKeyRotationAnnouncer {
+    fn announce_rotation(&self, _key_id: &str) {}
+}
+
 /// Enhanced encryption manager with advanced security features
 pub struct EncryptionManager {
     key_pair: GhostKeyPair,
@@ -75,6 +96,28 @@ pub struct SessionKey {
     pub created_at: u64,
     pub expires_at: u64,
     pub usage_count: usize,
+}
+
+/// Trait for managing encryption key lifecycle (rotation, revocation, backup).
+pub trait KeyManager {
+    /// Rotate keys (periodic or on-demand).
+    fn rotate(&mut self);
+    /// Revoke a key by ID.
+    fn revoke(&mut self, key_id: &str);
+    /// Backup keys (encrypted export).
+    fn backup(&self, passphrase: &str) -> Vec<u8>;
+    /// Restore keys from backup.
+    fn restore(&mut self, data: &[u8], passphrase: &str);
+}
+
+/// Stub implementation: does nothing.
+pub struct StubKeyManager;
+
+impl KeyManager for StubKeyManager {
+    fn rotate(&mut self) {}
+    fn revoke(&mut self, _key_id: &str) {}
+    fn backup(&self, _passphrase: &str) -> Vec<u8> { vec![] }
+    fn restore(&mut self, _data: &[u8], _passphrase: &str) {}
 }
 
 impl EncryptionManager {

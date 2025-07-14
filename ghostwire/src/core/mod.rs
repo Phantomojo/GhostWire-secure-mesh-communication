@@ -11,7 +11,7 @@ pub mod stealth_tcp;
 pub mod security;
 
 #[cfg(feature = "matrix-bridge")]
-use matrix_sdk::{Client, ruma::RoomId, config::SyncSettings};
+use matrix_sdk::{Client, ruma::RoomId, config::SyncSettings, Room, ruma::events::room::message::RoomMessageEventContent};
 
 pub use identity::Identity;
 pub use message::Message;
@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
-use transport::{TransportRegistry, Transport};
+use transport::TransportRegistry;
 
 // Protocol Adapter Trait
 #[async_trait::async_trait]
@@ -77,57 +77,73 @@ impl ProtocolAdapter for MatrixAdapter {
                 .homeserver_url(self.homeserver.clone())
                 .build()
                 .await?;
+            
+            // Login with access token
             client.restore_login_with_access_token(
                 self.user.clone(),
                 self.access_token.clone(),
                 None,
             ).await?;
-            // For demo: send to a hardcoded room (replace with your room ID)
-            let room_id = RoomId::parse("!yourroomid:matrix.org").unwrap();
+            
+            // Get room and send message
+            let room_id = RoomId::parse("!yourroomid:matrix.org")?;
             client.room_send(
                 &room_id,
-                matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(message.content.clone()),
+                RoomMessageEventContent::text_plain(message.content.clone()),
                 None,
             ).await?;
-            println!("[MatrixAdapter] Sent message to room {}: {}", room_id, message.content);
+            
             Ok(())
         }
         #[cfg(not(feature = "matrix-bridge"))]
         {
-            println!("[MatrixAdapter] (mock) Would send message: {}", message.content);
+            println!("[MOCK] Matrix: Would send message to room: {}", message.content);
             Ok(())
         }
     }
     async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
         #[cfg(feature = "matrix-bridge")]
         {
-            // Receive messages from a Matrix room using matrix-sdk
+            // Receive messages from Matrix rooms
             let client = Client::builder()
                 .homeserver_url(self.homeserver.clone())
                 .build()
                 .await?;
+            
+            // Login with access token
             client.restore_login_with_access_token(
                 self.user.clone(),
                 self.access_token.clone(),
                 None,
             ).await?;
-            // For demo: sync and print new messages from all joined rooms
-            let sync = client.sync_once(SyncSettings::default()).await?;
+            
+            // Sync and get messages
+            client.sync_once(SyncSettings::default()).await?;
+            
+            // Check for new messages in joined rooms
             for (room_id, room) in client.rooms().joined() {
                 let timeline = room.timeline().await?;
                 for event in timeline.events() {
                     if let matrix_sdk::deserialized_responses::TimelineEvent::Event(ev) = event {
-                        if let Some(content) = ev.event.deserialize_as::<matrix_sdk::ruma::events::room::message::RoomMessageEventContent>().ok() {
-                            println!("[MatrixAdapter] Received in {}: {}", room_id, content.body());
+                        if let Some(content) = ev.event.deserialize_as::<RoomMessageEventContent>().ok() {
+                            return Ok(Some(crate::core::message::Message {
+                                id: ev.event.event_id().to_string(),
+                                sender: ev.event.sender().to_string(),
+                                recipient: room_id.to_string(),
+                                content: content.body().to_string(),
+                                timestamp: ev.event.origin_server_ts().as_secs(),
+                                encrypted: false,
+                            }));
                         }
                     }
                 }
             }
-            Ok(None) // For now, just print
+            
+            Ok(None)
         }
         #[cfg(not(feature = "matrix-bridge"))]
         {
-            println!("[MatrixAdapter] (mock) Would poll for new messages");
+            println!("[MOCK] Matrix: Would receive message");
             Ok(None)
         }
     }
@@ -184,7 +200,7 @@ pub struct Core {
     pub reticulum_manager: Option<Arc<RwLock<ReticulumManager>>>,
     pub security_manager: Arc<SecurityManager>,
     pub transport_registry: Arc<RwLock<TransportRegistry>>,
-    pub active_transport: Option<Arc<dyn Transport>>,
+    pub active_transport: Option<Arc<tokio::sync::Mutex<dyn Transport>>>,
     pub adapter_registry: Arc<RwLock<AdapterRegistry>>,
     pub active_adapter: Option<Arc<dyn ProtocolAdapter>>,
 }
@@ -265,7 +281,8 @@ impl Core {
     /// Send a message through the selected transport
     pub async fn send_message(&self, message: &Message) -> Result<()> {
         if let Some(transport) = &self.active_transport {
-            transport.send_message(message).await
+            let mut guard = transport.lock().await;
+            guard.send_message(message).await
         } else {
             Err(anyhow::anyhow!("No active transport selected"))
         }

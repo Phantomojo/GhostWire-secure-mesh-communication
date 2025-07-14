@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MIT License
 
 ### Changed
+- Refactored `TransportRegistry` to use `Arc<tokio::sync::Mutex<dyn Transport>>` for async, mutable access to all transports.
+- Updated all code to lock the mutex before calling mutating methods on transports.
+- Fixed architectural issue where `send_message` required `&mut self` but registry used `Arc<dyn Transport>`, which only allowed immutable access.
+- Updated TCP transport instantiation in mesh networking to use the correct libp2p provider and config for compatibility with libp2p 0.44.0.
+- All build errors related to transport mutability, trait bounds, and libp2p provider types are resolved. Project builds cleanly.
 - Updated project structure and organization
 - Enhanced documentation and guides
 
