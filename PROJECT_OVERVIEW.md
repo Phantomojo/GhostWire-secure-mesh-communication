@@ -3,7 +3,7 @@
 ---
 
 ## 1. **Project Vision**
-GhostWire aims to be the universal, modular, and privacy-focused mesh communication platform. It will bridge multiple mesh protocols (Bluetooth, WiFi, LoRa, WebRTC, TCP/IP, etc.), support cross-network channels, and provide robust security, privacy, and usability. The goal is to become the backbone for decentralized, censorship-resistant, and resilient communication—usable by anyone, anywhere, on any device.
+GhostWire aims to be the universal, modular, and privacy-focused mesh communication platform. It bridges multiple mesh protocols (Bluetooth, WiFi, LoRa, WebRTC, TCP/IP, etc.), supports cross-network channels, and provides robust security, privacy, and usability. The goal is to become the backbone for decentralized, censorship-resistant, and resilient communication—usable by anyone, anywhere, on any device.
 
 ---
 
@@ -11,7 +11,7 @@ GhostWire aims to be the universal, modular, and privacy-focused mesh communicat
 
 ### **A. Codebase Structure**
 - **ghostwire/**: Rust core, CLI, and backend logic
-  - `src/core/`: Core modules (encryption, identity, mesh, message, store, transport)
+  - `src/core/`: Core modules (encryption, identity, mesh, message, modular security/trust, store, transport)
   - `src/cli/`: CLI commands
   - `src/web.rs`: Web API
   - `main.rs`: Entry point
@@ -25,6 +25,7 @@ GhostWire aims to be the universal, modular, and privacy-focused mesh communicat
 - Basic mesh networking (Rust core)
 - CLI for node management and messaging
 - Web UI for chat, settings, onboarding
+- Modular security/trust layers (Sybil defense, quotas, blacklists, disaster triggers, reputation, federation)
 - Encryption primitives (in progress)
 - Modular code structure for future transports
 - Documentation: README, SECURITY, CONTRIBUTING, ROADMAP, etc.
@@ -93,11 +94,11 @@ GhostWire aims to be the universal, modular, and privacy-focused mesh communicat
 
 ---
 
-## 7. **Next Steps**
-- Deep-dive codebase audit: Identify dead code, legacy modules, and integration gaps.
-- Prioritize modular transport refactor and protocol adapter design.
-- Set up regular documentation and code review cycles.
-- Engage community for feedback and contributions.
+## 7. **Get Involved**
+- See the [README.md](./README.md) for a quickstart, project vision, and contribution guide.
+- Join the community (Discord/forum link coming soon) and help shape the future of secure, decentralized communication.
+- Contribute to code, docs, security, protocol adapters, or outreach—see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- For the latest roadmap, threat model, and use cases, see the docs folder.
 
 ---
 
@@ -164,7 +165,7 @@ GhostWire aims to be the universal, modular, and privacy-focused mesh communicat
 
 ---
 
-**This document is the single source of truth for GhostWire’s direction, state, and priorities. Always update it as the project evolves.** 
+**This document is the single source of truth for GhostWire’s direction, state, and priorities. Always update it as the project evolves.**
 
 ---
 

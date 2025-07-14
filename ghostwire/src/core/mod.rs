@@ -253,7 +253,7 @@ impl Core {
         });
         let adapter_registry = Arc::new(RwLock::new(adapter_registry));
         let active_adapter = None;
-
+        
         Ok(Self {
             identity,
             encryption,

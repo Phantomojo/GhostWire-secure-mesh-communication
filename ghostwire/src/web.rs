@@ -748,11 +748,11 @@ pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoR
 pub async fn get_mesh_nodes(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: Implement proper mesh nodes retrieval
     let nodes: Vec<MeshNodeDto> = vec![]; // TODO: Get actual nodes
-    Json(ApiResponse {
-        success: true,
-        data: Some(nodes),
-        error: None,
-    })
+            Json(ApiResponse {
+                success: true,
+                data: Some(nodes),
+                error: None,
+            })
 }
 
 pub fn get_local_ip() -> Option<String> {
@@ -870,7 +870,7 @@ pub async fn get_security_stats(State(state): State<Arc<AppState>>) -> impl Into
 /// Start the web server with security-enhanced configuration
 pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app_state = Arc::new(AppState { core });
-
+    
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT])
