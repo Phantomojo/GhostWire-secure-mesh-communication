@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GhostWire – Modular Mesh Networking</title>
+  <meta name="description" content="GhostWire: Modular, privacy-focused mesh networking for everyone, everywhere.">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.3/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    body { background: linear-gradient(135deg, #1a1a2e 0%, #23235b 50%, #0f3460 100%); }
+    .glass { background: rgba(255,255,255,0.08); backdrop-filter: blur(16px); }
+    .animate-gradient { background: linear-gradient(270deg, #6d28d9, #a21caf, #f472b6, #2563eb); background-size: 800% 800%; animation: gradientMove 12s ease infinite; }
+    @keyframes gradientMove { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center text-white">
+  <div class="absolute inset-0 animate-gradient opacity-40 blur-2xl -z-10"></div>
+  <main class="glass rounded-3xl shadow-2xl p-12 max-w-3xl mx-auto mt-24 flex flex-col items-center">
+    <h1 class="text-5xl md:text-6xl font-extrabold mb-6 drop-shadow-lg text-center">GhostWire</h1>
+    <p class="text-xl md:text-2xl text-indigo-200 mb-8 text-center font-medium">
+      Modular, privacy-focused mesh networking for everyone, everywhere.
+    </p>
+    <a href="https://github.com/phantomojo/GhostWire" class="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white text-lg font-bold px-8 py-4 rounded-2xl shadow-lg hover:scale-105 transition-transform duration-200 mb-8">
+      View on GitHub
+    </a>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 w-full mb-8">
+      <div>
+        <h2 class="text-2xl font-bold mb-2">Features</h2>
+        <ul class="list-disc list-inside text-indigo-100">
+          <li>End-to-end encrypted mesh</li>
+          <li>Multi-transport: Bluetooth, WiFi, LoRa, WebRTC</li>
+          <li>Protocol adapters: Briar, Meshtastic, Matrix</li>
+          <li>Sybil defense, quotas, blacklists</li>
+          <li>Disaster triggers, reputation, federation</li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="text-2xl font-bold mb-2">Get Involved</h2>
+        <ul class="list-disc list-inside text-indigo-100">
+          <li><a href="https://github.com/phantomojo/GhostWire" class="underline text-indigo-300">GitHub</a></li>
+          <li><a href="#" class="underline text-indigo-300">Discord (coming soon)</a></li>
+          <li><a href="#" class="underline text-indigo-300">Docs</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="w-full my-8">
+      <h2 class="text-2xl font-bold mb-4 text-center">Roadmap</h2>
+      <ol class="relative border-l-4 border-indigo-500 pl-8">
+        <li class="mb-8">
+          <span class="absolute -left-5 top-1 w-6 h-6 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full shadow-lg flex items-center justify-center text-white font-bold">1</span>
+          <div class="bg-white/10 rounded-xl p-4 mb-2">
+            <div class="text-indigo-300 font-semibold mb-1">Q2 2024</div>
+            <div class="text-lg font-bold text-white mb-1">MVP Launch</div>
+            <div class="text-indigo-100">Core mesh networking, CLI, and web UI released.</div>
+          </div>
+        </li>
+        <li class="mb-8">
+          <span class="absolute -left-5 top-1 w-6 h-6 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full shadow-lg flex items-center justify-center text-white font-bold">2</span>
+          <div class="bg-white/10 rounded-xl p-4 mb-2">
+            <div class="text-indigo-300 font-semibold mb-1">Q3 2024</div>
+            <div class="text-lg font-bold text-white mb-1">Modular Transports</div>
+            <div class="text-indigo-100">Bluetooth, WiFi, LoRa, WebRTC support.</div>
+          </div>
+        </li>
+        <li class="mb-8">
+          <span class="absolute -left-5 top-1 w-6 h-6 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full shadow-lg flex items-center justify-center text-white font-bold">3</span>
+          <div class="bg-white/10 rounded-xl p-4 mb-2">
+            <div class="text-indigo-300 font-semibold mb-1">Q4 2024</div>
+            <div class="text-lg font-bold text-white mb-1">Protocol Adapters</div>
+            <div class="text-indigo-100">Briar, Meshtastic, Matrix bridges.</div>
+          </div>
+        </li>
+        <li class="mb-8">
+          <span class="absolute -left-5 top-1 w-6 h-6 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full shadow-lg flex items-center justify-center text-white font-bold">4</span>
+          <div class="bg-white/10 rounded-xl p-4 mb-2">
+            <div class="text-indigo-300 font-semibold mb-1">Q1 2025</div>
+            <div class="text-lg font-bold text-white mb-1">Advanced Security</div>
+            <div class="text-indigo-100">Cover traffic, Sybil defense, panic wipe.</div>
+          </div>
+        </li>
+        <li>
+          <span class="absolute -left-5 top-1 w-6 h-6 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full shadow-lg flex items-center justify-center text-white font-bold">5</span>
+          <div class="bg-white/10 rounded-xl p-4 mb-2">
+            <div class="text-indigo-300 font-semibold mb-1">Q2 2025</div>
+            <div class="text-lg font-bold text-white mb-1">Mobile/Desktop Wrappers</div>
+            <div class="text-indigo-100">Tauri and React Native apps.</div>
+          </div>
+        </li>
+      </ol>
+    </div>
+    <div class="text-center text-indigo-200 text-sm mt-4">
+      &copy; 2025 GhostWire. Built with Rust, React, and TailwindCSS.
+    </div>
+  </main>
+</body>
+</html> 
