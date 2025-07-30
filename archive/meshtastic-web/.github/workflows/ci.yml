@@ -1,0 +1,73 @@
+name: Push to Main CI
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Cache Deno dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            packages/web/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # --- Detect changed packages ---
+      - name: Get Changed Package Directories
+        id: changed_packages
+        uses: tj-actions/changed-files@v46
+        with:
+          dir_names: true
+          files: packages/**
+
+      - name: Build Changed Packages
+        if: steps.changed_packages.outputs.all_changed_and_modified_files != ''
+        run: |
+          set -euo pipefail
+
+          for pkg_dir in ${{ steps.changed_packages.outputs.all_changed_and_modified_files }}; do
+            echo "🔍 Inspecting $pkg_dir..."
+
+            if [[ -f "$pkg_dir/deno.lock" ]]; then
+              echo "🔧 Building with Bun: $pkg_dir"
+              (cd "$pkg_dir" && bun install && bun run build)
+            else
+              echo "⚠️ No recognizable build config in $pkg_dir — skipping"
+            fi
+          done
+
+      - name: No Changed Packages
+        if: steps.changed_packages.outputs.all_changed_and_modified_files == ''
+        run: echo "📦 No changed packages detected. Nothing to build."
