@@ -1,4 +1,4 @@
-import React from 'react';
+
 import TestimonialCarousel from '../components/TestimonialCarousel';
 
 const Community = () => (

@@ -5,23 +5,44 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[async_trait]
-pub trait Transport: Send + Sync {
-    /// Unique name/id for the transport (e.g., "mesh", "stealth_tcp", "briar")
-    fn name(&self) -> &'static str;
-    /// Human-readable description
-    fn description(&self) -> &'static str { "" }
-    /// Feature flag (for conditional compilation)
-    fn feature_flag(&self) -> Option<&'static str> { None }
-    /// Send a message
-    async fn send_message(&mut self, message: &Message) -> Result<()>;
-    /// Receive a message
-    async fn receive_message(&self) -> Result<Option<Message>>;
+// Transport Enum for async dispatch
+#[derive(Clone)]
+pub enum TransportKind {
+    // Add concrete transports here, e.g.:
+    // Mesh(MeshTransport),
+    // Stealth(stealth_tcp::StealthTCPProvider),
+    Dummy, // Placeholder for now
 }
 
-/// Registry for all available transports (built-in and plugins)
+impl TransportKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TransportKind::Dummy => "dummy",
+        }
+    }
+    pub fn description(&self) -> &'static str {
+        match self {
+            TransportKind::Dummy => "Dummy transport (placeholder)",
+        }
+    }
+    pub async fn send_message(&mut self, message: &Message) -> Result<()> {
+        match self {
+            TransportKind::Dummy => {
+                tracing::info!("Dummy transport sending message: {}", message.content);
+                Ok(())
+            }
+        }
+    }
+    pub async fn receive_message(&self) -> Result<Option<Message>> {
+        match self {
+            TransportKind::Dummy => Ok(None),
+        }
+    }
+}
+
+// Registry for all available transports (built-in and plugins)
 pub struct TransportRegistry {
-    transports: HashMap<String, Arc<tokio::sync::Mutex<dyn Transport>>>,
+    transports: HashMap<String, TransportKind>,
 }
 
 impl TransportRegistry {
@@ -32,13 +53,13 @@ impl TransportRegistry {
     }
 
     /// Register a transport (built-in or plugin)
-    pub fn register<T: Transport + 'static>(&mut self, transport: T) {
-        self.transports.insert(transport.name().to_string(), Arc::new(tokio::sync::Mutex::new(transport)));
+    pub fn register(&mut self, transport: TransportKind) {
+        self.transports.insert(transport.name().to_string(), transport);
     }
 
     /// Get a transport by name
-    pub fn get(&self, name: &str) -> Option<Arc<tokio::sync::Mutex<dyn Transport>>> {
-        self.transports.get(name).cloned()
+    pub fn get(&self, name: &str) -> Option<&TransportKind> {
+        self.transports.get(name)
     }
 
     /// List all registered transports

@@ -114,7 +114,7 @@ impl MeshTransport {
             mdns,
         };
 
-        let swarm = Swarm::new(transport, behaviour, local_peer_id, SwarmConfig::without_executor());
+        let swarm = Swarm::new(transport, behaviour, local_peer_id, SwarmConfig::with_tokio_executor());
 
         Ok(Self {
             swarm,
@@ -147,7 +147,7 @@ impl MeshTransport {
                 None
             }
         }) {
-            if !self.security_manager.is_ip_allowed(&ip) {
+            if !self.security_manager.is_ip_allowed(&ip).await {
                 return Err(anyhow::anyhow!("Listen address {} is not allowed by security policy", ip));
             }
         }
@@ -235,7 +235,7 @@ impl MeshTransport {
         // Security check for message processing
         let peer_ip = self.get_peer_ip(&peer_id).await;
         if let Some(ip) = peer_ip {
-            if !self.security_manager.is_ip_allowed(&ip) {
+            if !self.security_manager.is_ip_allowed(&ip).await {
                 warn!("Rejected message from blacklisted peer: {}", peer_id);
                 return Ok(());
             }
@@ -296,19 +296,6 @@ impl MeshTransport {
     async fn get_peer_ip(&self, _peer_id: &PeerId) -> Option<std::net::IpAddr> {
         // In a real implementation, this would look up the peer's IP from the swarm
         None
-    }
-}
-
-#[async_trait]
-impl super::transport::Transport for MeshTransport {
-    fn name(&self) -> &'static str { "mesh" }
-    fn description(&self) -> &'static str { "libp2p-based mesh networking transport" }
-    fn feature_flag(&self) -> Option<&'static str> { Some("mesh-transport") }
-    async fn send_message(&mut self, message: &Message) -> Result<()> {
-        self.broadcast_message(message).await
-    }
-    async fn receive_message(&self) -> Result<Option<Message>> {
-        Ok(None)
     }
 }
 

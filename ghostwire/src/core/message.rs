@@ -10,4 +10,6 @@ pub struct Message {
     pub content: String,
     pub timestamp: u64,
     pub encrypted: bool,
+    pub message_type: String,
+    pub encryption_status: String,
 } 

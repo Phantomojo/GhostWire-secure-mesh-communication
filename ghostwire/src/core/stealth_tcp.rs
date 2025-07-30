@@ -7,7 +7,6 @@ use tracing::{info, warn, error, debug};
 use crate::core::security::{SecurityManager, ThreatLevel, SecurityEvent, EntityType};
 use serde::{Serialize, Deserialize};
 use crate::core::message::Message;
-use crate::core::transport::Transport;
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -227,12 +226,12 @@ impl StealthTCPProvider {
             let connection_start = Instant::now();
 
             // Security checks
-            if !self.security_manager.is_ip_allowed(&addr.ip()) {
+            if !self.security_manager.is_ip_allowed(&addr.ip()).await {
                 self.security_manager.record_connection_attempt(
                     addr.ip(),
                     false,
                     "IP not allowed".to_string(),
-                );
+                ).await;
                 continue;
             }
 
@@ -242,7 +241,7 @@ impl StealthTCPProvider {
                     addr.ip(),
                     false,
                     "Not in allowlist".to_string(),
-                );
+                ).await;
                 continue;
             }
 
@@ -252,7 +251,7 @@ impl StealthTCPProvider {
                     addr.ip(),
                     false,
                     "Rate limited".to_string(),
-                );
+                ).await;
                 continue;
             }
 
@@ -267,7 +266,7 @@ impl StealthTCPProvider {
                         addr.ip(),
                         true,
                         "Stealth handshake successful".to_string(),
-                    );
+                    ).await;
                     return Ok(stream);
                 }
                 Ok(false) => {
@@ -279,7 +278,7 @@ impl StealthTCPProvider {
                         addr.ip(),
                         false,
                         "Stealth handshake failed".to_string(),
-                    );
+                    ).await;
                     continue;
                 }
                 Err(e) => {
@@ -291,7 +290,7 @@ impl StealthTCPProvider {
                         addr.ip(),
                         false,
                         format!("Handshake error: {}", e),
-                    );
+                    ).await;
                     continue;
                 }
             }
@@ -302,7 +301,7 @@ impl StealthTCPProvider {
         let connection_start = Instant::now();
         
         // Security check for outbound connections
-        if !self.security_manager.is_ip_allowed(&addr.ip()) {
+        if !self.security_manager.is_ip_allowed(&addr.ip()).await {
             return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "IP not allowed"));
         }
 
@@ -407,20 +406,19 @@ impl Default for ConnectionStats {
     }
 } 
 
-#[async_trait]
-impl Transport for StealthTCPProvider {
-    fn name(&self) -> &'static str { "stealth_tcp" }
-    fn description(&self) -> &'static str { "Stealth TCP transport with advanced security" }
-    fn feature_flag(&self) -> Option<&'static str> { Some("stealth-tcp-transport") }
-    async fn send_message(&mut self, _message: &Message) -> Result<()> {
-        // TODO: Implement actual message sending over StealthTCP
-        Ok(())
-    }
-    async fn receive_message(&self) -> Result<Option<Message>> {
-        // TODO: Implement actual message receiving over StealthTCP
-        Ok(None)
-    }
-}
+// Commented out: impl Transport for StealthTCPProvider {
+//     fn name(&self) -> &'static str { "stealth_tcp" }
+//     fn description(&self) -> &'static str { "Stealth TCP transport with advanced security" }
+//     fn feature_flag(&self) -> Option<&'static str> { Some("stealth-tcp-transport") }
+//     async fn send_message(&mut self, _message: &Message) -> Result<()> {
+//         // TODO: Implement actual message sending over StealthTCP
+//         Ok(())
+//     }
+//     async fn receive_message(&self) -> Result<Option<Message>> {
+//         // TODO: Implement actual message receiving over StealthTCP
+//         Ok(None)
+//     }
+// }
 // Registration example (in main/core):
 // #[cfg(feature = "stealth-tcp-transport")]
 // registry.register(StealthTCPProvider::new(...)); 
