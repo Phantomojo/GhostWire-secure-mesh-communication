@@ -2,7 +2,33 @@
 
 import type { User, Chat, Message, Contact, Group } from '../types';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// Dynamic API base URL - supports cross-PC communication
+const getApiBaseUrl = () => {
+  // Check for environment variable first
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  
+  // Check for localStorage configuration
+  const savedBackendUrl = localStorage.getItem('ghostwire_backend_url');
+  if (savedBackendUrl) {
+    return savedBackendUrl;
+  }
+  
+  // Default to localhost, but use window.location.hostname for cross-PC
+  const hostname = window.location.hostname;
+  const port = window.location.port || '3001';
+  
+  // If we're not on localhost, assume we're accessing from another PC
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return `http://${hostname}:${port}/api`;
+  }
+  
+  // Default local development
+  return 'http://localhost:3001/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface Peer {
   id: string;
@@ -40,25 +66,76 @@ export interface NetworkInfo {
   timestamp: string;
 }
 
+// Configuration management
+export const config = {
+  setBackendUrl: (url: string) => {
+    localStorage.setItem('ghostwire_backend_url', url);
+    window.location.reload(); // Reload to use new URL
+  },
+  
+  getBackendUrl: () => {
+    return localStorage.getItem('ghostwire_backend_url') || 'http://localhost:3001/api';
+  },
+  
+  resetBackendUrl: () => {
+    localStorage.removeItem('ghostwire_backend_url');
+    window.location.reload();
+  }
+};
+
 async function reportFrontendError(errorMsg: string) {
   try {
     const hostname = window.location.hostname;
     const userAgent = navigator.userAgent;
     const fullMsg = `Frontend error on ${hostname} [${userAgent}]: ${errorMsg}`;
-    await fetch('http://192.168.100.242:3001/api/report_error', {
+    
+    // Try to report to the current backend
+    const backendUrl = getApiBaseUrl().replace('/api', '');
+    await fetch(`${backendUrl}/api/report_error`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ error: fullMsg })
     });
-  } catch {}
+  } catch {
+    // Silently fail if error reporting fails
+  }
 }
 
 // REST API functions
 export const api = {
+  // Generic HTTP methods
+  async get(endpoint: string): Promise<any> {
+    const url = `${getApiBaseUrl()}${endpoint}`;
+    console.log(`API GET: ${url}`);
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`GET ${endpoint} failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async post(endpoint: string, data?: any): Promise<any> {
+    const url = `${getApiBaseUrl()}${endpoint}`;
+    console.log(`API POST: ${url}`, data);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
   // Send a message
   async sendMessage(recipient: string, message: string): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE_URL}/send_message`, {
+      const response = await fetch(`${getApiBaseUrl()}/send_message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -82,7 +159,7 @@ export const api = {
 
   // Get list of peers
   async getPeers(): Promise<Peer[]> {
-    const response = await fetch(`${API_BASE_URL}/peers`);
+    const response = await fetch(`${getApiBaseUrl()}/peers`);
     
     if (!response.ok) {
       throw new Error(`Failed to get peers: ${response.statusText}`);
@@ -98,7 +175,7 @@ export const api = {
 
   // Get settings
   async getSettings(): Promise<Settings> {
-    const response = await fetch(`${API_BASE_URL}/settings`);
+    const response = await fetch(`${getApiBaseUrl()}/settings`);
     
     if (!response.ok) {
       throw new Error(`Failed to get settings: ${response.statusText}`);
@@ -114,7 +191,7 @@ export const api = {
 
   // Update settings
   async updateSettings(settings: Partial<Settings>): Promise<Settings> {
-    const response = await fetch(`${API_BASE_URL}/settings`, {
+    const response = await fetch(`${getApiBaseUrl()}/settings`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -165,7 +242,8 @@ export const api = {
 
   // Scan network for other GhostWire nodes
   async scanNetwork(): Promise<NetworkScanResult> {
-    const response = await fetch(`${API_BASE_URL}/scan_network`);
+    console.log('Scanning network for GhostWire nodes...');
+    const response = await fetch(`${getApiBaseUrl()}/scan_network`);
     
     if (!response.ok) {
       throw new Error(`Failed to scan network: ${response.statusText}`);
@@ -176,12 +254,13 @@ export const api = {
       throw new Error(data.error || 'Failed to scan network');
     }
     
+    console.log('Network scan completed:', data.data);
     return data.data;
   },
 
   // Set username
   async setUsername(username: string): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}/set_username`, {
+    const response = await fetch(`${getApiBaseUrl()}/set_username`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -203,7 +282,7 @@ export const api = {
 
   // Get current username
   async getUsername(): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}/get_username`);
+    const response = await fetch(`${getApiBaseUrl()}/get_username`);
     
     if (!response.ok) {
       throw new Error(`Failed to get username: ${response.statusText}`);
@@ -219,7 +298,7 @@ export const api = {
 
   // Get network information (local IP)
   async getNetworkInfo(): Promise<NetworkInfo> {
-    const response = await fetch(`${API_BASE_URL}/get_network_info`);
+    const response = await fetch(`${getApiBaseUrl()}/get_network_info`);
     
     if (!response.ok) {
       throw new Error(`Failed to get network info: ${response.statusText}`);
@@ -232,6 +311,16 @@ export const api = {
     
     return data.data;
   },
+
+  // Test backend connectivity
+  async testConnection(): Promise<boolean> {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/status`);
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
 };
 
 // WebSocket connection for real-time updates
@@ -259,16 +348,20 @@ export class WebSocketService {
         // Try to get the port from the API base URL
         let port = 3001;
         try {
-          const url = new URL((api as any).API_BASE_URL || 'http://localhost:3001/api');
+          const url = new URL(getApiBaseUrl());
           port = parseInt(url.port) || 3001;
         } catch {}
         this.wsUrl = `ws://${wsHost}:${port}/ws`;
       }
+      
+      console.log(`Connecting to WebSocket: ${this.wsUrl}`);
       this.ws = new WebSocket(this.wsUrl);
+      
       this.ws.onopen = () => {
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
       };
+      
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -278,10 +371,12 @@ export class WebSocketService {
           console.error('Failed to parse WebSocket message:', error);
         }
       };
+      
       this.ws.onclose = () => {
         console.log('WebSocket disconnected');
         this.attemptReconnect();
       };
+      
       this.ws.onerror = (error) => {
         reportFrontendError(`WebSocket error: ${error}`);
         console.error('WebSocket error:', error);

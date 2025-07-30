@@ -2,94 +2,107 @@
 name = "ghostwire"
 version = "0.1.0"
 edition = "2021"
+authors = ["GhostWire Team"]
+description = "Secure mesh networking and messaging platform"
+license = "MIT"
+repository = "https://github.com/ghostwire/ghostwire"
+keywords = ["mesh", "networking", "security", "privacy", "p2p"]
+categories = ["network-programming", "security", "asynchronous"]
 
 [dependencies]
 # Core async runtime
 tokio = { version = "1.0", features = ["full"] }
-tokio-stream = "0.1"
 
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
+tower = { version = "0.4" }
 tower-http = { version = "0.5", features = ["cors"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0" }
+toml = { version = "0.8" }
 
-# Cryptography and security
-libp2p = { version = "0.56.0", features = ["macros", "gossipsub", "kad", "mdns", "identify", "noise", "tcp", "yamux"] }
-libp2p-identity = { version = "0.2.12", features = ["secp256k1"] }
-libp2p-mdns = { version = "0.48.0", features = ["tokio"] }
-libp2p-tcp = { version = "0.44.0", features = ["tokio"] }
-
-# Cryptographic primitives for Reticulum
-aes-gcm = "0.10"
-blake2b_simd = "1.0"
-getrandom = "0.2"
-ring = "0.16"
-
-# Mesh networking - Reticulum-inspired
-# reticulumnet = "0.1"
-
-# Error handling
-anyhow = "1.0"
-thiserror = "1.0"
-
-# Async traits
-async-trait = "0.1"
-
-# Futures
-futures = "0.3"
-futures-util = "0.3"
-
-# Logging and tracing
-tracing = "0.1"
-tracing-subscriber = "0.3"
-
-# UUID generation
-uuid = { version = "1.0", features = ["v4", "serde"] }
-
-# Time handling
-chrono = { version = "0.4", features = ["serde"] }
-
-# HTTP client
+# Networking
+libp2p = { version = "0.53", features = ["tokio", "macros", "tcp", "noise", "yamux", "kad", "gossipsub", "mdns", "identify"] }
 reqwest = { version = "0.11", features = ["json"] }
+libp2p-tcp = { version = "0.41" }
 
-# Email
-lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls"] }
+# Cryptography
+ring = { version = "0.17" }
+ed25519-dalek = { version = "2.0" }
+x25519-dalek = { version = "2.0" }
+aes-gcm = { version = "0.10" }
+chacha20poly1305 = { version = "0.10" }
 
-# Base64 encoding
-base64 = "0.21"
+# Utilities
+anyhow = { version = "1.0" }
+thiserror = { version = "1.0" }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = { version = "0.21" }
+hex = { version = "0.4" }
+bs58 = { version = "0.5" }
+lazy_static = { version = "1.4" }
 
-# Network utilities
-local-ip-address = "0.5"
-
-# File system
-tokio-fs = "0.1"
-
-# CLI and system
+# CLI
 clap = { version = "4.0", features = ["derive"] }
-hostname = "0.3"
 
-matrix-sdk = { version = "0.7", optional = true }
-serialport = { version = "4.2", optional = true }
-# Enable these features for real Matrix/Meshtastic bridging
-# cargo build --features matrix-bridge,meshtastic-bridge
+# Logging
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3" }
 
-[dev-dependencies]
-tokio-test = "0.4"
+# System
+hostname = { version = "0.3" }
+local-ip-address = { version = "0.5" }
 
-[profile.dev]
-debug = 1
+# Optional features
+neli = { version = "0.6" }
+async-trait = { version = "0.1" }
+futures = { version = "0.3", optional = true }
+futures-util = { version = "0.3" }
 
-[patch.crates-io]
-libp2p-mdns = { path = "vendor/libp2p-mdns-0.48.0" }
+# TUI dependencies
+ratatui = { version = "0.26" }
+crossterm = { version = "0.27" }
 
 [features]
-default = []
-matrix-bridge = ["matrix-sdk"]
-meshtastic-bridge = ["serialport"]
-mesh-transport = []
-stealth-tcp-transport = []
-briar-transport = []
-reticulum-transport = []
+default = ["web", "cli", "mesh", "security", "tui"]
+web = []
+cli = []
+mesh = []
+security = []
+matrix = []
+matrix-bridge = []
+meshtastic = []
+reticulum = []
+briar = []
+stealth = []
+tui = []
+
+# Minimal build for embedded systems
+minimal = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release.package."*"]
+opt-level = 3
+
+# Optimize specific crates
+[profile.release.package.ring]
+opt-level = 3
+
+[profile.release.package.libp2p]
+opt-level = 3
+
+[profile.release.package.tokio]
+opt-level = 3

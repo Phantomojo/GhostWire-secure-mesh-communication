@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const docs = [
   { title: 'Getting Started', link: '/docs/getting-started', desc: 'Quickstart guide for new users.' },

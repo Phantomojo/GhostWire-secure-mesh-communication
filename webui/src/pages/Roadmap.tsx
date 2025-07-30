@@ -1,4 +1,4 @@
-import React from 'react';
+
 import RoadmapTimeline from '../components/RoadmapTimeline';
 
 const Roadmap = () => (

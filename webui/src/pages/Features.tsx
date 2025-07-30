@@ -1,4 +1,4 @@
-import React from 'react';
+
 import FeatureGrid from '../components/FeatureGrid';
 
 const Features = () => (

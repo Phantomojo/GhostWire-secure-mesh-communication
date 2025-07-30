@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const outreach = [
   { title: 'Featured on Privacy Weekly', link: '#', desc: 'GhostWire was highlighted as a top privacy project.' },

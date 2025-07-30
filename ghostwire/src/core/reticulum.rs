@@ -47,6 +47,7 @@ pub struct ReticulumMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct ReticulumStats {
     pub total_nodes: usize,
     pub online_nodes: usize,

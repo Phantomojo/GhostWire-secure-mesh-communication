@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { FaLock, FaNetworkWired, FaUserShield, FaPlug, FaMobileAlt, FaGlobe } from 'react-icons/fa';
 
 const features = [

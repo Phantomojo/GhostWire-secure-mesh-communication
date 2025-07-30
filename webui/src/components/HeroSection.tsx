@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const HeroSection = () => (
   <section className="relative flex flex-col items-center justify-center min-h-[70vh] py-24">

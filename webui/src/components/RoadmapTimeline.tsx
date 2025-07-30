@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const milestones = [
   { date: 'Q2 2024', title: 'MVP Launch', desc: 'Core mesh networking, CLI, and web UI released.' },
