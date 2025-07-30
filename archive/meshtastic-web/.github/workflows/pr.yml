@@ -1,0 +1,46 @@
+name: Pull Request CI
+
+on: pull_request
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        # Commands will run from 'packages/web'
+        working-directory: packages/web
+        run: bun install
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            packages/web/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('packages/web/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # - name: Run linter
+      #   working-directory: packages/web
+      #   run: bun run lint
+
+      # - name: Check formatter
+      #   working-directory: packages/web
+      #   run: bun run check
+
+      - name: Build Package
+        working-directory: packages/web
+        run: bun run build

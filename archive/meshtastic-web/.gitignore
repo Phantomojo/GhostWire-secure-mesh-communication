@@ -1,0 +1,10 @@
+dist
+node_modules
+stats.html
+.vercel
+.vite
+dev-dist
+__screenshots__*
+*.diff
+npm/
+.idea

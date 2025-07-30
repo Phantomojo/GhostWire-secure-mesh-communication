@@ -1,0 +1,96 @@
+name: "Nightly Release"
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # Run every day at 5am UTC
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  nightly-build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            packages/web/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('packages/web/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun- 
+
+      # - name: Run tests
+      #   working-directory: packages/web
+      #   run: deno task test
+
+      - name: Install Dependencies
+        working-directory: packages/web
+        run: bun install
+
+      - name: Build Package
+        working-directory: packages/web
+        run: bun run build
+
+      - name: Package Output
+        working-directory: packages/web
+        run: bun run package
+
+      - name: Archive compressed build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: packages/web/dist/build.tar
+
+      - name: Get latest release version
+        id: get_release
+        run: |
+          LATEST_TAG=$(curl -sL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r ".tag_name")
+          # Fallback to a default if no release is found
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="2.6.0"
+          fi
+          echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Buildah Build
+        id: build-container
+        uses: redhat-actions/buildah-build@v2
+        with:
+          containerfiles: |
+            ./infra/Containerfile
+          image: ${{ github.event.repository.full_name }}
+          tags: nightly-${{ steps.get_release.outputs.tag }}-${{ github.sha }}
+
+
+          oci: true
+          platforms: linux/amd64, linux/arm64
+
+      - name: Push To Registry
+        id: push-to-registry
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-container.outputs.image }}
+          tags: ${{ steps.build-container.outputs.tags }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print image url
+        run: echo "Image pushed to ${{ steps.push-to-registry.outputs.registry-paths }}"
+

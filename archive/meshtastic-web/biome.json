@@ -1,0 +1,44 @@
+{
+	"files": {
+ 		"includes": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx", "!npm_modules/**", "!dist/**", "!npm/**"],
+		"ignoreUnknown": false
+	},
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false,
+		"indentStyle": "space",
+		"indentWidth": 2,
+		"lineWidth": 80,
+		"attributePosition": "auto"
+	},
+	"linter": {
+		"enabled": true,
+    "includes": ["**", "!test/**"],
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "error",
+				"noDebugger": "error"
+			},
+			"style": {
+				"useBlockStatements": "error",
+				"useSingleVarDeclarator": "off"
+			},
+			"correctness": {
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"semicolons": "always"
+		}
+	},
+"json": {
+    "formatter": {
+      "enabled": false
+    }
+  }
+}
