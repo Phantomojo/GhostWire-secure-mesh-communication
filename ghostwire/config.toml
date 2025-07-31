@@ -1,0 +1,50 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+web_enabled = true
+cli_enabled = false
+tui_enabled = false
+
+[security]
+max_connections_per_ip = 50
+max_messages_per_minute = 200
+blacklist_enabled = true
+threat_detection_enabled = true
+key_rotation_interval_days = 7
+encryption_algorithm = "aes-256-gcm"
+
+[network]
+mesh_enabled = true
+reticulum_enabled = false
+briar_enabled = false
+stealth_tcp_enabled = false
+max_peers = 100
+connection_timeout_secs = 30
+peer_discovery_interval_secs = 60
+heartbeat_interval_secs = 30
+
+[features]
+matrix_bridge = false
+meshtastic = false
+web_enabled = true
+tui_enabled = false
+
+[logging]
+level = "info"
+file_enabled = true
+file_path = "/app/data/logs/ghostwire.log"
+max_file_size_mb = 100
+max_files = 5
+
+[storage]
+data_dir = "/app/data"
+config_dir = "/app/config"
+backup_enabled = true
+backup_interval_hours = 24
+backup_retention_days = 7
+
+[monitoring]
+health_check_enabled = true
+metrics_enabled = true
+metrics_port = 9090
+alerting_enabled = false 

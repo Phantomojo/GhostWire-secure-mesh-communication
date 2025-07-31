@@ -44,6 +44,7 @@ base64 = { version = "0.21" }
 hex = { version = "0.4" }
 bs58 = { version = "0.5" }
 lazy_static = { version = "1.4" }
+rand = { version = "0.8" }
 
 # CLI
 clap = { version = "4.0", features = ["derive"] }

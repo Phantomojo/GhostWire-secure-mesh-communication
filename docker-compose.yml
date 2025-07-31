@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  ghostwire:
+    build: .
+    container_name: ghostwire
+    restart: unless-stopped
+    ports:
+      - "3000:3000"  # Web UI
+      - "9000:9000"  # API
+    environment:
+      - RUST_LOG=info
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=3000
+    volumes:
+      - ghostwire_data:/app/data
+      - ghostwire_config:/app/config
+    networks:
+      - ghostwire_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for caching (uncomment if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: ghostwire_redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - ghostwire_network
+
+volumes:
+  ghostwire_data:
+    driver: local
+  ghostwire_config:
+    driver: local
+  # redis_data:
+  #   driver: local
+
+networks:
+  ghostwire_network:
+    driver: bridge 

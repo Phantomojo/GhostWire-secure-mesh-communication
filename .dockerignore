@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+README.md
+CHANGELOG.md
+LICENSE
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+target/
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Test files
+tests/
+test/
+*.test.*
+*.spec.*
+
+# Vendor dependencies (for Rust)
+vendor/
+
+# Archive
+archive/
+
+# Scripts (keep only deployment scripts)
+scripts/
+*.sh
+*.bat
+*.ps1
+
+# Configuration files (will be copied separately)
+*.toml
+*.json
+*.yaml
+*.yml 
