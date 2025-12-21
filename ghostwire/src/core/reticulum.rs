@@ -404,9 +404,7 @@ impl Transport for ReticulumManager {
     fn description(&self) -> &'static str { "Reticulum-inspired secure mesh networking transport" }
     fn feature_flag(&self) -> Option<&'static str> { Some("reticulum-transport") }
     async fn send_message(&mut self, message: &crate::core::message::Message) -> anyhow::Result<()> {
-        let mut manager = ReticulumManager::new(self.identity.clone()).await?;
-        manager.send_message(message).await?;
-        Ok(())
+        self.send_message(message).await
     }
     async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
         // TODO: Implement actual message receiving logic

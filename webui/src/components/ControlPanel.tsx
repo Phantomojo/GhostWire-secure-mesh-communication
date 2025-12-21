@@ -12,12 +12,8 @@ interface ControlPanelProps {
   onScanNetwork: () => void;
   scanning: boolean;
   backendConnected: boolean;
-  onRefresh: () => void;
   onLockSystem: () => void;
   onBackup: () => void;
-  onRestart: () => void;
-  onShowStats: () => void;
-  onShowConfig: () => void;
   onShowLogs: () => void;
 }
 
@@ -33,171 +29,99 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onScanNetwork,
   scanning,
   backendConnected,
-  onRefresh,
   onLockSystem,
   onBackup,
-  onRestart,
-  onShowStats,
-  onShowConfig,
   onShowLogs
 }) => {
   return (
     <div className="control-panel">
-      {/* Panel Navigation */}
-      <div className="panel-nav">
-        <button
-          className={`nav-btn ${activePanel === 'network' ? 'active' : ''}`}
-          onClick={() => onPanelChange('network')}
-        >
-          🌐 Network
-        </button>
-        <button
-          className={`nav-btn ${activePanel === 'security' ? 'active' : ''}`}
-          onClick={() => onPanelChange('security')}
-        >
-          🛡️ Security
-        </button>
-        <button
-          className={`nav-btn ${activePanel === 'system' ? 'active' : ''}`}
-          onClick={() => onPanelChange('system')}
-        >
-          ⚙️ System
-        </button>
-        <button
-          className={`nav-btn ${activePanel === 'communication' ? 'active' : ''}`}
-          onClick={() => onPanelChange('communication')}
-        >
-          💬 Communication
-        </button>
+      {/* Navigation Module */}
+      <div className="sidebar-module">
+        <h3 className="module-title">NAV_CORE</h3>
+        <div className="panel-nav">
+          <button
+            className={`nav-btn ${activePanel === 'network' ? 'active' : ''}`}
+            onClick={() => onPanelChange('network')}
+          >
+            🛰️ NETWORK_OPS
+          </button>
+          <button
+            className={`nav-btn ${activePanel === 'security' ? 'active' : ''}`}
+            onClick={() => onPanelChange('security')}
+          >
+            🛡️ DEFENSE_SYS
+          </button>
+          <button
+            className={`nav-btn ${activePanel === 'system' ? 'active' : ''}`}
+            onClick={() => onPanelChange('system')}
+          >
+            ⚙️ KERNEL_CTL
+          </button>
+          <button
+            className={`nav-btn ${activePanel === 'communication' ? 'active' : ''}`}
+            onClick={() => onPanelChange('communication')}
+          >
+            💬 COMM_RELAY
+          </button>
+        </div>
       </div>
 
-      {/* Emergency Controls */}
-      <div className="emergency-controls">
-        <h4>🚨 Emergency Controls</h4>
+      {/* Critical Override Module */}
+      <div className="sidebar-module">
+        <h3 className="module-title">CRITICAL_OVERRIDE</h3>
         <button
-          className={`emergency-btn ${isEmergencyMode ? 'active' : ''}`}
+          className={`quick-control-btn emergency-btn ${isEmergencyMode ? 'active' : ''}`}
           onClick={onEmergencyMode}
         >
-          {isEmergencyMode ? '🟢' : '🔴'} Emergency Mode
+          <span>EMERGENCY_PRO</span>
+          <span>{isEmergencyMode ? 'ON' : 'OFF'}</span>
         </button>
         <button
-          className={`stealth-btn ${isStealthMode ? 'active' : ''}`}
+          className={`quick-control-btn stealth-btn ${isStealthMode ? 'active' : ''}`}
           onClick={onStealthMode}
         >
-          {isStealthMode ? '🟢' : '🔴'} Stealth Mode
+          <span>STEALTH_CLOAK</span>
+          <span>{isStealthMode ? 'ON' : 'OFF'}</span>
         </button>
         <button
-          className={`panic-btn ${isPanicMode ? 'active' : ''}`}
+          className={`quick-control-btn panic-btn ${isPanicMode ? 'active' : ''}`}
           onClick={onPanicMode}
         >
-          {isPanicMode ? '🟢' : '🔴'} Panic Mode
+          <span>PANIC_VENT</span>
+          <span>{isPanicMode ? 'ON' : 'OFF'}</span>
         </button>
       </div>
 
-      {/* Quick Actions */}
-      <div className="quick-actions">
-        <h4>⚡ Quick Actions</h4>
-        <button
-          className={`network-action-btn ${scanning ? 'scanning' : ''}`}
-          onClick={onScanNetwork}
-          disabled={!backendConnected || scanning}
-        >
-          {scanning ? '🔍 Scanning...' : '🔍 Scan Network'}
-        </button>
-        <button 
-          className="refresh-btn"
-          onClick={onRefresh}
-          disabled={!backendConnected}
-        >
-          🔄 Refresh
-        </button>
-        <button 
-          className="lock-btn"
-          onClick={onLockSystem}
-        >
-          🔒 Lock System
-        </button>
-        <button 
-          className="backup-btn"
-          onClick={onBackup}
-          disabled={!backendConnected}
-        >
-          💾 Backup
-        </button>
-        <button 
-          className="restart-btn"
-          onClick={onRestart}
-        >
-          🔄 Restart
-        </button>
-        <button 
-          className="stats-btn"
-          onClick={onShowStats}
-          disabled={!backendConnected}
-        >
-          📊 Stats
-        </button>
-        <button 
-          className="config-btn"
-          onClick={onShowConfig}
-        >
-          ⚙️ Config
-        </button>
-        <button 
-          className="logs-btn"
-          onClick={onShowLogs}
-          disabled={!backendConnected}
-        >
-          📋 Logs
-        </button>
-      </div>
-
-      {/* System Controls */}
-      <div className="system-controls">
-        <h4>🎛️ System Controls</h4>
-        <div className="control-item">
-          <label>Auto-backup</label>
-          <input type="checkbox" defaultChecked />
-        </div>
-        <div className="control-item">
-          <label>Threat Detection</label>
-          <input type="checkbox" defaultChecked />
-        </div>
-        <div className="control-item">
-          <label>Performance Monitoring</label>
-          <input type="checkbox" defaultChecked />
-        </div>
-        <div className="control-item">
-          <label>Network Optimization</label>
-          <input type="checkbox" defaultChecked />
-        </div>
-        <div className="control-item">
-          <label>Encryption Rotation</label>
-          <input type="checkbox" defaultChecked />
-        </div>
-        <div className="control-item">
-          <label>Peer Verification</label>
-          <input type="checkbox" defaultChecked />
+      {/* Tactical Actions Module */}
+      <div className="sidebar-module">
+        <h3 className="module-title">TACTICAL_ACTIONS</h3>
+        <div className="panel-nav">
+          <button
+            className="nav-btn"
+            onClick={onScanNetwork}
+            disabled={!backendConnected || scanning}
+          >
+            {scanning ? 'REFRESHING...' : 'SCAN_MESH'}
+          </button>
+          <button className="nav-btn" onClick={onShowLogs} disabled={!backendConnected}>
+            VIEW_TELEMETRY
+          </button>
+          <button className="nav-btn" onClick={onBackup} disabled={!backendConnected}>
+            DUMP_DATABASE
+          </button>
+          <button className="nav-btn" onClick={onLockSystem}>
+            LOCK_CONSOLE
+          </button>
         </div>
       </div>
 
-      {/* Connection Status */}
-      <div className="connection-status">
-        <h4>🔗 Connection Status</h4>
-        <div className={`status-indicator ${backendConnected ? 'connected' : 'disconnected'}`}>
-          <div className="status-dot"></div>
-          <div className="status-text">
-            {backendConnected ? 'Backend Connected' : 'Backend Disconnected'}
-          </div>
-        </div>
-        {!backendConnected && (
-          <div className="connection-warning">
-            ⚠️ Configure backend URL to enable network features
-          </div>
-        )}
+      {/* Connection Buffer */}
+      <div className={`status-node ${backendConnected ? 'node-active' : 'node-failure'}`} style={{ marginTop: 'auto' }}>
+        <div className="node-pulse"></div>
+        <div className="node-label">{backendConnected ? 'BACKEND_STABLE' : 'SIGNAL_LOST'}</div>
       </div>
     </div>
   );
 };
 
-export default ControlPanel; 
+export default ControlPanel;

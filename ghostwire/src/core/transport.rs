@@ -8,25 +8,33 @@ use tokio::sync::RwLock;
 // Transport Enum for async dispatch
 #[derive(Clone)]
 pub enum TransportKind {
-    // Add concrete transports here, e.g.:
-    // Mesh(MeshTransport),
-    // Stealth(stealth_tcp::StealthTCPProvider),
+    #[cfg(feature = "mesh")]
+    Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
     Dummy, // Placeholder for now
 }
 
 impl TransportKind {
     pub fn name(&self) -> &'static str {
         match self {
+            #[cfg(feature = "mesh")]
+            TransportKind::Mesh(_) => "mesh",
             TransportKind::Dummy => "dummy",
         }
     }
     pub fn description(&self) -> &'static str {
         match self {
+            #[cfg(feature = "mesh")]
+            TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (placeholder)",
         }
     }
-    pub async fn send_message(&mut self, message: &Message) -> Result<()> {
+    pub async fn send_message(&self, message: &Message) -> Result<()> {
         match self {
+            #[cfg(feature = "mesh")]
+            TransportKind::Mesh(manager) => {
+                let mut manager = manager.write().await;
+                manager.send_message(message).await
+            }
             TransportKind::Dummy => {
                 tracing::info!("Dummy transport sending message: {}", message.content);
                 Ok(())
@@ -35,6 +43,8 @@ impl TransportKind {
     }
     pub async fn receive_message(&self) -> Result<Option<Message>> {
         match self {
+            #[cfg(feature = "mesh")]
+            TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
         }
     }

@@ -31,109 +31,90 @@ const StatusBar: React.FC<StatusBarProps> = ({
   const formatUptime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
-  };
-
-  const getStatusColor = (value: number) => {
-    if (value >= 80) return '#ff4444';
-    if (value >= 60) return '#ffaa00';
-    return '#44ff44';
+    return `${hours}H ${minutes}M`;
   };
 
   const getStatusClass = (value: number) => {
-    if (value >= 80) return 'critical';
-    if (value >= 60) return 'warning';
-    return 'normal';
+    if (value >= 80) return 'status-critical';
+    if (value >= 60) return 'status-warning';
+    return 'status-optimal';
   };
 
   return (
-    <div className={`status-bar ${isEmergencyMode ? 'emergency' : ''} ${isStealthMode ? 'stealth' : ''} ${isPanicMode ? 'panic' : ''}`}>
-      <div className="status-instruments">
-        {/* System Status Indicators */}
-        <div className="instrument-group">
-          <div className="instrument">
-            <div className="instrument-label">CPU</div>
-            <div className={`gauge ${getStatusClass(systemStatus.cpu)}`}>
-              <div className="gauge-fill" style={{ width: `${systemStatus.cpu}%`, backgroundColor: getStatusColor(systemStatus.cpu) }}></div>
-              <div className="gauge-value">{systemStatus.cpu}%</div>
+    <div className={`cockpit-hud-top ${isEmergencyMode ? 'emergency-state' : ''} ${isStealthMode ? 'stealth-state' : ''} ${isPanicMode ? 'panic-state' : ''}`}>
+      <div className="hud-frame-left"></div>
+      <div className="hud-frame-right"></div>
+
+      <div className="hud-instruments">
+        {/* Core Vital Sensors */}
+        <div className="sensor-array">
+          <div className="sensor-item">
+            <span className="sensor-label">CPU_CORE</span>
+            <div className={`sensor-meter ${getStatusClass(systemStatus.cpu)}`}>
+              <div className="meter-fill" style={{ width: `${systemStatus.cpu}%` }}></div>
+              <div className="meter-glitch"></div>
+            </div>
+            <span className="sensor-value">{systemStatus.cpu}%</span>
+          </div>
+
+          <div className="sensor-item">
+            <span className="sensor-label">MEM_BANK</span>
+            <div className={`sensor-meter ${getStatusClass(systemStatus.memory)}`}>
+              <div className="meter-fill" style={{ width: `${systemStatus.memory}%` }}></div>
+            </div>
+            <span className="sensor-value">{systemStatus.memory}%</span>
+          </div>
+
+          <div className="sensor-item">
+            <span className="sensor-label">NET_LINK</span>
+            <div className={`sensor-meter ${getStatusClass(systemStatus.network)}`}>
+              <div className="meter-fill" style={{ width: `${systemStatus.network}%` }}></div>
+            </div>
+            <span className="sensor-value">{systemStatus.network}%</span>
+          </div>
+        </div>
+
+        {/* Tactical Telemetry */}
+        <div className="telemetry-deck">
+          <div className="telemetry-item">
+            <div className="telemetry-icon">⚡</div>
+            <div className="telemetry-content">
+              <span className="telemetry-value">{formatUptime(systemStatus.uptime)}</span>
+              <span className="telemetry-label">UPTIME_SYS</span>
             </div>
           </div>
 
-          <div className="instrument">
-            <div className="instrument-label">MEMORY</div>
-            <div className={`gauge ${getStatusClass(systemStatus.memory)}`}>
-              <div className="gauge-fill" style={{ width: `${systemStatus.memory}%`, backgroundColor: getStatusColor(systemStatus.memory) }}></div>
-              <div className="gauge-value">{systemStatus.memory}%</div>
+          <div className="telemetry-divider"></div>
+
+          <div className="telemetry-item">
+            <div className="telemetry-icon">🛰️</div>
+            <div className="telemetry-content">
+              <span className="telemetry-value">{systemStatus.connections}</span>
+              <span className="telemetry-label">PEER_NODES</span>
             </div>
           </div>
 
-          <div className="instrument">
-            <div className="instrument-label">NETWORK</div>
-            <div className={`gauge ${getStatusClass(systemStatus.network)}`}>
-              <div className="gauge-fill" style={{ width: `${systemStatus.network}%`, backgroundColor: getStatusColor(systemStatus.network) }}></div>
-              <div className="gauge-value">{systemStatus.network}%</div>
-            </div>
-          </div>
+          <div className="telemetry-divider"></div>
 
-          <div className="instrument">
-            <div className="instrument-label">ENCRYPTION</div>
-            <div className={`gauge ${getStatusClass(systemStatus.encryption)}`}>
-              <div className="gauge-fill" style={{ width: `${systemStatus.encryption}%`, backgroundColor: getStatusColor(systemStatus.encryption) }}></div>
-              <div className="gauge-value">{systemStatus.encryption}%</div>
+          <div className="telemetry-item">
+            <div className="telemetry-icon">🛡️</div>
+            <div className="telemetry-content">
+              <span className={`telemetry-value ${systemStatus.securityScore < 80 ? 'text-red-500' : 'text-cyan-400'}`}>
+                {systemStatus.securityScore}%
+              </span>
+              <span className="telemetry-label">SEC_INTEGRITY</span>
             </div>
           </div>
         </div>
 
-        {/* System Metrics */}
-        <div className="instrument-group">
-          <div className="metric">
-            <div className="metric-icon">⏱️</div>
-            <div className="metric-value">{formatUptime(systemStatus.uptime)}</div>
-            <div className="metric-label">UPTIME</div>
+        {/* Propulsion/Status Indicators */}
+        <div className="hud-status-node">
+          <div className={`status-node ${backendConnected ? 'node-active' : 'node-failure'}`}>
+            <div className="node-pulse"></div>
+            <div className="node-label">{backendConnected ? 'LINK_ESTABLISHED' : 'LINK_LOST'}</div>
           </div>
-
-          <div className="metric">
-            <div className="metric-icon">🔗</div>
-            <div className="metric-value">{systemStatus.connections}</div>
-            <div className="metric-label">CONNECTIONS</div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-icon">📨</div>
-            <div className="metric-value">{systemStatus.messages}</div>
-            <div className="metric-label">MESSAGES</div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-icon">🛡️</div>
-            <div className="metric-value">{systemStatus.securityScore}</div>
-            <div className="metric-label">SECURITY</div>
-          </div>
-        </div>
-
-        {/* Mode Indicators */}
-        <div className="mode-indicators">
-          <div className={`mode-indicator ${isEmergencyMode ? 'active' : ''}`}>
-            <div className="mode-icon">🚨</div>
-            <div className="mode-text">EMERGENCY</div>
-          </div>
-          <div className={`mode-indicator ${isStealthMode ? 'active' : ''}`}>
-            <div className="mode-icon">👻</div>
-            <div className="mode-text">STEALTH</div>
-          </div>
-          <div className={`mode-indicator ${isPanicMode ? 'active' : ''}`}>
-            <div className="mode-icon">💀</div>
-            <div className="mode-text">PANIC</div>
-          </div>
-        </div>
-
-        {/* Backend Status */}
-        <div className="backend-status">
-          <div className={`status-indicator ${backendConnected ? 'connected' : 'disconnected'}`}>
-            <div className="status-icon">{backendConnected ? '🟢' : '🔴'}</div>
-            <div className="status-text">{backendConnected ? 'BACKEND' : 'OFFLINE'}</div>
-          </div>
-          <button className="config-button" onClick={onConfigClick}>
+          <button className="hud-config-btn" onClick={onConfigClick} title="System Configuration">
+            <span className="btn-glimmer"></span>
             ⚙️
           </button>
         </div>
@@ -142,4 +123,4 @@ const StatusBar: React.FC<StatusBarProps> = ({
   );
 };
 
-export default StatusBar; 
+export default StatusBar;

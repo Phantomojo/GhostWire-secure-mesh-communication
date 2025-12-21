@@ -120,26 +120,33 @@ function App() {
 
   const loadRealData = async () => {
     try {
+      // Load real status
+      const statusResponse = await api.get('/status');
+      if (statusResponse.success) {
+        setSystemStatus({
+          cpu: statusResponse.data.cpu_usage || 0,
+          memory: (statusResponse.data.memory_used_kb / statusResponse.data.memory_total_kb) * 100 || 0,
+          network: (statusResponse.data.peer_count / 10) * 100 || 0, // Simplified network health
+          encryption: 100, // Assuming always enabled if backend is up
+          uptime: statusResponse.data.uptime_seconds || 0,
+          connections: statusResponse.data.peer_count || 0,
+          messages: messages.length,
+          securityScore: statusResponse.data.cpu_usage > 90 ? 70 : 95 // Dynamic score based on system health
+        });
+      }
+
       // Load real peers
       const peers = await api.getPeers();
       const realNodes: NetworkNode[] = peers.map(peer => ({
         id: peer.id,
         name: peer.name,
         status: peer.status === 'online' ? 'online' : 'offline',
-        latency: Math.floor(Math.random() * 200) + 20, // TODO: Get real latency
-        strength: Math.floor(Math.random() * 100) + 20, // TODO: Get real signal strength
+        latency: 0, // Will be updated by ping
+        strength: 85, // Static for now until signal quality is available
         lastSeen: new Date(peer.lastSeen),
         location: `${peer.id}`
       }));
       setNetworkNodes(realNodes);
-      
-      // Update system status with real data
-      setSystemStatus(prev => ({
-        ...prev,
-        connections: peers.length,
-        messages: messages.length,
-        securityScore: 95 // TODO: Calculate real security score
-      }));
     } catch (error) {
       console.error('Failed to load real data:', error);
     }
@@ -148,7 +155,7 @@ function App() {
   // Real-time data updates
   useEffect(() => {
     if (!backendConnected) return;
-    
+
     const interval = setInterval(() => {
       loadRealData(); // Refresh real data every 5 seconds
     }, 5000);
@@ -159,7 +166,7 @@ function App() {
   const handleEmergencyMode = () => {
     setIsEmergencyMode(!isEmergencyMode);
     if (!isEmergencyMode) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: 'EMERGENCY MODE ACTIVATED',
@@ -171,7 +178,7 @@ function App() {
 
   const handleStealthMode = () => {
     setIsStealthMode(!isStealthMode);
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'info',
       message: `Stealth mode ${!isStealthMode ? 'activated' : 'deactivated'}`,
@@ -183,7 +190,7 @@ function App() {
   const handlePanicMode = () => {
     setIsPanicMode(!isPanicMode);
     if (!isPanicMode) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: 'PANIC MODE ACTIVATED - ALL SYSTEMS LOCKED',
@@ -208,18 +215,18 @@ function App() {
       status: 'pending',
       encrypted: true
     };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev: Message[]) => [...prev, newMessage]);
 
     try {
       // Send real message to backend
       await api.sendMessage(recipient, content);
-      
+
       // Update message status to sent
-      setMessages(prev => prev.map(msg => 
+      setMessages((prev: Message[]) => prev.map((msg: Message) =>
         msg.id === newMessage.id ? { ...msg, status: 'sent' } : msg
       ));
 
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Message sent to ${recipient}`,
@@ -228,13 +235,13 @@ function App() {
       }]);
     } catch (error) {
       console.error('Failed to send message:', error);
-      
+
       // Update message status to failed
-      setMessages(prev => prev.map(msg => 
+      setMessages((prev: Message[]) => prev.map((msg: Message) =>
         msg.id === newMessage.id ? { ...msg, status: 'failed' } : msg
       ));
 
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to send message to ${recipient}: ${error}`,
@@ -267,7 +274,7 @@ function App() {
       }
     } catch (error) {
       console.error(`Failed to perform action ${action} on node ${nodeId}:`, error);
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to ${action} peer ${nodeId}: ${error}`,
@@ -279,9 +286,9 @@ function App() {
 
   const handleConnectPeer = async (nodeId: string) => {
     // Find the peer in discovered peers or network nodes
-    const peer = discoveredPeers.find(p => p.node_id === nodeId) || 
-                 networkNodes.find(n => n.id === nodeId);
-    
+    const peer = discoveredPeers.find(p => p.node_id === nodeId) ||
+      networkNodes.find(n => n.id === nodeId);
+
     if (!peer) {
       throw new Error('Peer not found');
     }
@@ -295,18 +302,18 @@ function App() {
     };
 
     const response = await api.post('/connect_peer', connectionRequest);
-    
+
     if (response.success) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Connection request sent to ${connectionRequest.peer_name}`,
         timestamp: new Date(),
         severity: 'low'
       }]);
-      
+
       // Update node status to pending
-      setNetworkNodes(prev => prev.map(node => 
+      setNetworkNodes(prev => prev.map(node =>
         node.id === nodeId ? { ...node, status: 'warning' as const } : node
       ));
     } else {
@@ -329,16 +336,16 @@ function App() {
     };
 
     const response = await api.post('/disconnect_peer', disconnectRequest);
-    
+
     if (response.success) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Disconnected from ${peer.name}`,
         timestamp: new Date(),
         severity: 'low'
       }]);
-      
+
       // Remove node from connected list
       setNetworkNodes(prev => prev.filter(node => node.id !== nodeId));
     } else {
@@ -352,19 +359,19 @@ function App() {
       throw new Error('Peer not found');
     }
 
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'info',
       message: `Pinging ${peer.name}...`,
       timestamp: new Date(),
       severity: 'low'
     }]);
-    
+
     // Real ping functionality
     try {
       const response = await api.post('/ping_peer', { peer_id: nodeId });
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Ping to ${peer.name}: ${response.data?.latency || 'Unknown'}ms`,
@@ -373,7 +380,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Ping failed to ${peer.name}: ${error}`,
@@ -392,7 +399,7 @@ function App() {
 
     try {
       await loadRealData();
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: 'Peer list refreshed',
@@ -400,7 +407,7 @@ function App() {
         severity: 'low'
       }]);
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to refresh peers: ${error}`,
@@ -422,7 +429,7 @@ function App() {
     try {
       const response = await api.post('/broadcast', { message });
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Broadcast sent to ${response.data?.recipients || 0} peers`,
@@ -431,7 +438,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Broadcast failed: ${error}`,
@@ -462,8 +469,8 @@ function App() {
           console.error(`Failed to connect to ${peer.username}:`, error);
         }
       }
-      
-      setSecurityAlerts(prev => [...prev, {
+
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Connected to ${connectedCount}/${discoveredPeers.length} peers`,
@@ -471,7 +478,7 @@ function App() {
         severity: 'low'
       }]);
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to connect to all peers: ${error}`,
@@ -502,8 +509,8 @@ function App() {
           console.error(`Failed to disconnect from ${node.name}:`, error);
         }
       }
-      
-      setSecurityAlerts(prev => [...prev, {
+
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Disconnected from ${disconnectedCount}/${networkNodes.length} peers`,
@@ -511,7 +518,7 @@ function App() {
         severity: 'low'
       }]);
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to disconnect from all peers: ${error}`,
@@ -530,7 +537,7 @@ function App() {
 
     try {
       await loadRealData();
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: 'System data refreshed',
@@ -538,7 +545,7 @@ function App() {
         severity: 'low'
       }]);
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to refresh: ${error}`,
@@ -550,7 +557,7 @@ function App() {
 
   const handleLockSystem = () => {
     setIsEmergencyMode(true);
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'warning',
       message: 'System locked - Emergency mode activated',
@@ -568,7 +575,7 @@ function App() {
     try {
       const response = await api.post('/backup', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'System backup completed successfully',
@@ -577,7 +584,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Backup failed: ${error}`,
@@ -589,14 +596,14 @@ function App() {
 
   const handleRestart = () => {
     if (confirm('Are you sure you want to restart the system?')) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'warning',
         message: 'System restart initiated...',
         timestamp: new Date(),
         severity: 'high'
       }]);
-      
+
       // In a real implementation, this would restart the backend
       setTimeout(() => {
         window.location.reload();
@@ -606,7 +613,7 @@ function App() {
 
   const handleShowStats = () => {
     setActivePanel('system');
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'info',
       message: 'System statistics displayed',
@@ -619,25 +626,16 @@ function App() {
     setShowConfig(true);
   };
 
-  // Helper function to handle 404 errors gracefully
-  const handleApiError = (error: unknown, successMessage: string, errorMessage: string) => {
-    if (String(error).includes('404')) {
-      setSecurityAlerts(prev => [...prev, {
-        id: Date.now().toString(),
-        type: 'info',
-        message: `${successMessage} (simulated)`,
-        timestamp: new Date(),
-        severity: 'low'
-      }]);
-    } else {
-      setSecurityAlerts(prev => [...prev, {
-        id: Date.now().toString(),
-        type: 'error',
-        message: errorMessage,
-        timestamp: new Date(),
-        severity: 'high'
-      }]);
-    }
+  // Helper function to handle API errors
+  const handleApiError = (error: unknown, _successMessage: string, errorMessage: string) => {
+    console.error('API Error:', error);
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
+      id: Date.now().toString(),
+      type: 'error',
+      message: `${errorMessage}: ${error}`,
+      timestamp: new Date(),
+      severity: 'high'
+    }]);
   };
 
   const handleShowLogs = async () => {
@@ -667,7 +665,7 @@ function App() {
     try {
       const response = await api.post('/rotate_keys', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Encryption keys rotated successfully',
@@ -678,7 +676,7 @@ function App() {
     } catch (error) {
       // Handle 404 errors gracefully with simulated response
       if (String(error).includes('404')) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Encryption keys rotated successfully (simulated)',
@@ -686,7 +684,7 @@ function App() {
           severity: 'low'
         }]);
       } else {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'error',
           message: `Failed to rotate keys: ${error}`,
@@ -706,7 +704,7 @@ function App() {
     try {
       const response = await api.post('/upgrade_encryption', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Encryption upgraded successfully',
@@ -717,7 +715,7 @@ function App() {
     } catch (error) {
       // Handle 404 errors gracefully with simulated response
       if (String(error).includes('404')) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Encryption upgraded successfully (simulated)',
@@ -725,7 +723,7 @@ function App() {
           severity: 'low'
         }]);
       } else {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'error',
           message: `Failed to upgrade encryption: ${error}`,
@@ -748,7 +746,7 @@ function App() {
     try {
       const response = await api.post('/configure_firewall', { config });
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Firewall configured successfully',
@@ -757,7 +755,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to configure firewall: ${error}`,
@@ -776,7 +774,7 @@ function App() {
     try {
       const response = await api.post('/test_firewall', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Firewall test completed: ${response.data?.result || 'Passed'}`,
@@ -785,7 +783,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Firewall test failed: ${error}`,
@@ -797,7 +795,7 @@ function App() {
 
   const handleSecuritySettings = () => {
     alert('Security settings panel would open here');
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'info',
       message: 'Security settings accessed',
@@ -819,7 +817,7 @@ function App() {
         alert(`Authentication Users:\n\n${users.join('\n')}`);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Failed to load auth users: ${error}`,
@@ -838,7 +836,7 @@ function App() {
     try {
       const response = await api.post('/audit_auth', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Authentication audit completed',
@@ -847,7 +845,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Authentication audit failed: ${error}`,
@@ -866,7 +864,7 @@ function App() {
     try {
       const response = await api.post('/security_scan', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Security scan completed: ${response.data?.threats || 0} threats found`,
@@ -875,7 +873,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Security scan failed: ${error}`,
@@ -894,7 +892,7 @@ function App() {
     try {
       const response = await api.post('/threat_hunt', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Threat hunting completed: ${response.data?.threats || 0} threats detected`,
@@ -903,7 +901,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Threat hunting failed: ${error}`,
@@ -922,7 +920,7 @@ function App() {
     try {
       const response = await api.post('/security_audit', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Security audit completed: Score ${response.data?.score || 'N/A'}`,
@@ -931,7 +929,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Security audit failed: ${error}`,
@@ -944,7 +942,7 @@ function App() {
   const handleLockdown = () => {
     setIsEmergencyMode(true);
     setIsPanicMode(true);
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'error',
       message: 'SYSTEM LOCKDOWN ACTIVATED - Emergency protocols engaged',
@@ -962,7 +960,7 @@ function App() {
     try {
       const response = await api.post('/backup_security', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: 'Security backup completed successfully',
@@ -971,7 +969,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Security backup failed: ${error}`,
@@ -988,7 +986,7 @@ function App() {
 
   const handleCommEmergency = () => {
     setIsEmergencyMode(true);
-    setSecurityAlerts(prev => [...prev, {
+    setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
       id: Date.now().toString(),
       type: 'error',
       message: 'Emergency mode activated from communication panel',
@@ -1013,7 +1011,7 @@ function App() {
 
     try {
       await loadRealData();
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: 'System synchronized with backend',
@@ -1021,7 +1019,7 @@ function App() {
         severity: 'low'
       }]);
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Sync failed: ${error}`,
@@ -1040,7 +1038,7 @@ function App() {
     try {
       const response = await api.post('/analyze_communications', {});
       if (response.success) {
-        setSecurityAlerts(prev => [...prev, {
+        setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
           id: Date.now().toString(),
           type: 'info',
           message: `Communication analysis completed: ${response.data?.insights || 'No insights'}`,
@@ -1049,7 +1047,7 @@ function App() {
         }]);
       }
     } catch (error) {
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Analysis failed: ${error}`,
@@ -1071,7 +1069,7 @@ function App() {
       const result = await api.scanNetwork();
       setDiscoveredPeers(result.discovered_peers);
       console.log('Network scan completed:', result);
-      
+
       // Update network nodes with discovered peers
       const newNodes: NetworkNode[] = result.discovered_peers.map((peer) => ({
         id: peer.node_id,
@@ -1082,10 +1080,10 @@ function App() {
         lastSeen: new Date(),
         location: `${peer.ip}:${peer.port}`
       }));
-      
+
       setNetworkNodes(prev => [...prev, ...newNodes]);
-      
-      setSecurityAlerts(prev => [...prev, {
+
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'info',
         message: `Network scan completed. Found ${result.discovered_peers.length} peers.`,
@@ -1094,7 +1092,7 @@ function App() {
       }]);
     } catch (error) {
       console.error('Network scan failed:', error);
-      setSecurityAlerts(prev => [...prev, {
+      setSecurityAlerts((prev: SecurityAlert[]) => [...prev, {
         id: Date.now().toString(),
         type: 'error',
         message: `Network scan failed: ${error}`,
@@ -1118,35 +1116,35 @@ function App() {
   };
 
   return (
-    <div className="control-center">
+    <div className={`control-center ${isEmergencyMode ? 'emergency-state' : ''}`}>
       {/* Configuration Panel */}
       {showConfig && (
         <div className="config-overlay">
           <div className="config-panel">
-            <h3>🔧 Backend Configuration</h3>
+            <h3>🔧 BACKEND_CORE CONFIG</h3>
             <div className="config-item">
-              <label>Backend URL:</label>
+              <label>PRIMARY_URL:</label>
               <input
                 type="text"
                 value={backendUrl}
                 onChange={(e) => setBackendUrl(e.target.value)}
-                placeholder="http://192.168.1.100:3001/api"
+                placeholder="PROT://NODE_IP:PORT/API"
               />
             </div>
             <div className="config-status">
-              Status: {backendConnected ? '🟢 Connected' : '🔴 Disconnected'}
+              CONNECTION_STATE: {backendConnected ? 'ESTABLISHED' : 'TERMINATED'}
             </div>
             <div className="config-buttons">
-              <button onClick={handleSetBackendUrl}>Connect</button>
-              <button onClick={handleResetBackendUrl}>Reset</button>
-              <button onClick={() => setShowConfig(false)}>Close</button>
+              <button onClick={handleSetBackendUrl}>ESTABLISH</button>
+              <button onClick={handleResetBackendUrl}>RECALIBRATE</button>
+              <button onClick={() => setShowConfig(false)}>DISMISS</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Status Bar */}
-      <StatusBar 
+      {/* StatusBar - HUD INSTRUMENTS */}
+      <StatusBar
         systemStatus={systemStatus}
         isEmergencyMode={isEmergencyMode}
         isStealthMode={isStealthMode}
@@ -1155,9 +1153,9 @@ function App() {
         onConfigClick={() => setShowConfig(true)}
       />
 
-      {/* Main Control Interface */}
+      {/* Main Control Interface - COCKPIT VIEW */}
       <div className="control-interface">
-        {/* Control Panel */}
+        {/* Control Panel - SIDECAR NAVIGATION */}
         <ControlPanel
           activePanel={activePanel}
           onPanelChange={setActivePanel}
@@ -1170,28 +1168,22 @@ function App() {
           onScanNetwork={handleScanNetwork}
           scanning={scanning}
           backendConnected={backendConnected}
-          onRefresh={handleRefresh}
           onLockSystem={handleLockSystem}
           onBackup={handleBackup}
-          onRestart={handleRestart}
-          onShowStats={handleShowStats}
-          onShowConfig={handleShowConfig}
           onShowLogs={handleShowLogs}
         />
 
-        {/* Main Content Area */}
+        {/* Main Content Area - PRIMARY VIEWPORT */}
         <div className="main-content">
           {activePanel === 'network' && (
             <NetworkPanel
               networkNodes={networkNodes}
-              systemStatus={systemStatus}
               discoveredPeers={discoveredPeers}
               onNodeAction={handleNodeAction}
               onScanNetwork={handleScanNetwork}
               onRefreshPeers={handleRefreshPeers}
               onBroadcast={handleBroadcast}
               onConnectAll={handleConnectAll}
-              onDisconnectAll={handleDisconnectAll}
               scanning={scanning}
             />
           )}
