@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, error, debug};
+use crate::core::signal::SignalManager;
 
 /// Enhanced encrypted message with additional security features
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,7 @@ pub struct EncryptionManager {
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
     key_rotation_interval: u64,
     last_key_rotation: u64,
+    signal_manager: SignalManager,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +128,7 @@ impl EncryptionManager {
         
         // Generate hybrid key pair (both Ed25519 and X25519)
         let key_pair = Self::generate_hybrid_key_pair(&rng)?;
+        let identity_key = key_pair.public_key.clone();
         
         Ok(EncryptionManager {
             key_pair,
@@ -137,6 +140,7 @@ impl EncryptionManager {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            signal_manager: SignalManager::new(identity_key),
         })
     }
     
@@ -212,6 +216,11 @@ impl EncryptionManager {
     }
     
     pub fn encrypt_message(&self, message: &str, recipient_id: &str, message_type: MessageType) -> Result<EncryptedMessage, Box<dyn std::error::Error>> {
+        // Try Signal encryption first if session exists
+        if let Ok(signal_msg) = self.signal_manager.encrypt_with_signal(recipient_id, message.as_bytes()) {
+            return Ok(signal_msg);
+        }
+
         let peer_keys = self.peer_keys.lock().unwrap();
         let peer_key = peer_keys.get(recipient_id)
             .ok_or("Recipient not found")?;
@@ -248,6 +257,13 @@ impl EncryptionManager {
         self.verify_signature(&encrypted_msg.ciphertext, &encrypted_msg.signature)?;
         
         // Check message version
+        if encrypted_msg.version == 0x03 {
+            // Signal protocol decryption
+            let decrypted = self.signal_manager.decrypt_with_signal(&encrypted_msg.sender_id, encrypted_msg)
+                .map_err(|e| format!("Signal decryption failed: {}", e))?;
+            return String::from_utf8(decrypted).map_err(|e| e.into());
+        }
+
         if encrypted_msg.version != 0x02 {
             return Err("Unsupported message version".into());
         }

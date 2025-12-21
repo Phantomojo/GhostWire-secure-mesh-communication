@@ -1,15 +1,5 @@
 import React from 'react';
-
-interface SystemStatus {
-  cpu: number;
-  memory: number;
-  network: number;
-  encryption: number;
-  uptime: number;
-  connections: number;
-  messages: number;
-  securityScore: number;
-}
+import MeshVisualizer from './MeshVisualizer';
 
 interface NetworkNode {
   id: string;
@@ -33,201 +23,94 @@ interface DiscoveredPeer {
 
 interface NetworkPanelProps {
   networkNodes: NetworkNode[];
-  systemStatus: SystemStatus;
   discoveredPeers: DiscoveredPeer[];
   onNodeAction: (nodeId: string, action: string) => void;
   onScanNetwork: () => void;
   onRefreshPeers: () => void;
   onBroadcast: () => void;
   onConnectAll: () => void;
-  onDisconnectAll: () => void;
   scanning: boolean;
 }
 
 const NetworkPanel: React.FC<NetworkPanelProps> = ({
   networkNodes,
-  systemStatus,
   discoveredPeers,
   onNodeAction,
   onScanNetwork,
   onRefreshPeers,
   onBroadcast,
   onConnectAll,
-  onDisconnectAll,
   scanning
 }) => {
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return '#00ff00';
-      case 'warning': return '#ffaa00';
-      case 'offline': return '#ff4444';
-      default: return '#888888';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'online': return '🟢';
-      case 'warning': return '🟡';
-      case 'offline': return '🔴';
-      default: return '⚪';
-    }
-  };
-
-  const formatTime = (date: Date) => {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    if (minutes < 1) return 'now';
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ago`;
-  };
-
   return (
-    <div className="network-panel">
-      {/* Network Statistics */}
-      <div className="network-stats">
-        <div className="stat">
-          <div className="stat-value">{networkNodes.length}</div>
-          <div className="stat-label">Total Nodes</div>
-        </div>
-        <div className="stat">
-          <div className="stat-value">{networkNodes.filter(n => n.status === 'online').length}</div>
-          <div className="stat-label">Online</div>
-        </div>
-        <div className="stat">
-          <div className="stat-value">{systemStatus.connections}</div>
-          <div className="stat-label">Active Connections</div>
-        </div>
-        <div className="stat">
-          <div className="stat-value">{discoveredPeers.length}</div>
-          <div className="stat-label">Discovered Peers</div>
-        </div>
+    <div className="main-content-module">
+      <div className="module-header">
+        <h2 className="module-title">MESH_NETWORK_TOPOLOGY</h2>
+        <div className="module-subtitle">ACTIVE_CONNECTIONS: {networkNodes.length} | PEERS_DISCOVERED: {discoveredPeers.length}</div>
       </div>
 
-      {/* Network Topology */}
-      <div className="network-topology">
-        <h3>🌐 Network Topology</h3>
-        <div className="topology-visualization">
-          <div className="local-node">
-            <div className="node-circle local">LOCAL</div>
-            <div className="node-info">This Node</div>
-          </div>
-          <div className="connections">
-            {networkNodes.slice(0, 6).map((node) => (
-              <div key={node.id} className="connection-line">
-                <div className={`remote-node ${node.status}`}>
-                  <div className="node-circle" style={{ borderColor: getStatusColor(node.status) }}>
-                    {getStatusIcon(node.status)}
-                  </div>
-                  <div className="node-name">{node.name}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Connected Nodes */}
-      <div className="connected-nodes">
-        <h3>🔗 Connected Nodes</h3>
-        <div className="nodes-grid">
-          {networkNodes.map((node) => (
-            <div key={node.id} className={`node-card ${node.status}`}>
-              <div className="node-header">
-                <div className="node-status" style={{ color: getStatusColor(node.status) }}>
-                  {getStatusIcon(node.status)}
-                </div>
-                <div className="node-name">{node.name}</div>
-              </div>
-              <div className="node-details">
-                <div className="node-latency">Latency: {node.latency}ms</div>
-                <div className="node-strength">Signal: {node.strength}%</div>
-                <div className="node-last-seen">Last seen: {formatTime(node.lastSeen)}</div>
-                {node.location && (
-                  <div className="node-location">Location: {node.location}</div>
-                )}
-              </div>
-              <div className="node-actions">
-                <button onClick={() => onNodeAction(node.id, 'ping')}>Ping</button>
-                <button onClick={() => onNodeAction(node.id, 'connect')}>Connect</button>
-                <button onClick={() => onNodeAction(node.id, 'disconnect')}>Disconnect</button>
-              </div>
+      <div className="module-grid">
+        {/* Topology Visualization Module */}
+        <div className="glass-module-card full-width no-padding overflow-hidden">
+          <div className="topology-hud-header">
+            <span className="hud-indicator">LIVE_MESH_STREAM</span>
+            <div className="hud-controls">
+              <span className="control-label">ZOOM:100%</span>
+              <span className="control-label">ROT:0.0</span>
             </div>
-          ))}
+          </div>
+          <MeshVisualizer nodes={networkNodes} />
         </div>
-      </div>
 
-      {/* Discovered Peers */}
-      {discoveredPeers.length > 0 && (
-        <div className="discovered-peers">
-          <h3>🔍 Discovered Peers</h3>
-          <div className="peers-grid">
-            {discoveredPeers.map((peer) => (
-              <div key={peer.node_id} className="peer-card">
-                <div className="peer-header">
-                  <div className="peer-status" style={{ color: getStatusColor(peer.status) }}>
-                    {getStatusIcon(peer.status)}
-                  </div>
-                  <div className="peer-name">{peer.username}</div>
-                </div>
-                <div className="peer-details">
-                  <div className="peer-ip">IP: {peer.ip}:{peer.port}</div>
-                  <div className="peer-id">ID: {peer.node_id}</div>
-                  <div className="peer-last-seen">Last seen: {peer.last_seen}</div>
-                </div>
-                <div className="peer-actions">
-                  <button onClick={() => onNodeAction(peer.node_id, 'connect')}>Connect</button>
-                  <button onClick={() => onNodeAction(peer.node_id, 'ping')}>Ping</button>
-                </div>
-              </div>
-            ))}
+        {/* Peer Management Deck */}
+        <div className="glass-module-card">
+          <h3 className="card-title">TACTICAL_NETWORK_DECK</h3>
+          <div className="action-grid-2">
+            <button className={`tactical-btn ${scanning ? 'pulse-active' : ''}`} onClick={onScanNetwork} disabled={scanning}>
+              <span className="btn-label">{scanning ? 'SCANNING...' : 'SCAN_MESH'}</span>
+              <span className="btn-subtext">Local P2P Discovery</span>
+            </button>
+            <button className="tactical-btn" onClick={onRefreshPeers}>
+              <span className="btn-label">REFRESH_PEERS</span>
+              <span className="btn-subtext">Update connection state</span>
+            </button>
+            <button className="tactical-btn purple" onClick={onBroadcast}>
+              <span className="btn-label">SIGNAL_BROADCAST</span>
+              <span className="btn-subtext">Announce presence</span>
+            </button>
+            <button className="tactical-btn cyan" onClick={onConnectAll} disabled={discoveredPeers.length === 0}>
+              <span className="btn-label">AUTOCONNECT_ALL</span>
+              <span className="btn-subtext">Link all valid peers</span>
+            </button>
           </div>
         </div>
-      )}
 
-      {/* Network Actions */}
-      <div className="network-actions">
-        <h3>⚡ Network Actions</h3>
-        <div className="action-buttons">
-          <button 
-            className={`network-action-btn ${scanning ? 'scanning' : ''}`}
-            onClick={onScanNetwork}
-            disabled={scanning}
-          >
-            {scanning ? '🔍 Scanning...' : '🔍 Scan Network'}
-          </button>
-          <button 
-            className="network-action-btn"
-            onClick={onRefreshPeers}
-          >
-            🔄 Refresh Peers
-          </button>
-          <button 
-            className="network-action-btn"
-            onClick={onBroadcast}
-          >
-            📡 Broadcast
-          </button>
-          <button 
-            className="network-action-btn"
-            onClick={onConnectAll}
-            disabled={discoveredPeers.length === 0}
-          >
-            🔗 Connect All ({discoveredPeers.length})
-          </button>
-          <button 
-            className="network-action-btn"
-            onClick={onDisconnectAll}
-            disabled={networkNodes.length === 0}
-          >
-            ❌ Disconnect All ({networkNodes.length})
-          </button>
+        {/* Connection Telemetry */}
+        <div className="glass-module-card">
+          <h3 className="card-title">CONNECTION_TELEMETRY</h3>
+          <div className="node-list-mini">
+            {networkNodes.length > 0 ? (
+              networkNodes.map(node => (
+                <div key={node.id} className="telemetry-node-row">
+                  <div className={`node-indicator ${node.status}`}></div>
+                  <div className="node-meta">
+                    <span className="node-id">{node.name}</span>
+                    <span className="node-latency">{node.latency}MS / {node.strength}%</span>
+                  </div>
+                  <div className="node-actions-mini">
+                    <button className="mini-btn" onClick={() => onNodeAction(node.id, 'ping')}>PING</button>
+                    <button className="mini-btn warn" onClick={() => onNodeAction(node.id, 'disconnect')}>DROP</button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty-telemetry">NO_ACTIVE_CONNECTIONS</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 };
 
-export default NetworkPanel; 
+export default NetworkPanel;

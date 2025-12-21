@@ -5,6 +5,7 @@ use serde::Serialize;
 pub mod identity;
 pub mod message;
 pub mod encryption;
+pub mod signal;
 pub mod transport;
 pub mod security;
 

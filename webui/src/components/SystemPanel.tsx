@@ -27,314 +27,129 @@ const SystemPanel: React.FC<SystemPanelProps> = ({
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getPerformanceStatus = (value: number) => {
-    if (value >= 80) return { status: 'CRITICAL', color: '#ff4444', icon: '🚨' };
-    if (value >= 60) return { status: 'WARNING', color: '#ffaa00', icon: '⚠️' };
-    return { status: 'NORMAL', color: '#44ff44', icon: '✅' };
+  const getStatusLevel = (value: number) => {
+    if (value >= 80) return 'critical';
+    if (value >= 60) return 'warning';
+    return 'optimal';
   };
 
-  const cpuStatus = getPerformanceStatus(systemStatus.cpu);
-  const memoryStatus = getPerformanceStatus(systemStatus.memory);
-  const networkStatus = getPerformanceStatus(systemStatus.network);
-
   return (
-    <div className="system-panel">
-      <div className="panel-header">
-        <h2>⚙️ SYSTEM MONITORING</h2>
-        <div className="system-overview">
-          <div className="system-uptime">
-            <div className="uptime-label">SYSTEM UPTIME</div>
-            <div className="uptime-value">{formatUptime(systemStatus.uptime)}</div>
-          </div>
-          <div className="system-health">
-            <div className="health-label">SYSTEM HEALTH</div>
-            <div className="health-value">GOOD</div>
-          </div>
-        </div>
+    <div className="main-content-module">
+      <div className="module-header">
+        <h2 className="module-title">SYSTEM_CORE_DIAGNOSTICS</h2>
+        <div className="module-subtitle">PRIMARY_KERNEL_STATE: ACTIVE</div>
       </div>
 
-      <div className="panel-content">
-        {/* Performance Metrics */}
-        <div className="performance-metrics">
-          <div className="section-title">PERFORMANCE METRICS</div>
-          <div className="metrics-grid">
-            <div className="metric-card">
-              <div className="metric-header">
-                <div className="metric-icon">🖥️</div>
-                <div className="metric-title">CPU USAGE</div>
+      <div className="module-grid">
+        {/* Core Propulsion/Resource Sensors */}
+        <div className="glass-module-card">
+          <h3 className="card-title">RESOURCE_VITAL_SENSORS</h3>
+          <div className="sensor-array-vertical">
+            <div className="sensor-node">
+              <div className="sensor-header">
+                <span className="sensor-label">CORE_LOAD</span>
+                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.cpu)}`}>
+                  {systemStatus.cpu}%
+                </span>
               </div>
-              <div className="metric-value">
-                <div className="circular-progress">
-                  <div className="progress-ring">
-                    <svg width="120" height="120">
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke="#2a2a2a"
-                        strokeWidth="8"
-                      />
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke={cpuStatus.color}
-                        strokeWidth="8"
-                        strokeDasharray={`${(systemStatus.cpu / 100) * 314} 314`}
-                        strokeDashoffset="0"
-                        transform="rotate(-90 60 60)"
-                      />
-                    </svg>
-                    <div className="progress-text">{systemStatus.cpu}%</div>
-                  </div>
-                </div>
-              </div>
-              <div className="metric-status" style={{ color: cpuStatus.color }}>
-                <span className="status-icon">{cpuStatus.icon}</span>
-                <span className="status-text">{cpuStatus.status}</span>
+              <div className="sensor-bar-bg">
+                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.cpu)}`} style={{ width: `${systemStatus.cpu}%` }}></div>
               </div>
             </div>
 
-            <div className="metric-card">
-              <div className="metric-header">
-                <div className="metric-icon">💾</div>
-                <div className="metric-title">MEMORY USAGE</div>
+            <div className="sensor-node">
+              <div className="sensor-header">
+                <span className="sensor-label">MEMORY_POOL</span>
+                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.memory)}`}>
+                  {systemStatus.memory}%
+                </span>
               </div>
-              <div className="metric-value">
-                <div className="circular-progress">
-                  <div className="progress-ring">
-                    <svg width="120" height="120">
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke="#2a2a2a"
-                        strokeWidth="8"
-                      />
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke={memoryStatus.color}
-                        strokeWidth="8"
-                        strokeDasharray={`${(systemStatus.memory / 100) * 314} 314`}
-                        strokeDashoffset="0"
-                        transform="rotate(-90 60 60)"
-                      />
-                    </svg>
-                    <div className="progress-text">{systemStatus.memory}%</div>
-                  </div>
-                </div>
-              </div>
-              <div className="metric-status" style={{ color: memoryStatus.color }}>
-                <span className="status-icon">{memoryStatus.icon}</span>
-                <span className="status-text">{memoryStatus.status}</span>
+              <div className="sensor-bar-bg">
+                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.memory)}`} style={{ width: `${systemStatus.memory}%` }}></div>
               </div>
             </div>
 
-            <div className="metric-card">
-              <div className="metric-header">
-                <div className="metric-icon">🌐</div>
-                <div className="metric-title">NETWORK LOAD</div>
+            <div className="sensor-node">
+              <div className="sensor-header">
+                <span className="sensor-label">NETWORK_BAND</span>
+                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.network)}`}>
+                  {systemStatus.network}%
+                </span>
               </div>
-              <div className="metric-value">
-                <div className="circular-progress">
-                  <div className="progress-ring">
-                    <svg width="120" height="120">
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke="#2a2a2a"
-                        strokeWidth="8"
-                      />
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="50"
-                        fill="none"
-                        stroke={networkStatus.color}
-                        strokeWidth="8"
-                        strokeDasharray={`${(systemStatus.network / 100) * 314} 314`}
-                        strokeDashoffset="0"
-                        transform="rotate(-90 60 60)"
-                      />
-                    </svg>
-                    <div className="progress-text">{systemStatus.network}%</div>
-                  </div>
-                </div>
-              </div>
-              <div className="metric-status" style={{ color: networkStatus.color }}>
-                <span className="status-icon">{networkStatus.icon}</span>
-                <span className="status-text">{networkStatus.status}</span>
+              <div className="sensor-bar-bg">
+                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.network)}`} style={{ width: `${systemStatus.network}%` }}></div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* System Information */}
-        <div className="system-info">
-          <div className="section-title">SYSTEM INFORMATION</div>
-          <div className="info-grid">
-            <div className="info-card">
-              <div className="info-header">
-                <div className="info-icon">🔗</div>
-                <div className="info-title">CONNECTIONS</div>
-              </div>
-              <div className="info-value">{systemStatus.connections}</div>
-              <div className="info-label">Active Connections</div>
+        {/* System Telemetry Module */}
+        <div className="glass-module-card">
+          <h3 className="card-title">PRIMARY_TELEMETRY</h3>
+          <div className="telemetry-table">
+            <div className="telemetry-row">
+              <span className="telemetry-key">UPTIME_CLOCK</span>
+              <span className="telemetry-val">{formatUptime(systemStatus.uptime)}</span>
             </div>
-
-            <div className="info-card">
-              <div className="info-header">
-                <div className="info-icon">📨</div>
-                <div className="info-title">MESSAGES</div>
-              </div>
-              <div className="info-value">{systemStatus.messages}</div>
-              <div className="info-label">Total Messages</div>
+            <div className="telemetry-row">
+              <span className="telemetry-key">PEER_NODES</span>
+              <span className="telemetry-val">{systemStatus.connections}</span>
             </div>
-
-            <div className="info-card">
-              <div className="info-header">
-                <div className="info-icon">🔒</div>
-                <div className="info-title">ENCRYPTION</div>
-              </div>
-              <div className="info-value">{systemStatus.encryption}%</div>
-              <div className="info-label">Encryption Level</div>
+            <div className="telemetry-row">
+              <span className="telemetry-key">SEC_SCORE</span>
+              <span className={`telemetry-val ${systemStatus.securityScore < 80 ? 'text-red-500' : 'text-cyan-400'}`}>
+                {systemStatus.securityScore}%
+              </span>
             </div>
-
-            <div className="info-card">
-              <div className="info-header">
-                <div className="info-icon">🛡️</div>
-                <div className="info-title">SECURITY</div>
-              </div>
-              <div className="info-value">{systemStatus.securityScore}/100</div>
-              <div className="info-label">Security Score</div>
+            <div className="telemetry-row">
+              <span className="telemetry-key">ENCRYPTION</span>
+              <span className="telemetry-val">TLS_1.3_E2EE</span>
             </div>
           </div>
         </div>
 
-        {/* System Controls */}
-        <div className="system-controls">
-          <div className="section-title">SYSTEM CONTROLS</div>
-          <div className="controls-grid">
-            <div className="control-group">
-              <div className="group-title">MAINTENANCE</div>
-              <div className="control-buttons">
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('backup')}
-                >
-                  <div className="btn-icon">💾</div>
-                  <div className="btn-label">BACKUP SYSTEM</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('restore')}
-                >
-                  <div className="btn-icon">🔄</div>
-                  <div className="btn-label">RESTORE SYSTEM</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('update')}
-                >
-                  <div className="btn-icon">⬆️</div>
-                  <div className="btn-label">UPDATE FIRMWARE</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="control-group">
-              <div className="group-title">DIAGNOSTICS</div>
-              <div className="control-buttons">
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('diagnostics')}
-                >
-                  <div className="btn-icon">🔍</div>
-                  <div className="btn-label">RUN DIAGNOSTICS</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('performance-test')}
-                >
-                  <div className="btn-icon">📊</div>
-                  <div className="btn-label">PERFORMANCE TEST</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('network-test')}
-                >
-                  <div className="btn-icon">🌐</div>
-                  <div className="btn-label">NETWORK TEST</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="control-group">
-              <div className="group-title">SYSTEM</div>
-              <div className="control-buttons">
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('restart')}
-                >
-                  <div className="btn-icon">🔄</div>
-                  <div className="btn-label">RESTART SYSTEM</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('shutdown')}
-                >
-                  <div className="btn-icon">⏹️</div>
-                  <div className="btn-label">SHUTDOWN</div>
-                </button>
-                
-                <button 
-                  className="system-control-btn"
-                  onClick={() => onSystemAction('factory-reset')}
-                >
-                  <div className="btn-icon">🏭</div>
-                  <div className="btn-label">FACTORY RESET</div>
-                </button>
-              </div>
-            </div>
+        {/* System Management Overrides */}
+        <div className="glass-module-card full-width">
+          <h3 className="card-title">TACTICAL_SYSTEM_OVERRIDES</h3>
+          <div className="action-grid-3">
+            <button className="tactical-btn purple" onClick={() => onSystemAction('backup')}>
+              <span className="btn-label">DATA_BACKUP</span>
+              <span className="btn-subtext">Archive primary state</span>
+            </button>
+            <button className="tactical-btn cyan" onClick={() => onSystemAction('diagnostics')}>
+              <span className="btn-label">RUN_DIAGNOSTICS</span>
+              <span className="btn-subtext">Deep packet inspection</span>
+            </button>
+            <button className="tactical-btn orange" onClick={() => onSystemAction('restart')}>
+              <span className="btn-label">KERNEL_RESTART</span>
+              <span className="btn-subtext">Flush volatile buffers</span>
+            </button>
           </div>
         </div>
 
-        {/* System Logs */}
-        <div className="system-logs">
-          <div className="section-title">SYSTEM LOGS</div>
-          <div className="logs-container">
-            <div className="log-entry">
-              <div className="log-time">21:27:15</div>
-              <div className="log-level info">INFO</div>
-              <div className="log-message">System performance monitoring active</div>
+        {/* Real-time System Log Buffer */}
+        <div className="glass-module-card full-width">
+          <h3 className="card-title">REALTIME_EVENT_BUFFER</h3>
+          <div className="log-buffer">
+            <div className="log-line">
+              <span className="log-timestamp">[21:30:15]</span>
+              <span className="log-tag tag-info">INFO</span>
+              <span className="log-msg">GHOSTWIRE_CORE: Heartbeat stable.</span>
             </div>
-            <div className="log-entry">
-              <div className="log-time">21:27:10</div>
-              <div className="log-level warning">WARN</div>
-              <div className="log-message">Memory usage approaching threshold</div>
+            <div className="log-line">
+              <span className="log-timestamp">[21:30:10]</span>
+              <span className="log-tag tag-warn">WARN</span>
+              <span className="log-msg">SIGNAL_STRENGTH: Jitter detected in packet routing.</span>
             </div>
-            <div className="log-entry">
-              <div className="log-time">21:27:05</div>
-              <div className="log-level info">INFO</div>
-              <div className="log-message">Network optimization completed</div>
+            <div className="log-line">
+              <span className="log-timestamp">[21:30:05]</span>
+              <span className="log-tag tag-info">INFO</span>
+              <span className="log-msg">MESH_TOPOLOGY: Node discovery phase complete.</span>
             </div>
-            <div className="log-entry">
-              <div className="log-time">21:27:00</div>
-              <div className="log-level info">INFO</div>
-              <div className="log-message">Security scan completed - no threats found</div>
+            <div className="log-line">
+              <span className="log-timestamp">[21:30:00]</span>
+              <span className="log-tag tag-sec">SEC</span>
+              <span className="log-msg">ENCRYPTION: Layer 2 handshakes verified.</span>
             </div>
           </div>
         </div>
@@ -343,4 +158,4 @@ const SystemPanel: React.FC<SystemPanelProps> = ({
   );
 };
 
-export default SystemPanel; 
+export default SystemPanel;

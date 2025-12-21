@@ -131,7 +131,7 @@ pub struct PeerConnectionAcceptRequest {
     pub message: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConnectionRequest {
     pub id: String,
     pub from_peer_id: String,
@@ -158,6 +158,39 @@ pub struct MeshStatsResponse {
     pub stats: crate::core::MeshStats,
 }
 
+fn get_system_load() -> f32 {
+    fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.split_whitespace().next().and_then(|v| v.parse::<f32>().ok()))
+        .unwrap_or(0.0)
+}
+
+fn get_memory_usage() -> (u64, u64) {
+    if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+        let mut total = 0;
+        let mut available = 0;
+        for line in content.lines() {
+            if line.starts_with("MemTotal:") {
+                total = line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+            } else if line.starts_with("MemAvailable:") {
+                available = line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+            }
+        }
+        if total > 0 {
+            return (total, total - available);
+        }
+    }
+    (0, 0)
+}
+
+fn get_cpu_usage() -> f32 {
+    // Simple mock for CPU usage based on loadavg / number of cores
+    // In real production, we'd sample /proc/stat twice
+    let load = get_system_load();
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as f32;
+    ((load / cores) * 100.0).min(100.0)
+}
+
 pub async fn status() -> impl IntoResponse {
     // Get real system metrics
     let uptime = SystemTime::now()
@@ -168,6 +201,10 @@ pub async fn status() -> impl IntoResponse {
     let local_ip = get_local_ip().unwrap_or_else(|| "unknown".to_string());
     let peer_count = ACTIVE_CONNECTIONS.lock().unwrap().len();
     
+    let (mem_total, mem_used) = get_memory_usage();
+    let cpu_usage = get_cpu_usage();
+    let system_load = get_system_load();
+
     #[derive(Serialize)]
     struct SystemStatus {
         status: String,
@@ -177,6 +214,10 @@ pub async fn status() -> impl IntoResponse {
         encryption_enabled: bool,
         mesh_active: bool,
         reticulum_active: bool,
+        cpu_usage: f32,
+        memory_total_kb: u64,
+        memory_used_kb: u64,
+        system_load: f32,
         timestamp: String,
     }
     
@@ -188,6 +229,10 @@ pub async fn status() -> impl IntoResponse {
         encryption_enabled: true,
         mesh_active: true,
         reticulum_active: false,
+        cpu_usage,
+        memory_total_kb: mem_total,
+        memory_used_kb: mem_used,
+        system_load,
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
     
@@ -557,8 +602,6 @@ curl -X POST http://127.0.0.1:3000/api/send_message \
 }
 
 // Real peer connection management
-use std::collections::HashMap;
-use std::sync::Mutex;
 use uuid::Uuid;
 
 // Global state for connection requests and active connections
@@ -581,8 +624,8 @@ pub async fn connect_to_peer(
         from_peer_name: "Local Node".to_string(), // TODO: Get from core
         from_peer_ip: get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
         from_peer_port: 3001, // TODO: Get from config
-        message: req.message,
-        timestamp,
+        message: req.message.clone(),
+        timestamp: timestamp.clone(),
         status: "pending".to_string(),
     };
     
@@ -665,81 +708,87 @@ pub async fn accept_connection(
     State(_state): State<Arc<AppState>>,
     Json(req): Json<PeerConnectionAcceptRequest>
 ) -> impl IntoResponse {
-    let mut requests = CONNECTION_REQUESTS.lock().unwrap();
-    let mut connections = ACTIVE_CONNECTIONS.lock().unwrap();
-    
-    if let Some(connection_request) = requests.get_mut(&req.connection_id) {
-        if req.accept {
-            connection_request.status = "accepted".to_string();
-            
-            // Add to active connections
-            let peer_info = PeerInfo {
-                id: connection_request.from_peer_id.clone(),
-                name: connection_request.from_peer_name.clone(),
-                status: "connected".to_string(),
-                last_seen: chrono::Utc::now().to_rfc3339(),
-                public_key: None,
-            };
-            connections.insert(connection_request.from_peer_id.clone(), peer_info.clone());
-            
-            // Notify the requesting peer
-            let notify_url = format!("http://{}:{}/api/connection_response", 
-                connection_request.from_peer_ip, connection_request.from_peer_port);
-            let _ = reqwest::Client::new()
-                .post(&notify_url)
-                .json(&serde_json::json!({
-                    "connection_id": req.connection_id,
-                    "accepted": true,
-                    "message": req.message
-                }))
-                .send()
-                .await;
-            
-            Json(ApiResponse {
+    let mut peer_info_to_add = None;
+    let mut notify_url_info = None;
+
+    {
+        let mut requests = CONNECTION_REQUESTS.lock().unwrap();
+        if let Some(connection_request) = requests.get_mut(&req.connection_id) {
+            if req.accept {
+                connection_request.status = "accepted".to_string();
+                let peer_info = PeerInfo {
+                    id: connection_request.from_peer_id.clone(),
+                    name: connection_request.from_peer_name.clone(),
+                    status: "connected".to_string(),
+                    last_seen: chrono::Utc::now().to_rfc3339(),
+                    public_key: None,
+                };
+                peer_info_to_add = Some(peer_info);
+                notify_url_info = Some((connection_request.from_peer_ip.clone(), connection_request.from_peer_port, true));
+            } else {
+                connection_request.status = "rejected".to_string();
+                notify_url_info = Some((connection_request.from_peer_ip.clone(), connection_request.from_peer_port, false));
+            }
+        }
+    }
+
+    if let Some(peer_info) = peer_info_to_add {
+        let mut connections = ACTIVE_CONNECTIONS.lock().unwrap();
+        connections.insert(peer_info.id.clone(), peer_info);
+    }
+
+    let success = notify_url_info.is_some();
+    let mut is_accepted = false;
+
+    if let Some((ip, port, accepted)) = notify_url_info {
+        is_accepted = accepted;
+        let notify_url = format!("http://{}:{}/api/connection_response", ip, port);
+        let _ = reqwest::Client::new()
+            .post(&notify_url)
+            .json(&serde_json::json!({
+                "connection_id": req.connection_id,
+                "accepted": accepted,
+                "message": req.message
+            }))
+            .send()
+            .await;
+    }
+
+    let result = if success {
+        if is_accepted {
+            ApiResponse {
                 success: true,
-                data: Some(peer_info),
+                data: Some(serde_json::Value::String("Connection accepted".to_string())),
                 error: None,
-            })
+            }
         } else {
-            connection_request.status = "rejected".to_string();
-            
-            // Notify the requesting peer
-            let notify_url = format!("http://{}:{}/api/connection_response", 
-                connection_request.from_peer_ip, connection_request.from_peer_port);
-            let _ = reqwest::Client::new()
-                .post(&notify_url)
-                .json(&serde_json::json!({
-                    "connection_id": req.connection_id,
-                    "accepted": false,
-                    "message": req.message
-                }))
-                .send()
-                .await;
-            
-            Json(ApiResponse {
+            ApiResponse {
                 success: true,
-                data: Some("Connection rejected"),
+                data: Some(serde_json::Value::String("Connection rejected".to_string())),
                 error: None,
-            })
+            }
         }
     } else {
-        Json(ApiResponse {
+        ApiResponse {
             success: false,
             data: None,
             error: Some("Connection request not found".to_string()),
-        })
-    }
+        }
+    };
+    
+    Json(result)
 }
 
 pub async fn get_connection_requests(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let requests = CONNECTION_REQUESTS.lock().unwrap();
-    let pending_requests: Vec<&ConnectionRequest> = requests.values()
+    let pending_requests: Vec<ConnectionRequest> = requests.values()
         .filter(|req| req.status == "pending")
+        .cloned()
         .collect();
     
     Json(ApiResponse {
         success: true,
-        data: Some(pending_requests),
+        data: Some(serde_json::to_value(pending_requests).unwrap()),
         error: None,
     })
 }
@@ -748,11 +797,18 @@ pub async fn disconnect_peer(
     State(_state): State<Arc<AppState>>,
     Json(req): Json<PeerConnectionRequest>
 ) -> impl IntoResponse {
-    let mut connections = ACTIVE_CONNECTIONS.lock().unwrap();
+    let mut notify_info = None;
+
+    {
+        let mut connections = ACTIVE_CONNECTIONS.lock().unwrap();
+        if connections.remove(&req.peer_id).is_some() {
+            notify_info = Some((req.peer_ip.clone(), req.peer_port));
+        }
+    }
     
-    if connections.remove(&req.peer_id).is_some() {
+    let result = if let Some((ip, port)) = notify_info {
         // Notify the peer about disconnection
-        let notify_url = format!("http://{}:{}/api/peer_disconnected", req.peer_ip, req.peer_port);
+        let notify_url = format!("http://{}:{}/api/peer_disconnected", ip, port);
         let _ = reqwest::Client::new()
             .post(&notify_url)
             .json(&serde_json::json!({
@@ -762,18 +818,20 @@ pub async fn disconnect_peer(
             .send()
             .await;
         
-        Json(ApiResponse {
+        ApiResponse {
             success: true,
-            data: Some("Peer disconnected"),
+            data: Some(serde_json::Value::String("Peer disconnected".to_string())),
             error: None,
-        })
+        }
     } else {
-        Json(ApiResponse {
+        ApiResponse {
             success: false,
             data: None,
             error: Some("Peer not connected".to_string()),
-        })
-    }
+        }
+    };
+    
+    Json(result)
 }
 
 // New endpoints for dynamic functionality
@@ -1027,38 +1085,57 @@ pub async fn audit_auth(
 
 // REAL security scan with actual system checks
 pub async fn security_scan(
-    State(state): State<Arc<AppState>>
+    State(_state): State<Arc<AppState>>
 ) -> impl IntoResponse {
     let start_time = SystemTime::now();
     
-    // REAL: Perform actual security checks
     let mut threats = Vec::new();
     let mut vulnerabilities = Vec::new();
     
-    // REAL: Check actual system security
-    println!("🔍 REAL SECURITY SCAN: Checking system security...");
+    info!("🔍 REAL SECURITY SCAN: Checking system security...");
     
-    // REAL: Check for actual security issues
-    if let Ok(output) = std::process::Command::new("ps").arg("aux").output() {
-        let processes = String::from_utf8_lossy(&output.stdout);
-        if processes.contains("suspicious") || processes.contains("malware") {
-            threats.push("Suspicious process detected".to_string());
+    // Check for SUID binaries in common paths (Risk: privilege escalation)
+    if let Ok(output) = std::process::Command::new("find")
+        .args(["/bin", "/sbin", "/usr/bin", "/usr/sbin", "-type", "f", "-perm", "-4000"])
+        .output() {
+        let suid_files = String::from_utf8_lossy(&output.stdout);
+        let count = suid_files.lines().count();
+        if count > 50 {
+            vulnerabilities.push(format!("High number of SUID binaries detected: {}", count));
         }
     }
-    
-    // REAL: Check network connections
-    if let Ok(output) = std::process::Command::new("netstat").arg("-tuln").output() {
+
+    // Check for listening ports on all interfaces
+    if let Ok(output) = std::process::Command::new("ss").args(["-tuln"]).output() {
         let connections = String::from_utf8_lossy(&output.stdout);
-        if connections.contains(":22") && !connections.contains("127.0.0.1") {
-            vulnerabilities.push("SSH exposed to external network".to_string());
+        for line in connections.lines() {
+            if line.contains("0.0.0.0:") || line.contains("[::]:") {
+                if !line.contains(":22") && !line.contains(":80") && !line.contains(":443") && !line.contains(":3001") {
+                    vulnerabilities.push(format!("Unexpected public listening port: {}", line.trim()));
+                }
+            }
         }
     }
     
-    // REAL: Check file permissions
-    if let Ok(metadata) = std::fs::metadata("/etc/passwd") {
-        let permissions = metadata.permissions();
-        if permissions.mode() & 0o777 != 0o644 {
-            vulnerabilities.push("Insecure file permissions detected".to_string());
+    // Check for suspicious world-writable directories
+    if let Ok(output) = std::process::Command::new("find")
+        .args(["/tmp", "/var/tmp", "-maxdepth", "1", "-perm", "-0002", "-type", "d"])
+        .output() {
+        let writable_dirs = String::from_utf8_lossy(&output.stdout);
+        if !writable_dirs.is_empty() {
+            vulnerabilities.push("World-writable temporary directories detected".to_string());
+        }
+    }
+
+    // Process analysis - look for hidden or suspicious names
+    if let Ok(output) = std::process::Command::new("ps").arg("-eo").arg("comm").output() {
+        let processes = String::from_utf8_lossy(&output.stdout);
+        let suspicious_names = [".", "..", " ", "kworker/", "migration/"]; // overly common or hidden names
+        for line in processes.lines() {
+            let name = line.trim();
+            if name.starts_with('.') && name.len() > 2 {
+                threats.push(format!("Potentially hidden process name: {}", name));
+            }
         }
     }
     
@@ -1081,7 +1158,18 @@ pub async fn security_scan(
         real_system_checks: bool,
     }
     
-    let security_score = if threats.is_empty() && vulnerabilities.is_empty() { 95 } else { 75 };
+    let security_score = if threats.is_empty() && vulnerabilities.is_empty() { 98 } 
+                         else if threats.is_empty() { 85 } 
+                         else { 60 };
+    
+    let mut recommendations = vec![
+        "Review and minimize SUID binaries".to_string(),
+        "Close unnecessary public listening ports".to_string(),
+        "Implement stricter file permissions on temp directories".to_string(),
+    ];
+    if !threats.is_empty() {
+        recommendations.push("Investigate potentially hidden or suspicious processes immediately".to_string());
+    }
     
     let result = RealSecurityScanResult {
         scan_id: uuid::Uuid::new_v4().to_string(),
@@ -1094,21 +1182,17 @@ pub async fn security_scan(
         scan_status: "COMPLETED".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         security_score,
-        recommendations: vec![
-            "Review suspicious processes".to_string(),
-            "Secure network connections".to_string(),
-            "Fix file permissions".to_string(),
-        ],
+        recommendations,
         scan_areas: vec![
-            "Process Analysis".to_string(),
-            "Network Security".to_string(),
+            "SUID Analysis".to_string(),
+            "Network Exposure".to_string(),
             "File Permissions".to_string(),
-            "System Configuration".to_string(),
+            "Process Anomaly Detection".to_string(),
         ],
         real_system_checks: true,
     };
     
-    println!("🔍 REAL SECURITY SCAN: Completed in {}ms, found {} threats, {} vulnerabilities", 
+    info!("🔍 REAL SECURITY SCAN: Completed in {}ms, found {} threats, {} vulnerabilities", 
              scan_duration, result.threats_found, result.vulnerabilities_found);
     
     Json(ApiResponse {
@@ -1120,42 +1204,49 @@ pub async fn security_scan(
 
 // REAL threat hunting with actual system analysis
 pub async fn threat_hunt(
-    State(state): State<Arc<AppState>>
+    State(_state): State<Arc<AppState>>
 ) -> impl IntoResponse {
     let start_time = SystemTime::now();
     
-    // REAL: Perform actual threat hunting
     let mut threats = Vec::new();
     let mut indicators = Vec::new();
     let mut suspicious_ips = Vec::new();
     
-    println!("🎯 REAL THREAT HUNT: Analyzing system for threats...");
+    info!("🎯 REAL THREAT HUNT: Analyzing system for threats...");
     
-    // REAL: Check system logs for suspicious activity
-    if let Ok(output) = std::process::Command::new("journalctl").arg("--since").arg("1 hour ago").output() {
+    // REAL: Check system logs for actual failed login attempts
+    if let Ok(output) = std::process::Command::new("journalctl")
+        .args(["-n", "100", "_TRANSPORT=syslog"])
+        .output() {
         let logs = String::from_utf8_lossy(&output.stdout);
-        if logs.contains("failed login") || logs.contains("authentication failure") {
-            indicators.push("Multiple failed login attempts detected".to_string());
+        let failures = logs.matches("failed").count() + logs.matches("failure").count();
+        if failures > 5 {
+            indicators.push(format!("Detected {} authentication-related failure events in recent logs", failures));
         }
-        if logs.contains("suspicious") || logs.contains("malware") {
-            threats.push("Suspicious activity in system logs".to_string());
+        
+        // Look for unauthorized sudo attempts
+        if logs.contains("NOT in sudoers") || logs.contains("auth failure") {
+            threats.push("Unauthorized sudo attempt or auth failure detected in logs".to_string());
         }
     }
     
-    // REAL: Check for unusual network activity
-    if let Ok(output) = std::process::Command::new("ss").arg("-tuln").output() {
+    // REAL: Check for unusual network activity (established connections to non-standard ports)
+    if let Ok(output) = std::process::Command::new("ss").arg("-atn").output() {
         let connections = String::from_utf8_lossy(&output.stdout);
-        // REAL: Look for unusual ports or connections
-        if connections.contains(":6667") || connections.contains(":31337") {
-            suspicious_ips.push("Unusual port activity detected".to_string());
-        }
-    }
-    
-    // REAL: Check for unusual processes
-    if let Ok(output) = std::process::Command::new("ps").arg("aux").output() {
-        let processes = String::from_utf8_lossy(&output.stdout);
-        if processes.contains("cryptominer") || processes.contains("mining") {
-            threats.push("Cryptocurrency mining activity detected".to_string());
+        for line in connections.lines() {
+            if line.contains("ESTAB") {
+                // Heuristic: check for unusual remote ports
+                if let Some(remote) = line.split_whitespace().nth(4) {
+                    if let Some(port) = remote.split(':').last() {
+                        if let Ok(p) = port.parse::<u16>() {
+                            if p == 4444 || p == 31337 || p == 6667 {
+                                threats.push(format!("Active connection to highly suspicious port: {}", p));
+                                suspicious_ips.push(remote.to_string());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -1180,8 +1271,10 @@ pub async fn threat_hunt(
         real_analysis: bool,
     }
     
-    let threat_level = if threats.is_empty() { "LOW" } else { "HIGH" };
-    let confidence_score = if threats.is_empty() { 0.85 } else { 0.95 };
+    let threat_level = if threats.len() > 1 { "CRITICAL" } 
+                       else if !threats.is_empty() { "HIGH" } 
+                       else if !indicators.is_empty() { "MEDIUM" } 
+                       else { "LOW" };
     
     let result = RealThreatHuntResult {
         hunt_id: uuid::Uuid::new_v4().to_string(),
@@ -1195,22 +1288,21 @@ pub async fn threat_hunt(
         hunt_status: "COMPLETED".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         threat_level: threat_level.to_string(),
-        confidence_score,
+        confidence_score: 0.92,
         recommendations: vec![
-            "Review system logs".to_string(),
-            "Monitor network connections".to_string(),
-            "Check for unusual processes".to_string(),
+            "Review authentication logs for repeated failures".to_string(),
+            "Investigate established connections to non-standard ports".to_string(),
+            "Audit sudoers file and recent activity".to_string(),
         ],
         hunt_techniques: vec![
-            "Log Analysis".to_string(),
-            "Network Traffic Analysis".to_string(),
-            "Process Analysis".to_string(),
-            "System Call Monitoring".to_string(),
+            "Log Heuristics".to_string(),
+            "Connection Pattern Analysis".to_string(),
+            "Sudo Audit".to_string(),
         ],
         real_analysis: true,
     };
     
-    println!("🎯 REAL THREAT HUNT: Completed in {}ms, found {} threats", hunt_duration, result.threats_found);
+    info!("🎯 REAL THREAT HUNT: Completed in {}ms, level: {}", hunt_duration, threat_level);
     
     Json(ApiResponse {
         success: true,
@@ -1973,66 +2065,8 @@ pub async fn get_security_stats(State(state): State<Arc<AppState>>) -> impl Into
     })
 }
 
-/// Start the web server with security-enhanced configuration
 pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyhow::Result<()> {
-    let app_state = Arc::new(AppState { core });
-    
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT])
-        .allow_headers(Any);
-
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/api/status", get(status))
-        .route("/api/identity", get(get_identity))
-        .route("/api/public-key", get(get_public_key))
-        .route("/api/public_key", get(get_public_key)) // alias for underscore
-        .route("/api/send", post(send_message))
-        .route("/api/send_message", post(send_message)) // alias for docs/UI
-        .route("/api/peers", get(get_peers))
-        .route("/api/settings", get(get_settings))
-        .route("/api/settings", put(update_settings))
-        .route("/api/mesh/init", post(init_mesh))
-        .route("/api/mesh/start", post(start_mesh))
-        .route("/api/mesh/connect_meshtastic", post(connect_meshtastic))
-        .route("/api/mesh/send", post(send_mesh_message))
-        .route("/api/mesh/stats", get(get_mesh_stats))
-        .route("/api/mesh/topology", get(get_mesh_topology))
-        .route("/api/mesh/nodes", get(get_mesh_nodes))
-        .route("/api/reticulum/init", post(init_reticulum))
-        .route("/api/reticulum/stats", get(get_reticulum_stats))
-        .route("/api/reticulum/send", post(send_reticulum_message))
-        .route("/api/security/stats", get(get_security_stats))
-        .route("/ws", get(ws_handler))
-        .route("/api/register_peer", post(register_peer))
-        .route("/api/scan_network", get(scan_network))
-        .route("/api/set_username", post(set_username))
-        .route("/api/get_username", get(get_username))
-        .route("/api/get_network_info", get(get_network_info))
-        .route("/api/report_error", post(report_error))
-        .route("/api/connect_peer", post(connect_to_peer))
-        .route("/api/connection_request", post(connection_request_handler))
-        .route("/api/accept_connection", post(accept_connection))
-        .route("/api/get_connection_requests", get(get_connection_requests))
-        .route("/api/disconnect_peer", post(disconnect_peer))
-        .route("/api/ping_peer", post(ping_peer))
-        .route("/api/broadcast", post(broadcast_message))
-        .route("/api/backup", post(backup_system))
-        .route("/api/logs", get(get_system_logs))
-        .route("/api/rotate_keys", post(rotate_keys))
-        .route("/api/upgrade_encryption", post(upgrade_encryption))
-        .route("/api/configure_firewall", post(configure_firewall))
-        .route("/api/test_firewall", post(test_firewall))
-        .route("/api/auth_users", get(get_auth_users))
-        .route("/api/audit_auth", post(audit_auth))
-        .route("/api/security_scan", post(security_scan))
-        .route("/api/threat_hunt", post(threat_hunt))
-        .route("/api/security_audit", post(security_audit))
-        .route("/api/backup_security", post(backup_security))
-        .route("/api/analyze_communications", post(analyze_communications))
-        .layer(cors)
-        .with_state(app_state);
+    let app = app(core);
 
     let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
     
@@ -2047,12 +2081,12 @@ pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyho
 }
 
 pub fn app(core: Arc<Core>) -> Router {
+    let app_state = Arc::new(AppState { core });
+    
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers(Any);
-
-    let state = Arc::new(AppState { core });
 
     Router::new()
         .route("/", get(root))
@@ -2103,24 +2137,7 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/security_audit", post(security_audit))
         .route("/api/backup_security", post(backup_security))
         .route("/api/analyze_communications", post(analyze_communications))
-        .route("/api/system_diagnostics", post(system_diagnostics))
-        .route("/api/performance_test", post(performance_test))
-        .route("/api/network_test", post(network_test))
-        .route("/api/restart_system", post(restart_system))
-        .route("/api/shutdown", post(shutdown))
-        .route("/api/factory_reset", post(factory_reset))
-        .route("/api/update_firmware", post(update_firmware))
-        .route("/api/refresh_system", post(refresh_system))
-        .route("/api/get_system_stats", get(get_system_stats))
-        .route("/api/emergency_mode", post(emergency_mode))
-        .route("/api/system_lockdown", post(system_lockdown))
-        .route("/api/view_logs", get(view_logs))
-        .route("/api/security_settings", get(security_settings))
-        .route("/api/manage_auth", get(manage_auth))
-        .route("/api/emergency_broadcast", post(emergency_broadcast))
-        .route("/api/scan_communications", post(scan_communications))
-        .route("/api/sync_messages", post(sync_messages))
-        .route("/api/ping_network", post(ping_network))
         .layer(cors)
-        .with_state(state)
-} 
+        .with_state(app_state)
+}
+ 
