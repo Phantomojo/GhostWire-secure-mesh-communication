@@ -365,3 +365,22 @@ sudo ./systemd/install-service.sh
 **🚀 Ready to deploy? Run `./deploy.sh` for production or `./launch-ghostwire-working.sh` for development!**
 
 </div> 
+## [2.0.0] - 2025-01-XX
+### Changed
+- **LICENSE CHANGE: MIT → AGPL-3.0**
+  - Ensures security improvements remain open source
+  - Prevents proprietary forks of mesh network
+  - All network service modifications must be disclosed
+  - See LICENSE for full terms
+  
+### Added
+- Production AES-256-GCM encryption (no fallbacks)
+- Proof-of-Work Sybil defense
+- Sliding window rate limiting
+- Persistent blacklist manager
+- DHT username discovery system
+
+### Security
+- Removed all XOR encryption fallbacks
+- Removed all mock/placeholder data
+- Implemented real security managers

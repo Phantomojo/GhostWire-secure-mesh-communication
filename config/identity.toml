@@ -1,0 +1,26 @@
+# GhostWire Identity Configuration Template
+# This file will be customized during installation
+
+[identity]
+# Your username on the mesh network
+# This is how other nodes will find and identify you
+username = ""
+
+# Display name (can be more descriptive)
+display_name = ""
+
+# Keypair information (auto-generated on first run)
+# DO NOT edit these fields manually
+# public_key = ""
+# peer_id = ""
+
+[profile]
+# Optional profile metadata
+status = "online"
+# avatar_hash = ""  # Hash of avatar image
+# bio = ""          # Short bio or description
+
+[contacts]
+# Frequently used contacts (auto-populated)
+# Format: username = "PeerID"
+# Example: alice = "12D3KooWRelay1..."

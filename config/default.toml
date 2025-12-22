@@ -1,0 +1,75 @@
+# GhostWire Default Configuration
+# This file contains default settings for the GhostWire mesh network
+
+[network]
+# P2P listen address
+# Default: Listen on all interfaces, port 4001
+listen_addr = "/ip4/0.0.0.0/tcp/4001"
+
+# Enable NAT traversal features for internet-wide mesh networking
+enable_relay = true      # Enable relay transport for NAT traversal
+enable_autonat = true    # Automatically detect NAT type and public address
+enable_dcutr = true      # Direct Connection Upgrade through Relay
+
+# Relay servers for NAT traversal (Circuit Relay v2)
+# Add your own relay servers or use public ones
+# Format: "/ip4/<ip>/tcp/<port>/p2p/<peerID>"
+relay_servers = []
+
+# Bootstrap nodes for initial peer discovery across the internet
+# These are public libp2p bootstrap nodes
+bootstrap_nodes = [
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+]
+
+# STUN servers for NAT hole punching
+stun_servers = [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun2.l.google.com:19302",
+]
+
+# mDNS settings for local network discovery
+enable_mdns = true
+
+[web]
+# Web UI and API server settings
+host = "0.0.0.0"
+port = 3001
+
+# CORS settings
+cors_origins = ["*"]  # Allow all origins (change in production)
+
+[security]
+# Security settings
+enable_encryption = true
+enable_stealth = true
+
+# Threat detection
+enable_threat_detection = true
+max_failed_auth_attempts = 5
+block_duration_seconds = 300
+
+[gossipsub]
+# Gossipsub protocol settings
+max_transmit_size = 65536
+heartbeat_interval_seconds = 1
+history_length = 5
+history_gossip = 3
+
+[kademlia]
+# Kademlia DHT settings
+replication_factor = 10
+query_timeout_seconds = 60
+username_ttl_seconds = 86400  # 24 hours
+
+[logging]
+# Logging level: trace, debug, info, warn, error
+level = "info"
+log_to_file = true
+log_file_path = "logs/ghostwire.log"
+max_log_size_mb = 100
+max_log_backups = 5
