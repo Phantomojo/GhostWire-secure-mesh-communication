@@ -374,29 +374,21 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
             app.search_buffer.clear();
         }
 
-        // Navigation
-        KeyCode::Tab => {
-            app.current_tab = match app.current_tab {
-                Tab::Chat => Tab::Network,
-                Tab::Network => Tab::Config,
-                Tab::Config => Tab::Logs,
-                Tab::Logs => Tab::Chat,
-            };
-        }
-        KeyCode::Char('1') => app.current_tab = Tab::Chat,
-        KeyCode::Char('2') => app.current_tab = Tab::Network,
-        KeyCode::Char('3') => app.current_tab = Tab::Config,
-        KeyCode::Char('4') => app.current_tab = Tab::Logs,
-
-        // State navigation
-        KeyCode::Char('d') => app.app_state = AppState::Dashboard,
-        KeyCode::Char('h') => app.app_state = AppState::Help,
-        KeyCode::Char('a') => app.app_state = AppState::About,
-        KeyCode::Char('s') => app.app_state = AppState::Security,
-        KeyCode::Char('x') => app.app_state = AppState::Advanced,
-        KeyCode::Char('g') => app.app_state = AppState::Diagnostics,
-
         // Quick actions (Ctrl+ combinations)
+        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Help,
+        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Dashboard,
+        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Security,
+        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Advanced,
+        KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Err(e) = app.message_sender.send(TuiMessage::SystemDiagnostics) {
+                eprintln!("Failed to send diagnostics message: {}", e);
+            }
+        }
+        KeyCode::Char('6') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Err(e) = app.message_sender.send(TuiMessage::NetworkDiagnostics) {
+                eprintln!("Failed to send network diagnostics message: {}", e);
+            }
+        }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Err(e) = app.message_sender.send(TuiMessage::ScanNetwork) {
                 eprintln!("Failed to send scan message: {}", e);
@@ -434,21 +426,19 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
             }
         }
 
-        // Function keys (using proper key codes)
-        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Help,
-        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Dashboard,
-        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Security,
-        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Advanced,
-        KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Err(e) = app.message_sender.send(TuiMessage::SystemDiagnostics) {
-                eprintln!("Failed to send diagnostics message: {}", e);
-            }
+        // Navigation
+        KeyCode::Tab => {
+            app.current_tab = match app.current_tab {
+                Tab::Chat => Tab::Network,
+                Tab::Network => Tab::Config,
+                Tab::Config => Tab::Logs,
+                Tab::Logs => Tab::Chat,
+            };
         }
-        KeyCode::Char('6') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Err(e) = app.message_sender.send(TuiMessage::NetworkDiagnostics) {
-                eprintln!("Failed to send network diagnostics message: {}", e);
-            }
-        }
+        KeyCode::Char('1') => app.current_tab = Tab::Chat,
+        KeyCode::Char('2') => app.current_tab = Tab::Network,
+        KeyCode::Char('3') => app.current_tab = Tab::Config,
+        KeyCode::Char('4') => app.current_tab = Tab::Logs,
         KeyCode::Char('7') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Err(e) = app.message_sender.send(TuiMessage::SecurityAudit) {
                 eprintln!("Failed to send security audit message: {}", e);

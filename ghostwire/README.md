@@ -183,23 +183,25 @@ Start the web server and navigate to `http://localhost:8080`:
 
 ### API Endpoints
 
-#### Core API
-- `GET /api/status` - Get system status
-- `GET /api/identity` - Get identity information
-- `GET /api/public-key` - Get public key
-- `POST /api/send` - Send a message
+#### Core API (v2)
+- `GET /api/v2/status` - Get system status
+- `GET /api/v2/profile` - Get full profile information
+- `GET /api/v2/profile/username` - Get username
+- `GET /api/v2/profile/public-key` - Get public key
+- `POST /api/send_message` - Send a message (Legacy/v1)
 
 #### Mesh Network API
 - `POST /api/mesh/init` - Initialize mesh network
 - `POST /api/mesh/start` - Start mesh networking
 - `POST /api/mesh/send` - Send mesh message
-- `GET /api/mesh/stats` - Get mesh statistics
+- `GET /api/v2/peers` - Get connected peers list (v2)
 - `GET /api/mesh/topology` - Get network topology
 
-#### Security API
-- `GET /api/security/stats` - Get security statistics
+#### Security API (v2)
+- `GET /api/v2/security/dashboard` - Get full security dashboard stats
+- `GET /api/v2/security/events` - Get security events
 - `POST /api/security/scan` - Perform security scan
-- `GET /api/security/events` - Get security events
+- `GET /api/security/stats` - Get legacy security stats
 
 #### Reticulum API
 - `POST /api/reticulum/init` - Initialize Reticulum network

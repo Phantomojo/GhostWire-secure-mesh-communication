@@ -1,29 +1,37 @@
-use axum::{Router, routing::{post, get, put}, extract::State, response::IntoResponse, Json};
-use axum::extract::ws::{WebSocketUpgrade, WebSocket};
+use crate::api_v2_endpoints::*;
+use crate::api_v2_endpoints::*;
+use crate::api_v2_endpoints::*;
+use crate::api_v2_endpoints::*;
+use crate::core::{Core, Message};
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::http::Method;
 use axum::response::Html;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tower_http::cors::{CorsLayer, Any};
-use crate::core::{Core, Message};
+use axum::{
+    extract::State,
+    response::IntoResponse,
+    routing::{get, post, put},
+    Json, Router,
+};
 use base64::engine::general_purpose;
 use base64::Engine;
-use uuid;
 use chrono;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use reqwest;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::io::{self, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
+use uuid;
 
+use lazy_static::lazy_static;
 use local_ip_address;
+use rand::Rng;
+use std::collections::HashMap;
 use std::fs;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use rand::Rng;
-
 
 #[derive(Clone)]
 pub struct AppState {
@@ -64,7 +72,7 @@ pub struct Settings {
 }
 
 #[derive(Serialize)]
-pub struct ApiResponse<T> 
+pub struct ApiResponse<T>
 where
     T: Serialize,
 {
@@ -161,7 +169,11 @@ pub struct MeshStatsResponse {
 fn get_system_load() -> f32 {
     fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| s.split_whitespace().next().and_then(|v| v.parse::<f32>().ok()))
+        .and_then(|s| {
+            s.split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<f32>().ok())
+        })
         .unwrap_or(0.0)
 }
 
@@ -171,9 +183,17 @@ fn get_memory_usage() -> (u64, u64) {
         let mut available = 0;
         for line in content.lines() {
             if line.starts_with("MemTotal:") {
-                total = line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                total = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0);
             } else if line.starts_with("MemAvailable:") {
-                available = line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                available = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0);
             }
         }
         if total > 0 {
@@ -187,23 +207,23 @@ fn get_cpu_usage() -> f32 {
     // Simple mock for CPU usage based on loadavg / number of cores
     // In real production, we'd sample /proc/stat twice
     let load = get_system_load();
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as f32;
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1) as f32;
     ((load / cores) * 100.0).min(100.0)
 }
 
-pub async fn status() -> impl IntoResponse {
-    // Get real system metrics
+pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
     let local_ip = get_local_ip().unwrap_or_else(|| "unknown".to_string());
-    let peer_count = ACTIVE_CONNECTIONS.lock().unwrap().len();
-    
+
     let (mem_total, mem_used) = get_memory_usage();
     let cpu_usage = get_cpu_usage();
-    let system_load = get_system_load();
+    let sec_stats = state.core.get_security_stats().await;
+    let peer_count = state.core.get_peer_count();
 
     #[derive(Serialize)]
     struct SystemStatus {
@@ -211,40 +231,34 @@ pub async fn status() -> impl IntoResponse {
         uptime_seconds: u64,
         local_ip: String,
         peer_count: usize,
-        encryption_enabled: bool,
-        mesh_active: bool,
-        reticulum_active: bool,
+        threat_level: crate::core::security::ThreatLevel,
+        blocked_connections: u64,
         cpu_usage: f32,
         memory_total_kb: u64,
         memory_used_kb: u64,
-        system_load: f32,
         timestamp: String,
     }
-    
-    let status = SystemStatus {
-        status: "GhostWire API is running".to_string(),
-        uptime_seconds: uptime,
-        local_ip,
-        peer_count,
-        encryption_enabled: true,
-        mesh_active: true,
-        reticulum_active: false,
-        cpu_usage,
-        memory_total_kb: mem_total,
-        memory_used_kb: mem_used,
-        system_load,
-        timestamp: chrono::Utc::now().to_rfc3339(),
-    };
-    
+
     Json(ApiResponse {
         success: true,
-        data: Some(status),
+        data: Some(SystemStatus {
+            status: "OPERATIONAL".to_string(),
+            uptime_seconds: uptime,
+            local_ip,
+            peer_count,
+            threat_level: sec_stats.threat_level,
+            blocked_connections: sec_stats.blocked_connections,
+            cpu_usage,
+            memory_total_kb: mem_total,
+            memory_used_kb: mem_used,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }),
         error: None,
     })
 }
 
 pub async fn send_message(
-    State(state): State<Arc<AppState>>, 
+    State(state): State<Arc<AppState>>,
     Json(req): Json<SendMessageRequest>,
 ) -> impl IntoResponse {
     // Enhanced message sending with encryption and delivery tracking
@@ -253,10 +267,10 @@ pub async fn send_message(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     // Simulate encryption
     let encrypted_content = format!("ENCRYPTED:{}", req.message);
-    
+
     // Create a proper Message object
     let message = Message {
         id: message_id,
@@ -275,7 +289,7 @@ pub async fn send_message(
     } else {
         "delivered"
     };
-    
+
     #[derive(Serialize)]
     struct MessageResponse {
         message_id: String,
@@ -286,7 +300,7 @@ pub async fn send_message(
         recipient: String,
         delivery_confirmations: u32,
     }
-    
+
     let response = MessageResponse {
         message_id: message_id.to_string(),
         status: delivery_status.to_string(),
@@ -311,38 +325,30 @@ pub async fn send_message(
     }
 }
 
-pub async fn get_peers(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // Get real peers from active connections
-    let connections = ACTIVE_CONNECTIONS.lock().unwrap();
-    let mut peers: Vec<PeerInfo> = connections.values().cloned().collect();
-    
-    // Add some simulated discovered peers for demonstration
-    if peers.is_empty() {
-        peers.push(PeerInfo {
-            id: "peer_001".to_string(),
-            name: "Alice's Node".to_string(),
-            status: "discovered".to_string(),
-            last_seen: chrono::Utc::now().to_rfc3339(),
-            public_key: Some("alice_public_key_123".to_string()),
-        });
-        
-        peers.push(PeerInfo {
-            id: "peer_002".to_string(),
-            name: "Bob's Node".to_string(),
-            status: "discovered".to_string(),
-            last_seen: chrono::Utc::now().to_rfc3339(),
-            public_key: Some("bob_public_key_456".to_string()),
-        });
-        
-        peers.push(PeerInfo {
-            id: "peer_003".to_string(),
-            name: "Charlie's Node".to_string(),
-            status: "connected".to_string(),
-            last_seen: chrono::Utc::now().to_rfc3339(),
-            public_key: Some("charlie_public_key_789".to_string()),
-        });
+pub async fn get_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut peers: Vec<PeerInfo> = Vec::new();
+
+    #[cfg(feature = "mesh")]
+    if let Some(mesh_manager) = &state.core.mesh_manager {
+        let topology = mesh_manager.read().await.get_topology().await;
+        for (id, node) in topology.nodes {
+            peers.push(PeerInfo {
+                id,
+                name: node.username,
+                status: if node.is_online {
+                    "connected".to_string()
+                } else {
+                    "offline".to_string()
+                },
+                last_seen: node.last_seen.to_string(),
+                public_key: Some(base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    node.public_key,
+                )),
+            });
+        }
     }
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(PeersResponse { peers }),
@@ -352,7 +358,7 @@ pub async fn get_peers(State(_state): State<Arc<AppState>>) -> impl IntoResponse
 
 pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let peer_count = ACTIVE_CONNECTIONS.lock().unwrap().len();
-    
+
     #[derive(Serialize)]
     struct EnhancedSettings {
         stealth_mode: bool,
@@ -367,7 +373,7 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoRespon
         log_level: String,
         last_updated: String,
     }
-    
+
     let settings = EnhancedSettings {
         stealth_mode: false,
         encryption_enabled: true,
@@ -381,7 +387,7 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoRespon
         log_level: "info".to_string(),
         last_updated: chrono::Utc::now().to_rfc3339(),
     };
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(settings),
@@ -390,12 +396,15 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoRespon
 }
 
 pub async fn update_settings(
-    State(_state): State<Arc<AppState>>, 
-    Json(settings): Json<Settings>
+    State(_state): State<Arc<AppState>>,
+    Json(settings): Json<Settings>,
 ) -> impl IntoResponse {
     // TODO: Implement actual settings update
-    println!("Updating settings: stealth_mode = {}", settings.stealth_mode);
-    
+    println!(
+        "Updating settings: stealth_mode = {}",
+        settings.stealth_mode
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(settings),
@@ -406,13 +415,13 @@ pub async fn update_settings(
 pub async fn get_public_key(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let public_key = general_purpose::STANDARD.encode(state.core.get_public_key());
     let key_id = state.core.get_key_id();
-    
+
     #[derive(Serialize)]
     struct KeyInfo {
         public_key: String,
         key_id: String,
     }
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(KeyInfo { public_key, key_id }),
@@ -440,7 +449,8 @@ async fn handle_socket(mut socket: WebSocket) {
 }
 
 pub async fn root() -> impl IntoResponse {
-    Html(r#"
+    Html(
+        r#"
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -598,7 +608,8 @@ curl -X POST http://127.0.0.1:3000/api/send_message \
     </div>
 </body>
 </html>
-    "#)
+    "#,
+    )
 }
 
 // Real peer connection management
@@ -612,11 +623,11 @@ lazy_static::lazy_static! {
 
 pub async fn connect_to_peer(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<PeerConnectionRequest>
+    Json(req): Json<PeerConnectionRequest>,
 ) -> impl IntoResponse {
     let connection_id = Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
-    
+
     // Create connection request
     let connection_request = ConnectionRequest {
         id: connection_id.clone(),
@@ -628,15 +639,18 @@ pub async fn connect_to_peer(
         timestamp: timestamp.clone(),
         status: "pending".to_string(),
     };
-    
+
     // Store the request
     {
         let mut requests = CONNECTION_REQUESTS.lock().unwrap();
         requests.insert(connection_id.clone(), connection_request);
     }
-    
+
     // Try to send connection request to the target peer
-    let target_url = format!("http://{}:{}/api/connection_request", req.peer_ip, req.peer_port);
+    let target_url = format!(
+        "http://{}:{}/api/connection_request",
+        req.peer_ip, req.peer_port
+    );
     let request_data = serde_json::json!({
         "connection_id": connection_id,
         "from_peer_id": "local_node",
@@ -646,12 +660,13 @@ pub async fn connect_to_peer(
         "message": req.message,
         "timestamp": timestamp
     });
-    
+
     match reqwest::Client::new()
         .post(&target_url)
         .json(&request_data)
         .send()
-        .await {
+        .await
+    {
         Ok(response) => {
             if response.status().is_success() {
                 Json(ApiResponse {
@@ -677,26 +692,24 @@ pub async fn connect_to_peer(
                 })
             }
         }
-        Err(_) => {
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                error: Some("Could not reach peer".to_string()),
-            })
-        }
+        Err(_) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Could not reach peer".to_string()),
+        }),
     }
 }
 
 pub async fn connection_request_handler(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<ConnectionRequest>
+    Json(req): Json<ConnectionRequest>,
 ) -> impl IntoResponse {
     // Store incoming connection request
     {
         let mut requests = CONNECTION_REQUESTS.lock().unwrap();
         requests.insert(req.id.clone(), req.clone());
     }
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Connection request received"),
@@ -706,7 +719,7 @@ pub async fn connection_request_handler(
 
 pub async fn accept_connection(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<PeerConnectionAcceptRequest>
+    Json(req): Json<PeerConnectionAcceptRequest>,
 ) -> impl IntoResponse {
     let mut peer_info_to_add = None;
     let mut notify_url_info = None;
@@ -724,10 +737,18 @@ pub async fn accept_connection(
                     public_key: None,
                 };
                 peer_info_to_add = Some(peer_info);
-                notify_url_info = Some((connection_request.from_peer_ip.clone(), connection_request.from_peer_port, true));
+                notify_url_info = Some((
+                    connection_request.from_peer_ip.clone(),
+                    connection_request.from_peer_port,
+                    true,
+                ));
             } else {
                 connection_request.status = "rejected".to_string();
-                notify_url_info = Some((connection_request.from_peer_ip.clone(), connection_request.from_peer_port, false));
+                notify_url_info = Some((
+                    connection_request.from_peer_ip.clone(),
+                    connection_request.from_peer_port,
+                    false,
+                ));
             }
         }
     }
@@ -775,17 +796,18 @@ pub async fn accept_connection(
             error: Some("Connection request not found".to_string()),
         }
     };
-    
+
     Json(result)
 }
 
 pub async fn get_connection_requests(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let requests = CONNECTION_REQUESTS.lock().unwrap();
-    let pending_requests: Vec<ConnectionRequest> = requests.values()
+    let pending_requests: Vec<ConnectionRequest> = requests
+        .values()
         .filter(|req| req.status == "pending")
         .cloned()
         .collect();
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(serde_json::to_value(pending_requests).unwrap()),
@@ -795,7 +817,7 @@ pub async fn get_connection_requests(State(_state): State<Arc<AppState>>) -> imp
 
 pub async fn disconnect_peer(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<PeerConnectionRequest>
+    Json(req): Json<PeerConnectionRequest>,
 ) -> impl IntoResponse {
     let mut notify_info = None;
 
@@ -805,7 +827,7 @@ pub async fn disconnect_peer(
             notify_info = Some((req.peer_ip.clone(), req.peer_port));
         }
     }
-    
+
     let result = if let Some((ip, port)) = notify_info {
         // Notify the peer about disconnection
         let notify_url = format!("http://{}:{}/api/peer_disconnected", ip, port);
@@ -817,7 +839,7 @@ pub async fn disconnect_peer(
             }))
             .send()
             .await;
-        
+
         ApiResponse {
             success: true,
             data: Some(serde_json::Value::String("Peer disconnected".to_string())),
@@ -830,7 +852,7 @@ pub async fn disconnect_peer(
             error: Some("Peer not connected".to_string()),
         }
     };
-    
+
     Json(result)
 }
 
@@ -848,17 +870,19 @@ pub struct PingResponse {
 
 pub async fn ping_peer(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<PingRequest>
+    Json(req): Json<PingRequest>,
 ) -> impl IntoResponse {
     let connections = ACTIVE_CONNECTIONS.lock().unwrap();
-    
+
     if let Some(peer) = connections.get(&req.peer_id) {
         // Simulate ping (in real implementation, this would actually ping the peer)
         let latency = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() as u64 % 200 + 20; // Random latency between 20-220ms
-        
+            .as_millis() as u64
+            % 200
+            + 20; // Random latency between 20-220ms
+
         Json(ApiResponse {
             success: true,
             data: Some(PingResponse {
@@ -890,7 +914,7 @@ pub struct BroadcastResponse {
 // Enhanced broadcast with REAL functionality
 pub async fn broadcast_message(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<BroadcastRequest>
+    Json(req): Json<BroadcastRequest>,
 ) -> impl IntoResponse {
     // REAL broadcast functionality - actually send to connected peers
     let message_id = uuid::Uuid::new_v4();
@@ -898,31 +922,34 @@ pub async fn broadcast_message(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     // Get actual connected peers
     let connections = ACTIVE_CONNECTIONS.lock().unwrap();
     let peer_count = connections.len();
-    
+
     // REAL: Actually broadcast to connected peers
     let mut delivery_status = Vec::new();
     for (peer_id, peer_info) in connections.iter() {
         // REAL: Send actual message to peer
-        println!("🔊 REAL BROADCAST: Sending to {} ({}): {}", peer_id, peer_info.name, req.message);
-        
+        println!(
+            "🔊 REAL BROADCAST: Sending to {} ({}): {}",
+            peer_id, peer_info.name, req.message
+        );
+
         // REAL: Simulate actual network delivery (in real implementation, this would use libp2p)
         delivery_status.push(format!("{}:delivered", peer_id));
-        
+
         // REAL: Log actual broadcast attempt
         println!("📡 REAL: Message sent to peer {} via network", peer_id);
     }
-    
+
     // REAL: If no peers connected, simulate network discovery
     if peer_count == 0 {
         println!("🔍 REAL: No peers connected, attempting network discovery...");
         // REAL: In actual implementation, this would scan the network for peers
         delivery_status.push("network_discovery:attempted".to_string());
     }
-    
+
     #[derive(Serialize)]
     struct RealBroadcastResponse {
         message_id: String,
@@ -937,7 +964,7 @@ pub async fn broadcast_message(
         delivery_time_ms: u64,
         real_network_activity: bool,
     }
-    
+
     let response = RealBroadcastResponse {
         message_id: message_id.to_string(),
         recipients: peer_count,
@@ -946,15 +973,22 @@ pub async fn broadcast_message(
         encryption_algorithm: "AES-256-GCM".to_string(),
         timestamp,
         broadcast_type: "real_mesh_network".to_string(),
-        network_coverage: if peer_count > 0 { (peer_count as f32 / 10.0).min(1.0) } else { 0.0 },
+        network_coverage: if peer_count > 0 {
+            (peer_count as f32 / 10.0).min(1.0)
+        } else {
+            0.0
+        },
         message_size: req.message.len(),
         delivery_time_ms: 150,
         real_network_activity: peer_count > 0,
     };
-    
+
     // REAL: Log actual broadcast activity
-    println!("🔊 REAL BROADCAST: Message '{}' sent to {} recipients via actual network", req.message, peer_count);
-    
+    println!(
+        "🔊 REAL BROADCAST: Message '{}' sent to {} recipients via actual network",
+        req.message, peer_count
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(response),
@@ -963,12 +997,10 @@ pub async fn broadcast_message(
 }
 
 // Additional endpoints for dynamic functionality
-pub async fn backup_system(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn backup_system(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate backup process
     std::thread::sleep(std::time::Duration::from_millis(1000));
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Backup completed successfully"),
@@ -976,9 +1008,7 @@ pub async fn backup_system(
     })
 }
 
-pub async fn get_system_logs(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn get_system_logs(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate system logs
     let logs = vec![
         "2024-01-01 10:00:00 - System started",
@@ -987,7 +1017,7 @@ pub async fn get_system_logs(
         "2024-01-01 10:03:00 - Message sent to peer",
         "2024-01-01 10:04:00 - Security check passed",
     ];
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(logs),
@@ -996,12 +1026,10 @@ pub async fn get_system_logs(
 }
 
 // Security endpoints
-pub async fn rotate_keys(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn rotate_keys(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate key rotation
     std::thread::sleep(std::time::Duration::from_millis(500));
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Keys rotated successfully"),
@@ -1009,12 +1037,10 @@ pub async fn rotate_keys(
     })
 }
 
-pub async fn upgrade_encryption(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn upgrade_encryption(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate encryption upgrade
     std::thread::sleep(std::time::Duration::from_millis(1000));
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Encryption upgraded to AES-256"),
@@ -1024,11 +1050,11 @@ pub async fn upgrade_encryption(
 
 pub async fn configure_firewall(
     State(_state): State<Arc<AppState>>,
-    Json(req): Json<serde_json::Value>
+    Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // Simulate firewall configuration
     println!("Configuring firewall with: {:?}", req);
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Firewall configured successfully"),
@@ -1036,12 +1062,10 @@ pub async fn configure_firewall(
     })
 }
 
-pub async fn test_firewall(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn test_firewall(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate firewall test
     let result = "Passed";
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(serde_json::json!({
@@ -1052,17 +1076,15 @@ pub async fn test_firewall(
     })
 }
 
-pub async fn get_auth_users(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn get_auth_users(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate auth users
     let users = vec![
         "admin - Active",
-        "user1 - Active", 
+        "user1 - Active",
         "user2 - Inactive",
-        "guest - Limited"
+        "guest - Limited",
     ];
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(users),
@@ -1070,12 +1092,10 @@ pub async fn get_auth_users(
     })
 }
 
-pub async fn audit_auth(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn audit_auth(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate auth audit
     std::thread::sleep(std::time::Duration::from_millis(800));
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Authentication audit completed - No issues found"),
@@ -1084,20 +1104,28 @@ pub async fn audit_auth(
 }
 
 // REAL security scan with actual system checks
-pub async fn security_scan(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn security_scan(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let start_time = SystemTime::now();
-    
+
     let mut threats = Vec::new();
     let mut vulnerabilities = Vec::new();
-    
+
     info!("🔍 REAL SECURITY SCAN: Checking system security...");
-    
+
     // Check for SUID binaries in common paths (Risk: privilege escalation)
     if let Ok(output) = std::process::Command::new("find")
-        .args(["/bin", "/sbin", "/usr/bin", "/usr/sbin", "-type", "f", "-perm", "-4000"])
-        .output() {
+        .args([
+            "/bin",
+            "/sbin",
+            "/usr/bin",
+            "/usr/sbin",
+            "-type",
+            "f",
+            "-perm",
+            "-4000",
+        ])
+        .output()
+    {
         let suid_files = String::from_utf8_lossy(&output.stdout);
         let count = suid_files.lines().count();
         if count > 50 {
@@ -1110,17 +1138,32 @@ pub async fn security_scan(
         let connections = String::from_utf8_lossy(&output.stdout);
         for line in connections.lines() {
             if line.contains("0.0.0.0:") || line.contains("[::]:") {
-                if !line.contains(":22") && !line.contains(":80") && !line.contains(":443") && !line.contains(":3001") {
-                    vulnerabilities.push(format!("Unexpected public listening port: {}", line.trim()));
+                if !line.contains(":22")
+                    && !line.contains(":80")
+                    && !line.contains(":443")
+                    && !line.contains(":3001")
+                {
+                    vulnerabilities
+                        .push(format!("Unexpected public listening port: {}", line.trim()));
                 }
             }
         }
     }
-    
+
     // Check for suspicious world-writable directories
     if let Ok(output) = std::process::Command::new("find")
-        .args(["/tmp", "/var/tmp", "-maxdepth", "1", "-perm", "-0002", "-type", "d"])
-        .output() {
+        .args([
+            "/tmp",
+            "/var/tmp",
+            "-maxdepth",
+            "1",
+            "-perm",
+            "-0002",
+            "-type",
+            "d",
+        ])
+        .output()
+    {
         let writable_dirs = String::from_utf8_lossy(&output.stdout);
         if !writable_dirs.is_empty() {
             vulnerabilities.push("World-writable temporary directories detected".to_string());
@@ -1128,7 +1171,11 @@ pub async fn security_scan(
     }
 
     // Process analysis - look for hidden or suspicious names
-    if let Ok(output) = std::process::Command::new("ps").arg("-eo").arg("comm").output() {
+    if let Ok(output) = std::process::Command::new("ps")
+        .arg("-eo")
+        .arg("comm")
+        .output()
+    {
         let processes = String::from_utf8_lossy(&output.stdout);
         let suspicious_names = [".", "..", " ", "kworker/", "migration/"]; // overly common or hidden names
         for line in processes.lines() {
@@ -1138,9 +1185,9 @@ pub async fn security_scan(
             }
         }
     }
-    
+
     let scan_duration = start_time.elapsed().unwrap().as_millis();
-    
+
     #[derive(Serialize)]
     struct RealSecurityScanResult {
         scan_id: String,
@@ -1157,20 +1204,25 @@ pub async fn security_scan(
         scan_areas: Vec<String>,
         real_system_checks: bool,
     }
-    
-    let security_score = if threats.is_empty() && vulnerabilities.is_empty() { 98 } 
-                         else if threats.is_empty() { 85 } 
-                         else { 60 };
-    
+
+    let security_score = if threats.is_empty() && vulnerabilities.is_empty() {
+        98
+    } else if threats.is_empty() {
+        85
+    } else {
+        60
+    };
+
     let mut recommendations = vec![
         "Review and minimize SUID binaries".to_string(),
         "Close unnecessary public listening ports".to_string(),
         "Implement stricter file permissions on temp directories".to_string(),
     ];
     if !threats.is_empty() {
-        recommendations.push("Investigate potentially hidden or suspicious processes immediately".to_string());
+        recommendations
+            .push("Investigate potentially hidden or suspicious processes immediately".to_string());
     }
-    
+
     let result = RealSecurityScanResult {
         scan_id: uuid::Uuid::new_v4().to_string(),
         scan_type: "Real System Security Scan".to_string(),
@@ -1191,10 +1243,12 @@ pub async fn security_scan(
         ],
         real_system_checks: true,
     };
-    
-    info!("🔍 REAL SECURITY SCAN: Completed in {}ms, found {} threats, {} vulnerabilities", 
-             scan_duration, result.threats_found, result.vulnerabilities_found);
-    
+
+    info!(
+        "🔍 REAL SECURITY SCAN: Completed in {}ms, found {} threats, {} vulnerabilities",
+        scan_duration, result.threats_found, result.vulnerabilities_found
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(result),
@@ -1203,33 +1257,35 @@ pub async fn security_scan(
 }
 
 // REAL threat hunting with actual system analysis
-pub async fn threat_hunt(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn threat_hunt(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let start_time = SystemTime::now();
-    
+
     let mut threats = Vec::new();
     let mut indicators = Vec::new();
     let mut suspicious_ips = Vec::new();
-    
+
     info!("🎯 REAL THREAT HUNT: Analyzing system for threats...");
-    
+
     // REAL: Check system logs for actual failed login attempts
     if let Ok(output) = std::process::Command::new("journalctl")
         .args(["-n", "100", "_TRANSPORT=syslog"])
-        .output() {
+        .output()
+    {
         let logs = String::from_utf8_lossy(&output.stdout);
         let failures = logs.matches("failed").count() + logs.matches("failure").count();
         if failures > 5 {
-            indicators.push(format!("Detected {} authentication-related failure events in recent logs", failures));
+            indicators.push(format!(
+                "Detected {} authentication-related failure events in recent logs",
+                failures
+            ));
         }
-        
+
         // Look for unauthorized sudo attempts
         if logs.contains("NOT in sudoers") || logs.contains("auth failure") {
             threats.push("Unauthorized sudo attempt or auth failure detected in logs".to_string());
         }
     }
-    
+
     // REAL: Check for unusual network activity (established connections to non-standard ports)
     if let Ok(output) = std::process::Command::new("ss").arg("-atn").output() {
         let connections = String::from_utf8_lossy(&output.stdout);
@@ -1240,7 +1296,10 @@ pub async fn threat_hunt(
                     if let Some(port) = remote.split(':').last() {
                         if let Ok(p) = port.parse::<u16>() {
                             if p == 4444 || p == 31337 || p == 6667 {
-                                threats.push(format!("Active connection to highly suspicious port: {}", p));
+                                threats.push(format!(
+                                    "Active connection to highly suspicious port: {}",
+                                    p
+                                ));
                                 suspicious_ips.push(remote.to_string());
                             }
                         }
@@ -1249,9 +1308,9 @@ pub async fn threat_hunt(
             }
         }
     }
-    
+
     let hunt_duration = start_time.elapsed().unwrap().as_millis();
-    
+
     #[derive(Serialize)]
     struct RealThreatHuntResult {
         hunt_id: String,
@@ -1270,12 +1329,17 @@ pub async fn threat_hunt(
         hunt_techniques: Vec<String>,
         real_analysis: bool,
     }
-    
-    let threat_level = if threats.len() > 1 { "CRITICAL" } 
-                       else if !threats.is_empty() { "HIGH" } 
-                       else if !indicators.is_empty() { "MEDIUM" } 
-                       else { "LOW" };
-    
+
+    let threat_level = if threats.len() > 1 {
+        "CRITICAL"
+    } else if !threats.is_empty() {
+        "HIGH"
+    } else if !indicators.is_empty() {
+        "MEDIUM"
+    } else {
+        "LOW"
+    };
+
     let result = RealThreatHuntResult {
         hunt_id: uuid::Uuid::new_v4().to_string(),
         hunt_type: "Real System Threat Hunting".to_string(),
@@ -1301,9 +1365,12 @@ pub async fn threat_hunt(
         ],
         real_analysis: true,
     };
-    
-    info!("🎯 REAL THREAT HUNT: Completed in {}ms, level: {}", hunt_duration, threat_level);
-    
+
+    info!(
+        "🎯 REAL THREAT HUNT: Completed in {}ms, level: {}",
+        hunt_duration, threat_level
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(result),
@@ -1312,20 +1379,22 @@ pub async fn threat_hunt(
 }
 
 // REAL security audit with actual system assessment
-pub async fn security_audit(
-    State(state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn security_audit(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let start_time = SystemTime::now();
-    
+
     // REAL: Perform actual security audit
     let mut findings = Vec::new();
     let mut recommendations = Vec::new();
     let mut compliance_issues = Vec::new();
-    
+
     println!("📋 REAL SECURITY AUDIT: Conducting comprehensive system audit...");
-    
+
     // REAL: Check system security configuration
-    if let Ok(output) = std::process::Command::new("systemctl").arg("status").arg("firewalld").output() {
+    if let Ok(output) = std::process::Command::new("systemctl")
+        .arg("status")
+        .arg("firewalld")
+        .output()
+    {
         let status = String::from_utf8_lossy(&output.stdout);
         if status.contains("active") {
             findings.push("Firewall is active and protecting the system".to_string());
@@ -1334,9 +1403,13 @@ pub async fn security_audit(
             recommendations.push("Enable and configure firewall".to_string());
         }
     }
-    
+
     // REAL: Check for security updates
-    if let Ok(output) = std::process::Command::new("apt").arg("list").arg("--upgradable").output() {
+    if let Ok(output) = std::process::Command::new("apt")
+        .arg("list")
+        .arg("--upgradable")
+        .output()
+    {
         let updates = String::from_utf8_lossy(&output.stdout);
         if updates.contains("security") {
             compliance_issues.push("Security updates available".to_string());
@@ -1345,7 +1418,7 @@ pub async fn security_audit(
             findings.push("System is up to date with security patches".to_string());
         }
     }
-    
+
     // REAL: Check user account security
     if let Ok(output) = std::process::Command::new("passwd").arg("-S").output() {
         let accounts = String::from_utf8_lossy(&output.stdout);
@@ -1355,9 +1428,9 @@ pub async fn security_audit(
             compliance_issues.push("User account security needs review".to_string());
         }
     }
-    
+
     let audit_duration = start_time.elapsed().unwrap().as_millis();
-    
+
     #[derive(Serialize)]
     struct RealSecurityAuditResult {
         audit_id: String,
@@ -1378,11 +1451,23 @@ pub async fn security_audit(
         audit_areas: Vec<String>,
         real_assessment: bool,
     }
-    
+
     let overall_score = if compliance_issues.is_empty() { 95 } else { 85 };
-    let grade = if overall_score >= 90 { "A" } else if overall_score >= 80 { "B" } else { "C" };
-    let risk_level = if overall_score >= 90 { "LOW" } else if overall_score >= 80 { "MEDIUM" } else { "HIGH" };
-    
+    let grade = if overall_score >= 90 {
+        "A"
+    } else if overall_score >= 80 {
+        "B"
+    } else {
+        "C"
+    };
+    let risk_level = if overall_score >= 90 {
+        "LOW"
+    } else if overall_score >= 80 {
+        "MEDIUM"
+    } else {
+        "HIGH"
+    };
+
     let result = RealSecurityAuditResult {
         audit_id: uuid::Uuid::new_v4().to_string(),
         audit_type: "Real System Security Audit".to_string(),
@@ -1398,7 +1483,10 @@ pub async fn security_audit(
         audit_status: "COMPLETED".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         risk_level: risk_level.to_string(),
-        next_audit_date: chrono::Utc::now().checked_add_signed(chrono::Duration::days(90)).unwrap().to_rfc3339(),
+        next_audit_date: chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::days(90))
+            .unwrap()
+            .to_rfc3339(),
         audit_areas: vec![
             "Firewall Configuration".to_string(),
             "Security Updates".to_string(),
@@ -1407,9 +1495,12 @@ pub async fn security_audit(
         ],
         real_assessment: true,
     };
-    
-    println!("📋 REAL SECURITY AUDIT: Completed in {}ms, score: {} (Grade {})", audit_duration, overall_score, grade);
-    
+
+    println!(
+        "📋 REAL SECURITY AUDIT: Completed in {}ms, score: {} (Grade {})",
+        audit_duration, overall_score, grade
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(result),
@@ -1417,12 +1508,10 @@ pub async fn security_audit(
     })
 }
 
-pub async fn backup_security(
-    State(_state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn backup_security(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // Simulate security backup
     std::thread::sleep(std::time::Duration::from_millis(1200));
-    
+
     Json(ApiResponse {
         success: true,
         data: Some("Security configuration backed up successfully"),
@@ -1431,29 +1520,27 @@ pub async fn backup_security(
 }
 
 // Communication endpoints
-pub async fn analyze_communications(
-    State(state): State<Arc<AppState>>
-) -> impl IntoResponse {
+pub async fn analyze_communications(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let start_time = SystemTime::now();
-    
+
     // REAL: Analyze actual communication patterns
     let mut patterns = Vec::new();
     let mut anomalies = Vec::new();
     let mut insights = Vec::new();
-    
+
     println!("📊 REAL COMMUNICATION ANALYSIS: Analyzing network communications...");
-    
+
     // REAL: Check actual network connections
     if let Ok(output) = std::process::Command::new("ss").arg("-tuln").output() {
         let connections = String::from_utf8_lossy(&output.stdout);
         let connection_count = connections.lines().count();
         patterns.push(format!("Active network connections: {}", connection_count));
-        
+
         // REAL: Look for unusual connection patterns
         if connection_count > 100 {
             anomalies.push("Unusually high number of network connections".to_string());
         }
-        
+
         // REAL: Check for specific service patterns
         if connections.contains(":80") || connections.contains(":443") {
             patterns.push("Web traffic detected".to_string());
@@ -1462,26 +1549,29 @@ pub async fn analyze_communications(
             patterns.push("SSH connections active".to_string());
         }
     }
-    
+
     // REAL: Check network interface statistics
-    if let Ok(output) = std::process::Command::new("cat").arg("/proc/net/dev").output() {
+    if let Ok(output) = std::process::Command::new("cat")
+        .arg("/proc/net/dev")
+        .output()
+    {
         let stats = String::from_utf8_lossy(&output.stdout);
         insights.push("Network interface statistics available".to_string());
     }
-    
+
     // REAL: Check for active network services
     if let Ok(output) = std::process::Command::new("netstat").arg("-tuln").output() {
         let services = String::from_utf8_lossy(&output.stdout);
         let service_count = services.lines().count();
         patterns.push(format!("Active network services: {}", service_count));
-        
+
         if service_count > 20 {
             insights.push("Multiple network services running".to_string());
         }
     }
-    
+
     let analysis_duration = start_time.elapsed().unwrap().as_millis();
-    
+
     #[derive(Serialize)]
     struct RealCommunicationAnalysisResult {
         analysis_id: String,
@@ -1501,10 +1591,10 @@ pub async fn analyze_communications(
         peer_activity_summary: Vec<String>,
         real_network_analysis: bool,
     }
-    
+
     let network_health_score = if anomalies.is_empty() { 98 } else { 85 };
     let encryption_coverage = 100.0;
-    
+
     let result = RealCommunicationAnalysisResult {
         analysis_id: uuid::Uuid::new_v4().to_string(),
         analysis_type: "Real Network Communication Analysis".to_string(),
@@ -1527,10 +1617,12 @@ pub async fn analyze_communications(
         ],
         real_network_analysis: true,
     };
-    
-    println!("📊 REAL COMMUNICATION ANALYSIS: Completed in {}ms, found {} patterns, {} anomalies", 
-             analysis_duration, result.patterns_found, result.anomalies_detected);
-    
+
+    println!(
+        "📊 REAL COMMUNICATION ANALYSIS: Completed in {}ms, found {} patterns, {} anomalies",
+        analysis_duration, result.patterns_found, result.anomalies_detected
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some(result),
@@ -1540,12 +1632,15 @@ pub async fn analyze_communications(
 
 #[allow(dead_code)]
 pub async fn register_peer(
-    State(_state): State<Arc<AppState>>, 
-    Json(req): Json<PeerDiscoveryRequest>
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<PeerDiscoveryRequest>,
 ) -> impl IntoResponse {
     // TODO: Implement actual peer registration and storage
-    println!("New peer registered: {} ({}) at {}", req.peer_name, req.peer_id, req.address);
-    
+    println!(
+        "New peer registered: {} ({}) at {}",
+        req.peer_name, req.peer_id, req.address
+    );
+
     Json(ApiResponse {
         success: true,
         data: Some("Peer registered successfully"),
@@ -1557,43 +1652,64 @@ pub async fn register_peer(
 pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let mut discovered_peers = Vec::new();
-    
+
     // Extract network prefix (e.g., "192.168.1" from "192.168.1.100")
     if let Some(network_prefix) = local_ip.rsplitn(2, '.').nth(1) {
         let base_network = format!("{}.", network_prefix);
-        
+
         // Scan common ports for GhostWire nodes
         let ports = vec![3001, 3002, 3003, 3004, 3005];
-        
+
         for port in ports {
             for i in 1..255 {
                 let target_ip = format!("{}{}", base_network, i);
                 let target_url = format!("http://{}:{}/api/status", target_ip, port);
-                
+
                 // Try to connect to each potential GhostWire node
                 if let Ok(response) = reqwest::get(&target_url).await {
                     if response.status().is_success() {
                         // Found a GhostWire node! Get its info
-                        if let Ok(node_info) = reqwest::get(&format!("http://{}:{}/api/get_network_info", target_ip, port)).await {
+                        if let Ok(node_info) = reqwest::get(&format!(
+                            "http://{}:{}/api/get_network_info",
+                            target_ip, port
+                        ))
+                        .await
+                        {
                             if let Ok(info_data) = node_info.json::<serde_json::Value>().await {
                                 if let Some(data) = info_data.get("data") {
                                     if let Some(ip) = data.get("local_ip") {
                                         // Try to get username
-                                        let username = if let Ok(user_response) = reqwest::get(&format!("http://{}:{}/api/get_username", target_ip, port)).await {
-                                            if let Ok(user_data) = user_response.json::<serde_json::Value>().await {
-                                                user_data.get("data").and_then(|d| d.as_str()).unwrap_or("Unknown").to_string()
+                                        let username = if let Ok(user_response) =
+                                            reqwest::get(&format!(
+                                                "http://{}:{}/api/get_username",
+                                                target_ip, port
+                                            ))
+                                            .await
+                                        {
+                                            if let Ok(user_data) =
+                                                user_response.json::<serde_json::Value>().await
+                                            {
+                                                user_data
+                                                    .get("data")
+                                                    .and_then(|d| d.as_str())
+                                                    .unwrap_or("Unknown")
+                                                    .to_string()
                                             } else {
                                                 "Unknown".to_string()
                                             }
                                         } else {
                                             "Unknown".to_string()
                                         };
-                                        
+
                                         discovered_peers.push(DiscoveredPeer {
                                             ip: ip.as_str().unwrap_or(&target_ip).to_string(),
                                             port,
                                             username,
-                                            node_id: format!("node_{}_{}", ip.as_str().unwrap_or("unknown"), port),
+                                            node_id: format!(
+                                                "node_{}_{}",
+                                                ip.as_str().unwrap_or("unknown"),
+                                                port
+                                            ),
                                             public_key: "discovered_key".to_string(),
                                             last_seen: "now".to_string(),
                                             status: "online".to_string(),
@@ -1607,31 +1723,12 @@ pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoRespo
             }
         }
     }
-    
-    // If no real peers found, add some mock data for testing
+
+    // Return actual discovered peers only (no mocks in production)
     if discovered_peers.is_empty() {
-        discovered_peers = vec![
-            DiscoveredPeer {
-                ip: "192.168.1.100".to_string(),
-                port: 3002,
-                username: "Alice".to_string(),
-                node_id: "node_alice_001".to_string(),
-                public_key: "mock_public_key_1".to_string(),
-                last_seen: "2 min ago".to_string(),
-                status: "online".to_string(),
-            },
-            DiscoveredPeer {
-                ip: "192.168.1.101".to_string(),
-                port: 3003,
-                username: "Bob".to_string(),
-                node_id: "node_bob_002".to_string(),
-                public_key: "mock_public_key_2".to_string(),
-                last_seen: "5 min ago".to_string(),
-                status: "online".to_string(),
-            },
-        ];
+        info!("No GhostWire peers discovered on local network");
     }
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(NetworkScanResponse {
@@ -1644,8 +1741,8 @@ pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoRespo
 
 #[allow(dead_code)]
 pub async fn set_username(
-    State(_state): State<Arc<AppState>>, 
-    Json(req): Json<UsernameRequest>
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<UsernameRequest>,
 ) -> impl IntoResponse {
     // Store username in persistent storage (username.txt)
     let result = fs::write("username.txt", &req.username);
@@ -1681,13 +1778,13 @@ pub async fn get_username(State(_state): State<Arc<AppState>>) -> impl IntoRespo
 #[allow(dead_code)]
 pub async fn get_network_info(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-    
+
     #[derive(Serialize)]
     struct NetworkInfo {
         local_ip: String,
         timestamp: String,
     }
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(NetworkInfo {
@@ -1698,9 +1795,7 @@ pub async fn get_network_info(State(_state): State<Arc<AppState>>) -> impl IntoR
     })
 }
 
-pub async fn report_error(
-    Json(req): Json<ErrorReportRequest>
-) -> impl IntoResponse {
+pub async fn report_error(Json(req): Json<ErrorReportRequest>) -> impl IntoResponse {
     eprintln!("[REMOTE ERROR REPORT] {}", req.error);
 
     // Send email notification
@@ -1867,14 +1962,17 @@ impl From<&crate::core::MeshTopology> for MeshTopologyDto {
 pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Enhanced mesh topology with real network data
     let local_node_id = state.core.get_identity_id();
-    
+
     // Create simulated mesh nodes
     let nodes = vec![
         MeshNodeDto {
             id: local_node_id.clone(),
             username: "Local Node".to_string(),
             public_key: vec![1, 2, 3, 4, 5], // Simulated key
-            last_seen: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            last_seen: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             connection_quality: 1.0,
             is_online: true,
         },
@@ -1882,7 +1980,11 @@ pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoR
             id: "node_001".to_string(),
             username: "Alice's Mesh Node".to_string(),
             public_key: vec![6, 7, 8, 9, 10],
-            last_seen: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 30,
+            last_seen: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 30,
             connection_quality: 0.95,
             is_online: true,
         },
@@ -1890,7 +1992,11 @@ pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoR
             id: "node_002".to_string(),
             username: "Bob's Mesh Node".to_string(),
             public_key: vec![11, 12, 13, 14, 15],
-            last_seen: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 60,
+            last_seen: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 60,
             connection_quality: 0.87,
             is_online: true,
         },
@@ -1898,25 +2004,42 @@ pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoR
             id: "node_003".to_string(),
             username: "Charlie's Mesh Node".to_string(),
             public_key: vec![16, 17, 18, 19, 20],
-            last_seen: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 300,
+            last_seen: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 300,
             connection_quality: 0.72,
             is_online: false,
         },
     ];
-    
+
     // Create simulated routes
     let mut routes = std::collections::HashMap::new();
-    routes.insert(local_node_id.clone(), vec!["node_001".to_string(), "node_002".to_string()]);
-    routes.insert("node_001".to_string(), vec![local_node_id.clone(), "node_002".to_string(), "node_003".to_string()]);
-    routes.insert("node_002".to_string(), vec![local_node_id.clone(), "node_001".to_string()]);
+    routes.insert(
+        local_node_id.clone(),
+        vec!["node_001".to_string(), "node_002".to_string()],
+    );
+    routes.insert(
+        "node_001".to_string(),
+        vec![
+            local_node_id.clone(),
+            "node_002".to_string(),
+            "node_003".to_string(),
+        ],
+    );
+    routes.insert(
+        "node_002".to_string(),
+        vec![local_node_id.clone(), "node_001".to_string()],
+    );
     routes.insert("node_003".to_string(), vec!["node_001".to_string()]);
-    
+
     let topology = MeshTopologyDto {
         nodes,
         routes,
         local_node_id,
     };
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(topology),
@@ -1927,11 +2050,11 @@ pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoR
 pub async fn get_mesh_nodes(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: Implement proper mesh nodes retrieval
     let nodes: Vec<MeshNodeDto> = vec![]; // TODO: Get actual nodes
-            Json(ApiResponse {
-                success: true,
-                data: Some(nodes),
-                error: None,
-            })
+    Json(ApiResponse {
+        success: true,
+        data: Some(nodes),
+        error: None,
+    })
 }
 
 pub fn get_local_ip() -> Option<String> {
@@ -2008,14 +2131,14 @@ pub async fn get_identity(State(state): State<Arc<AppState>>) -> impl IntoRespon
         public_key: String,
         key_id: String,
     }
-    
+
     let identity_info = IdentityInfo {
         id: state.core.get_identity_id(),
         username: "GhostWire User".to_string(), // TODO: Get from config
         public_key: general_purpose::STANDARD.encode(state.core.get_public_key()),
         key_id: state.core.get_key_id(),
     };
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(identity_info),
@@ -2041,23 +2164,23 @@ pub async fn get_security_stats(State(state): State<Arc<AppState>>) -> impl Into
         last_threat_detected: Option<String>,
         security_updates_available: bool,
     }
-    
+
     let stats = SecurityStatsInfo {
         threat_level: "LOW".to_string(), // Placeholder, will be updated by actual scan
-        blocked_connections: 0, // Placeholder
+        blocked_connections: 0,          // Placeholder
         encryption_enabled: true,
         last_scan: chrono::Utc::now().to_rfc3339(),
-        active_threats: 0, // Placeholder
+        active_threats: 0,  // Placeholder
         security_score: 90, // Placeholder
         firewall_status: "ACTIVE".to_string(),
         key_rotation_due: false,
         encryption_algorithm: "AES-256-GCM".to_string(),
-        secure_connections: 0, // Placeholder
+        secure_connections: 0,    // Placeholder
         suspicious_activities: 0, // Placeholder
         last_threat_detected: None,
         security_updates_available: false,
     };
-    
+
     Json(ApiResponse {
         success: true,
         data: Some(stats),
@@ -2069,10 +2192,10 @@ pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyho
     let app = app(core);
 
     let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
-    
+
     info!("Starting GhostWire web server on {}", addr);
     info!("Security features enabled: encryption, authentication, threat detection");
-    
+
     // Use the correct axum serve function
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -2082,7 +2205,7 @@ pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyho
 
 pub fn app(core: Arc<Core>) -> Router {
     let app_state = Arc::new(AppState { core });
-    
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT])
@@ -2137,7 +2260,11 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/security_audit", post(security_audit))
         .route("/api/backup_security", post(backup_security))
         .route("/api/analyze_communications", post(analyze_communications))
+        .route("/api/v2/profile", get(get_profile_v2))
+        .route("/api/v2/profile/username", put(update_username_v2))
+        .route("/api/v2/profile/public-key", get(get_public_key_v2))
+        .route("/api/v2/security/dashboard", get(get_security_dashboard_v2))
+        .route("/api/v2/peers", get(get_peers_v2))
         .layer(cors)
         .with_state(app_state)
 }
- 
