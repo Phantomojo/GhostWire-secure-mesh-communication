@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 # 🚀 **GhostWire** - Secure Mesh Networking & Communication
 
 <div align="center">
@@ -38,7 +39,10 @@ Monitor your system's heartbeat with a high-density status bar.
 ![Tactical HUD](docs/screenshots/tactical_hud.png)
 
 ### **🔍 Interactive Mesh Topology**
-Visualize and manage your peer network in real-time. Click nodes to connect, hover for detailed telemetry.
+Visualize and manage your peer network in real-time.
+- **Stealth Discovery**: Nodes appear as generic TCP traffic to unauthorized scanners.
+- **Swarm Simulator**: Test multi-node mesh networks on a single PC using `scripts/launch_swarm.sh`.
+
 ![Mesh Topology](docs/screenshots/network_topology.png)
 
 ### **💬 Modern Communication**
@@ -47,16 +51,43 @@ A premium messaging experience designed for high-stakes coordination.
 
 ---
 
-## 🚀 **Quick Start - Launch the HUD**
+## 🚀 **Quick Start - Install GhostWire**
 
+### **One-Line Installation**
+
+**Linux / macOS:**
 ```bash
-# Clone the repository
 git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication
-
-# Launch Node Cluster V2
-./launch-ghostwire-working.sh
+./install.sh
 ```
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication
+.\install.ps1
+```
+
+### **What This Does**
+- ✅ Installs all dependencies (Rust, Node.js)
+- ✅ Builds GhostWire backend and frontend
+- ✅ Sets up your node identity with a username
+- ✅ Configures NAT traversal for internet-wide mesh networking
+- ✅ Installs to `~/.local/ghostwire` (user-specific, secure)
+- ✅ Adds management commands for easy control
+
+### **After Installation**
+
+```bash
+# Start GhostWire
+./ghostwire-manager.sh start
+
+# Access Web UI
+# Open: http://localhost:3001
+```
+
+**📖 Full Installation Guide:** See [INSTALL.md](INSTALL.md) for detailed instructions, configuration, multi-PC deployment, and troubleshooting.
 
 ---
 
@@ -314,7 +345,7 @@ cd GhostWire-secure-mesh-communication
 
 ## 📄 **License**
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the AGPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
