@@ -1,32 +1,17 @@
 #[cfg(feature = "cli")]
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tracing::{info, error};
-use base64::Engine;
-use std::env;
-#[cfg(feature = "web")]
-use reqwest;
-#[cfg(feature = "web")]
-use web::get_local_ip;
-use hostname;
-use crate::core::Core;
-use crate::web::start_web_server as imported_start_web_server;
+use tracing::info;
 use anyhow::Result;
 
-// #[cfg(feature = "cli")]
-// mod cli;
-mod config;
-mod core;
-#[cfg(feature = "tui")]
-mod tui;
+// Use modules from the library crate
+use ghostwire::core::Core;
 #[cfg(feature = "web")]
-mod web;
-// mod ioc;
-// mod messaging;
-// mod trust;
-// mod tor_integration;
+use ghostwire::web;
+#[cfg(feature = "tui")]
+use ghostwire::tui;
+// use ghostwire::config; // If needed
 
 #[derive(Parser)]
 #[cfg(feature = "cli")]
@@ -91,20 +76,6 @@ async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> Result<()
     web::start_web_server(core, host, port).await
 }
 
-#[cfg(feature = "web")]
-async fn report_startup_error(error_msg: &str) {
-    let hostname = hostname::get().unwrap_or_default().to_string_lossy().to_string();
-    let local_ip = match web::get_local_ip() { Some(ip) => ip, None => "unknown".to_string() };
-    let os = env::consts::OS;
-    let arch = env::consts::ARCH;
-    let full_msg = format!("Backend error on {} ({} [{} {}]): {}", hostname, local_ip, os, arch, error_msg);
-    let _ = reqwest::Client::new()
-        .post("http://192.168.100.242:3001/api/report_error")
-        .json(&serde_json::json!({"error": full_msg}))
-        .send()
-        .await;
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -126,7 +97,6 @@ async fn main() -> Result<()> {
         #[cfg(feature = "cli")]
         Some(Commands::Cli) => {
             info!("Starting CLI mode");
-            // return cli::run_cli().await;
             println!("CLI mode is currently disabled.");
         }
         #[cfg(feature = "web")]
@@ -138,17 +108,16 @@ async fn main() -> Result<()> {
         #[cfg(feature = "tui")]
         Some(Commands::Tui) => {
             info!("Starting TUI mode");
-            let core_for_tui = Core::new().await?;
-            let core_mutex = Arc::new(Mutex::new(core_for_tui));
+            // Re-initialize core inside TUI if needed or pass the mutex
+            // For now, TUI signature expects a mutex
+            let core_mutex = Arc::new(Mutex::new(Core::new().await?)); 
             tui::start_tui(core_mutex).await
                 .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
         }
         None => {
-            // Default behavior based on flags
+            // Default behavior
             #[cfg(feature = "cli")]
             if args.cli {
-                info!("Starting CLI mode");
-                // return cli::run_cli().await;
                 println!("CLI mode is currently disabled.");
             } else 
             if args.web {
@@ -156,16 +125,14 @@ async fn main() -> Result<()> {
                 start_web_server(core_arc, args.host, args.port).await
                     .map_err(|e| anyhow::anyhow!(e))?;
             } else {
-                // Default to web server if available, otherwise just run core
-                {
-                    info!("Starting web server mode on {}:{}", args.host, args.port);
-                    start_web_server(core_arc, args.host, args.port).await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                }
+                // Default to web server
+                info!("Starting web server mode on {}:{}", args.host, args.port);
+                start_web_server(core_arc, args.host, args.port).await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    
                 #[cfg(not(feature = "web"))]
                 {
                     info!("Running in minimal mode - core only");
-                    // Keep the core running
                     tokio::signal::ctrl_c().await?;
                 }
             }

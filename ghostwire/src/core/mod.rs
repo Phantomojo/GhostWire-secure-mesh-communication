@@ -2,36 +2,40 @@
 
 use serde::Serialize;
 
+pub mod encryption;
 pub mod identity;
 pub mod message;
-pub mod encryption;
+pub mod security;
 pub mod signal;
 pub mod transport;
-pub mod security;
+// pub mod username_discovery; // TODO: Fix libp2p imports // DHT-based username discovery
 
+#[cfg(feature = "briar")]
+pub mod briar;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
-#[cfg(feature = "briar")]
-pub mod briar;
 pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
-use matrix_sdk::{Client, ruma::RoomId, config::SyncSettings, Room, ruma::events::room::message::RoomMessageEventContent};
+use matrix_sdk::{
+    config::SyncSettings, ruma::events::room::message::RoomMessageEventContent, ruma::RoomId,
+    Client, Room,
+};
 
+pub use encryption::Encryption;
 pub use identity::Identity;
 pub use message::Message;
-pub use encryption::Encryption;
 // Transport trait removed, using TransportKind enum instead
-pub use security::{SecurityManager, SecurityConfig, SecurityStats};
+pub use security::{SecurityConfig, SecurityManager, SecurityStats};
 
 #[cfg(feature = "mesh")]
-pub use mesh::{MeshManager, MeshStats, MeshNode, MeshTopology};
+pub use mesh::{MeshManager, MeshNode, MeshStats, MeshTopology};
 #[cfg(feature = "reticulum")]
 pub use reticulum::{ReticulumManager, ReticulumStats, ReticulumTopology};
 #[cfg(feature = "stealth")]
-pub use stealth_tcp::{StealthTCPProvider, ConnectionStats};
+pub use stealth_tcp::{ConnectionStats, StealthTCPProvider};
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -61,7 +65,10 @@ impl AdapterKind {
             AdapterKind::Meshtastic(a) => a.description(),
         }
     }
-    pub async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
+    pub async fn send_message(
+        &self,
+        message: &crate::core::message::Message,
+    ) -> anyhow::Result<()> {
         match self {
             AdapterKind::Matrix(a) => a.send_message(message).await,
             AdapterKind::Meshtastic(a) => a.send_message(message).await,
@@ -82,7 +89,9 @@ pub struct AdapterRegistry {
 
 impl AdapterRegistry {
     pub fn new() -> Self {
-        Self { adapters: HashMap::new() }
+        Self {
+            adapters: HashMap::new(),
+        }
     }
     pub fn register(&mut self, adapter: AdapterKind) {
         self.adapters.insert(adapter.name().to_string(), adapter);
@@ -95,42 +104,77 @@ impl AdapterRegistry {
     }
 }
 
+// Initial Matrix adapter placeholder definition replaced by real implementation below
+
+// MatrixAdapter implementation moved to AdapterKind enum
+
 #[derive(Clone)]
 pub struct MatrixAdapter {
     pub homeserver: String,
     pub user: String,
     pub access_token: String,
+    #[cfg(feature = "matrix-bridge")]
+    pub client: Option<Arc<Client>>,
 }
 
-// MatrixAdapter implementation moved to AdapterKind enum
-
 impl MatrixAdapter {
-    pub fn name(&self) -> &'static str { "matrix" }
-    pub fn description(&self) -> &'static str { "Matrix protocol bridge adapter" }
-    
-    pub async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
-        println!("[MOCK] Matrix: Would send message to room: {}", message.content);
+    pub fn name(&self) -> &'static str {
+        "matrix"
+    }
+    pub fn description(&self) -> &'static str {
+        "Matrix protocol bridge adapter"
+    }
+
+    pub async fn send_message(
+        &self,
+        message: &crate::core::message::Message,
+    ) -> anyhow::Result<()> {
+        #[cfg(feature = "matrix-bridge")]
+        {
+            if let Some(client) = &self.client {
+                let room_id = RoomId::parse(&message.recipient)?;
+                let content = RoomMessageEventContent::text_plain(&message.content);
+                client
+                    .get_room(&room_id)
+                    .ok_or_else(|| anyhow::anyhow!("Room not found"))?
+                    .send(content)
+                    .await?;
+                return Ok(());
+            }
+        }
+        println!(
+            "[MOCK] Matrix: Would send message to room: {}",
+            message.content
+        );
         Ok(())
     }
-    
+
     pub async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
+        #[cfg(feature = "matrix-bridge")]
+        {
+            // Real sync logic would go here
+            return Ok(None);
+        }
         println!("[MOCK] Matrix: Would receive message");
         Ok(None)
     }
-    
-    /// Send a test message to a Matrix room
-    pub async fn send_test_message(&self, content: &str) -> anyhow::Result<()> {
-        let msg = crate::core::message::Message {
-            id: uuid::Uuid::new_v4(),
-            sender: self.user.clone(),
-            recipient: "!yourroomid:matrix.org".to_string(), // Replace with your room ID
-            content: content.to_string(),
-            timestamp: chrono::Utc::now().timestamp() as u64,
-            encrypted: false,
-            message_type: "text".to_string(),
-            encryption_status: "unknown".to_string(),
-        };
-        self.send_message(&msg).await
+
+    /// Initialize real Matrix client
+    pub async fn init_client(&mut self) -> anyhow::Result<()> {
+        #[cfg(feature = "matrix-bridge")]
+        {
+            let client = Client::builder()
+                .homeserver_url(&self.homeserver)
+                .build()
+                .await?;
+            client
+                .matrix_auth()
+                .login_username(&self.user, "password") // TODO: get from config
+                .send()
+                .await?;
+            self.client = Some(Arc::new(client));
+        }
+        Ok(())
     }
 }
 // Usage:
@@ -146,16 +190,47 @@ pub struct MeshtasticAdapter {
 }
 
 impl MeshtasticAdapter {
-    pub fn name(&self) -> &'static str { "meshtastic" }
-    pub fn description(&self) -> &'static str { "Meshtastic protocol bridge adapter" }
-    
-    pub async fn send_message(&self, message: &crate::core::message::Message) -> anyhow::Result<()> {
-        println!("[MOCK] Meshtastic: Would send message to device {}: {}", self.device_path, message.content);
+    pub fn name(&self) -> &'static str {
+        "meshtastic"
+    }
+    pub fn description(&self) -> &'static str {
+        "Meshtastic protocol bridge adapter"
+    }
+
+    pub async fn send_message(
+        &self,
+        message: &crate::core::message::Message,
+    ) -> anyhow::Result<()> {
+        #[cfg(feature = "meshtastic")]
+        {
+            let mut port = serialport::new(&self.device_path, 115_200)
+                .timeout(Duration::from_millis(100))
+                .open()?;
+            port.write_all(message.content.as_bytes())?;
+            return Ok(());
+        }
+        println!(
+            "[MOCK] Meshtastic: Would send message to device {}: {}",
+            self.device_path, message.content
+        );
         Ok(())
     }
-    
+
     pub async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
-        println!("[MOCK] Meshtastic: Would receive message from device {}", self.device_path);
+        #[cfg(feature = "meshtastic")]
+        {
+            let mut port = serialport::new(&self.device_path, 115_200).open()?;
+            let mut serial_buf: Vec<u8> = vec![0; 1000];
+            let n = port.read(serial_buf.as_mut_slice())?;
+            if n > 0 {
+                // Real implementation would parse Meshtastic protobuf here
+                return Ok(None);
+            }
+        }
+        println!(
+            "[MOCK] Meshtastic: Would receive message from device {}",
+            self.device_path
+        );
         Ok(None)
     }
 }
@@ -177,8 +252,12 @@ pub struct Core {
 
 impl Core {
     pub async fn new() -> Result<Self> {
-        let identity = Arc::new(Identity::new().map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?);
-        let encryption = Arc::new(Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?);
+        let identity = Arc::new(
+            Identity::new().map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
+        );
+        let encryption = Arc::new(
+            Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
+        );
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
         let mut registry = TransportRegistry::new();
@@ -193,7 +272,7 @@ impl Core {
         let mut adapter_registry = AdapterRegistry::new();
         // Load configuration
         let config = crate::config::Config::load().unwrap_or_default();
-        
+
         // Register Matrix adapter if enabled
         if config.features.matrix_bridge {
             if let Some(matrix_config) = config.get_matrix_config() {
@@ -210,19 +289,24 @@ impl Core {
         }));
         let adapter_registry = Arc::new(RwLock::new(adapter_registry));
         let active_adapter = None;
-        
+
+        #[cfg(feature = "mesh")]
+        let mesh_manager = Some(Arc::new(RwLock::new(
+            MeshManager::new(identity.clone()).await?,
+        )));
+
         Ok(Self {
             identity,
             encryption,
-            #[cfg(feature = "mesh")]
-            mesh_manager: None,
-            #[cfg(feature = "reticulum")]
-            reticulum_manager: None,
             security_manager,
             transport_registry: registry,
             active_transport,
             adapter_registry,
             active_adapter,
+            #[cfg(feature = "mesh")]
+            mesh_manager,
+            #[cfg(feature = "reticulum")]
+            reticulum_manager: None,
         })
     }
 
@@ -239,14 +323,18 @@ impl Core {
 
     /// Send a message through the selected transport
     pub async fn send_message(&self, message: &Message) -> Result<()> {
+        // Record message for security stats
+        self.security_manager.record_message(&message.sender).await;
+
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let mut mgr = mesh_manager.write().await;
+            return mgr.send_message(message).await;
+        }
+
         if let Some(transport) = &self.active_transport {
-            // If mut required, store as Option<TransportKind> in a Mutex/RwLock
-            // For now, assume immutable for demonstration
-            // Commented out problematic transport.send_message(message).await
             Ok(())
         } else {
-            // Instead of failing, just log the message locally for now
-            // This allows the TUI to work even without a transport configured
             tracing::info!("Message sent locally (no transport): {}", message.content);
             Ok(())
         }
@@ -288,7 +376,7 @@ impl Core {
     pub fn get_public_key(&self) -> Vec<u8> {
         self.encryption.export_public_key()
     }
-    
+
     /// Get the key ID
     pub fn get_key_id(&self) -> String {
         self.encryption.get_key_id()
@@ -357,8 +445,8 @@ impl Core {
             if let Some(reticulum_manager) = &self.reticulum_manager {
                 let manager = reticulum_manager.read().await;
                 Some(ReticulumStats {
-                    node_count: 0, // TODO: Implement node counting
-                    message_count: 0, // TODO: Implement message counting
+                    node_count: 0,     // TODO: Implement node counting
+                    message_count: 0,  // TODO: Implement message counting
                     uptime_seconds: 0, // TODO: Implement uptime tracking
                 })
             } else {
@@ -373,15 +461,22 @@ impl Core {
 
     /// Get security statistics
     pub async fn get_security_stats(&self) -> SecurityStats {
-        self.security_manager.get_security_stats()
+        self.security_manager.get_security_stats().await
     }
 
-    pub async fn connect_meshtastic(&self, _address: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // Implementation for Meshtastic connection
+    pub async fn connect_meshtastic(&self, address: &str) -> anyhow::Result<()> {
+        let mut registry = self.adapter_registry.write().await;
+        registry.register(AdapterKind::Meshtastic(MeshtasticAdapter {
+            device_path: address.to_string(),
+            channel: "main".to_string(),
+        }));
         Ok(())
     }
 
-    pub async fn connect_reticulum(&self, _address: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect_reticulum(
+        &self,
+        _address: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "reticulum")]
         {
             if let Some(_reticulum_manager) = &self.reticulum_manager {
@@ -409,9 +504,20 @@ impl Core {
         }
     }
 
-    pub async fn start_mesh(&self, _address: &str) -> anyhow::Result<()> {
-        // Stub implementation
-        Ok(())
+    pub async fn start_mesh(&self, address: &str) -> anyhow::Result<()> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let addr = address.parse()?;
+            let mesh_manager = mesh_manager.clone();
+            tokio::spawn(async move {
+                let mut mgr = mesh_manager.write().await;
+                if let Err(e) = mgr.start(addr).await {
+                    tracing::error!("Mesh loop failed: {}", e);
+                }
+            });
+            return Ok(());
+        }
+        Err(anyhow::anyhow!("Mesh networking not available"))
     }
     pub async fn get_mesh_topology(&self) -> anyhow::Result<()> {
         // Stub implementation
@@ -420,6 +526,12 @@ impl Core {
 
     // Add convenience methods for backward compatibility
     pub fn get_peer_count(&self) -> usize {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            // This is a bit tricky since we can't await in a sync function
+            // For HUD, we usually want live data
+            return 0; // Will be optimized later with an atomic counter
+        }
         self.encryption.get_peer_count()
     }
 }
@@ -489,6 +601,10 @@ pub struct ReticulumManager {
 #[cfg(not(feature = "reticulum"))]
 impl ReticulumManager {
     pub async fn new(_identity: Arc<Identity>) -> Result<Self> {
-        Ok(Self { identity: Arc::new(Identity::new().map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?) })
+        Ok(Self {
+            identity: Arc::new(
+                Identity::new().map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?,
+            ),
+        })
     }
 }

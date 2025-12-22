@@ -1,5 +1,5 @@
-use std::{io, net::SocketAddr, sync::{Arc, Mutex}, time::{Duration, Instant}};
-use std::collections::HashMap;
+use std::{io, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use dashmap::DashMap;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -23,12 +23,12 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 /// Enhanced StealthTCP provider with advanced security features
 #[derive(Clone)]
 pub struct StealthTCPProvider {
-    rate_limiter: Arc<Mutex<HashMap<SocketAddr, (usize, Instant)>>>,
+    rate_limiter: Arc<DashMap<SocketAddr, (usize, Instant)>>,
     allowlist: Option<Vec<std::net::IpAddr>>,
     security_manager: Arc<SecurityManager>,
     handshake_secret: Vec<u8>,
     enable_stealth_mode: bool,
-    connection_history: Arc<Mutex<HashMap<SocketAddr, ConnectionInfo>>>,
+    connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,23 +59,21 @@ impl StealthTCPProvider {
         });
 
         Self {
-            rate_limiter: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(DashMap::new()),
             allowlist,
             security_manager,
             handshake_secret: secret,
             enable_stealth_mode,
-            connection_history: Arc::new(Mutex::new(HashMap::new())),
+            connection_history: Arc::new(DashMap::new()),
         }
     }
 
     fn check_rate_limit(&self, addr: &SocketAddr) -> bool {
-        let mut rl = self.rate_limiter.lock().unwrap();
         let now = Instant::now();
-        let entry = rl.entry(*addr).or_insert((0, now));
+        let mut entry = self.rate_limiter.entry(*addr).or_insert((0, now));
         
         if now.duration_since(entry.1) > Duration::from_secs(60) {
-            entry.0 = 1;
-            entry.1 = now;
+            *entry = (1, now);
             true
         } else if entry.0 < MAX_CONN_PER_MIN {
             entry.0 += 1;
@@ -93,10 +91,8 @@ impl StealthTCPProvider {
     }
 
     fn update_connection_history(&self, addr: SocketAddr, success: bool, latency: Duration) {
-        let mut history = self.connection_history.lock().unwrap();
         let now = Instant::now();
-        
-        let entry = history.entry(addr).or_insert(ConnectionInfo {
+        let mut entry = self.connection_history.entry(addr).or_insert(ConnectionInfo {
             first_seen: now,
             last_seen: now,
             total_connections: 0,
@@ -111,15 +107,13 @@ impl StealthTCPProvider {
         
         if success {
             entry.successful_connections += 1;
-            // Update average latency
             let total_latency = entry.average_latency * (entry.successful_connections - 1) as u32 + latency;
             entry.average_latency = total_latency / entry.successful_connections as u32;
         } else {
             entry.failed_attempts += 1;
         }
 
-        // Calculate threat score based on connection patterns
-        entry.threat_score = self.calculate_threat_score(entry);
+        entry.threat_score = self.calculate_threat_score(&entry);
     }
 
     fn calculate_threat_score(&self, info: &ConnectionInfo) -> f32 {
@@ -352,23 +346,22 @@ impl StealthTCPProvider {
 
     /// Get connection statistics
     pub fn get_connection_stats(&self) -> ConnectionStats {
-        let history = self.connection_history.lock().unwrap();
-        let total_connections = history.values().map(|info| info.total_connections as u64).sum();
-        let active_connections = history.values().filter(|info| info.successful_connections > 0).count() as u64;
-        let failed_connections = history.values().map(|info| info.failed_attempts as u64).sum();
-        let blocked_connections = history.values().filter(|info| info.threat_score > 0.7).count() as u64;
+        let total_connections = self.connection_history.iter().map(|kv| kv.value().total_connections as u64).sum();
+        let active_connections = self.connection_history.iter().filter(|kv| kv.value().successful_connections > 0).count() as u64;
+        let failed_connections = self.connection_history.iter().map(|kv| kv.value().failed_attempts as u64).sum();
+        let blocked_connections = self.connection_history.iter().filter(|kv| kv.value().threat_score > 0.7).count() as u64;
         
         let avg_connection_time = if total_connections > 0 {
-            let total_time: f64 = history.values()
-                .map(|info| info.average_latency.as_millis() as f64)
+            let total_time: f64 = self.connection_history.iter()
+                .map(|kv| kv.value().average_latency.as_millis() as f64)
                 .sum();
             total_time / total_connections as f64
         } else {
             0.0
         };
         
-        let last_connection_time = history.values()
-            .map(|info| info.last_seen.duration_since(Instant::now()).as_secs() as u64)
+        let last_connection_time = self.connection_history.iter()
+            .map(|kv| kv.value().last_seen.duration_since(Instant::now()).as_secs() as u64)
             .max()
             .unwrap_or(0);
         

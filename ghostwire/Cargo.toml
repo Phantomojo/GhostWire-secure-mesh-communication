@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["GhostWire Team"]
 description = "Secure mesh networking and messaging platform"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/ghostwire/ghostwire"
 keywords = ["mesh", "networking", "security", "privacy", "p2p"]
 categories = ["network-programming", "security", "asynchronous"]
@@ -45,6 +45,9 @@ hex = { version = "0.4" }
 bs58 = { version = "0.5" }
 lazy_static = { version = "1.4" }
 rand = { version = "0.8" }
+dashmap = { version = "5.0" }
+bytes = { version = "1.5" }
+bincode = { version = "1.3" }
 
 # CLI
 clap = { version = "4.0", features = ["derive"] }
@@ -62,6 +65,8 @@ neli = { version = "0.6" }
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
+matrix-sdk = { version = "0.7", optional = true }
+serialport = { version = "4.3", optional = true }
 
 # TUI dependencies
 ratatui = { version = "0.26" }
@@ -74,8 +79,8 @@ cli = []
 mesh = []
 security = []
 matrix = []
-matrix-bridge = []
-meshtastic = []
+matrix-bridge = ["matrix-sdk"]
+meshtastic = ["serialport"]
 reticulum = []
 briar = []
 stealth = []

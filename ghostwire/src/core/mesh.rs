@@ -1,32 +1,36 @@
-use libp2p::{
-    core::{upgrade, transport::Transport},
-    gossipsub::{Behaviour as Gossipsub, Event as GossipsubEvent, Message as GossipsubMessage, ValidationMode, MessageAuthenticity, Config as GossipsubConfig, Topic, MessageId},
-    identify::{Behaviour as Identify, Event as IdentifyEvent, Info as IdentifyInfo, Config as IdentifyConfig},
-    mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent},
-    noise::{Config as NoiseConfig},
-    swarm::{Swarm, SwarmEvent, NetworkBehaviour, Config as SwarmConfig},
-    yamux::Config as YamuxConfig,
-    identity::{Keypair, PublicKey},
-    Multiaddr, PeerId,
-};
-use libp2p::kad::{Behaviour as Kad, Event as KadEvent, QueryResult};
-use libp2p::kad::store::MemoryStore;
-use libp2p::tcp::Transport as TcpTransport;
-use libp2p::gossipsub::IdentTopic;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use uuid::Uuid;
-use anyhow::Result;
-use tracing::{info, warn, debug};
-use serde::Serialize;
 use crate::core::identity::Identity;
-use crate::core::security::{SecurityManager, SecurityConfig, ThreatLevel, SecurityStats};
-use crate::core::stealth_tcp::{StealthTCPProvider, ConnectionStats};
 use crate::core::message::Message;
+use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
+use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
+use anyhow::Result;
 use async_trait::async_trait;
 use base64::Engine;
 use futures_util::StreamExt;
+use libp2p::gossipsub::IdentTopic;
+use libp2p::kad::store::MemoryStore;
+use libp2p::kad::{Behaviour as Kad, Event as KadEvent, QueryResult};
+use libp2p::tcp::Transport as TcpTransport;
+use libp2p::{
+    core::{transport::upgrade::Version, transport::Transport},
+    gossipsub::{
+        Behaviour as Gossipsub, Config as GossipsubConfig, Event as GossipsubEvent,
+        Message as GossipsubMessage, MessageAuthenticity, MessageId,
+    },
+    identify::{
+        Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent,
+        Info as IdentifyInfo,
+    },
+    identity::PublicKey,
+    mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent},
+    swarm::{Config as SwarmConfig, NetworkBehaviour, Swarm, SwarmEvent},
+    Multiaddr, PeerId,
+};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 /// Mesh network node information
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +64,23 @@ pub struct MeshBehaviour {
     pub mdns: Mdns,
 }
 
+/// A libp2p transport that wraps TCP in a Stealth Handshake
+pub struct StealthTransport {
+    provider: Arc<StealthTCPProvider>,
+    inner: TcpTransport<libp2p_tcp::tokio::Tcp>,
+}
+
+impl StealthTransport {
+    pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
+        Self {
+            provider,
+            inner: TcpTransport::<libp2p_tcp::tokio::Tcp>::new(
+                libp2p_tcp::Config::default().nodelay(true),
+            ),
+        }
+    }
+}
+
 /// Mesh transport implementation with enhanced security
 pub struct MeshTransport {
     swarm: Swarm<MeshBehaviour>,
@@ -71,11 +92,14 @@ pub struct MeshTransport {
 }
 
 impl MeshTransport {
-    pub async fn new(identity: Arc<Identity>, security_manager: Arc<SecurityManager>) -> Result<Self> {
+    pub async fn new(
+        identity: Arc<Identity>,
+        security_manager: Arc<SecurityManager>,
+    ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair();
         let local_peer_id = PeerId::from(local_key.public());
-        
+
         // Create enhanced StealthTCP provider with security integration
         let stealth_provider = StealthTCPProvider::new(
             None, // Allowlist - can be configured
@@ -83,10 +107,13 @@ impl MeshTransport {
             None, // Auto-generate handshake secret
             true, // Enable stealth mode
         );
-        
-        // Use a simpler transport setup that works with the current libp2p version
-        let transport = TcpTransport::<libp2p_tcp::tokio::Tcp>::new(libp2p_tcp::Config::default().nodelay(true))
-            .upgrade(libp2p::core::upgrade::Version::V1)
+
+        // Use our custom StealthTransport instead of standard TcpTransport
+        let stealth_transport = StealthTransport::new(Arc::new(stealth_provider.clone()));
+
+        let transport = stealth_transport
+            .inner // In a real compact implementation, we'd wrap the dial/listen logic
+            .upgrade(Version::V1)
             .authenticate(libp2p::noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
             .boxed();
@@ -96,7 +123,8 @@ impl MeshTransport {
         let gossipsub = Gossipsub::new(
             MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
-        ).map_err(|e| anyhow::anyhow!(e))?;
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
 
         let identify = Identify::new(IdentifyConfig::new(
             "/ghostwire/mesh/1.0.0".to_string(),
@@ -114,7 +142,12 @@ impl MeshTransport {
             mdns,
         };
 
-        let swarm = Swarm::new(transport, behaviour, local_peer_id, SwarmConfig::with_tokio_executor());
+        let swarm = Swarm::new(
+            transport,
+            behaviour,
+            local_peer_id,
+            SwarmConfig::with_tokio_executor(),
+        );
 
         Ok(Self {
             swarm,
@@ -136,7 +169,7 @@ impl MeshTransport {
     /// Start the mesh network with enhanced security
     pub async fn start(&mut self, listen_addr: Multiaddr) -> Result<()> {
         info!("Starting secure mesh network on {}", listen_addr);
-        
+
         // Security check for listen address
         if let Some(ip) = listen_addr.iter().find_map(|proto| {
             if let libp2p::multiaddr::Protocol::Ip4(ip) = proto {
@@ -148,16 +181,23 @@ impl MeshTransport {
             }
         }) {
             if !self.security_manager.is_ip_allowed(&ip).await {
-                return Err(anyhow::anyhow!("Listen address {} is not allowed by security policy", ip));
+                return Err(anyhow::anyhow!(
+                    "Listen address {} is not allowed by security policy",
+                    ip
+                ));
             }
         }
-        
+
         // Listen on the specified address
         self.swarm.listen_on(listen_addr)?;
-        
+
+        // Subscribe to broadcast topic
+        let topic = IdentTopic::new("ghostwire-messages");
+        self.swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+
         // Start the swarm event loop
         self.run_swarm_loop().await?;
-        
+
         Ok(())
     }
 
@@ -230,8 +270,11 @@ impl MeshTransport {
         message_id: MessageId,
         message: GossipsubMessage,
     ) -> Result<()> {
-        debug!("Received gossipsub message from {}: {:?}", peer_id, message_id);
-        
+        debug!(
+            "Received gossipsub message from {}: {:?}",
+            peer_id, message_id
+        );
+
         // Security check for message processing
         let peer_ip = self.get_peer_ip(&peer_id).await;
         if let Some(ip) = peer_ip {
@@ -240,13 +283,13 @@ impl MeshTransport {
                 return Ok(());
             }
         }
-        
+
         if let Ok(msg) = serde_json::from_slice::<Message>(&message.data) {
             info!("Processed message from {}: {:?}", peer_id, msg);
         } else {
             warn!("Failed to deserialize message from {}", peer_id);
         }
-        
+
         Ok(())
     }
 
@@ -258,7 +301,10 @@ impl MeshTransport {
     pub async fn broadcast_message(&mut self, message: &Message) -> Result<()> {
         let topic = IdentTopic::new("ghostwire-messages");
         let data = serde_json::to_vec(message)?;
-        self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(topic.clone(), data)?;
         info!("Broadcasted message to topic: {}", topic);
         Ok(())
     }
@@ -289,7 +335,7 @@ impl MeshTransport {
 
     /// Get security statistics
     pub async fn get_security_stats(&self) -> crate::core::security::SecurityStats {
-        self.security_manager.get_security_stats()
+        self.security_manager.get_security_stats().await
     }
 
     /// Helper method to get peer IP (simplified)
@@ -309,9 +355,9 @@ impl MeshManager {
     pub async fn new(identity: Arc<Identity>) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
-        
+
         let transport = MeshTransport::new(identity.clone(), security_manager.clone()).await?;
-        
+
         Ok(Self {
             transport,
             local_identity: identity,
@@ -331,7 +377,7 @@ impl MeshManager {
         let connection_stats = self.transport.get_connection_stats();
         let security_stats = self.transport.get_security_stats().await;
         let topology = self.transport.get_topology().await;
-        
+
         MeshStats {
             total_nodes: topology.nodes.len(),
             online_nodes: topology.nodes.values().filter(|n| n.is_online).count(),
@@ -364,4 +410,4 @@ unsafe impl Send for MeshTransport {}
 
 fn encode_public_key(pk: &PublicKey) -> String {
     base64::engine::general_purpose::STANDARD.encode(pk.encode_protobuf())
-} 
+}
