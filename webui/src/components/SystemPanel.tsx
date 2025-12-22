@@ -1,4 +1,16 @@
 import React from 'react';
+import { GlassCard, SectionTitle, Subtitle, Badge, ActionButton } from './DesignSystem';
+import {
+  HiOutlineCpuChip,
+  HiOutlineServerStack,
+  HiOutlineShieldCheck,
+  HiOutlineCommandLine,
+  HiOutlineArrowUpOnSquare,
+  HiOutlineArrowPath,
+  HiOutlineMagnifyingGlass,
+  HiOutlineCircleStack,
+  HiOutlinePresentationChartLine
+} from 'react-icons/hi2';
 
 interface SystemStatus {
   cpu: number;
@@ -23,136 +35,127 @@ const SystemPanel: React.FC<SystemPanelProps> = ({
   const formatUptime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const getStatusLevel = (value: number) => {
-    if (value >= 80) return 'critical';
-    if (value >= 60) return 'warning';
-    return 'optimal';
+    return `${hours}h ${minutes}m`;
   };
 
   return (
-    <div className="main-content-module">
-      <div className="module-header">
-        <h2 className="module-title">SYSTEM_CORE_DIAGNOSTICS</h2>
-        <div className="module-subtitle">PRIMARY_KERNEL_STATE: ACTIVE</div>
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+        <div>
+          <SectionTitle>Node Health</SectionTitle>
+          <Subtitle>Core resources and technical operations overview</Subtitle>
+        </div>
+        <div className="flex gap-2">
+          <Badge variant="success" className="px-3 py-1">Online</Badge>
+          <Badge variant="indigo" className="px-3 py-1 font-mono">{formatUptime(systemStatus.uptime)}</Badge>
+        </div>
       </div>
 
-      <div className="module-grid">
-        {/* Core Propulsion/Resource Sensors */}
-        <div className="glass-module-card">
-          <h3 className="card-title">RESOURCE_VITAL_SENSORS</h3>
-          <div className="sensor-array-vertical">
-            <div className="sensor-node">
-              <div className="sensor-header">
-                <span className="sensor-label">CORE_LOAD</span>
-                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.cpu)}`}>
-                  {systemStatus.cpu}%
-                </span>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Simplified Resource Cards */}
+        {[
+          { label: 'CPU Usage', value: systemStatus.cpu, color: 'indigo', icon: HiOutlineCpuChip, desc: 'Core processing load' },
+          { label: 'Memory', value: systemStatus.memory, color: 'sky', icon: HiOutlineCircleStack, desc: 'Storage & cache allocation' },
+          { label: 'Signal', value: systemStatus.network, color: 'violet', icon: HiOutlinePresentationChartLine, desc: 'Data throughput' },
+          { label: 'Security', value: systemStatus.securityScore, color: 'emerald', icon: HiOutlineShieldCheck, desc: 'Threat defense rating' }
+        ].map((metric, idx) => (
+          <GlassCard key={idx} className="p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`p-2 rounded-xl bg-${metric.color}-500/10 text-${metric.color}-400`}>
+                <metric.icon className="text-xl" />
               </div>
-              <div className="sensor-bar-bg">
-                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.cpu)}`} style={{ width: `${systemStatus.cpu}%` }}></div>
-              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{metric.label}</span>
             </div>
+            <div className="flex items-end gap-2 mb-3">
+              <span className="text-3xl font-bold text-white tracking-tight">{metric.value}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+              <div
+                className={`h-full bg-${metric.color === 'emerald' ? 'emerald' : metric.color === 'sky' ? 'sky' : metric.color === 'violet' ? 'violet' : 'indigo'}-500 transition-all duration-1000`}
+                style={{ width: `${metric.value}%` }}
+              />
+            </div>
+          </GlassCard>
+        ))}
+      </div>
 
-            <div className="sensor-node">
-              <div className="sensor-header">
-                <span className="sensor-label">MEMORY_POOL</span>
-                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.memory)}`}>
-                  {systemStatus.memory}%
-                </span>
-              </div>
-              <div className="sensor-bar-bg">
-                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.memory)}`} style={{ width: `${systemStatus.memory}%` }}></div>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Activity Stream */}
+        <div className="lg:col-span-2">
+          <GlassCard className="h-full">
+            <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+              <HiOutlineCommandLine className="text-indigo-400" />
+              Recent Activity
+            </h3>
+            <div className="space-y-4">
+              {[
+                { time: '14s ago', tag: 'Core', msg: 'Heartbeat stable. Primary link verified.', type: 'info' },
+                { time: '2m ago', tag: 'Signal', msg: 'Minor jitter detected in packet routing at hop 3.', type: 'warn' },
+                { time: '5m ago', tag: 'Mesh', msg: 'Auto-discovery complete. 12 peers synced.', type: 'info' },
+                { time: '12m ago', tag: 'Sec', msg: 'End-to-end encryption key rotation successful.', type: 'sec' },
+              ].map((log, idx) => (
+                <div key={idx} className="flex gap-4 p-3 rounded-xl bg-white/[0.02] border border-white/5 group hover:bg-white/[0.05] transition-all">
+                  <span className="text-[10px] font-mono text-slate-600 w-14 shrink-0 mt-0.5">{log.time}</span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${log.type === 'warn' ? 'bg-amber-500/10 text-amber-500' :
+                        log.type === 'sec' ? 'bg-indigo-500/20 text-indigo-400 font-extrabold' : 'bg-indigo-500/10 text-indigo-400'
+                        }`}>{log.tag}</span>
+                      <span className="text-xs text-slate-300 group-hover:text-white transition-colors">{log.msg}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <div className="sensor-node">
-              <div className="sensor-header">
-                <span className="sensor-label">NETWORK_BAND</span>
-                <span className={`sensor-status-badge ${getStatusLevel(systemStatus.network)}`}>
-                  {systemStatus.network}%
-                </span>
-              </div>
-              <div className="sensor-bar-bg">
-                <div className={`sensor-bar-fill ${getStatusLevel(systemStatus.network)}`} style={{ width: `${systemStatus.network}%` }}></div>
-              </div>
-            </div>
-          </div>
+          </GlassCard>
         </div>
 
-        {/* System Telemetry Module */}
-        <div className="glass-module-card">
-          <h3 className="card-title">PRIMARY_TELEMETRY</h3>
-          <div className="telemetry-table">
-            <div className="telemetry-row">
-              <span className="telemetry-key">UPTIME_CLOCK</span>
-              <span className="telemetry-val">{formatUptime(systemStatus.uptime)}</span>
-            </div>
-            <div className="telemetry-row">
-              <span className="telemetry-key">PEER_NODES</span>
-              <span className="telemetry-val">{systemStatus.connections}</span>
-            </div>
-            <div className="telemetry-row">
-              <span className="telemetry-key">SEC_SCORE</span>
-              <span className={`telemetry-val ${systemStatus.securityScore < 80 ? 'text-red-500' : 'text-cyan-400'}`}>
-                {systemStatus.securityScore}%
-              </span>
-            </div>
-            <div className="telemetry-row">
-              <span className="telemetry-key">ENCRYPTION</span>
-              <span className="telemetry-val">TLS_1.3_E2EE</span>
-            </div>
-          </div>
-        </div>
+        {/* Tactical Overrides */}
+        <GlassCard>
+          <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+            <HiOutlineServerStack className="text-indigo-400" />
+            Node Controls
+          </h3>
+          <div className="space-y-3">
+            <ActionButton
+              variant="secondary"
+              onClick={() => onSystemAction('backup')}
+              className="w-full justify-start py-4"
+            >
+              <HiOutlineArrowUpOnSquare className="text-sky-400 text-lg" />
+              <div className="text-left ml-3">
+                <div className="text-xs font-bold">Safe Snapshot</div>
+                <div className="text-[10px] text-slate-500">Backup current session data</div>
+              </div>
+            </ActionButton>
 
-        {/* System Management Overrides */}
-        <div className="glass-module-card full-width">
-          <h3 className="card-title">TACTICAL_SYSTEM_OVERRIDES</h3>
-          <div className="action-grid-3">
-            <button className="tactical-btn purple" onClick={() => onSystemAction('backup')}>
-              <span className="btn-label">DATA_BACKUP</span>
-              <span className="btn-subtext">Archive primary state</span>
-            </button>
-            <button className="tactical-btn cyan" onClick={() => onSystemAction('diagnostics')}>
-              <span className="btn-label">RUN_DIAGNOSTICS</span>
-              <span className="btn-subtext">Deep packet inspection</span>
-            </button>
-            <button className="tactical-btn orange" onClick={() => onSystemAction('restart')}>
-              <span className="btn-label">KERNEL_RESTART</span>
-              <span className="btn-subtext">Flush volatile buffers</span>
-            </button>
-          </div>
-        </div>
+            <ActionButton
+              variant="secondary"
+              onClick={() => onSystemAction('diagnostics')}
+              className="w-full justify-start py-4"
+            >
+              <HiOutlineMagnifyingGlass className="text-indigo-400 text-lg" />
+              <div className="text-left ml-3">
+                <div className="text-xs font-bold">Deep Scan</div>
+                <div className="text-[10px] text-slate-500">Analyze full stack performance</div>
+              </div>
+            </ActionButton>
 
-        {/* Real-time System Log Buffer */}
-        <div className="glass-module-card full-width">
-          <h3 className="card-title">REALTIME_EVENT_BUFFER</h3>
-          <div className="log-buffer">
-            <div className="log-line">
-              <span className="log-timestamp">[21:30:15]</span>
-              <span className="log-tag tag-info">INFO</span>
-              <span className="log-msg">GHOSTWIRE_CORE: Heartbeat stable.</span>
-            </div>
-            <div className="log-line">
-              <span className="log-timestamp">[21:30:10]</span>
-              <span className="log-tag tag-warn">WARN</span>
-              <span className="log-msg">SIGNAL_STRENGTH: Jitter detected in packet routing.</span>
-            </div>
-            <div className="log-line">
-              <span className="log-timestamp">[21:30:05]</span>
-              <span className="log-tag tag-info">INFO</span>
-              <span className="log-msg">MESH_TOPOLOGY: Node discovery phase complete.</span>
-            </div>
-            <div className="log-line">
-              <span className="log-timestamp">[21:30:00]</span>
-              <span className="log-tag tag-sec">SEC</span>
-              <span className="log-msg">ENCRYPTION: Layer 2 handshakes verified.</span>
-            </div>
+            <div className="h-px bg-white/5 my-2" />
+
+            <ActionButton
+              variant="secondary"
+              onClick={() => onSystemAction('restart')}
+              className="w-full justify-start py-4 border-amber-500/20 text-amber-500 bg-amber-500/5 hover:bg-amber-500/10"
+            >
+              <HiOutlineArrowPath className="text-xl" />
+              <div className="text-left ml-3">
+                <div className="text-xs font-bold">Node Refresh</div>
+                <div className="text-[10px] text-amber-500/60">Restart engine services</div>
+              </div>
+            </ActionButton>
           </div>
-        </div>
+        </GlassCard>
       </div>
     </div>
   );
