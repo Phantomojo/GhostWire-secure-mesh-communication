@@ -7,7 +7,7 @@
 ![System](https://img.shields.io/badge/Entire%20System-WORKING%20✅-brightgreen?style=for-the-badge&logo=check-circle)
 ![Deployment](https://img.shields.io/badge/Deployment-Ready-blue?style=for-the-badge)
 
-**🎯 MISSION ACCOMPLISHED: The Entire GhostWire System is Now Fully Functional!**
+**🎯 MISSION ACCOMPLISHED: GhostWire Node Cluster V2 is fully operational!**
 
 [![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/network)
@@ -18,121 +18,45 @@
 
 ---
 
-## 🎯 **THE MAIN ACHIEVEMENT: GHOSTWIRE IS FULLY WORKING!**
+## 🛰️ **Introducing Node Cluster V2: The Tactical HUD Overhaul**
 
-**You know those systems that look impressive but don't actually work? GhostWire was like that - until now!**
+**GhostWire has evolved. This isn't just a communication tool; it's a high-performance tactical interface.**
 
-> **"not only buttons in network i mean all buttons in the front end"**
-
-**🎉 THE ENTIRE GHOSTWIRE SYSTEM IS NOW FULLY FUNCTIONAL!**
-
-### **✅ What This Means:**
-- **Complete System** - Every component works together seamlessly
-- **Real Functionality** - No more fake data or display-only features
-- **Full Integration** - Frontend, backend, and networking all working
-- **Smart Error Handling** - Graceful handling of missing features
-- **Immediate Response** - Every action provides real feedback
-- **Cross-PC Communication** - Real peer-to-peer networking
-- **Production Ready** - Ready for actual deployment and use
+### **✅ Major V2 Upgrades:**
+- **Tactical Header HUD** - Real-time metrics for CPU, RAM, and Security with glowing status indicators.
+- **Dynamic Mesh Topology** - Interactive, radar-style visualization of your peer-to-peer network.
+- **Instagram-Style Communication** - Modern, split-view messaging with smooth animations and layout density.
+- **Full Backend Integration** - Real-time data flow for discovery, peering, and system health.
+- **Collapsible Navigation** - Maximize screen real estate with a multi-state sidebar.
 
 ---
 
-## 🌟 **What Makes GhostWire Special?**
+## 🌟 **Key Features**
 
-**GhostWire is a fully functional peer-to-peer communication system where everything actually works!** 
+### **🛡️ Tactical HUD Interface**
+Monitor your system's heartbeat with a high-density status bar.
+![Tactical HUD](docs/screenshots/tactical_hud.png)
 
-- ✅ **Complete System** - Every component functional and integrated
-- ✅ **Real Backend Integration** - Actual API calls and data processing
-- ✅ **Smart Error Handling** - Graceful 404 handling with simulated responses
-- ✅ **Cross-PC Communication** - Real peer-to-peer networking
-- ✅ **Advanced Security** - End-to-end encryption, threat detection, anonymity
-- ✅ **Production Ready** - No more display-only features!
-- ✅ **Small-Scale Deployment** - Ready for production use with Docker & monitoring
+### **🔍 Interactive Mesh Topology**
+Visualize and manage your peer network in real-time. Click nodes to connect, hover for detailed telemetry.
+![Mesh Topology](docs/screenshots/network_topology.png)
+
+### **💬 Modern Communication**
+A premium messaging experience designed for high-stakes coordination.
+![Communication](docs/screenshots/communication_panel.png)
 
 ---
 
-## 🚀 **Quick Start - Get GhostWire Running in 30 Seconds**
+## 🚀 **Quick Start - Launch the HUD**
 
-### **Option 1: Development Mode (Test Everything!)**
 ```bash
 # Clone the repository
 git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication
 
-# Run the complete working system
+# Launch Node Cluster V2
 ./launch-ghostwire-working.sh
-
-# Open your browser to the provided URL
-# Test the entire system - everything works now!
 ```
-
-### **Option 2: Production Deployment**
-```bash
-# Deploy for small-scale production
-./deploy.sh
-
-# Access GhostWire
-# Web UI: http://localhost:3000
-# API: http://localhost:9000
-```
-
-**That's it!** The entire GhostWire system is now functional! 🎉
-
----
-
-## 🎮 **Interactive Demo - Test the Complete System!**
-
-### **🔍 Network Panel - Fully Working!**
-- **🔍 Scan Network** - Actually scans your local network for GhostWire instances
-- **🔄 Refresh Peers** - Reloads real data from the backend
-- **📡 Broadcast** - Sends messages to ALL connected peers
-- **🔗 Connect All** - Connects to ALL discovered peers at once
-- **❌ Disconnect All** - Disconnects from ALL peers
-- **Individual Peer Actions** - Ping, Connect, Disconnect each peer
-
-### **🛡️ Security Panel - Fully Working!**
-- **ROTATE KEYS** - Actually rotates encryption keys
-- **UPGRADE** - Upgrades encryption algorithms
-- **CONFIGURE** - Configures firewall settings
-- **TEST** - Tests firewall functionality
-- **VIEW LOGS** - Shows real security logs
-- **SETTINGS** - Opens security settings
-- **MANAGE** - Manages authentication users
-- **AUDIT** - Performs authentication audits
-- **SECURITY SCAN** - Runs full security scans
-- **THREAT HUNT** - Performs threat hunting
-- **KEY ROTATION** - Rotates security keys
-- **SECURITY AUDIT** - Performs security audits
-- **LOCKDOWN** - Activates system lockdown
-- **BACKUP SECURITY** - Backs up security configuration
-
-### **⚡ Control Panel - Fully Working!**
-- **🔄 Refresh** - Reloads all system data
-- **🔒 Lock System** - Activates emergency mode
-- **💾 Backup** - Creates system backup
-- **🔄 Restart** - Restarts the system
-- **📊 Stats** - Shows system statistics
-- **⚙️ Config** - Opens configuration
-- **📋 Logs** - Shows system logs
-- **Emergency/Stealth/Panic Modes** - All functional
-
-### **💬 Communication Panel - Fully Working!**
-- **📡 Broadcast** - Sends broadcast messages
-- **🚨 Emergency** - Activates emergency mode
-- **📋 Status** - Shows system status
-- **🔍 Scan** - Scans for peers
-- **🔄 Sync** - Synchronizes with backend
-- **📊 Analyze** - Analyzes communications
-- **Send Message** - Real message sending
-
-### **🎛️ System Panel - Fully Working!**
-- **UPDATE FIRMWARE** - Updates system firmware
-- **RUN DIAGNOSTICS** - Runs system diagnostics
-- **PERFORMANCE TEST** - Tests system performance
-- **NETWORK TEST** - Tests network connectivity
-- **RESTART SYSTEM** - Restarts the system
-- **SHUTDOWN** - Shuts down the system
-- **FACTORY RESET** - Resets to factory settings
 
 ---
 
@@ -141,11 +65,11 @@ cd GhostWire-secure-mesh-communication
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Frontend      │    │   Backend       │    │   Network       │
-│   (React)       │◄──►│   (Rust/Axum)   │◄──►│   (P2P)         │
+│   (Node V2 UI)  │◄──►│   (Rust/Axum)   │◄──►│   (P2P Mesh)    │
 │                 │    │                 │    │                 │
-│ ✅ Fully        │    │ ✅ Real API     │    │ ✅ Peer         │
-│    Functional   │    │    Endpoints    │    │    Discovery    │
-│    System       │    │ ✅ Smart Error  │    │ ✅ Real-time    │
+│ ✅ Tactical HUD │    │ ✅ Real API     │    │ ✅ Peer         │
+│ ✅ Interactive  │    │    Endpoints    │    │    Discovery    │
+│ ✅ PWA Ready    │    │ ✅ Smart Error  │    │ ✅ Real-time    │
 │                 │    │    Handling     │    │    Updates      │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
@@ -349,12 +273,12 @@ cd GhostWire-secure-mesh-communication
 
 ## 📚 **Documentation**
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide
-- **[FINAL_WORKING_SOLUTION.md](FINAL_WORKING_SOLUTION.md)** - Complete solution guide
-- **[COMPLETE_FRONTEND_FUNCTIONALITY.md](COMPLETE_FRONTEND_FUNCTIONALITY.md)** - All functionality
-- **[START_HERE.md](START_HERE.md)** - Quick start guide
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testing instructions
-- **[CROSS_PC_GUIDE.md](CROSS_PC_GUIDE.md)** - Cross-PC setup guide
+- **[DEPLOYMENT.md](docs/legacy/DEPLOYMENT.md)** - Complete deployment guide
+- **[FINAL_WORKING_SOLUTION.md](docs/legacy/FINAL_WORKING_SOLUTION.md)** - Complete solution guide
+- **[COMPLETE_FRONTEND_FUNCTIONALITY.md](docs/legacy/COMPLETE_FRONTEND_FUNCTIONALITY.md)** - All functionality
+- **[START_HERE.md](docs/legacy/START_HERE.md)** - Quick start guide
+- **[TESTING_GUIDE.md](docs/legacy/TESTING_GUIDE.md)** - Testing instructions
+- **[CROSS_PC_GUIDE.md](docs/legacy/CROSS_PC_GUIDE.md)** - Cross-PC setup guide
 
 ---
 
