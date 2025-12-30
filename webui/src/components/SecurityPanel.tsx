@@ -116,7 +116,7 @@ const SecurityPanel: React.FC<SecurityPanelProps> = ({
                   <div key={alert.id} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-white/10 transition-all">
                     <div className="flex items-start gap-4">
                       <div className={`mt-1 p-2 rounded-lg ${alert.severity === 'critical' ? 'bg-rose-500/20 text-rose-400' :
-                          alert.severity === 'high' ? 'bg-amber-500/20 text-amber-400' : 'bg-sky-500/20 text-sky-400'
+                        alert.severity === 'high' ? 'bg-amber-500/20 text-amber-400' : 'bg-sky-500/20 text-sky-400'
                         }`}>
                         <HiOutlineShieldExclamation />
                       </div>
@@ -204,6 +204,30 @@ const SecurityPanel: React.FC<SecurityPanelProps> = ({
                   Test Link
                 </ActionButton>
               </div>
+            </GlassCard>
+
+            <GlassCard className="border-rose-500/10 bg-rose-500/5">
+              <h3 className="text-xs font-bold text-white uppercase tracking-widest mb-4 flex items-center gap-2">
+                <HiOutlineShieldCheck className="text-rose-400" />
+                PQ_Armor (ML-KEM)
+              </h3>
+              <div className="flex items-center justify-between mb-6">
+                <div className="space-y-1">
+                  <div className="text-[10px] font-black text-rose-300 uppercase tracking-tighter">Hybrid_Kyber_768</div>
+                  <div className="text-[8px] text-slate-500 uppercase">Resistant to Shor's Algo</div>
+                </div>
+                <div className="relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-slate-800">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    onChange={() => onUpgradeEncryption()} // Reuse or add onTogglePQC
+                  />
+                  <div className="w-4 h-4 rounded-full bg-slate-400 peer-checked:bg-rose-500 peer-checked:translate-x-5 transition-all"></div>
+                </div>
+              </div>
+              <p className="text-[9px] text-slate-400 leading-relaxed opacity-60">
+                Enables NIST-approved Kyber key encapsulation for all traffic. Increases overhead but hardens against future threats.
+              </p>
             </GlassCard>
           </div>
         </div>

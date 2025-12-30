@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { HiOutlineGlobeAlt, HiOutlineShieldCheck, HiOutlineCpuChip, HiOutlineChatBubbleLeftRight, HiOutlineExclamationTriangle, HiOutlineEye, HiOutlineLockClosed, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineShieldExclamation } from 'react-icons/hi2';
+import { HiOutlineHome, HiOutlineGlobeAlt, HiOutlineShieldCheck, HiOutlineCpuChip, HiOutlineChatBubbleLeftRight, HiOutlineExclamationTriangle, HiOutlineEye, HiOutlineLockClosed, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineShieldExclamation, HiOutlineCog6Tooth } from 'react-icons/hi2';
+import UserProfile from '../UserProfile';
 
 interface SidebarProps {
     activePanel: string;
@@ -10,6 +11,8 @@ interface SidebarProps {
     onEmergencyMode: () => void;
     onStealthMode: () => void;
     onPanicMode: () => void;
+    user: any;
+    onUpdateMetadata?: (metadata: any) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -20,15 +23,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     isPanicMode,
     onEmergencyMode,
     onStealthMode,
-    onPanicMode
+    onPanicMode,
+    user,
+    onUpdateMetadata
 }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     const navItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: HiOutlineHome },
         { id: 'network', label: 'Network', icon: HiOutlineGlobeAlt },
+        { id: 'communication', label: 'Messages', icon: HiOutlineChatBubbleLeftRight },
         { id: 'security', label: 'Security', icon: HiOutlineShieldExclamation },
         { id: 'system', label: 'System', icon: HiOutlineCpuChip },
-        { id: 'communication', label: 'Communication', icon: HiOutlineChatBubbleLeftRight },
+        { id: 'settings', label: 'Settings', icon: HiOutlineCog6Tooth },
     ];
 
     return (
@@ -159,6 +166,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                         ))}
                     </div>
+                </div>
+
+                {/* User Profile Section */}
+                <div className={`mt-auto transition-all duration-500 ${isCollapsed ? 'p-4' : 'p-6'}`}>
+                    {!isCollapsed ? (
+                        <UserProfile user={user} onUpdateMetadata={onUpdateMetadata} />
+                    ) : (
+                        <button
+                            className="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center hover:bg-slate-800 transition-all mx-auto shadow-2xl"
+                            onClick={() => setIsCollapsed(false)}
+                        >
+                            <span className="text-2xl">{user.avatar}</span>
+                        </button>
+                    )}
                 </div>
             </aside>
 

@@ -1,24 +1,26 @@
-use std::{io, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use crate::core::security::SecurityManager;
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, warn, error, debug};
-use crate::core::security::{SecurityManager, ThreatLevel, SecurityEvent, EntityType};
-use serde::{Serialize, Deserialize};
-use crate::core::message::Message;
-use anyhow::Result;
-use async_trait::async_trait;
+use tracing;
 
 // Enhanced stealth handshake with multiple layers
-const MAGIC_BYTES: &[u8] = b"GWSTH"; // GhostWire Stealth Handshake
+const MAGIC_BYTES: &[u8; 5] = b"GWSTH";
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_CONN_PER_MIN: usize = 10;
 
 // Advanced stealth features
 const STEALTH_VERSION: u8 = 0x01;
 const MAX_HANDSHAKE_ATTEMPTS: usize = 3;
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+// unused constant removed
 
 /// Enhanced StealthTCP provider with advanced security features
 #[derive(Clone)]
@@ -71,7 +73,7 @@ impl StealthTCPProvider {
     fn check_rate_limit(&self, addr: &SocketAddr) -> bool {
         let now = Instant::now();
         let mut entry = self.rate_limiter.entry(*addr).or_insert((0, now));
-        
+
         if now.duration_since(entry.1) > Duration::from_secs(60) {
             *entry = (1, now);
             true
@@ -92,22 +94,26 @@ impl StealthTCPProvider {
 
     fn update_connection_history(&self, addr: SocketAddr, success: bool, latency: Duration) {
         let now = Instant::now();
-        let mut entry = self.connection_history.entry(addr).or_insert(ConnectionInfo {
-            first_seen: now,
-            last_seen: now,
-            total_connections: 0,
-            successful_connections: 0,
-            failed_attempts: 0,
-            average_latency: Duration::ZERO,
-            threat_score: 0.0,
-        });
+        let mut entry = self
+            .connection_history
+            .entry(addr)
+            .or_insert(ConnectionInfo {
+                first_seen: now,
+                last_seen: now,
+                total_connections: 0,
+                successful_connections: 0,
+                failed_attempts: 0,
+                average_latency: Duration::ZERO,
+                threat_score: 0.0,
+            });
 
         entry.last_seen = now;
         entry.total_connections += 1;
-        
+
         if success {
             entry.successful_connections += 1;
-            let total_latency = entry.average_latency * (entry.successful_connections - 1) as u32 + latency;
+            let total_latency =
+                entry.average_latency * (entry.successful_connections - 1) as u32 + latency;
             entry.average_latency = total_latency / entry.successful_connections as u32;
         } else {
             entry.failed_attempts += 1;
@@ -123,8 +129,8 @@ impl StealthTCPProvider {
             0.0
         };
 
-        let connection_frequency = info.total_connections as f32 / 
-            info.first_seen.elapsed().as_secs().max(1) as f32;
+        let connection_frequency =
+            info.total_connections as f32 / info.first_seen.elapsed().as_secs().max(1) as f32;
 
         let latency_anomaly = if info.average_latency > Duration::from_millis(1000) {
             1.0
@@ -139,24 +145,30 @@ impl StealthTCPProvider {
     /// Enhanced stealth handshake with multiple verification layers
     async fn perform_stealth_handshake(&self, stream: &mut TcpStream) -> io::Result<bool> {
         let start_time = Instant::now();
-        
+
         // Layer 1: Version check
         let mut version_buf = [0u8; 1];
-        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut version_buf)).await.is_err() {
+        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut version_buf[..]))
+            .await
+            .is_err()
+        {
             return Ok(false);
         }
-        
+
         if version_buf[0] != STEALTH_VERSION {
             return Ok(false);
         }
 
         // Layer 2: Magic bytes
         let mut magic_buf = [0u8; MAGIC_BYTES.len()];
-        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut magic_buf)).await.is_err() {
+        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut magic_buf[..]))
+            .await
+            .is_err()
+        {
             return Ok(false);
         }
-        
-        if &magic_buf != MAGIC_BYTES {
+
+        if &magic_buf[..] != &MAGIC_BYTES[..] {
             return Ok(false);
         }
 
@@ -168,8 +180,8 @@ impl StealthTCPProvider {
         }
 
         let handshake_time = start_time.elapsed();
-        debug!("Stealth handshake completed in {:?}", handshake_time);
-        
+        tracing::debug!("Stealth handshake completed in {:?}", handshake_time);
+
         Ok(true)
     }
 
@@ -179,21 +191,23 @@ impl StealthTCPProvider {
         use ring::rand::{SecureRandom, SystemRandom};
         let rng = SystemRandom::new();
         let mut challenge = [0u8; 16];
-        rng.fill(&mut challenge).map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "Failed to generate challenge")
-        })?;
+        rng.fill(&mut challenge[..])
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to generate challenge"))?;
 
         // Send challenge
         stream.write_all(&challenge).await?;
 
         // Receive response
         let mut response = [0u8; 32];
-        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut response)).await.is_err() {
+        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut response[..]))
+            .await
+            .is_err()
+        {
             return Ok(false);
         }
 
         // Verify response (HMAC of challenge with secret)
-        let expected_response = self.calculate_challenge_response(&challenge);
+        let expected_response = self.calculate_challenge_response(&challenge[..]);
         Ok(response == expected_response)
     }
 
@@ -208,12 +222,15 @@ impl StealthTCPProvider {
 
     pub async fn accept(&self, listener: &TcpListener) -> io::Result<TcpStream> {
         let mut attempts = 0;
-        
+
         loop {
             attempts += 1;
             if attempts > MAX_HANDSHAKE_ATTEMPTS {
-                error!("StealthTCP: Too many failed handshake attempts");
-                return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "Too many failed attempts"));
+                tracing::error!("StealthTCP: Too many failed handshake attempts");
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "Too many failed attempts",
+                ));
             }
 
             let (mut stream, addr) = listener.accept().await?;
@@ -221,31 +238,28 @@ impl StealthTCPProvider {
 
             // Security checks
             if !self.security_manager.is_ip_allowed(&addr.ip()).await {
-                self.security_manager.record_connection_attempt(
-                    addr.ip(),
-                    false,
-                    "IP not allowed".to_string(),
-                ).await;
+                self.security_manager
+                    .record_connection_attempt(addr.ip(), false, "IP not allowed".to_string())
+                    .await;
                 continue;
             }
 
             if !self.check_allowlist(&addr) {
-                warn!("StealthTCP: Connection from {} rejected (not in allowlist)", addr);
-                self.security_manager.record_connection_attempt(
-                    addr.ip(),
-                    false,
-                    "Not in allowlist".to_string(),
-                ).await;
+                tracing::warn!(
+                    "StealthTCP: Connection from {} rejected (not in allowlist)",
+                    addr
+                );
+                self.security_manager
+                    .record_connection_attempt(addr.ip(), false, "Not in allowlist".to_string())
+                    .await;
                 continue;
             }
 
             if !self.check_rate_limit(&addr) {
-                warn!("StealthTCP: Connection from {} rate-limited", addr);
-                self.security_manager.record_connection_attempt(
-                    addr.ip(),
-                    false,
-                    "Rate limited".to_string(),
-                ).await;
+                tracing::warn!("StealthTCP: Connection from {} rate-limited", addr);
+                self.security_manager
+                    .record_connection_attempt(addr.ip(), false, "Rate limited".to_string())
+                    .await;
                 continue;
             }
 
@@ -254,37 +268,50 @@ impl StealthTCPProvider {
                 Ok(true) => {
                     let latency = connection_start.elapsed();
                     self.update_connection_history(addr, true, latency);
-                    
-                    info!("StealthTCP: Accepted stealth connection from {} (latency: {:?})", addr, latency);
-                    self.security_manager.record_connection_attempt(
-                        addr.ip(),
-                        true,
-                        "Stealth handshake successful".to_string(),
-                    ).await;
+
+                    tracing::info!(
+                        "StealthTCP: Accepted stealth connection from {} (latency: {:?})",
+                        addr,
+                        latency
+                    );
+                    self.security_manager
+                        .record_connection_attempt(
+                            addr.ip(),
+                            true,
+                            "Stealth handshake successful".to_string(),
+                        )
+                        .await;
                     return Ok(stream);
                 }
                 Ok(false) => {
                     let latency = connection_start.elapsed();
                     self.update_connection_history(addr, false, latency);
-                    
-                    warn!("StealthTCP: Connection from {} failed stealth handshake", addr);
-                    self.security_manager.record_connection_attempt(
-                        addr.ip(),
-                        false,
-                        "Stealth handshake failed".to_string(),
-                    ).await;
+
+                    tracing::warn!(
+                        "StealthTCP: Connection from {} failed stealth handshake",
+                        addr
+                    );
+                    self.security_manager
+                        .record_connection_attempt(
+                            addr.ip(),
+                            false,
+                            "Stealth handshake failed".to_string(),
+                        )
+                        .await;
                     continue;
                 }
                 Err(e) => {
                     let latency = connection_start.elapsed();
                     self.update_connection_history(addr, false, latency);
-                    
-                    error!("StealthTCP: Handshake error from {}: {}", addr, e);
-                    self.security_manager.record_connection_attempt(
-                        addr.ip(),
-                        false,
-                        format!("Handshake error: {}", e),
-                    ).await;
+
+                    tracing::error!("StealthTCP: Handshake error from {}: {}", addr, e);
+                    self.security_manager
+                        .record_connection_attempt(
+                            addr.ip(),
+                            false,
+                            format!("Handshake error: {}", e),
+                        )
+                        .await;
                     continue;
                 }
             }
@@ -293,32 +320,38 @@ impl StealthTCPProvider {
 
     pub async fn connect(&self, addr: &SocketAddr) -> io::Result<TcpStream> {
         let connection_start = Instant::now();
-        
+
         // Security check for outbound connections
         if !self.security_manager.is_ip_allowed(&addr.ip()).await {
-            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "IP not allowed"));
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "IP not allowed",
+            ));
         }
 
         let mut stream = TcpStream::connect(addr).await?;
-        
+
         // Perform outbound stealth handshake
         if !self.perform_outbound_handshake(&mut stream).await? {
-            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "Stealth handshake failed"));
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "Stealth handshake failed",
+            ));
         }
 
         let latency = connection_start.elapsed();
         self.update_connection_history(*addr, true, latency);
-        
-        info!("StealthTCP: Connected to {} (latency: {:?})", addr, latency);
+
+        tracing::info!("StealthTCP: Connected to {} (latency: {:?})", addr, latency);
         Ok(stream)
     }
 
     async fn perform_outbound_handshake(&self, stream: &mut TcpStream) -> io::Result<bool> {
         // Send version
-        stream.write_all(&[STEALTH_VERSION]).await?;
+        stream.write_all(&[STEALTH_VERSION][..]).await?;
 
         // Send magic bytes
-        stream.write_all(MAGIC_BYTES).await?;
+        stream.write_all(&MAGIC_BYTES[..]).await?;
 
         // Handle challenge-response if stealth mode enabled
         if self.enable_stealth_mode {
@@ -333,38 +366,66 @@ impl StealthTCPProvider {
     async fn handle_outbound_challenge_response(&self, stream: &mut TcpStream) -> io::Result<bool> {
         // Receive challenge
         let mut challenge = [0u8; 16];
-        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut challenge)).await.is_err() {
+        if timeout(HANDSHAKE_TIMEOUT, stream.read_exact(&mut challenge[..]))
+            .await
+            .is_err()
+        {
             return Ok(false);
         }
 
         // Calculate and send response
-        let response = self.calculate_challenge_response(&challenge);
-        stream.write_all(&response).await?;
+        let response = self.calculate_challenge_response(&challenge[..]);
+        stream.write_all(&response[..]).await?;
 
         Ok(true)
     }
 
     /// Get connection statistics
     pub fn get_connection_stats(&self) -> ConnectionStats {
-        let total_connections = self.connection_history.iter().map(|kv| kv.value().total_connections as u64).sum();
-        let active_connections = self.connection_history.iter().filter(|kv| kv.value().successful_connections > 0).count() as u64;
-        let failed_connections = self.connection_history.iter().map(|kv| kv.value().failed_attempts as u64).sum();
-        let blocked_connections = self.connection_history.iter().filter(|kv| kv.value().threat_score > 0.7).count() as u64;
-        
+        let total_connections = self
+            .connection_history
+            .iter()
+            .map(|kv| kv.value().total_connections as u64)
+            .sum();
+        let active_connections = self
+            .connection_history
+            .iter()
+            .filter(|kv| kv.value().successful_connections > 0)
+            .count() as u64;
+        let failed_connections = self
+            .connection_history
+            .iter()
+            .map(|kv| kv.value().failed_attempts as u64)
+            .sum();
+        let blocked_connections = self
+            .connection_history
+            .iter()
+            .filter(|kv| kv.value().threat_score > 0.7)
+            .count() as u64;
+
         let avg_connection_time = if total_connections > 0 {
-            let total_time: f64 = self.connection_history.iter()
+            let total_time: f64 = self
+                .connection_history
+                .iter()
                 .map(|kv| kv.value().average_latency.as_millis() as f64)
                 .sum();
             total_time / total_connections as f64
         } else {
             0.0
         };
-        
-        let last_connection_time = self.connection_history.iter()
-            .map(|kv| kv.value().last_seen.duration_since(Instant::now()).as_secs() as u64)
+
+        let last_connection_time = self
+            .connection_history
+            .iter()
+            .map(|kv| {
+                kv.value()
+                    .last_seen
+                    .duration_since(Instant::now())
+                    .as_secs() as u64
+            })
             .max()
             .unwrap_or(0);
-        
+
         ConnectionStats {
             total_connections,
             active_connections,
@@ -397,7 +458,7 @@ impl Default for ConnectionStats {
             last_connection_time: 0,
         }
     }
-} 
+}
 
 // Commented out: impl Transport for StealthTCPProvider {
 //     fn name(&self) -> &'static str { "stealth_tcp" }
@@ -414,4 +475,4 @@ impl Default for ConnectionStats {
 // }
 // Registration example (in main/core):
 // #[cfg(feature = "stealth-tcp-transport")]
-// registry.register(StealthTCPProvider::new(...)); 
+// registry.register(StealthTCPProvider::new(...));

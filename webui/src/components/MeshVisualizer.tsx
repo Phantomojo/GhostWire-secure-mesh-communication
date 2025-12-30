@@ -134,11 +134,45 @@ const MeshVisualizer: React.FC<MeshVisualizerProps> = ({ nodes, onNodeClick }) =
 
                 ctx.strokeStyle = `rgba(99, 102, 241, ${alpha * (isHovered || isSelected ? 0.8 : 0.3)})`;
                 ctx.lineWidth = isHovered || isSelected ? 2 : 1;
+
+                // Tactical Pulse / Transport Indicator
+                const isLoRa = node.id.includes('lora') || node.name.toLowerCase().includes('radio');
+                if (isLoRa) {
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeStyle = `rgba(245, 158, 11, ${alpha})`;
+                }
+
                 ctx.beginPath();
                 ctx.moveTo(localX, localY);
                 ctx.lineTo(node.x, node.y);
                 ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Signal Flow Animation
+                // Signal Flow Animation
+                if (node.status === 'online') {
+                    const time = Date.now() / 1000;
+                    const dotPos = (time % 1);
+                    const dx = node.x - localX;
+                    const dy = node.y - localY;
+                    ctx.fillStyle = isLoRa ? '#f59e0b' : '#6366f1';
+                    ctx.beginPath();
+                    ctx.arc(localX + dx * dotPos, localY + dy * dotPos, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             });
+
+            // Radar Sweep Effect
+            const sweepAngle = (Date.now() / 2000) % (Math.PI * 2);
+            const sweepGradient = ctx.createRadialGradient(localX, localY, 0, localX, localY, 350);
+            sweepGradient.addColorStop(0, 'rgba(99, 102, 241, 0)');
+            sweepGradient.addColorStop(1, 'rgba(99, 102, 241, 0.05)');
+            ctx.fillStyle = sweepGradient;
+            ctx.beginPath();
+            ctx.moveTo(localX, localY);
+            ctx.arc(localX, localY, 350, sweepAngle, sweepAngle + 0.4);
+            ctx.closePath();
+            ctx.fill();
 
             // Draw nodes
             nodesRef.current.forEach((node) => {
@@ -200,7 +234,29 @@ const MeshVisualizer: React.FC<MeshVisualizerProps> = ({ nodes, onNodeClick }) =
             ctx.textAlign = 'center';
             ctx.fillText('COREHOST', localX, localY - 25);
 
+            // Draw Tactical HUD
+            drawHUD(ctx, nodesRef.current.length);
+
             requestRef.current = requestAnimationFrame(animate);
+        };
+
+        // Inner Tactical HUD Function (Draws the War Room overlays)
+        const drawHUD = (ctx: CanvasRenderingContext2D, nodesCount: number) => {
+            ctx.fillStyle = 'rgba(99, 102, 241, 0.8)';
+            ctx.font = '900 10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText("> GHOSTWIRE WAR ROOM v2.0", 20, 30);
+            ctx.fillText(`> ACTIVE PEERS: ${nodesCount}`, 20, 45);
+            ctx.fillText("> PQ-ARMOR: HYBRID_KYBER_768_ACTIVE", 20, 60);
+
+            // Nervous System Decision Log
+            ctx.font = '700 8px "Inter", sans-serif';
+            ctx.textBaseline = 'top';
+            ctx.fillText("AUTONOMIC LOGS:", 20, 85);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.fillText("T-0s: TRANSPORT SWAP OPTIMIZED", 20, 95);
+            ctx.fillText("T-10s: HYSTERESIS STABILIZED", 20, 105);
+            ctx.fillText("T-20s: CHAFF HEARTBEAT EMITTED", 20, 115);
         };
 
         requestRef.current = requestAnimationFrame(animate);

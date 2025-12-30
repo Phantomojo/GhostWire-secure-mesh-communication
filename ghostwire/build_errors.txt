@@ -1,0 +1,405 @@
+    Blocking waiting for file lock on build directory
+    Checking ghostwire v0.1.0 (/home/ph/GhostWire-secure-mesh-communication/ghostwire)
+warning: unused import: `self`
+ --> src/core/encryption.rs:7:23
+  |
+7 | use ring::agreement::{self};
+  |                       ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `error`
+ --> src/core/signal.rs:4:22
+  |
+4 | use tracing::{debug, error, info};
+  |                      ^^^^^
+
+warning: unused import: `async_trait::async_trait`
+ --> src/core/transport.rs:1:5
+  |
+1 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::sync::RwLock`
+ --> src/core/transport.rs:6:5
+  |
+6 | use tokio::sync::RwLock;
+  |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `async_trait::async_trait`
+ --> src/core/mesh.rs:6:5
+  |
+6 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `EntityType`, `SecurityEvent`, and `ThreatLevel`
+ --> src/core/stealth_tcp.rs:7:46
+  |
+7 | use crate::core::security::{SecurityManager, ThreatLevel, SecurityEvent, EntityType};
+  |                                              ^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `crate::core::message::Message`
+ --> src/core/stealth_tcp.rs:9:5
+  |
+9 | use crate::core::message::Message;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+  --> src/core/stealth_tcp.rs:10:5
+   |
+10 | use anyhow::Result;
+   |     ^^^^^^^^^^^^^^
+
+warning: unused import: `async_trait::async_trait`
+  --> src/core/stealth_tcp.rs:11:5
+   |
+11 | use async_trait::async_trait;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::api_v2_endpoints::*`
+ --> src/web.rs:2:5
+  |
+2 | use crate::api_v2_endpoints::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::api_v2_endpoints::*`
+ --> src/web.rs:3:5
+  |
+3 | use crate::api_v2_endpoints::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::api_v2_endpoints::*`
+ --> src/web.rs:4:5
+  |
+4 | use crate::api_v2_endpoints::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Write` and `self`
+  --> src/web.rs:21:15
+   |
+21 | use std::io::{self, Write};
+   |               ^^^^  ^^^^^
+
+warning: unused imports: `IpAddr` and `Ipv4Addr`
+  --> src/web.rs:22:16
+   |
+22 | use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+   |                ^^^^^^  ^^^^^^^^
+
+warning: unused import: `lazy_static::lazy_static`
+  --> src/web.rs:27:5
+   |
+27 | use lazy_static::lazy_static;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rand::Rng`
+  --> src/web.rs:29:5
+   |
+29 | use rand::Rng;
+   |     ^^^^^^^^^
+
+warning: unused import: `self`
+ --> src/tui/mod.rs:7:24
+  |
+7 | use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
+  |                        ^^^^
+
+warning: unused imports: `Block`, `Borders`, `Color`, `Constraint`, `Direction`, `Frame`, `Layout`, `Line`, `ListItem`, `List`, `Modifier`, `Paragraph`, `Rect`, `Span`, `Style`, `Stylize`, and `Wrap`
+  --> src/tui/mod.rs:9:14
+   |
+ 9 |     layout::{Constraint, Direction, Layout, Rect},
+   |              ^^^^^^^^^^  ^^^^^^^^^  ^^^^^^  ^^^^
+10 |     style::{Color, Modifier, Style, Stylize},
+   |             ^^^^^  ^^^^^^^^  ^^^^^  ^^^^^^^
+11 |     text::{Span, Line},
+   |            ^^^^  ^^^^
+12 |     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+   |               ^^^^^  ^^^^^^^  ^^^^  ^^^^^^^^  ^^^^^^^^^  ^^^^
+13 |     Frame, Terminal,
+   |     ^^^^^
+
+warning: unused import: `ratatui::prelude::Alignment`
+  --> src/tui/mod.rs:16:5
+   |
+16 | use ratatui::prelude::Alignment;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::tui::chat::ChatState`
+  --> src/tui/mod.rs:18:5
+   |
+18 | use crate::tui::chat::ChatState;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `app::App`
+  --> src/tui/mod.rs:22:5
+   |
+22 | use app::App;
+   |     ^^^^^^^^
+
+warning: unused import: `Terminal`
+ --> src/tui/ui.rs:9:12
+  |
+9 |     Frame, Terminal,
+  |            ^^^^^^^^
+
+warning: unused import: `Deserialize`
+ --> src/api_v2_types.rs:4:24
+  |
+4 | use serde::{Serialize, Deserialize};
+  |                        ^^^^^^^^^^^
+
+warning: unused imports: `HateoasLinks` and `PaginationMeta`
+  --> src/api_v2_endpoints.rs:13:42
+   |
+13 | use crate::api_v2_types::{ApiV2Response, HateoasLinks, PaginationMeta};
+   |                                          ^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+
+error[E0716]: temporary value dropped while borrowed
+   --> src/core/mesh.rs:141:42
+    |
+141 |             libp2p::StreamProtocol::new(&format!("/ghostwire/kad/shard/{}", shard_id)),
+    |             -----------------------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-
+    |             |                            |
+    |             |                            creates a temporary value which is freed while still in use
+    |             argument requires that borrow lasts for `'static`
+142 |         ]);
+    |           - temporary value is freed at the end of this statement
+    |
+    = note: this error originates in the macro `format` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unreachable pattern
+   --> src/core/mesh.rs:269:25
+    |
+269 |                         _ => {}
+    |                         ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> src/core/mesh.rs:269:25
+    |
+257 |                                         MdnsEvent::Discovered(list) => {
+    |                                         --------------------------- matches some of the same values
+...
+263 |                                         MdnsEvent::Expired(list) => {
+    |                                         ------------------------ matches some of the same values
+...
+269 |                         _ => {}
+    |                         ^ collectively making this unreachable
+    = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `target_node`
+   --> src/core/mesh.rs:335:36
+    |
+335 |     pub async fn find_route(&self, target_node: &str) -> Option<Vec<String>> {
+    |                                    ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_target_node`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `traffic_armor`
+   --> src/core/mod.rs:287:13
+    |
+287 |         let traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_traffic_armor`
+
+warning: variable does not need to be mutable
+   --> src/core/mod.rs:298:13
+    |
+298 |         let mut registry = TransportRegistry::new();
+    |             ----^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `transport`
+   --> src/core/mod.rs:439:21
+    |
+439 |         if let Some(transport) = &self.active_transport {
+    |                     ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_transport`
+
+warning: unused variable: `state`
+   --> src/web.rs:359:33
+    |
+359 | pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    |                                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `peer`
+   --> src/web.rs:877:17
+    |
+877 |     if let Some(peer) = connections.get(&req.peer_id) {
+    |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_peer`
+
+warning: unused variable: `state`
+   --> src/web.rs:916:11
+    |
+916 |     State(state): State<Arc<AppState>>,
+    |           ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `suspicious_names`
+    --> src/web.rs:1180:13
+     |
+1180 |         let suspicious_names = [".", "..", " ", "kworker/", "migration/"]; // overly common or hidden names
+     |             ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_suspicious_names`
+
+warning: unused variable: `state`
+    --> src/web.rs:1382:35
+     |
+1382 | pub async fn security_audit(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+     |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `state`
+    --> src/web.rs:1523:43
+     |
+1523 | pub async fn analyze_communications(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+     |                                           ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `stats`
+    --> src/web.rs:1558:13
+     |
+1558 |         let stats = String::from_utf8_lossy(&output.stdout);
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_stats`
+
+warning: unused variable: `state`
+    --> src/web.rs:2149:39
+     |
+2149 | pub async fn get_security_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+     |                                       ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: variable does not need to be mutable
+   --> src/tui/mod.rs:720:13
+    |
+720 |         let mut core_guard = app.core.lock().await;
+    |             ----^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `core_guard`
+   --> src/tui/mod.rs:734:13
+    |
+734 |     let mut core_guard = app.core.lock().await;
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_core_guard`
+
+warning: variable does not need to be mutable
+   --> src/tui/mod.rs:734:9
+    |
+734 |     let mut core_guard = app.core.lock().await;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: unused variable: `core_guard`
+   --> src/tui/mod.rs:792:13
+    |
+792 |     let mut core_guard = app.core.lock().await;
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_core_guard`
+
+warning: variable does not need to be mutable
+   --> src/tui/mod.rs:792:9
+    |
+792 |     let mut core_guard = app.core.lock().await;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: unused variable: `core_guard`
+   --> src/tui/mod.rs:832:13
+    |
+832 |     let mut core_guard = app.core.lock().await;
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_core_guard`
+
+warning: variable does not need to be mutable
+   --> src/tui/mod.rs:832:9
+    |
+832 |     let mut core_guard = app.core.lock().await;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: unused variable: `public_key`
+   --> src/tui/mod.rs:851:9
+    |
+851 |     let public_key = core_guard.get_public_key();
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_public_key`
+
+warning: unused variable: `key_id`
+   --> src/tui/mod.rs:852:9
+    |
+852 |     let key_id = core_guard.get_key_id();
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_key_id`
+
+warning: unused variable: `core_guard`
+   --> src/tui/mod.rs:873:13
+    |
+873 |     let mut core_guard = app.core.lock().await;
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_core_guard`
+
+warning: variable does not need to be mutable
+   --> src/tui/mod.rs:873:9
+    |
+873 |     let mut core_guard = app.core.lock().await;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: unused variable: `state`
+   --> src/api_v2_endpoints.rs:243:11
+    |
+243 |     State(state): State<Arc<AppState>>,
+    |           ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `end`
+   --> src/api_v2_endpoints.rs:269:9
+    |
+269 |     let end = start + per_page;
+    |         ^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+269 |     let _end = start + per_page;
+    |         +
+help: you might have meant to pattern match on the similarly named constant `MAX_HANDSHAKE_ATTEMPTS`
+    |
+269 -     let end = start + per_page;
+269 +     let core::stealth_tcp::MAX_HANDSHAKE_ATTEMPTS = start + per_page;
+    |
+
+warning: unused import: `backend::Backend`
+ --> src/tui/ui.rs:4:5
+  |
+4 |     backend::Backend,
+  |     ^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src/core/encryption.rs:393:13
+    |
+393 |         let mut opening_key = aead::LessSafeKey::new(unbound_key);
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `mesh_manager`
+   --> src/core/mod.rs:676:21
+    |
+676 |         if let Some(mesh_manager) = &self.mesh_manager {
+    |                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mesh_manager`
+
+warning: unused variable: `app`
+  --> src/tui/config.rs:76:21
+   |
+76 | pub fn handle_input(app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEvent) {
+   |                     ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+
+warning: unused variable: `json_logs`
+   --> src/tui/logs.rs:207:17
+    |
+207 |             let json_logs = app.logs_state.export_logs("json");
+    |                 ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_json_logs`
+
+warning: unused variable: `app`
+    --> src/tui/ui.rs:1178:39
+     |
+1178 | fn render_settings(frame: &mut Frame, app: &TuiApp) {
+     |                                       ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+
+For more information about this error, try `rustc --explain E0716`.
+warning: `ghostwire` (lib) generated 56 warnings
+error: could not compile `ghostwire` (lib) due to 1 previous error; 56 warnings emitted

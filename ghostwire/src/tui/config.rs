@@ -73,7 +73,7 @@ impl ConfigState {
 }
 
 /// Handle config-specific input
-pub fn handle_input(app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEvent) {
+pub fn handle_input(_app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEvent) {
     match key.code {
         crossterm::event::KeyCode::Char('s') => {
             // Save configuration
@@ -85,4 +85,4 @@ pub fn handle_input(app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEven
         }
         _ => {}
     }
-} 
+}

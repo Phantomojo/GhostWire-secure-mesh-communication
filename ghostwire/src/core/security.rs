@@ -92,23 +92,25 @@ impl Default for SecurityStats {
 
 /// Main security manager
 pub struct SecurityManager {
-    config: SecurityConfig,
+    config: Arc<RwLock<SecurityConfig>>,
     blacklist: Arc<RwLock<HashMap<String, u64>>>, // IP -> timestamp
     connection_counts: Arc<RwLock<HashMap<IpAddr, usize>>>,
     message_counts: Arc<RwLock<HashMap<String, usize>>>,
     events: Arc<RwLock<Vec<SecurityEvent>>>,
     stats: Arc<RwLock<SecurityStats>>,
+    pub lockdown_enabled: Arc<RwLock<bool>>,
 }
 
 impl SecurityManager {
     pub fn new(config: SecurityConfig) -> Self {
         Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             blacklist: Arc::new(RwLock::new(HashMap::new())),
             connection_counts: Arc::new(RwLock::new(HashMap::new())),
             message_counts: Arc::new(RwLock::new(HashMap::new())),
             events: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(RwLock::new(SecurityStats::default())),
+            lockdown_enabled: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -117,12 +119,13 @@ impl SecurityManager {
         let ip_str = ip.to_string();
 
         // Check explicit allowlist
-        if !self.config.allowed_ips.is_empty() && !self.config.allowed_ips.contains(&ip_str) {
+        let config = self.config.read().await;
+        if !config.allowed_ips.is_empty() && !config.allowed_ips.contains(&ip_str) {
             return false;
         }
 
         // Check explicit blocklist
-        if self.config.blocked_ips.contains(&ip_str) {
+        if config.blocked_ips.contains(&ip_str) {
             return false;
         }
 
@@ -152,7 +155,8 @@ impl SecurityManager {
         let count = counts.entry(ip).or_insert(0);
         *count += 1;
 
-        if *count > self.config.max_connections_per_ip {
+        let max = self.config.read().await.max_connections_per_ip;
+        if *count > max {
             self.block_ip(&ip.to_string()).await;
             // Increment rate limit violations
             let mut stats = self.stats.write().await;
@@ -169,7 +173,8 @@ impl SecurityManager {
         let count = counts.entry(peer_id.to_string()).or_insert(0);
         *count += 1;
 
-        if *count > self.config.max_messages_per_minute {
+        let max = self.config.read().await.max_messages_per_minute;
+        if *count > max {
             let mut stats = self.stats.write().await;
             stats.rate_limit_violations += 1;
             return false;
@@ -274,6 +279,57 @@ impl SecurityManager {
         // Update last scan
         let mut stats = self.stats.write().await;
         stats.last_scan = now;
+    }
+
+    pub async fn set_lockdown(&self, enabled: bool) {
+        let mut lockdown = self.lockdown_enabled.write().await;
+        *lockdown = enabled;
+
+        let event = SecurityEvent {
+            event_type: if enabled {
+                "lockdown_enabled".to_string()
+            } else {
+                "lockdown_disabled".to_string()
+            },
+            entity_type: EntityType::Node,
+            entity_id: "local".to_string(),
+            threat_level: if enabled {
+                ThreatLevel::Critical
+            } else {
+                ThreatLevel::Low
+            },
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            description: if enabled {
+                "System placed in LOCKDOWN mode".to_string()
+            } else {
+                "Lockdown mode lifted".to_string()
+            },
+        };
+        self.add_event(event).await;
+    }
+
+    pub async fn is_lockdown(&self) -> bool {
+        *self.lockdown_enabled.read().await
+    }
+
+    pub fn save_config(&self, path: &str) -> std::io::Result<()> {
+        let rt = tokio::runtime::Handle::current();
+        let config_guard = rt.block_on(self.config.read());
+        let json = serde_json::to_string_pretty(&*config_guard)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub async fn update_config(&self, new_config: SecurityConfig) {
+        let mut config = self.config.write().await;
+        *config = new_config;
+    }
+
+    pub async fn get_config(&self) -> SecurityConfig {
+        self.config.read().await.clone()
     }
 }
 
@@ -473,7 +529,7 @@ pub struct PersistentBlacklistManager {
 #[derive(Debug, Clone)]
 struct BlacklistEntry {
     timestamp: u64,
-    reason: String,
+    _reason: String,
     expires_at: Option<u64>, // None = permanent, Some = temporary
 }
 
@@ -509,7 +565,7 @@ impl PersistentBlacklistManager {
             peer_id.to_string(),
             BlacklistEntry {
                 timestamp: now,
-                reason,
+                _reason: reason,
                 expires_at: duration_secs.map(|d| now + d),
             },
         );

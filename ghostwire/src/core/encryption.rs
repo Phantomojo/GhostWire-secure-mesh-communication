@@ -1,16 +1,20 @@
 //! Encryption: key revocation, rotation announcements, CRLs.
 //! Next: integrate with key manager and web API.
 
+use crate::core::armor::TrafficArmor;
 use crate::core::signal::SignalManager;
 use ring::aead::{self, UnboundKey, AES_256_GCM};
-use ring::agreement::{self, EphemeralPrivateKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing;
+use x25519_dalek::x25519;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Enhanced encrypted message with additional security features
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,18 +27,20 @@ pub struct EncryptedMessage {
     pub key_id: String,
     pub message_type: MessageType,
     pub version: u8,
+    pub pq_key: Option<Vec<u8>>, // Kyber encapsulated key for PQC Hardening
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
     Text,
     Binary,
     Control,
     Heartbeat,
+    Handshake,
 }
 
 /// Enhanced key pair with additional metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct GhostKeyPair {
     pub public_key: Vec<u8>,
     pub private_key: Vec<u8>,
@@ -45,11 +51,13 @@ pub struct GhostKeyPair {
     pub key_type: KeyType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize)]
 pub enum KeyType {
     Ed25519,
     X25519,
-    Hybrid, // Both Ed25519 and X25519
+    Hybrid,      // Both Ed25519 and X25519
+    PostQuantum, // Kyber
+    Ultimate,    // Ed25519 + X25519 + Kyber
 }
 
 /// Enhanced peer key information
@@ -90,9 +98,10 @@ pub struct EncryptionManager {
     key_rotation_interval: u64,
     last_key_rotation: u64,
     signal_manager: SignalManager,
+    pub traffic_armor: Option<Arc<TrafficArmor>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SessionKey {
     pub key: Vec<u8>,
     pub created_at: u64,
@@ -126,6 +135,37 @@ impl KeyManager for StubKeyManager {
 
 impl EncryptionManager {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_or_create()
+    }
+
+    pub fn load_or_create() -> Result<Self, Box<dyn std::error::Error>> {
+        let storage_path = Self::get_storage_path()?;
+
+        if storage_path.exists() {
+            match Self::load_from_disk(&storage_path) {
+                Ok(manager) => {
+                    tracing::info!(
+                        "🔐 Loaded persistent encryption keys: {}",
+                        manager.key_pair.key_id
+                    );
+                    return Ok(manager);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "⚠️ Failed to load encryption keys: {}. Rotating/Creating new.",
+                        e
+                    );
+                }
+            }
+        }
+
+        tracing::info!("🆕 Generating new persistent encryption keys...");
+        let manager = Self::create_new()?;
+        manager.save_to_disk()?;
+        Ok(manager)
+    }
+
+    fn create_new() -> Result<Self, Box<dyn std::error::Error>> {
         let rng = SystemRandom::new();
 
         // Generate hybrid key pair (both Ed25519 and X25519)
@@ -143,33 +183,148 @@ impl EncryptionManager {
                 .unwrap()
                 .as_secs(),
             signal_manager: SignalManager::new(identity_key),
+            traffic_armor: None,
         })
+    }
+
+    fn get_storage_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+        let home = dirs::home_dir().ok_or("Could not find home directory")?;
+        let ghost_dir = home.join(".ghostwire");
+        if !ghost_dir.exists() {
+            std::fs::create_dir_all(&ghost_dir)?;
+        }
+        Ok(ghost_dir.join("encryption.json"))
+    }
+
+    fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        // Use secure load
+        let persisted: PersistedEncryption = Self::secure_load(path)?;
+
+        let rng = SystemRandom::new();
+        // Reconstruct manager from persisted state
+        Ok(EncryptionManager {
+            key_pair: persisted.key_pair,
+            peer_keys: Arc::new(Mutex::new(HashMap::new())),
+            rng,
+            session_keys: Arc::new(Mutex::new(HashMap::new())),
+            key_rotation_interval: persisted.key_rotation_interval,
+            last_key_rotation: persisted.last_key_rotation,
+            signal_manager: SignalManager::new(persisted.identity_key),
+            traffic_armor: None,
+        })
+    }
+
+    fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let home = dirs::home_dir().ok_or("No home dir")?;
+        let ghost_dir = home.join(".ghostwire");
+        if !ghost_dir.exists() {
+            std::fs::create_dir_all(&ghost_dir)?;
+        }
+        let key_path = ghost_dir.join("master.key");
+
+        if key_path.exists() {
+            let key = std::fs::read(&key_path)?;
+            if key.len() != 32 {
+                return Err("Invalid master key length".into());
+            }
+            Ok(key)
+        } else {
+            let mut key = [0u8; 32];
+            SystemRandom::new()
+                .fill(&mut key[..])
+                .map_err(|_| "RNG failed")?;
+
+            // save with 600
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .mode(0o600)
+                .open(&key_path)?;
+            file.write_all(&key)?;
+            tracing::info!("🔑 Generated new Master Key for secure storage");
+            Ok(key.to_vec())
+        }
+    }
+
+    pub fn secure_save<T: Serialize>(
+        path: &std::path::Path,
+        data: &T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let json_bytes = serde_json::to_vec(data)?;
+        let master_key = Self::get_master_key()?;
+
+        // Encrypt with AES-GCM
+        let result = Self::encrypt_with_aes_gcm(&json_bytes, &master_key)?;
+
+        let mut file = std::fs::File::create(path)?;
+        // Simple container format: [Nonce (12)] [Ciphertext]
+        file.write_all(&result.nonce)?;
+        file.write_all(&result.ciphertext)?;
+        Ok(())
+    }
+
+    pub fn secure_load<T: for<'de> Deserialize<'de>>(
+        path: &std::path::Path,
+    ) -> Result<T, Box<dyn std::error::Error>> {
+        let data = std::fs::read(path)?;
+        if data.len() < 12 {
+            return Err("File too short".into());
+        }
+
+        let master_key = Self::get_master_key()?;
+        let nonce = &data[..12];
+        let ciphertext = &data[12..];
+
+        let plaintext_bytes = Self::decrypt_with_aes_gcm(ciphertext, nonce, &master_key)?;
+        let object: T = serde_json::from_slice(&plaintext_bytes)?;
+        Ok(object)
+    }
+
+    pub fn save_to_disk(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let path = Self::get_storage_path()?;
+        let persisted = PersistedEncryption {
+            key_pair: self.key_pair.clone(),
+            key_rotation_interval: self.key_rotation_interval,
+            last_key_rotation: self.last_key_rotation,
+            identity_key: self.key_pair.public_key.clone(),
+        };
+
+        Self::secure_save(&path, &persisted)?;
+        Ok(())
     }
 
     fn generate_hybrid_key_pair(
         rng: &SystemRandom,
     ) -> Result<GhostKeyPair, Box<dyn std::error::Error>> {
         // Generate Ed25519 key pair for signing
-        let ed25519_key_pair_bytes = Ed25519KeyPair::generate_pkcs8(rng)
+        let ed25519_pkcs8_key_pair = Ed25519KeyPair::generate_pkcs8(rng as &dyn SecureRandom)
             .map_err(|e| format!("Failed to generate Ed25519 key pair: {:?}", e))?;
-        let _ed25519_key_pair = Ed25519KeyPair::from_pkcs8(ed25519_key_pair_bytes.as_ref())
+        let ed25519_key_pair = Ed25519KeyPair::from_pkcs8(ed25519_pkcs8_key_pair.as_ref())
             .map_err(|e| format!("Failed to create Ed25519 key pair: {:?}", e))?;
 
-        // Generate X25519 key pair for encryption
-        let x25519_private_key = EphemeralPrivateKey::generate(&agreement::X25519, rng)
-            .map_err(|e| format!("Failed to generate X25519 private key: {:?}", e))?;
-        let x25519_public_key = x25519_private_key
-            .compute_public_key()
-            .map_err(|e| format!("Failed to compute X25519 public key: {:?}", e))?;
+        // Generate X25519 key pair for encryption (persistent static secret)
+        let mut x25519_private_bytes = [0u8; 32];
+        rng.fill(&mut x25519_private_bytes[..])
+            .map_err(|e| format!("RNG failure: {:?}", e))?;
 
-        // Combine both keys
-        let combined_private_key = ed25519_key_pair_bytes.as_ref().to_vec();
-        // Note: In a real implementation, you'd properly extract and combine the private keys
-        // For now, we'll use the Ed25519 key as the primary key
+        // Generate public key using basepoint [9, 0, ...]
+        let mut basepoint = [0u8; 32];
+        basepoint[0] = 9;
+        let x25519_public_bytes = x25519(x25519_private_bytes, basepoint);
+
+        // Combine keys into a serialized format
+        // Public part: [Ed25519 Public (32 bytes)] [X25519 Public (32 bytes)]
+        let mut public_key = ed25519_key_pair.public_key().as_ref().to_vec();
+        public_key.extend_from_slice(&x25519_public_bytes);
+
+        // Private part: [Ed25519 PKCS8 (variable)] [SEPARATOR] [X25519 Private (32 bytes)]
+        let mut private_key = ed25519_pkcs8_key_pair.as_ref().to_vec();
+        private_key.extend_from_slice(b"---X25519---"); // Simple separator for now
+        private_key.extend_from_slice(&x25519_private_bytes);
 
         let key_pair = GhostKeyPair {
-            public_key: _ed25519_key_pair.public_key().as_ref().to_vec(),
-            private_key: combined_private_key,
+            public_key,
+            private_key,
             key_id: Self::generate_key_id(),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -245,7 +400,7 @@ impl EncryptionManager {
         let session_key = self.derive_session_key(recipient_id, &peer_key.public_key)?;
 
         // Encrypt the message using AES-256-GCM
-        let encrypted_data = self.encrypt_with_aes_gcm(message.as_bytes(), &session_key)?;
+        let encrypted_data = Self::encrypt_with_aes_gcm(message.as_bytes(), &session_key)?;
 
         // Sign the encrypted message
         let signature = self.sign_message(&encrypted_data.ciphertext)?;
@@ -264,7 +419,8 @@ impl EncryptionManager {
                 .as_secs(),
             key_id: self.key_pair.key_id.clone(),
             message_type,
-            version: 0x02, // Current version
+            version: 0x03, // Upgraded version for PQC support
+            pq_key: None,  // TODO: Implement Kyber encapsulation
         })
     }
 
@@ -305,7 +461,7 @@ impl EncryptionManager {
         let session_key = self.derive_session_key(&encrypted_msg.sender_id, &peer_public_key)?;
 
         // Decrypt using AES-256-GCM
-        let decrypted_data = self.decrypt_with_aes_gcm(
+        let decrypted_data = Self::decrypt_with_aes_gcm(
             &encrypted_msg.ciphertext,
             &encrypted_msg.nonce,
             &session_key,
@@ -315,7 +471,6 @@ impl EncryptionManager {
     }
 
     fn encrypt_with_aes_gcm(
-        &self,
         data: &[u8],
         key: &[u8],
     ) -> Result<AesGcmResult, Box<dyn std::error::Error>> {
@@ -329,7 +484,7 @@ impl EncryptionManager {
             .map_err(|e| format!("Failed to create AES-256-GCM key: {:?}", e))?;
 
         // Generate random nonce (96 bits = 12 bytes for GCM)
-        let nonce_bytes = self.generate_nonce();
+        let nonce_bytes = Self::generate_nonce();
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
         // Create LessSafeKey for encryption
@@ -349,7 +504,6 @@ impl EncryptionManager {
     }
 
     fn decrypt_with_aes_gcm(
-        &self,
         ciphertext: &[u8],
         nonce: &[u8],
         key: &[u8],
@@ -374,7 +528,7 @@ impl EncryptionManager {
         let nonce = aead::Nonce::assume_unique_for_key(nonce_array);
 
         // Create Opening key
-        let mut opening_key = aead::LessSafeKey::new(unbound_key);
+        let opening_key = aead::LessSafeKey::new(unbound_key);
 
         // Decrypt in place (verifies and removes authentication tag)
         let mut in_out = ciphertext.to_vec();
@@ -407,31 +561,31 @@ impl EncryptionManager {
             }
         }
 
-        // Derive new session key using HKDF
-        let mut key = [0u8; 32];
-        let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
-        hasher.update(b"GhostWire-Session-Key-v1");
-
-        // WARNING: INSECURE STUB IMPLEMENTATION
-        // We are strictly for testing/debugging purposes using a symmetric derivation
-        // derived ONLY from public keys because we lack X25519 Private Key storage
-        // in current GhostKeyPair. Real implementation MUST use ECDH (X25519).
-        // This allows Alice and Bob to derive the same key.
-
-        let my_pub = &self.key_pair.public_key;
-        let peer_pub = peer_public_key;
-
-        // Deterministic ordering to ensure symmetry
-        if my_pub < &peer_pub.to_vec() {
-            hasher.update(my_pub);
-            hasher.update(peer_pub);
-        } else {
-            hasher.update(peer_pub);
-            hasher.update(my_pub);
+        // 🛡️ REAL ECDH IMPLEMENTATION
+        // Peer public key structure: [Ed25519 (32) | X25519 (32)]
+        if peer_public_key.len() < 64 {
+            return Err("Invalid peer public key length".into());
         }
+        let x25519_peer_pub_bytes: [u8; 32] = peer_public_key[32..64].try_into()?;
 
-        // Remove random nonce usage!
-        key.copy_from_slice(hasher.finish().as_ref());
+        // Our private key structure: [Ed25519 PKCS8 | SEPARATOR | X25519 Private (32)]
+        let priv_key_str = self.key_pair.private_key.clone();
+        let sep = b"---X25519---";
+        let sep_pos = priv_key_str
+            .windows(sep.len())
+            .position(|window| window == sep)
+            .ok_or("Invalid private key format: missing separator")?;
+        let x25519_priv_bytes: [u8; 32] = priv_key_str[sep_pos + sep.len()..].try_into()?;
+
+        // Compute Shared Secret using functional API
+        let shared_secret = x25519(x25519_priv_bytes, x25519_peer_pub_bytes);
+
+        // Derive session key using SHA-256 for domain separation and extraction
+        let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+        hasher.update(&b"GhostWire-Session-Key-v1"[..]);
+        hasher.update(&shared_secret[..]);
+
+        let key = hasher.finish().as_ref().to_vec();
 
         // Cache the session key
         let now = SystemTime::now()
@@ -448,7 +602,7 @@ impl EncryptionManager {
             },
         );
 
-        Ok(key.to_vec())
+        Ok(key)
     }
 
     // Enhanced encryption method for CLI compatibility
@@ -456,7 +610,7 @@ impl EncryptionManager {
         // Derive a strong 32-byte key from our key pair
         let key = self.derive_cli_key();
 
-        match self.encrypt_with_aes_gcm(data, &key) {
+        match Self::encrypt_with_aes_gcm(data, &key) {
             Ok(result) => {
                 // Combine nonce and ciphertext
                 let mut combined = result.nonce;
@@ -464,7 +618,7 @@ impl EncryptionManager {
                 combined
             }
             Err(e) => {
-                error!("CLI encryption failed: {}", e);
+                tracing::error!("CLI encryption failed: {}", e);
                 panic!(
                     "Encryption failed - this should never happen in production: {}",
                     e
@@ -479,9 +633,9 @@ impl EncryptionManager {
 
         // Use SHA-256 to derive a 32-byte key from our keypair
         let mut ctx = digest::Context::new(&digest::SHA256);
-        ctx.update(b"GhostWire-CLI-v1"); // Domain separation
-        ctx.update(&self.key_pair.private_key);
-        ctx.update(&self.key_pair.public_key);
+        ctx.update(&b"GhostWire-CLI-v1"[..]); // Domain separation
+        ctx.update(&self.key_pair.private_key[..]);
+        ctx.update(&self.key_pair.public_key[..]);
 
         ctx.finish().as_ref().to_vec()
     }
@@ -489,7 +643,7 @@ impl EncryptionManager {
     // Enhanced decryption method for CLI compatibility
     pub fn decrypt(&self, data: &[u8]) -> Vec<u8> {
         if data.len() < 12 {
-            error!("Encrypted data too short (need at least 12 bytes for nonce)");
+            tracing::error!("Encrypted data too short (need at least 12 bytes for nonce)");
             panic!("Corrupted or invalid encrypted data");
         }
 
@@ -500,10 +654,10 @@ impl EncryptionManager {
         let nonce = &data[..12];
         let ciphertext = &data[12..];
 
-        match self.decrypt_with_aes_gcm(ciphertext, nonce, &key) {
+        match Self::decrypt_with_aes_gcm(ciphertext, nonce, &key) {
             Ok(decrypted) => decrypted,
             Err(e) => {
-                error!("CLI decryption failed: {}", e);
+                tracing::error!("CLI decryption failed: {}", e);
                 panic!(
                     "Decryption failed - data may be corrupted or tampered: {}",
                     e
@@ -538,16 +692,16 @@ impl EncryptionManager {
             .map_err(|e| format!("Signature verification failed: {:?}", e).into())
     }
 
-    fn generate_nonce(&self) -> [u8; 12] {
+    fn generate_nonce() -> [u8; 12] {
         let mut nonce = [0u8; 12];
-        self.rng.fill(&mut nonce).unwrap();
+        SystemRandom::new().fill(&mut nonce[..]).unwrap();
         nonce
     }
 
     fn increment_key_usage(&self) {
         // In a real implementation, this would be thread-safe
         // For now, we'll just log the usage
-        debug!("Key usage incremented for key: {}", self.key_pair.key_id);
+        tracing::debug!("Key usage incremented for key: {}", self.key_pair.key_id);
     }
 
     pub fn export_public_key(&self) -> Vec<u8> {
@@ -571,7 +725,7 @@ impl EncryptionManager {
     /// Rotate keys if needed
     pub fn rotate_keys_if_needed(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.should_rotate_keys() {
-            info!("Rotating encryption keys");
+            tracing::info!("Rotating encryption keys");
             let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
             self.key_pair = new_key_pair;
             self.last_key_rotation = SystemTime::now()
@@ -642,4 +796,12 @@ mod tests {
         assert!(!encryption.get_public_key().is_empty());
         assert!(!encryption.get_key_id().is_empty());
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedEncryption {
+    key_pair: GhostKeyPair,
+    key_rotation_interval: u64,
+    last_key_rotation: u64,
+    identity_key: Vec<u8>,
 }

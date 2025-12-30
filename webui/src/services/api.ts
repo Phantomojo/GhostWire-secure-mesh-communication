@@ -8,27 +8,44 @@ const getApiBaseUrl = () => {
   if (import.meta.env.VITE_API_BASE_URL) {
     return import.meta.env.VITE_API_BASE_URL;
   }
-  
+
   // Check for localStorage configuration
   const savedBackendUrl = localStorage.getItem('ghostwire_backend_url');
   if (savedBackendUrl) {
     return savedBackendUrl;
   }
-  
+
   // Default to localhost, but use window.location.hostname for cross-PC
   const hostname = window.location.hostname;
   const port = window.location.port || '3001';
-  
+
   // If we're not on localhost, assume we're accessing from another PC
   if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
     return `http://${hostname}:${port}/api`;
   }
-  
+
   // Default local development
   return 'http://localhost:3001/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
+
+// Auth token for X-Ghost-Token header
+const getAuthToken = (): string | null => {
+  return localStorage.getItem('ghostwire_auth_token');
+};
+
+// Get auth headers for API requests
+const getAuthHeaders = (): Record<string, string> => {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['X-Ghost-Token'] = token;
+  }
+  return headers;
+};
 
 export interface Peer {
   id: string;
@@ -72,14 +89,33 @@ export const config = {
     localStorage.setItem('ghostwire_backend_url', url);
     window.location.reload(); // Reload to use new URL
   },
-  
+
   getBackendUrl: () => {
     return localStorage.getItem('ghostwire_backend_url') || 'http://localhost:3001/api';
   },
-  
+
   resetBackendUrl: () => {
     localStorage.removeItem('ghostwire_backend_url');
     window.location.reload();
+  },
+
+  // Auth token management
+  setAuthToken: (token: string) => {
+    localStorage.setItem('ghostwire_auth_token', token);
+    console.log('🔐 Auth token set. API requests will now include X-Ghost-Token header.');
+  },
+
+  getAuthToken: (): string | null => {
+    return getAuthToken();
+  },
+
+  clearAuthToken: () => {
+    localStorage.removeItem('ghostwire_auth_token');
+    console.log('🔓 Auth token cleared.');
+  },
+
+  isAuthenticated: (): boolean => {
+    return !!getAuthToken();
   }
 };
 
@@ -88,7 +124,7 @@ async function reportFrontendError(errorMsg: string) {
     const hostname = window.location.hostname;
     const userAgent = navigator.userAgent;
     const fullMsg = `Frontend error on ${hostname} [${userAgent}]: ${errorMsg}`;
-    
+
     // Try to report to the current backend
     const backendUrl = getApiBaseUrl().replace('/api', '');
     await fetch(`${backendUrl}/api/report_error`, {
@@ -107,9 +143,14 @@ export const api = {
   async get(endpoint: string): Promise<any> {
     const url = `${getApiBaseUrl()}${endpoint}`;
     console.log(`API GET: ${url}`);
-    
-    const response = await fetch(url);
+
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
     if (!response.ok) {
+      if (response.status === 401) {
+        console.error('🔒 Unauthorized! Set your token with: config.setAuthToken("YOUR_TOKEN")');
+      }
       throw new Error(`GET ${endpoint} failed: ${response.statusText}`);
     }
     return response.json();
@@ -118,15 +159,16 @@ export const api = {
   async post(endpoint: string, data?: any): Promise<any> {
     const url = `${getApiBaseUrl()}${endpoint}`;
     console.log(`API POST: ${url}`, data);
-    
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: data ? JSON.stringify(data) : undefined,
     });
     if (!response.ok) {
+      if (response.status === 401) {
+        console.error('🔒 Unauthorized! Set your token with: config.setAuthToken("YOUR_TOKEN")');
+      }
       throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
     }
     return response.json();
@@ -137,9 +179,7 @@ export const api = {
     try {
       const response = await fetch(`${getApiBaseUrl()}/send_message`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ recipient, message }),
       });
       if (!response.ok) {
@@ -159,33 +199,37 @@ export const api = {
 
   // Get list of peers
   async getPeers(): Promise<Peer[]> {
-    const response = await fetch(`${getApiBaseUrl()}/peers`);
-    
+    const response = await fetch(`${getApiBaseUrl()}/peers`, {
+      headers: getAuthHeaders(),
+    });
+
     if (!response.ok) {
       throw new Error(`Failed to get peers: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to get peers');
     }
-    
+
     return data.data?.peers || [];
   },
 
   // Get settings
   async getSettings(): Promise<Settings> {
-    const response = await fetch(`${getApiBaseUrl()}/settings`);
-    
+    const response = await fetch(`${getApiBaseUrl()}/settings`, {
+      headers: getAuthHeaders(),
+    });
+
     if (!response.ok) {
       throw new Error(`Failed to get settings: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to get settings');
     }
-    
+
     return data.data || { stealth_mode: false };
   },
 
@@ -193,21 +237,19 @@ export const api = {
   async updateSettings(settings: Partial<Settings>): Promise<Settings> {
     const response = await fetch(`${getApiBaseUrl()}/settings`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(settings),
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to update settings: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to update settings');
     }
-    
+
     return data.data || settings;
   },
 
@@ -216,7 +258,7 @@ export const api = {
     // Get our own network info to provide the correct IP
     const networkInfo = await this.getNetworkInfo();
     const myAddress = `${networkInfo.local_ip}:3001`;
-    
+
     const response = await fetch(`http://${peerAddress}/api/register_peer`, {
       method: 'POST',
       headers: {
@@ -229,11 +271,11 @@ export const api = {
         address: myAddress
       }),
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to register with peer: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to register with peer');
@@ -243,17 +285,19 @@ export const api = {
   // Scan network for other GhostWire nodes
   async scanNetwork(): Promise<NetworkScanResult> {
     console.log('Scanning network for GhostWire nodes...');
-    const response = await fetch(`${getApiBaseUrl()}/scan_network`);
-    
+    const response = await fetch(`${getApiBaseUrl()}/scan_network`, {
+      headers: getAuthHeaders(),
+    });
+
     if (!response.ok) {
       throw new Error(`Failed to scan network: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to scan network');
     }
-    
+
     console.log('Network scan completed:', data.data);
     return data.data;
   },
@@ -262,60 +306,64 @@ export const api = {
   async setUsername(username: string): Promise<string> {
     const response = await fetch(`${getApiBaseUrl()}/set_username`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ username }),
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to set username: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to set username');
     }
-    
+
     return data.data;
   },
 
   // Get current username
   async getUsername(): Promise<string> {
-    const response = await fetch(`${getApiBaseUrl()}/get_username`);
-    
+    const response = await fetch(`${getApiBaseUrl()}/get_username`, {
+      headers: getAuthHeaders(),
+    });
+
     if (!response.ok) {
       throw new Error(`Failed to get username: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to get username');
     }
-    
+
     return data.data;
   },
 
   // Get network information (local IP)
   async getNetworkInfo(): Promise<NetworkInfo> {
-    const response = await fetch(`${getApiBaseUrl()}/get_network_info`);
-    
+    const response = await fetch(`${getApiBaseUrl()}/get_network_info`, {
+      headers: getAuthHeaders(),
+    });
+
     if (!response.ok) {
       throw new Error(`Failed to get network info: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to get network info');
     }
-    
+
     return data.data;
   },
 
   // Test backend connectivity
   async testConnection(): Promise<boolean> {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/status`);
+      const response = await fetch(`${getApiBaseUrl()}/status`, {
+        headers: getAuthHeaders(),
+      });
       return response.ok;
     } catch {
       return false;
@@ -336,7 +384,7 @@ export class WebSocketService {
     private onPeerUpdate: (peers: Peer[]) => void,
     private onStatusUpdate: (status: any) => void,
     private onError: (error: string) => void
-  ) {}
+  ) { }
 
   async connect() {
     try {
@@ -350,18 +398,18 @@ export class WebSocketService {
         try {
           const url = new URL(getApiBaseUrl());
           port = parseInt(url.port) || 3001;
-        } catch {}
+        } catch { }
         this.wsUrl = `ws://${wsHost}:${port}/ws`;
       }
-      
+
       console.log(`Connecting to WebSocket: ${this.wsUrl}`);
       this.ws = new WebSocket(this.wsUrl);
-      
+
       this.ws.onopen = () => {
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
       };
-      
+
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -371,12 +419,12 @@ export class WebSocketService {
           console.error('Failed to parse WebSocket message:', error);
         }
       };
-      
+
       this.ws.onclose = () => {
         console.log('WebSocket disconnected');
         this.attemptReconnect();
       };
-      
+
       this.ws.onerror = (error) => {
         reportFrontendError(`WebSocket error: ${error}`);
         console.error('WebSocket error:', error);
@@ -409,7 +457,7 @@ export class WebSocketService {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
+
       setTimeout(() => {
         this.connect();
       }, this.reconnectDelay * this.reconnectAttempts);
