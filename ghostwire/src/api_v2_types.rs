@@ -1,7 +1,7 @@
 // API V2 Response Types - Standardized envelopes
 // Add to web.rs near the top with other types
 
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use uuid::Uuid;
 
 /// Standardized API v2 response envelope
@@ -75,7 +75,7 @@ pub struct HateoasLinks {
 pub struct RateLimitInfo {
     limit: usize,
     remaining: usize,
-    reset: String,  // ISO 8601 timestamp
+    reset: String, // ISO 8601 timestamp
 }
 
 impl<T: Serialize> ApiV2Response<T> {
@@ -92,7 +92,7 @@ impl<T: Serialize> ApiV2Response<T> {
             rate_limit: None,
         }
     }
-    
+
     /// Create an error response
     pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -112,7 +112,7 @@ impl<T: Serialize> ApiV2Response<T> {
             rate_limit: None,
         }
     }
-    
+
     /// Add pagination metadata
     pub fn with_pagination(mut self, total: usize, page: usize, per_page: usize) -> Self {
         self.pagination = Some(PaginationMeta {
@@ -123,7 +123,7 @@ impl<T: Serialize> ApiV2Response<T> {
         });
         self
     }
-    
+
     /// Add HATEOAS links
     pub fn with_links(mut self, self_link: String) -> Self {
         self.links = Some(HateoasLinks {
@@ -145,7 +145,7 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
         public_key: base64::encode(state.core.get_public_key()),
         key_id: state.core.get_key_id(),
     };
-    
+
     Json(ApiV2Response::success(profile)
         .with_links("/api/v2/profile".to_string()))
 }

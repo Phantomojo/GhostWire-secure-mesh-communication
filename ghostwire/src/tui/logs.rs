@@ -1,7 +1,7 @@
 //! System logs and monitoring interface for GhostWire TUI
 
-use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
+use std::collections::VecDeque;
 
 /// Log entry with comprehensive information
 #[derive(Debug, Clone)]
@@ -58,16 +58,53 @@ impl LogsState {
         };
 
         // Add some sample logs
-        logs.add_entry(LogLevel::Info, "System", "GhostWire TUI initialized successfully", None, LogSource::System);
-        logs.add_entry(LogLevel::Info, "Network", "Mesh network ready for connections", None, LogSource::Network);
-        logs.add_entry(LogLevel::Warning, "Security", "New peer detected - verification pending", Some("Peer ID: node1"), LogSource::Security);
-        logs.add_entry(LogLevel::Info, "Encryption", "Key rotation completed", None, LogSource::Encryption);
-        logs.add_entry(LogLevel::Debug, "Mesh", "Topology update: 3 nodes connected", None, LogSource::Mesh);
+        logs.add_entry(
+            LogLevel::Info,
+            "System",
+            "GhostWire TUI initialized successfully",
+            None,
+            LogSource::System,
+        );
+        logs.add_entry(
+            LogLevel::Info,
+            "Network",
+            "Mesh network ready for connections",
+            None,
+            LogSource::Network,
+        );
+        logs.add_entry(
+            LogLevel::Warning,
+            "Security",
+            "New peer detected - verification pending",
+            Some("Peer ID: node1"),
+            LogSource::Security,
+        );
+        logs.add_entry(
+            LogLevel::Info,
+            "Encryption",
+            "Key rotation completed",
+            None,
+            LogSource::Encryption,
+        );
+        logs.add_entry(
+            LogLevel::Debug,
+            "Mesh",
+            "Topology update: 3 nodes connected",
+            None,
+            LogSource::Mesh,
+        );
 
         logs
     }
 
-    pub fn add_entry(&mut self, level: LogLevel, module: &str, message: &str, details: Option<&str>, source: LogSource) {
+    pub fn add_entry(
+        &mut self,
+        level: LogLevel,
+        module: &str,
+        message: &str,
+        details: Option<&str>,
+        source: LogSource,
+    ) {
         let entry = LogEntry {
             timestamp: Utc::now(),
             level,
@@ -123,7 +160,11 @@ impl LogsState {
 
                 // Search filter
                 if !self.search_term.is_empty() {
-                    if !entry.message.to_lowercase().contains(&self.search_term.to_lowercase()) {
+                    if !entry
+                        .message
+                        .to_lowercase()
+                        .contains(&self.search_term.to_lowercase())
+                    {
                         return false;
                     }
                 }
@@ -136,7 +177,10 @@ impl LogsState {
     fn matches_level(&self, entry: &LogEntry) -> bool {
         match (self.filter_level, &entry.level) {
             (LogLevel::Debug, _) => true,
-            (LogLevel::Info, LogLevel::Info | LogLevel::Warning | LogLevel::Error | LogLevel::Critical) => true,
+            (
+                LogLevel::Info,
+                LogLevel::Info | LogLevel::Warning | LogLevel::Error | LogLevel::Critical,
+            ) => true,
             (LogLevel::Warning, LogLevel::Warning | LogLevel::Error | LogLevel::Critical) => true,
             (LogLevel::Error, LogLevel::Error | LogLevel::Critical) => true,
             (LogLevel::Critical, LogLevel::Critical) => true,
@@ -155,7 +199,8 @@ impl LogsState {
 
     fn export_json(&self) -> String {
         // Simplified JSON export
-        let entries: Vec<String> = self.entries
+        let entries: Vec<String> = self
+            .entries
             .iter()
             .map(|entry| {
                 format!(
@@ -198,15 +243,22 @@ impl LogsState {
 /// Handle logs-specific input
 pub fn handle_input(app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEvent) {
     match key.code {
-        crossterm::event::KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+        crossterm::event::KeyCode::Char('c')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
             // Ctrl+C - Clear logs
             app.logs_state.clear();
         }
         crossterm::event::KeyCode::Char('e') => {
             // Export logs
-            let json_logs = app.logs_state.export_logs("json");
+            let _json_logs = app.logs_state.export_logs("json");
             // In a real implementation, this would save to file
-            app.notification = Some(("Logs exported to logs.json".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Logs exported to logs.json".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         crossterm::event::KeyCode::Char('f') => {
             // Filter logs
@@ -228,4 +280,4 @@ pub fn handle_input(app: &mut crate::tui::TuiApp, key: crossterm::event::KeyEven
         }
         _ => {}
     }
-} 
+}

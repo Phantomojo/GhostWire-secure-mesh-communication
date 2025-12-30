@@ -1,28 +1,54 @@
-/// Trait for auto-switching between transports based on policy or network status.
-pub trait TransportSwitcher {
-    /// Evaluate current network status and decide which transport to use.
-    fn evaluate(&self, status: &NetworkStatus) -> TransportType;
-    /// Set or update the switching policy.
-    fn set_policy(&mut self, policy: SwitchPolicy);
+use crate::core::disaster::{
+    DisasterLevel, DisasterManager, DisasterMetrics, DisasterPolicy, TransportType,
+};
+use tracing::{info, warn};
+
+/// Decides which transport to use based on network conditions and policy.
+pub struct AutoTransportSwitcher {
+    disaster_manager: DisasterManager,
+    policy: DisasterPolicy,
+    current_level: DisasterLevel,
+    current_transport: TransportType,
 }
 
-/// Default implementation: always returns a fixed transport.
-pub struct DefaultTransportSwitcher {
-    pub policy: SwitchPolicy,
-}
-
-impl TransportSwitcher for DefaultTransportSwitcher {
-    fn evaluate(&self, _status: &NetworkStatus) -> TransportType {
-        // TODO: Use real logic in next phase
-        self.policy.preferred_transport.clone()
+impl AutoTransportSwitcher {
+    pub fn new(disaster_manager: DisasterManager, policy: DisasterPolicy) -> Self {
+        Self {
+            disaster_manager,
+            policy,
+            current_level: DisasterLevel::Normal,
+            current_transport: TransportType::StealthTcp, // Default start
+        }
     }
-    fn set_policy(&mut self, policy: SwitchPolicy) {
-        self.policy = policy;
+
+    /// Evaluates metrics and returns the recommended transport if a change is needed.
+    pub fn update_and_evaluate(&mut self, metrics: &DisasterMetrics) -> Option<TransportType> {
+        let new_level = self.disaster_manager.evaluate(metrics);
+
+        if new_level != self.current_level {
+            info!(
+                "DISASTER LEVEL CHANGE: {:?} -> {:?}",
+                self.current_level, new_level
+            );
+            self.current_level = new_level;
+
+            if let Some(recommended) = self.policy.get_recommended_transport(new_level) {
+                if recommended != self.current_transport {
+                    warn!("NETWORK ADAPTATION: Switching to {:?}", recommended);
+                    self.current_transport = recommended;
+                    return Some(recommended);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn current_level(&self) -> DisasterLevel {
+        self.current_level
+    }
+
+    pub fn current_transport(&self) -> TransportType {
+        self.current_transport
     }
 }
-
-/// Placeholder types for demo
-pub struct NetworkStatus;
-#[derive(Clone)]
-pub enum TransportType { LoRa, Bluetooth, WiFi, StealthTcp, Mesh }
-pub struct SwitchPolicy { pub preferred_transport: TransportType } 

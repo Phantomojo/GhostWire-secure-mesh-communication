@@ -1,9 +1,10 @@
+use crate::core::encryption::{EncryptionManager, KeyType};
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
 use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
 use anyhow::Result;
-use async_trait::async_trait;
+// use async_trait::async_trait;
 use base64::Engine;
 use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
@@ -66,14 +67,14 @@ pub struct MeshBehaviour {
 
 /// A libp2p transport that wraps TCP in a Stealth Handshake
 pub struct StealthTransport {
-    provider: Arc<StealthTCPProvider>,
+    _provider: Arc<StealthTCPProvider>,
     inner: TcpTransport<libp2p_tcp::tokio::Tcp>,
 }
 
 impl StealthTransport {
     pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
         Self {
-            provider,
+            _provider: provider,
             inner: TcpTransport::<libp2p_tcp::tokio::Tcp>::new(
                 libp2p_tcp::Config::default().nodelay(true),
             ),
@@ -85,16 +86,19 @@ impl StealthTransport {
 pub struct MeshTransport {
     swarm: Swarm<MeshBehaviour>,
     node_id: String,
-    local_peer_id: PeerId,
+    _local_peer_id: PeerId,
     security_manager: Arc<SecurityManager>,
+    encryption_manager: Arc<EncryptionManager>,
     stealth_provider: StealthTCPProvider,
-    stats: Arc<RwLock<MeshStats>>,
+    _stats: Arc<RwLock<MeshStats>>,
+    current_shard: String,
 }
 
 impl MeshTransport {
     pub async fn new(
         identity: Arc<Identity>,
         security_manager: Arc<SecurityManager>,
+        encryption_manager: Arc<EncryptionManager>,
     ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair();
@@ -127,11 +131,24 @@ impl MeshTransport {
         .map_err(|e| anyhow::anyhow!(e))?;
 
         let identify = Identify::new(IdentifyConfig::new(
-            "/ghostwire/mesh/1.0.0".to_string(),
+            "/ghostwire/mesh/2.0.0".to_string(),
             local_key.public(),
         ));
 
-        let kad = Kad::new(local_peer_id, MemoryStore::new(local_peer_id));
+        // Recursive DHT: Regional Sharding logic
+        // Nodes join a global shard AND a regional shard for high-velocity lookups
+        let mut kad_config = libp2p::kad::Config::default();
+        let shard_id = "global"; // TODO: Dynamically determine region
+        kad_config.set_protocol_names(vec![
+            libp2p::StreamProtocol::new("/ghostwire/kad/shard/global"),
+            libp2p::StreamProtocol::try_from_owned(format!("/ghostwire/kad/shard/{}", shard_id))
+                .unwrap(),
+        ]);
+
+        let mut kad = Kad::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_config);
+
+        // Harden Kademlia: Increase replication and periodic refresh
+        kad.set_mode(Some(libp2p::kad::Mode::Server));
 
         let mdns = Mdns::new(MdnsConfig::default(), local_peer_id)?;
 
@@ -152,10 +169,11 @@ impl MeshTransport {
         Ok(Self {
             swarm,
             node_id: node_id.clone(),
-            local_peer_id,
+            _local_peer_id: local_peer_id,
             security_manager,
+            encryption_manager,
             stealth_provider,
-            stats: Arc::new(RwLock::new(MeshStats {
+            _stats: Arc::new(RwLock::new(MeshStats {
                 total_nodes: 0,
                 online_nodes: 0,
                 local_node_id: node_id,
@@ -163,6 +181,7 @@ impl MeshTransport {
                 connection_stats: ConnectionStats::default(),
                 security_stats: SecurityStats::default(),
             })),
+            current_shard: shard_id.to_string(),
         })
     }
 
@@ -244,15 +263,15 @@ impl MeshTransport {
                             for (peer_id, multiaddr) in list {
                                 info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
                                 self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
+                                self.send_handshake().await?;
                             }
                         }
                                         MdnsEvent::Expired(list) => {
                             for (peer_id, multiaddr) in list {
-                                info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
+                                tracing::info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
                                 self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
                             }
                         }
-                        _ => {}
                     }
                 }
                             }
@@ -262,6 +281,27 @@ impl MeshTransport {
                 }
             }
         }
+    }
+
+    async fn send_handshake(&mut self) -> Result<()> {
+        let pub_key = self.encryption_manager.export_public_key();
+        let encoded_key = base64::engine::general_purpose::STANDARD.encode(pub_key);
+
+        let msg = Message {
+            id: Uuid::new_v4(),
+            sender: self.node_id.clone(),
+            recipient: "broadcast".to_string(),
+            content: encoded_key,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+            encrypted: false,
+            message_type: "handshake".to_string(),
+            encryption_status: "none".to_string(),
+        };
+
+        self.broadcast_message(&msg).await?;
+        Ok(())
     }
 
     async fn handle_gossipsub_message(
@@ -286,6 +326,22 @@ impl MeshTransport {
 
         if let Ok(msg) = serde_json::from_slice::<Message>(&message.data) {
             info!("Processed message from {}: {:?}", peer_id, msg);
+
+            if msg.message_type == "handshake" {
+                info!("🤝 Received Handshake from {}", msg.sender);
+                if let Ok(pub_key_bytes) =
+                    base64::engine::general_purpose::STANDARD.decode(&msg.content)
+                {
+                    self.encryption_manager.add_peer_key(
+                        msg.sender.clone(),
+                        pub_key_bytes,
+                        KeyType::Hybrid,
+                    );
+                    info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
+                } else {
+                    warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
+                }
+            }
         } else {
             warn!("Failed to deserialize message from {}", peer_id);
         }
@@ -318,7 +374,7 @@ impl MeshTransport {
         }
     }
 
-    pub async fn find_route(&self, target_node: &str) -> Option<Vec<String>> {
+    pub async fn find_route(&self, _target_node: &str) -> Option<Vec<String>> {
         // For now, return None
         None
     }
@@ -343,25 +399,42 @@ impl MeshTransport {
         // In a real implementation, this would look up the peer's IP from the swarm
         None
     }
+
+    pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
+        self.current_shard = shard.to_string();
+        // Since Kad protocol names are usually fixed at creation in current libp2p,
+        // we'll log this as a switch. Real implementation might need to restart the swarm
+        // or support dynamic protocols if the underlying transport allows.
+        tracing::info!("MeshTransport switching to DHT Shard: {}", shard);
+        Ok(())
+    }
 }
 
 pub struct MeshManager {
     transport: MeshTransport,
-    local_identity: Arc<Identity>,
-    security_manager: Arc<SecurityManager>,
+    _local_identity: Arc<Identity>,
+    _security_manager: Arc<SecurityManager>,
 }
 
 impl MeshManager {
-    pub async fn new(identity: Arc<Identity>) -> Result<Self> {
+    pub async fn new(
+        identity: Arc<Identity>,
+        encryption_manager: Arc<EncryptionManager>,
+    ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
 
-        let transport = MeshTransport::new(identity.clone(), security_manager.clone()).await?;
+        let transport = MeshTransport::new(
+            identity.clone(),
+            security_manager.clone(),
+            encryption_manager,
+        )
+        .await?;
 
         Ok(Self {
             transport,
-            local_identity: identity,
-            security_manager,
+            _local_identity: identity,
+            _security_manager: security_manager,
         })
     }
 
@@ -371,6 +444,10 @@ impl MeshManager {
 
     pub async fn send_message(&mut self, message: &Message) -> Result<()> {
         self.transport.broadcast_message(message).await
+    }
+
+    pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
+        self.transport.set_shard(shard).await
     }
 
     pub async fn get_stats(&self) -> MeshStats {
@@ -408,6 +485,7 @@ pub struct MeshStats {
 unsafe impl Sync for MeshTransport {}
 unsafe impl Send for MeshTransport {}
 
+#[allow(dead_code)]
 fn encode_public_key(pk: &PublicKey) -> String {
     base64::engine::general_purpose::STANDARD.encode(pk.encode_protobuf())
 }

@@ -41,6 +41,8 @@ interface NetworkPanelProps {
   onConnectAll: () => void;
   scanning: boolean;
   onNodeClick?: (nodeId: string) => void;
+  currentShard: string;
+  onUpdateShard: (shard: string) => void;
 }
 
 const NetworkPanel: React.FC<NetworkPanelProps> = ({
@@ -52,7 +54,9 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
   onBroadcast,
   onConnectAll,
   scanning,
-  onNodeClick
+  onNodeClick,
+  currentShard,
+  onUpdateShard
 }) => {
   return (
     <div className="space-y-8 animate-fade-in">
@@ -62,18 +66,33 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
           <SectionTitle className="text-2xl font-black">Mesh Topology</SectionTitle>
           <Subtitle className="text-slate-400 font-medium">Real-time localized peer-to-peer visualizer and discovery</Subtitle>
         </div>
-        <div className="flex gap-3">
-          <div className="flex flex-col items-end gap-1">
-            <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400/60">Active_Links</span>
-            <Badge variant="indigo" className="px-4 py-1.5 rounded-xl font-black text-xs border border-indigo-500/20 shadow-lg shadow-indigo-500/10">
-              {networkNodes.length} NODES
-            </Badge>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-start gap-1">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Recursive_Shard</span>
+            <select
+              value={currentShard}
+              onChange={(e) => onUpdateShard(e.target.value)}
+              className="bg-slate-900 border border-white/5 rounded-xl px-3 py-1.5 text-[10px] font-black text-indigo-300 uppercase tracking-widest focus:outline-none focus:border-indigo-500/30 transition-all"
+            >
+              <option value="main">Main_Grid</option>
+              <option value="alpha">Alpha_Shard</option>
+              <option value="beta">Beta_Shard</option>
+              <option value="stealth">Stealth_VPN</option>
+            </select>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400/60">Detected_Ops</span>
-            <Badge variant="info" className="px-4 py-1.5 rounded-xl font-black text-xs border border-emerald-500/20 shadow-lg shadow-emerald-500/10">
-              {discoveredPeers.length} PEERS
-            </Badge>
+          <div className="flex gap-3">
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400/60">Active_Links</span>
+              <Badge variant="indigo" className="px-4 py-1.5 rounded-xl font-black text-xs border border-indigo-500/20 shadow-lg shadow-indigo-500/10">
+                {networkNodes.length} NODES
+              </Badge>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400/60">Detected_Ops</span>
+              <Badge variant="info" className="px-4 py-1.5 rounded-xl font-black text-xs border border-emerald-500/20 shadow-lg shadow-emerald-500/10">
+                {discoveredPeers.length} PEERS
+              </Badge>
+            </div>
           </div>
         </div>
       </div>
@@ -108,9 +127,26 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
 
             {/* Float HUD Controls */}
             <div className="absolute bottom-8 left-8 right-8 flex justify-between items-center z-10">
-              <div className="bg-slate-950/80 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/10 text-[9px] text-slate-400 font-black uppercase tracking-widest flex items-center gap-3 shadow-2xl">
-                <span className="w-2 h-2 rounded-full bg-emerald-500/50" />
-                Auto-scaling active • Dynamic routing • Layer_3
+              <div className="flex flex-col gap-2">
+                <div className="bg-slate-950/80 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/10 text-[9px] text-slate-400 font-black uppercase tracking-widest flex items-center gap-3 shadow-2xl">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500/50" />
+                  Auto-scaling active • Dynamic routing • Layer_3
+                </div>
+                <div className="flex gap-2">
+                  <div className="bg-indigo-600/20 backdrop-blur-md px-3 py-1.5 rounded-xl border border-indigo-500/20 text-[8px] font-black text-indigo-300 uppercase tracking-widest flex items-center gap-2">
+                    <HiOutlineMap />
+                    SHARD_REGION:
+                    <select
+                      className="bg-transparent border-none outline-none text-white cursor-pointer"
+                      onChange={(e) => console.log("Shard changed:", e.target.value)}
+                    >
+                      <option value="global" className="bg-slate-900">GLOBAL</option>
+                      <option value="north_america" className="bg-slate-900">NA_EAST_1</option>
+                      <option value="europe" className="bg-slate-900">EU_WEST_1</option>
+                      <option value="asia" className="bg-slate-900">ASIA_PAC_1</option>
+                    </select>
+                  </div>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
@@ -176,9 +212,10 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
             </h3>
             <div className="space-y-4">
               <ActionButton
+                variant="secondary"
                 onClick={onScanNetwork}
                 disabled={scanning}
-                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all bg-indigo-600/5 active:scale-95 border-indigo-500/10"
+                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all bg-indigo-600/5 active:scale-95 border border-indigo-500/10 hover:border-indigo-500/30"
               >
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-lg ${scanning ? 'animate-pulse' : 'group-hover:shadow-indigo-500/30 group-hover:border-indigo-500/50'} transition-all`}>
                   <HiOutlineSignal className="text-xl" />
@@ -190,10 +227,10 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
               </ActionButton>
 
               <ActionButton
-                variant="primary"
+                variant="secondary"
                 onClick={onConnectAll}
                 disabled={discoveredPeers.length === 0}
-                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all active:scale-95 group shadow-indigo-600/10"
+                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all active:scale-95 group shadow-indigo-600/10 bg-indigo-600/5 border border-indigo-500/10 hover:border-indigo-500/30"
               >
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/10 text-white shadow-xl group-hover:bg-white/20 transition-all border border-white/20">
                   <HiOutlineLink className="text-xl" />
@@ -205,8 +242,9 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
               </ActionButton>
 
               <ActionButton
+                variant="secondary"
                 onClick={onBroadcast}
-                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all bg-emerald-600/5 active:scale-95 border-emerald-500/10"
+                className="w-full justify-start py-5 px-6 rounded-2xl hover:scale-[1.02] transition-all bg-emerald-600/5 active:scale-95 border border-emerald-500/10 hover:border-emerald-500/30"
               >
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-lg group-hover:shadow-emerald-500/30 group-hover:border-emerald-500/50 transition-all">
                   <HiOutlineRadio className="text-xl" />

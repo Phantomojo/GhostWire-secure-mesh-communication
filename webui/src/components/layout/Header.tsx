@@ -1,5 +1,5 @@
 import React from 'react';
-import { HiOutlineSignal, HiOutlineCpuChip, HiOutlineShieldCheck, HiOutlineCog6Tooth, HiOutlineServerStack } from 'react-icons/hi2';
+import { HiOutlineSignal, HiOutlineCpuChip, HiOutlineShieldCheck, HiOutlineServerStack } from 'react-icons/hi2';
 
 interface HeaderProps {
     systemStatus: {
@@ -12,7 +12,7 @@ interface HeaderProps {
     onConfigClick: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected, onConfigClick }) => {
+const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected }) => {
     return (
         <header className="h-16 md:h-20 glass-panel border-b border-white/5 flex items-center justify-between px-4 md:px-8 z-10 sticky top-0 bg-slate-950/40 backdrop-blur-xl">
             {/* Left Section: Node Status */}
@@ -102,15 +102,9 @@ const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected, onConfi
                     </div>
                 </div>
 
-                {/* Tactical Controls */}
+                {/* Tactical Controls - Removed per user request for single source of truth */}
                 <div className="flex items-center gap-2">
-                    <button
-                        onClick={onConfigClick}
-                        className="p-3 bg-slate-900/60 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-2xl transition-all duration-300 border border-white/5 hover:border-indigo-500/40 active:scale-95 group shadow-lg"
-                        title="Core Configuration"
-                    >
-                        <HiOutlineCog6Tooth className="text-xl group-hover:rotate-90 transition-transform duration-500" />
-                    </button>
+                    {/* Placeholder for future specific actions if needed */}
                 </div>
             </div>
         </header>

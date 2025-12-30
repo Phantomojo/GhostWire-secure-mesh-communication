@@ -1,8 +1,8 @@
-//! Retro-style chat interface for GhostWire TUI
+// No change needed yet
 
-use std::collections::VecDeque;
-use chrono::{DateTime, Utc};
 use crate::core::message::Message;
+use chrono::{DateTime, Utc};
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 pub struct ChatState {
@@ -74,19 +74,19 @@ pub enum EncryptionStatus {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
-    PrivMsg,      // Regular message
-    Notice,       // Server notice
-    Join,         // User joined
-    Part,         // User left
-    Quit,         // User quit
-    Nick,         // Nickname change
-    Mode,         // Mode change
-    Topic,        // Topic change
-    Kick,         // User kicked
-    Ban,          // User banned
-    System,       // System message
-    Action,       // /me action
-    Ctcp,         // CTCP request
+    PrivMsg, // Regular message
+    Notice,  // Server notice
+    Join,    // User joined
+    Part,    // User left
+    Quit,    // User quit
+    Nick,    // Nickname change
+    Mode,    // Mode change
+    Topic,   // Topic change
+    Kick,    // User kicked
+    Ban,     // User banned
+    System,  // System message
+    Action,  // /me action
+    Ctcp,    // CTCP request
 }
 
 impl ChatState {
@@ -124,7 +124,11 @@ impl ChatState {
                 user_count: 3,
                 is_joined: true,
                 messages: VecDeque::new(),
-                users: vec!["ghostwire_user".to_string(), "alice".to_string(), "bob".to_string()],
+                users: vec![
+                    "ghostwire_user".to_string(),
+                    "alice".to_string(),
+                    "bob".to_string(),
+                ],
             },
             Channel {
                 name: "#general".to_string(),
@@ -168,7 +172,11 @@ impl ChatState {
                 is_away: false,
                 away_message: None,
                 last_seen: Utc::now(),
-                channels: vec!["#ghostwire".to_string(), "#general".to_string(), "#tech".to_string()],
+                channels: vec![
+                    "#ghostwire".to_string(),
+                    "#general".to_string(),
+                    "#tech".to_string(),
+                ],
             },
             User {
                 nickname: "bob".to_string(),
@@ -186,13 +194,48 @@ impl ChatState {
 
         // Add some sample messages to demonstrate the IRC interface
         let sample_messages = vec![
-            ("System", "Welcome to GhostWire IRC Network!", MessageType::System, None),
-            ("System", "Your nickname is ghostwire_user", MessageType::System, None),
-            ("alice", "Hello everyone! 👋", MessageType::PrivMsg, Some("#ghostwire".to_string())),
-            ("ghostwire_user", "Hi alice! How's the network?", MessageType::PrivMsg, Some("#ghostwire".to_string())),
-            ("bob", "Network is running smoothly", MessageType::PrivMsg, Some("#ghostwire".to_string())),
-            ("alice", "Just joined #tech", MessageType::Join, Some("#tech".to_string())),
-            ("System", "Topic for #ghostwire: Main GhostWire discussion channel", MessageType::Topic, Some("#ghostwire".to_string())),
+            (
+                "System",
+                "Welcome to GhostWire IRC Network!",
+                MessageType::System,
+                None,
+            ),
+            (
+                "System",
+                "Your nickname is ghostwire_user",
+                MessageType::System,
+                None,
+            ),
+            (
+                "alice",
+                "Hello everyone! 👋",
+                MessageType::PrivMsg,
+                Some("#ghostwire".to_string()),
+            ),
+            (
+                "ghostwire_user",
+                "Hi alice! How's the network?",
+                MessageType::PrivMsg,
+                Some("#ghostwire".to_string()),
+            ),
+            (
+                "bob",
+                "Network is running smoothly",
+                MessageType::PrivMsg,
+                Some("#ghostwire".to_string()),
+            ),
+            (
+                "alice",
+                "Just joined #tech",
+                MessageType::Join,
+                Some("#tech".to_string()),
+            ),
+            (
+                "System",
+                "Topic for #ghostwire: Main GhostWire discussion channel",
+                MessageType::Topic,
+                Some("#ghostwire".to_string()),
+            ),
         ];
 
         for (sender, content, msg_type, channel) in sample_messages {
@@ -224,7 +267,12 @@ impl ChatState {
         chat_state
     }
 
-    pub fn add_message(&mut self, message: Message, msg_type: MessageType, channel: Option<String>) {
+    pub fn add_message(
+        &mut self,
+        message: Message,
+        msg_type: MessageType,
+        channel: Option<String>,
+    ) {
         let is_own = message.sender == self.nickname;
         let display_name = message.sender.clone();
 
@@ -293,7 +341,7 @@ impl ChatState {
         if !channel_name.starts_with('#') {
             return;
         }
-        
+
         if let Some(channel) = self.channels.iter_mut().find(|c| c.name == channel_name) {
             channel.is_joined = true;
             channel.user_count += 1;
@@ -312,7 +360,7 @@ impl ChatState {
             };
             self.channels.push(new_channel);
         }
-        
+
         self.current_channel = channel_name.to_string();
     }
 
@@ -322,7 +370,7 @@ impl ChatState {
             channel.user_count = channel.user_count.saturating_sub(1);
             channel.users.retain(|u| u != &self.nickname);
         }
-        
+
         if self.current_channel == channel_name {
             // Switch to first available channel
             if let Some(first_channel) = self.channels.iter().find(|c| c.is_joined) {
@@ -334,14 +382,14 @@ impl ChatState {
     pub fn change_nickname(&mut self, new_nick: &str) {
         let old_nick = self.nickname.clone();
         self.nickname = new_nick.to_string();
-        
+
         // Update in all channels
         for channel in &mut self.channels {
             if let Some(pos) = channel.users.iter().position(|u| u == &old_nick) {
                 channel.users[pos] = new_nick.to_string();
             }
         }
-        
+
         // Update own user record
         if let Some(user) = self.users.iter_mut().find(|u| u.nickname == old_nick) {
             user.nickname = new_nick.to_string();
@@ -438,7 +486,10 @@ fn handle_irc_command(app: &mut crate::tui::TuiApp, command: &str) {
             if parts.len() > 1 {
                 let old_nick = app.chat_state.nickname.clone();
                 app.chat_state.change_nickname(parts[1]);
-                add_system_message(app, &format!("Nickname changed from {} to {}", old_nick, parts[1]));
+                add_system_message(
+                    app,
+                    &format!("Nickname changed from {} to {}", old_nick, parts[1]),
+                );
             }
         }
         "/msg" | "/m" => {
@@ -496,10 +547,17 @@ fn send_irc_message(app: &mut crate::tui::TuiApp, content: &str) {
         encryption_status: "encrypted".to_string(),
     };
 
-    app.chat_state.add_message(message, MessageType::PrivMsg, Some(app.chat_state.current_channel.clone()));
-    
+    app.chat_state.add_message(
+        message,
+        MessageType::PrivMsg,
+        Some(app.chat_state.current_channel.clone()),
+    );
+
     // Send via backend
-    if let Err(e) = app.message_sender.send(crate::tui::TuiMessage::SendMessage(content.to_string())) {
+    if let Err(e) = app
+        .message_sender
+        .send(crate::tui::TuiMessage::SendMessage(content.to_string()))
+    {
         eprintln!("Failed to send message to channel: {}", e);
     }
 }
@@ -516,10 +574,14 @@ fn send_private_message(app: &mut crate::tui::TuiApp, target: &str, content: &st
         encryption_status: "encrypted".to_string(),
     };
 
-    app.chat_state.add_message(message, MessageType::PrivMsg, None);
-    
+    app.chat_state
+        .add_message(message, MessageType::PrivMsg, None);
+
     // Send via backend
-    if let Err(e) = app.message_sender.send(crate::tui::TuiMessage::SendMessage(content.to_string())) {
+    if let Err(e) = app
+        .message_sender
+        .send(crate::tui::TuiMessage::SendMessage(content.to_string()))
+    {
         eprintln!("Failed to send private message: {}", e);
     }
 }
@@ -536,7 +598,11 @@ fn send_action_message(app: &mut crate::tui::TuiApp, action: &str) {
         encryption_status: "encrypted".to_string(),
     };
 
-    app.chat_state.add_message(message, MessageType::Action, Some(app.chat_state.current_channel.clone()));
+    app.chat_state.add_message(
+        message,
+        MessageType::Action,
+        Some(app.chat_state.current_channel.clone()),
+    );
 }
 
 fn add_system_message(app: &mut crate::tui::TuiApp, content: &str) {
@@ -551,11 +617,20 @@ fn add_system_message(app: &mut crate::tui::TuiApp, content: &str) {
         encryption_status: "unencrypted".to_string(),
     };
 
-    app.chat_state.add_message(message, MessageType::System, Some(app.chat_state.current_channel.clone()));
+    app.chat_state.add_message(
+        message,
+        MessageType::System,
+        Some(app.chat_state.current_channel.clone()),
+    );
 }
 
 fn set_channel_topic(app: &mut crate::tui::TuiApp, topic: &str) {
-    if let Some(channel) = app.chat_state.channels.iter_mut().find(|c| c.name == app.chat_state.current_channel) {
+    if let Some(channel) = app
+        .chat_state
+        .channels
+        .iter_mut()
+        .find(|c| c.name == app.chat_state.current_channel)
+    {
         channel.topic = topic.to_string();
         add_system_message(app, &format!("Topic changed to: {}", topic));
     }
@@ -570,12 +645,23 @@ fn show_whois(app: &mut crate::tui::TuiApp, nickname: &str) {
         let channels = user.channels.clone();
         let is_away = user.is_away;
         let away_message = user.away_message.clone();
-        
-        add_system_message(app, &format!("WHOIS {}: {}@{} ({})", 
-            nickname, username, hostname, realname));
+
+        add_system_message(
+            app,
+            &format!(
+                "WHOIS {}: {}@{} ({})",
+                nickname, username, hostname, realname
+            ),
+        );
         add_system_message(app, &format!("Channels: {}", channels.join(", ")));
         if is_away {
-            add_system_message(app, &format!("Away: {}", away_message.as_ref().unwrap_or(&"No message".to_string())));
+            add_system_message(
+                app,
+                &format!(
+                    "Away: {}",
+                    away_message.as_ref().unwrap_or(&"No message".to_string())
+                ),
+            );
         }
     } else {
         add_system_message(app, &format!("No such nick: {}", nickname));
@@ -586,20 +672,34 @@ fn show_channel_list(app: &mut crate::tui::TuiApp) {
     add_system_message(app, "Channel List:");
     let channels = app.chat_state.channels.clone();
     for channel in channels {
-        add_system_message(app, &format!("{} {} {}", 
-            channel.name, channel.user_count, channel.topic));
+        add_system_message(
+            app,
+            &format!("{} {} {}", channel.name, channel.user_count, channel.topic),
+        );
     }
 }
 
 fn show_user_list(app: &mut crate::tui::TuiApp) {
-    add_system_message(app, &format!("Users in {}:", app.chat_state.current_channel));
+    add_system_message(
+        app,
+        &format!("Users in {}:", app.chat_state.current_channel),
+    );
     let current_channel = app.chat_state.current_channel.clone();
     let users = app.chat_state.get_channel_users(&current_channel);
-    let user_list: Vec<String> = users.iter().map(|user| {
-        let prefix = if user.is_operator { "@" } else if user.is_voice { "+" } else { "" };
-        format!("{}{}", prefix, user.nickname)
-    }).collect();
-    
+    let user_list: Vec<String> = users
+        .iter()
+        .map(|user| {
+            let prefix = if user.is_operator {
+                "@"
+            } else if user.is_voice {
+                "+"
+            } else {
+                ""
+            };
+            format!("{}{}", prefix, user.nickname)
+        })
+        .collect();
+
     for user_text in user_list {
         add_system_message(app, &user_text);
     }
@@ -622,50 +722,90 @@ fn show_help(app: &mut crate::tui::TuiApp) {
 
 pub fn format_message(msg: &ChatMessage) -> String {
     let timestamp = msg.timestamp.format("%H:%M");
-    
+
     match msg.message_type {
         MessageType::PrivMsg => {
             if msg.is_own {
-                format!("[{}] <{}> {}", timestamp, msg.display_name, msg.message.content)
+                format!(
+                    "[{}] <{}> {}",
+                    timestamp, msg.display_name, msg.message.content
+                )
             } else {
-                format!("[{}] <{}> {}", timestamp, msg.display_name, msg.message.content)
+                format!(
+                    "[{}] <{}> {}",
+                    timestamp, msg.display_name, msg.message.content
+                )
             }
         }
         MessageType::Notice => {
-            format!("[{}] -{}- {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] -{}- {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
         MessageType::Join => {
-            format!("[{}] *** {} has joined {}", timestamp, msg.display_name, msg.channel.as_ref().unwrap_or(&"".to_string()))
+            format!(
+                "[{}] *** {} has joined {}",
+                timestamp,
+                msg.display_name,
+                msg.channel.as_ref().unwrap_or(&"".to_string())
+            )
         }
         MessageType::Part => {
-            format!("[{}] *** {} has left {}", timestamp, msg.display_name, msg.channel.as_ref().unwrap_or(&"".to_string()))
+            format!(
+                "[{}] *** {} has left {}",
+                timestamp,
+                msg.display_name,
+                msg.channel.as_ref().unwrap_or(&"".to_string())
+            )
         }
         MessageType::Quit => {
             format!("[{}] *** {} has quit IRC", timestamp, msg.display_name)
         }
         MessageType::Nick => {
-            format!("[{}] *** {} is now known as {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] *** {} is now known as {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
         MessageType::Mode => {
-            format!("[{}] *** {} sets mode {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] *** {} sets mode {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
         MessageType::Topic => {
-            format!("[{}] *** {} changes topic to: {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] *** {} changes topic to: {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
         MessageType::Kick => {
-            format!("[{}] *** {} has been kicked by {}", timestamp, msg.message.content, msg.display_name)
+            format!(
+                "[{}] *** {} has been kicked by {}",
+                timestamp, msg.message.content, msg.display_name
+            )
         }
         MessageType::Ban => {
-            format!("[{}] *** {} has been banned by {}", timestamp, msg.message.content, msg.display_name)
+            format!(
+                "[{}] *** {} has been banned by {}",
+                timestamp, msg.message.content, msg.display_name
+            )
         }
         MessageType::System => {
             format!("[{}] *** {}", timestamp, msg.message.content)
         }
         MessageType::Action => {
-            format!("[{}] {} {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] {} {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
         MessageType::Ctcp => {
-            format!("[{}] CTCP {}: {}", timestamp, msg.display_name, msg.message.content)
+            format!(
+                "[{}] CTCP {}: {}",
+                timestamp, msg.display_name, msg.message.content
+            )
         }
     }
-} 
+}

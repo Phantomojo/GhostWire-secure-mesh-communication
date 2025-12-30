@@ -1,42 +1,33 @@
 //! GhostWire Terminal User Interface (TUI)
 //! A retro-style, feature-rich terminal interface for mesh networking
 
-use std::sync::Arc;
-use std::io;
-use tokio::sync::{mpsc, Mutex};
-use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Span, Line},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame, Terminal,
-};
-use ratatui::backend::CrosstermBackend;
-use ratatui::prelude::Alignment;
 use crate::core::{Core, Message};
-use crate::tui::chat::ChatState;
-use crate::tui::network::NetworkState;
 use crate::tui::config::ConfigState;
 use crate::tui::logs::LogsState;
-use app::App;
+use crate::tui::network::NetworkState;
 use anyhow::Result;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
+use std::io;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
+pub mod app;
 pub mod chat;
-pub mod network;
 pub mod config;
 pub mod logs;
-pub mod app;
+pub mod network;
 pub mod ui;
 
 /// Input modes to prevent keybind conflicts
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputMode {
-    Normal,     // Navigation mode
-    Insert,     // Text input mode
-    Command,    // Command mode (like vim)
-    Search,     // Search mode
-    Menu,       // Menu selection mode
+    Normal,  // Navigation mode
+    Insert,  // Text input mode
+    Command, // Command mode (like vim)
+    Search,  // Search mode
+    Menu,    // Menu selection mode
 }
 
 /// Application states for navigation
@@ -244,7 +235,11 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
                         message_type: "text".to_string(),
                         encryption_status: "encrypted".to_string(),
                     };
-                    app.chat_state.add_message(message.clone(), crate::tui::chat::MessageType::PrivMsg, Some(app.chat_state.current_channel.clone()));
+                    app.chat_state.add_message(
+                        message.clone(),
+                        crate::tui::chat::MessageType::PrivMsg,
+                        Some(app.chat_state.current_channel.clone()),
+                    );
                 }
                 TuiMessage::ScanNetwork => {
                     if let Err(e) = scan_network_async(&mut app).await {
@@ -287,44 +282,80 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
                 TuiMessage::EmergencyMode => {
                     app.advanced_features.emergency_mode = !app.advanced_features.emergency_mode;
                     app.notification = Some((
-                        if app.advanced_features.emergency_mode { "EMERGENCY MODE ACTIVATED" } else { "Emergency mode deactivated" }.to_string(),
-                        std::time::Instant::now()
+                        if app.advanced_features.emergency_mode {
+                            "EMERGENCY MODE ACTIVATED"
+                        } else {
+                            "Emergency mode deactivated"
+                        }
+                        .to_string(),
+                        std::time::Instant::now(),
                     ));
                 }
                 TuiMessage::StealthMode => {
                     app.advanced_features.stealth_mode = !app.advanced_features.stealth_mode;
                     app.notification = Some((
-                        if app.advanced_features.stealth_mode { "STEALTH MODE ACTIVATED" } else { "Stealth mode deactivated" }.to_string(),
-                        std::time::Instant::now()
+                        if app.advanced_features.stealth_mode {
+                            "STEALTH MODE ACTIVATED"
+                        } else {
+                            "Stealth mode deactivated"
+                        }
+                        .to_string(),
+                        std::time::Instant::now(),
                     ));
                 }
                 TuiMessage::PanicMode => {
                     app.advanced_features.panic_mode = !app.advanced_features.panic_mode;
                     app.notification = Some((
-                        if app.advanced_features.panic_mode { "PANIC MODE ACTIVATED" } else { "Panic mode deactivated" }.to_string(),
-                        std::time::Instant::now()
+                        if app.advanced_features.panic_mode {
+                            "PANIC MODE ACTIVATED"
+                        } else {
+                            "Panic mode deactivated"
+                        }
+                        .to_string(),
+                        std::time::Instant::now(),
                     ));
                 }
                 TuiMessage::BackupSystem => {
-                    app.notification = Some(("System backup initiated".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "System backup initiated".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::RestoreSystem => {
-                    app.notification = Some(("System restore initiated".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "System restore initiated".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::UpdateFirmware => {
-                    app.notification = Some(("Firmware update initiated".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "Firmware update initiated".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::SystemDiagnostics => {
-                    app.notification = Some(("System diagnostics running".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "System diagnostics running".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::NetworkDiagnostics => {
-                    app.notification = Some(("Network diagnostics running".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "Network diagnostics running".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::SecurityAudit => {
-                    app.notification = Some(("Security audit running".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "Security audit running".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::PerformanceTest => {
-                    app.notification = Some(("Performance test running".to_string(), std::time::Instant::now()));
+                    app.notification = Some((
+                        "Performance test running".to_string(),
+                        std::time::Instant::now(),
+                    ));
                 }
                 TuiMessage::Quit => {
                     app.should_quit = true;
@@ -375,10 +406,18 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
         }
 
         // Quick actions (Ctrl+ combinations)
-        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Help,
-        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Dashboard,
-        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Security,
-        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => app.app_state = AppState::Advanced,
+        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.app_state = AppState::Help
+        }
+        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.app_state = AppState::Dashboard
+        }
+        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.app_state = AppState::Security
+        }
+        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.app_state = AppState::Advanced
+        }
         KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Err(e) = app.message_sender.send(TuiMessage::SystemDiagnostics) {
                 eprintln!("Failed to send diagnostics message: {}", e);
@@ -472,20 +511,18 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
         KeyCode::Enter => {
             // Handle menu selection
             match app.app_state {
-                AppState::MainMenu => {
-                    match app.menu_selection {
-                        0 => app.app_state = AppState::Dashboard,
-                        1 => app.app_state = AppState::Chat,
-                        2 => app.app_state = AppState::Network,
-                        3 => app.app_state = AppState::Security,
-                        4 => app.app_state = AppState::Advanced,
-                        5 => app.app_state = AppState::Diagnostics,
-                        6 => app.app_state = AppState::Settings,
-                        7 => app.app_state = AppState::About,
-                        8 => app.app_state = AppState::Help,
-                        _ => {}
-                    }
-                }
+                AppState::MainMenu => match app.menu_selection {
+                    0 => app.app_state = AppState::Dashboard,
+                    1 => app.app_state = AppState::Chat,
+                    2 => app.app_state = AppState::Network,
+                    3 => app.app_state = AppState::Security,
+                    4 => app.app_state = AppState::Advanced,
+                    5 => app.app_state = AppState::Diagnostics,
+                    6 => app.app_state = AppState::Settings,
+                    7 => app.app_state = AppState::About,
+                    8 => app.app_state = AppState::Help,
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -625,25 +662,37 @@ fn execute_command(app: &mut TuiApp, command: &str) {
             if let Err(e) = app.message_sender.send(TuiMessage::ScanNetwork) {
                 eprintln!("Failed to send scan message: {}", e);
             }
-            app.notification = Some(("Network scan initiated".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Network scan initiated".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "connect" => {
             if let Err(e) = app.message_sender.send(TuiMessage::ConnectNetwork) {
                 eprintln!("Failed to send connect message: {}", e);
             }
-            app.notification = Some(("Connecting to network...".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Connecting to network...".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "disconnect" => {
             if let Err(e) = app.message_sender.send(TuiMessage::DisconnectNetwork) {
                 eprintln!("Failed to send disconnect message: {}", e);
             }
-            app.notification = Some(("Disconnecting from network...".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Disconnecting from network...".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "refresh" => {
             if let Err(e) = app.message_sender.send(TuiMessage::RefreshPeers) {
                 eprintln!("Failed to send refresh message: {}", e);
             }
-            app.notification = Some(("Refreshing peer list...".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Refreshing peer list...".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "export" => {
             if let Err(e) = app.message_sender.send(TuiMessage::ExportKeys) {
@@ -655,37 +704,55 @@ fn execute_command(app: &mut TuiApp, command: &str) {
             if let Err(e) = app.message_sender.send(TuiMessage::StealthMode) {
                 eprintln!("Failed to send stealth message: {}", e);
             }
-            app.notification = Some(("Stealth mode activated".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Stealth mode activated".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "panic" => {
             if let Err(e) = app.message_sender.send(TuiMessage::PanicMode) {
                 eprintln!("Failed to send panic message: {}", e);
             }
-            app.notification = Some(("PANIC MODE ACTIVATED".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "PANIC MODE ACTIVATED".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "emergency" => {
             if let Err(e) = app.message_sender.send(TuiMessage::EmergencyMode) {
                 eprintln!("Failed to send emergency message: {}", e);
             }
-            app.notification = Some(("EMERGENCY MODE ACTIVATED".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "EMERGENCY MODE ACTIVATED".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "backup" => {
             if let Err(e) = app.message_sender.send(TuiMessage::BackupSystem) {
                 eprintln!("Failed to send backup message: {}", e);
             }
-            app.notification = Some(("System backup initiated".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "System backup initiated".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "diagnostics" => {
             if let Err(e) = app.message_sender.send(TuiMessage::SystemDiagnostics) {
                 eprintln!("Failed to send diagnostics message: {}", e);
             }
-            app.notification = Some(("Running system diagnostics...".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Running system diagnostics...".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "audit" => {
             if let Err(e) = app.message_sender.send(TuiMessage::SecurityAudit) {
                 eprintln!("Failed to send audit message: {}", e);
             }
-            app.notification = Some(("Security audit initiated".to_string(), std::time::Instant::now()));
+            app.notification = Some((
+                "Security audit initiated".to_string(),
+                std::time::Instant::now(),
+            ));
         }
         "help" => {
             app.app_state = AppState::Help;
@@ -694,7 +761,10 @@ fn execute_command(app: &mut TuiApp, command: &str) {
             app.should_quit = true;
         }
         _ => {
-            app.notification = Some((format!("Unknown command: {}", parts[0]), std::time::Instant::now()));
+            app.notification = Some((
+                format!("Unknown command: {}", parts[0]),
+                std::time::Instant::now(),
+            ));
         }
     }
 }
@@ -713,11 +783,15 @@ async fn send_message_async(app: &mut TuiApp, content: String) -> Result<()> {
     };
 
     // Add to chat history
-    app.chat_state.add_message(message.clone(), crate::tui::chat::MessageType::PrivMsg, Some(app.chat_state.current_channel.clone()));
+    app.chat_state.add_message(
+        message.clone(),
+        crate::tui::chat::MessageType::PrivMsg,
+        Some(app.chat_state.current_channel.clone()),
+    );
 
     // Send through core
     {
-        let mut core_guard = app.core.lock().await;
+        let core_guard = app.core.lock().await;
         core_guard.send_message(&message).await?;
     }
 
@@ -731,45 +805,53 @@ pub async fn send_message(app: &mut TuiApp, content: String) -> Result<()> {
 
 /// Scan network for nearby devices
 async fn scan_network_async(app: &mut TuiApp) -> Result<()> {
-    let mut core_guard = app.core.lock().await;
-    
+    let _core_guard = app.core.lock().await;
+
     // Update scan time
     app.last_scan_time = std::time::Instant::now();
-    
+
     // Clear previous results
     app.scan_results.clear();
-    
+
     // Simulate network scanning (replace with actual implementation)
-    app.scan_results.push("🔍 Scanning local network...".to_string());
-    app.scan_results.push("📡 Checking for GhostWire nodes...".to_string());
-    
+    app.scan_results
+        .push("🔍 Scanning local network...".to_string());
+    app.scan_results
+        .push("📡 Checking for GhostWire nodes...".to_string());
+
     // Add some simulated results
-    app.scan_results.push("✅ Found: node1 (192.168.1.101) - Online".to_string());
-    app.scan_results.push("✅ Found: node2 (192.168.1.102) - Online".to_string());
-    app.scan_results.push("⚠️  Found: unknown (192.168.1.103) - Unverified".to_string());
-    
+    app.scan_results
+        .push("✅ Found: node1 (192.168.1.101) - Online".to_string());
+    app.scan_results
+        .push("✅ Found: node2 (192.168.1.102) - Online".to_string());
+    app.scan_results
+        .push("⚠️  Found: unknown (192.168.1.103) - Unverified".to_string());
+
     // Update network state
     app.network_state.is_connected = true;
     app.network_state.peer_count = 5;
     app.network_state.message_count = 42;
-    
-    tracing::info!("Network scan completed - found {} peers", app.network_state.peer_count);
+
+    tracing::info!(
+        "Network scan completed - found {} peers",
+        app.network_state.peer_count
+    );
     Ok(())
 }
 
 /// Connect to the mesh network
 async fn connect_network_async(app: &mut TuiApp) -> Result<()> {
     let mut core_guard = app.core.lock().await;
-    
+
     // Initialize mesh network if not already done
     if let Err(e) = core_guard.init_mesh().await {
         tracing::warn!("Failed to initialize mesh: {}", e);
     }
-    
+
     // Update network state
     app.network_state.is_connected = true;
     app.network_state.uptime_seconds = 0;
-    
+
     // Add connection message to chat
     let connection_msg = crate::core::message::Message {
         id: uuid::Uuid::new_v4(),
@@ -781,21 +863,25 @@ async fn connect_network_async(app: &mut TuiApp) -> Result<()> {
         message_type: "system".to_string(),
         encryption_status: "unencrypted".to_string(),
     };
-    app.chat_state.add_message(connection_msg, crate::tui::chat::MessageType::System, Some(app.chat_state.current_channel.clone()));
-    
+    app.chat_state.add_message(
+        connection_msg,
+        crate::tui::chat::MessageType::System,
+        Some(app.chat_state.current_channel.clone()),
+    );
+
     tracing::info!("Connected to mesh network");
     Ok(())
 }
 
 /// Disconnect from the mesh network
 async fn disconnect_network_async(app: &mut TuiApp) -> Result<()> {
-    let mut core_guard = app.core.lock().await;
-    
+    let _core_guard = app.core.lock().await;
+
     // Update network state
     app.network_state.is_connected = false;
     app.network_state.peer_count = 0;
     app.network_state.message_count = 0;
-    
+
     // Add disconnection message to chat
     let disconnection_msg = crate::core::message::Message {
         id: uuid::Uuid::new_v4(),
@@ -807,8 +893,12 @@ async fn disconnect_network_async(app: &mut TuiApp) -> Result<()> {
         message_type: "system".to_string(),
         encryption_status: "unencrypted".to_string(),
     };
-    app.chat_state.add_message(disconnection_msg, crate::tui::chat::MessageType::System, Some(app.chat_state.current_channel.clone()));
-    
+    app.chat_state.add_message(
+        disconnection_msg,
+        crate::tui::chat::MessageType::System,
+        Some(app.chat_state.current_channel.clone()),
+    );
+
     tracing::info!("Disconnected from mesh network");
     Ok(())
 }
@@ -816,29 +906,33 @@ async fn disconnect_network_async(app: &mut TuiApp) -> Result<()> {
 /// Refresh peer list
 async fn refresh_peers_async(app: &mut TuiApp) -> Result<()> {
     let core_guard = app.core.lock().await;
-    
+
     // Get mesh stats if available
     if let Some(stats) = core_guard.get_mesh_stats().await {
         app.network_state.peer_count = stats.total_nodes;
         app.network_state.message_count = stats.total_nodes; // Use as placeholder
     }
-    
-    tracing::info!("Refreshed peer list - {} peers", app.network_state.peer_count);
+
+    tracing::info!(
+        "Refreshed peer list - {} peers",
+        app.network_state.peer_count
+    );
     Ok(())
 }
 
 /// Update security settings
 async fn update_security_settings_async(app: &mut TuiApp) -> Result<()> {
-    let mut core_guard = app.core.lock().await;
-    
+    let _core_guard = app.core.lock().await;
+
     // Add security alert
-    app.security_alerts.push("🔒 Security settings updated".to_string());
-    
+    app.security_alerts
+        .push("🔒 Security settings updated".to_string());
+
     // Keep only last 10 alerts
     if app.security_alerts.len() > 10 {
         app.security_alerts.remove(0);
     }
-    
+
     tracing::info!("Security settings updated");
     Ok(())
 }
@@ -846,11 +940,11 @@ async fn update_security_settings_async(app: &mut TuiApp) -> Result<()> {
 /// Export encryption keys
 async fn export_keys_async(app: &mut TuiApp) -> Result<()> {
     let core_guard = app.core.lock().await;
-    
+
     // Get public key
-    let public_key = core_guard.get_public_key();
-    let key_id = core_guard.get_key_id();
-    
+    let _public_key = core_guard.get_public_key();
+    let _key_id = core_guard.get_key_id();
+
     // Add export message to chat
     let export_msg = crate::core::message::Message {
         id: uuid::Uuid::new_v4(),
@@ -862,16 +956,20 @@ async fn export_keys_async(app: &mut TuiApp) -> Result<()> {
         message_type: "system".to_string(),
         encryption_status: "unencrypted".to_string(),
     };
-    app.chat_state.add_message(export_msg, crate::tui::chat::MessageType::System, Some(app.chat_state.current_channel.clone()));
-    
+    app.chat_state.add_message(
+        export_msg,
+        crate::tui::chat::MessageType::System,
+        Some(app.chat_state.current_channel.clone()),
+    );
+
     tracing::info!("Exported encryption keys");
     Ok(())
 }
 
 /// Import encryption keys
 async fn import_keys_async(app: &mut TuiApp) -> Result<()> {
-    let mut core_guard = app.core.lock().await;
-    
+    let _core_guard = app.core.lock().await;
+
     // Add import message to chat
     let import_msg = crate::core::message::Message {
         id: uuid::Uuid::new_v4(),
@@ -883,8 +981,12 @@ async fn import_keys_async(app: &mut TuiApp) -> Result<()> {
         message_type: "system".to_string(),
         encryption_status: "unencrypted".to_string(),
     };
-    app.chat_state.add_message(import_msg, crate::tui::chat::MessageType::System, Some(app.chat_state.current_channel.clone()));
-    
+    app.chat_state.add_message(
+        import_msg,
+        crate::tui::chat::MessageType::System,
+        Some(app.chat_state.current_channel.clone()),
+    );
+
     tracing::info!("Imported encryption keys");
     Ok(())
 }
@@ -901,4 +1003,4 @@ pub fn get_network_status(app: &TuiApp) -> String {
             "DISCONNECTED"
         }
     )
-} 
+}
