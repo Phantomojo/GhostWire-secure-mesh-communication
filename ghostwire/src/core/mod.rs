@@ -10,9 +10,10 @@ pub mod message;
 pub mod monitor;
 pub mod security;
 pub mod signal;
+pub mod store;
 pub mod transport;
 pub mod transport_manager;
-// pub mod username_discovery; // TODO: Fix libp2p imports // DHT-based username discovery
+pub mod username_discovery; // DHT-based username discovery
 
 #[cfg(feature = "briar")]
 pub mod briar;
@@ -42,6 +43,7 @@ pub use reticulum::{ReticulumManager, ReticulumStats, ReticulumTopology};
 pub use stealth_tcp::{ConnectionStats, StealthTCPProvider};
 
 use anyhow::Result;
+use libp2p::Multiaddr;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -278,10 +280,12 @@ pub struct Core {
     pub switcher: Arc<RwLock<transport_manager::AutoTransportSwitcher>>,
     pub traffic_armor: Arc<armor::TrafficArmor>,
     pub messages: Arc<RwLock<Vec<Message>>>,
+    pub message_store: Arc<store::SecureMessageStore>,
+    pub bootstrap_nodes: Vec<Multiaddr>,
 }
 
 impl Core {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(bootstrap_nodes: Vec<Multiaddr>) -> Result<Self> {
         let identity = Arc::new(
             Identity::new().map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
@@ -340,10 +344,30 @@ impl Core {
 
         let traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
 
+        let messages = Arc::new(RwLock::new(Vec::new()));
+        let message_store = Arc::new(store::SecureMessageStore::new()?);
+
         #[cfg(feature = "mesh")]
-        let mesh_manager_inner = Some(Arc::new(RwLock::new(
-            MeshManager::new(identity.clone(), encryption.clone()).await?,
-        )));
+        let mesh_manager_inner = {
+            let username = identity.get_metadata().nickname;
+            let peer_id = identity.keypair().public().to_peer_id();
+
+            let username_discovery = Arc::new(
+                crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
+            );
+
+            Some(Arc::new(RwLock::new(
+                MeshManager::new(
+                    identity.clone(),
+                    encryption.clone(),
+                    messages.clone(),
+                    message_store.clone(),
+                    bootstrap_nodes.clone(),
+                    username_discovery,
+                )
+                .await?,
+            )))
+        };
 
         #[cfg(not(feature = "mesh"))]
         let mesh_manager_inner = None;
@@ -368,7 +392,9 @@ impl Core {
             mesh_manager: mesh_manager_inner,
             #[cfg(feature = "reticulum")]
             reticulum_manager: None,
-            messages: Arc::new(RwLock::new(Vec::new())),
+            messages,
+            message_store,
+            bootstrap_nodes,
         })
     }
 
@@ -449,6 +475,17 @@ impl Core {
             return Err(anyhow::anyhow!(
                 "SYSTEM LOCKDOWN ACTIVE - OUTGOING TRAFFIC BLOCKED"
             ));
+        }
+
+        // Persist message to encrypted storage
+        if let Err(e) = self.message_store.save_message(message) {
+            tracing::error!("⚠️ Persistence failure: {}", e);
+        }
+
+        // Add to in-memory history
+        {
+            let mut messages = self.messages.write().await;
+            messages.push(message.clone());
         }
 
         // Record message for security stats
@@ -569,8 +606,22 @@ impl Core {
         #[cfg(feature = "mesh")]
         {
             if self.mesh_manager.is_none() {
-                let mesh_manager =
-                    MeshManager::new(self.identity.clone(), self.encryption.clone()).await?;
+                let username = self.identity.get_metadata().nickname;
+                let peer_id = self.identity.keypair().public().to_peer_id();
+
+                let username_discovery = Arc::new(
+                    crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
+                );
+
+                let mesh_manager = MeshManager::new(
+                    self.identity.clone(),
+                    self.encryption.clone(),
+                    self.messages.clone(),
+                    self.message_store.clone(),
+                    self.bootstrap_nodes.clone(),
+                    username_discovery,
+                )
+                .await?;
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
                 tracing::info!("Mesh network initialized");
             }
@@ -580,6 +631,16 @@ impl Core {
             tracing::warn!("Mesh feature not enabled");
         }
         Ok(())
+    }
+
+    /// Add bootstrap nodes dynamically
+    pub async fn add_bootstrap_nodes(&self, nodes: Vec<Multiaddr>) {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let mut mgr = mesh_manager.write().await;
+            tracing::info!("Added {} bootstrap nodes dynamically", nodes.len());
+            mgr.add_bootstrap_nodes(nodes);
+        }
     }
 
     /// Initialize Reticulum network

@@ -33,6 +33,9 @@ struct Args {
     port: u16,
 
     #[arg(long)]
+    bootstrap: Vec<String>,
+
+    #[arg(long)]
     web: bool,
 
     #[arg(long)]
@@ -48,6 +51,7 @@ struct Args {
     api_host: String,
     mesh_host: String,
     port: u16,
+    bootstrap: Vec<String>,
     web: bool,
     cli: bool,
 }
@@ -65,6 +69,8 @@ enum Commands {
         mesh_host: String,
         #[arg(long, default_value_t = 8080)]
         port: u16,
+        #[arg(long)]
+        bootstrap: Vec<String>,
     },
     /// Run TUI mode
     Tui,
@@ -95,14 +101,26 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "cli"))]
     let args = Args {
         command: None,
-        host: "127.0.0.1".to_string(),
+        api_host: "127.0.0.1".to_string(),
+        mesh_host: "0.0.0.0".to_string(),
         port: 8080,
+        bootstrap: Vec::new(),
         web: false,
         cli: false,
     };
 
+    // Parse bootstrap nodes
+    let mut bootstrap_multiaddrs = Vec::new();
+    for b in &args.bootstrap {
+        if let Ok(ma) = b.parse::<libp2p::Multiaddr>() {
+            bootstrap_multiaddrs.push(ma);
+        } else {
+            tracing::warn!("Failed to parse bootstrap address: {}", b);
+        }
+    }
+
     // Initialize core components
-    let core = Core::new().await?;
+    let core = Core::new(bootstrap_multiaddrs).await?;
     let core_arc = Arc::new(core);
 
     // Activate the autonomic nervous system (DNA 10/10)
@@ -119,8 +137,23 @@ async fn main() -> Result<()> {
             api_host,
             mesh_host,
             port,
+            bootstrap,
         }) => {
-            // Activate Mesh on specific interface
+            // Parse local bootstraps for this command
+            let mut local_bootstraps = Vec::new();
+            for b in bootstrap {
+                if let Ok(ma) = b.parse::<libp2p::Multiaddr>() {
+                    local_bootstraps.push(ma);
+                }
+            }
+
+            // If we have local bootstraps, we might want to update the core's mesh manager
+            // but for now, Core::new already took the global ones if they were provided.
+            if !local_bootstraps.is_empty() {
+                core_arc.add_bootstrap_nodes(local_bootstraps).await;
+            }
+
+            // Let's just ensure we start the nervous system.
             core_arc.clone().start_nervous_system(mesh_host).await;
 
             info!("Starting web server mode on {}:{}", api_host, port);
@@ -137,9 +170,8 @@ async fn main() -> Result<()> {
                 .await;
 
             info!("Starting TUI mode");
-            // Re-initialize core inside TUI if needed or pass the mutex
-            // For now, TUI signature expects a mutex
-            let core_mutex = Arc::new(Mutex::new(Core::new().await?));
+            // For now, TUI gets no bootstraps unless we pass 'em through
+            let core_mutex = Arc::new(Mutex::new(Core::new(Vec::new()).await?));
             tui::start_tui(core_mutex)
                 .await
                 .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;

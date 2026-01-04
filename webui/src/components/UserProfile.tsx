@@ -5,12 +5,12 @@ interface UserProfileProps {
   user: {
     id: string;
     did: string;
-    name: string;
+    username: string;
     nickname: string;
     bio: string;
-    avatar: string;
-    status: string;
-    isOnline: boolean;
+    avatar?: string;
+    security_score?: number;
+    created_at?: string;
   };
   onUpdateMetadata?: (metadata: { nickname?: string; bio?: string }) => void;
 }
@@ -31,17 +31,25 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onUpdateMetadata }) => 
     <div className="user-profile bg-slate-900/40 p-6 rounded-3xl border border-white/5 backdrop-blur-md">
       <div className="flex items-start justify-between mb-6">
         <div className="user-avatar relative">
-          <span className="avatar-emoji text-4xl">{user.avatar}</span>
-          {user.isOnline && (
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-4 border-slate-900 animate-pulse"></div>
-          )}
+          <span className="avatar-emoji text-4xl">{user.avatar || '👻'}</span>
+          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-4 border-slate-900 animate-pulse"></div>
         </div>
-        <button
-          onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-          className={`p-2 rounded-xl transition-all ${isEditing ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-slate-400 hover:text-white'}`}
-        >
-          {isEditing ? <HiOutlineCheck className="text-xl" /> : <HiOutlinePencilSquare className="text-xl" />}
-        </button>
+        <div className="flex items-center gap-2">
+          {user.security_score !== undefined && (
+            <div className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase border ${user.security_score > 80 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                user.security_score > 50 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                  'bg-red-500/10 text-red-400 border-red-500/20'
+              }`}>
+              SCORE: {user.security_score}
+            </div>
+          )}
+          <button
+            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+            className={`p-2 rounded-xl transition-all ${isEditing ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+          >
+            {isEditing ? <HiOutlineCheck className="text-xl" /> : <HiOutlinePencilSquare className="text-xl" />}
+          </button>
+        </div>
       </div>
 
       <div className="user-info space-y-4">
@@ -63,7 +71,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onUpdateMetadata }) => 
           </div>
         ) : (
           <div>
-            <h3 className="text-xl font-black text-white tracking-tight">{user.nickname || user.name}</h3>
+            <h3 className="text-xl font-black text-white tracking-tight">{user.nickname || user.username}</h3>
             <p className="text-xs text-slate-400 italic mt-1">{user.bio || 'Sovereign GhostWire Node'}</p>
           </div>
         )}

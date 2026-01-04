@@ -29,6 +29,7 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
     }
 
     let metadata = state.core.get_metadata();
+    let security_score = state.core.security_manager.calculate_security_score().await;
 
     let username = match std::fs::read_to_string("username.txt") {
         Ok(name) => name.trim().to_string(),
@@ -43,9 +44,9 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
         bio: metadata.bio,
         public_key: general_purpose::STANDARD.encode(state.core.get_public_key()),
         key_id: state.core.get_key_id(),
-        created_at: chrono::Utc::now().to_rfc3339(), // TODO: Get from storage
+        created_at: chrono::Utc::now().to_rfc3339(), // TODO: Get from identity last_updated
         dht_published: false,                        // TODO: Get from DHT status
-        security_score: 95,                          // TODO: Calculate from security stats
+        security_score,
     };
 
     let response = ApiV2Response::success(profile).with_links("/api/v2/profile".to_string());
@@ -211,9 +212,10 @@ pub async fn get_security_dashboard_v2(State(state): State<Arc<AppState>>) -> im
 
     // Get real security stats from SecurityManager
     let stats = state.core.get_security_stats().await;
+    let score = state.core.security_manager.calculate_security_score().await;
 
     let dashboard = SecurityDashboard {
-        score: 95, // TODO: Calculate from stats
+        score,
         encryption: EncryptionStatus {
             method: "AES-256-GCM".to_string(),
             active: true,
@@ -240,7 +242,7 @@ pub async fn get_security_dashboard_v2(State(state): State<Arc<AppState>>) -> im
 
 /// GET /api/v2/peers - Paginated peer list
 pub async fn get_peers_v2(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     #[derive(Serialize)]
@@ -250,7 +252,34 @@ pub async fn get_peers_v2(
         status: String,
         last_seen: String,
         trust_score: u8,
+        public_key: String,
     }
+
+    // Get peers from actual mesh manager
+    let mut all_peers = vec![];
+
+    #[cfg(feature = "mesh")]
+    if let Some(mesh_manager) = &state.core.mesh_manager {
+        let topology = mesh_manager.read().await.get_topology().await;
+        for (id, node) in topology.nodes {
+            all_peers.push(PeerResponse {
+                id,
+                username: node.username,
+                status: if node.is_online {
+                    "online".to_string()
+                } else {
+                    "offline".to_string()
+                },
+                last_seen: chrono::DateTime::from_timestamp(node.last_seen as i64, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default(),
+                trust_score: 100, // TODO: Get from reputation manager
+                public_key: general_purpose::STANDARD.encode(node.public_key),
+            });
+        }
+    }
+
+    let total = all_peers.len();
 
     // Parse pagination params
     let page: usize = params.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
@@ -258,20 +287,30 @@ pub async fn get_peers_v2(
         .get("per_page")
         .and_then(|p| p.parse().ok())
         .unwrap_or(20)
-        .min(100); // Max 100 per page
-
-    // Get peers (TODO: from actual peer manager)
-    let all_peers = vec![]; // Placeholder
-    let total = all_peers.len();
-
-    // Paginate
-    let start = (page - 1) * per_page;
-    let _end = start + per_page;
-    let peers: Vec<PeerResponse> = all_peers.into_iter().skip(start).take(per_page).collect();
+        .min(100);
 
     Json(
-        ApiV2Response::success(peers)
+        ApiV2Response::success(all_peers)
             .with_pagination(total, page, per_page)
             .with_links(format!("/api/v2/peers?page={}&per_page={}", page, per_page)),
     )
+}
+
+/// GET /api/v2/messages - Historical message list from sovereign storage
+pub async fn get_messages_v2(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let peer_id = params
+        .get("peer_id")
+        .cloned()
+        .unwrap_or_else(|| "all".to_string());
+    let limit: usize = params
+        .get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(50);
+
+    let messages = state.core.message_store.get_history(&peer_id, limit);
+
+    Json(ApiV2Response::success(messages).with_links("/api/v2/messages".to_string()))
 }

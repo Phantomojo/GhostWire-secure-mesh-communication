@@ -419,7 +419,7 @@ impl EncryptionManager {
                 .as_secs(),
             key_id: self.key_pair.key_id.clone(),
             message_type,
-            version: 0x03, // Upgraded version for PQC support
+            version: 0x02, // Standard encryption
             pq_key: None,  // TODO: Implement Kyber encapsulation
         })
     }
@@ -669,7 +669,17 @@ impl EncryptionManager {
     // Enhanced signature methods
     pub fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Use Ed25519 for signing
-        let key_pair_bytes = &self.key_pair.private_key;
+        // Extract plain Ed25519 PKCS8 bytes from hybrid key
+        let priv_key_full = &self.key_pair.private_key;
+        let sep = b"---X25519---";
+        let sep_pos = priv_key_full
+            .windows(sep.len())
+            .position(|window| window == sep)
+            // If separator not found in legacy keys, assume entire blob is Ed25519
+            .unwrap_or(priv_key_full.len());
+
+        let key_pair_bytes = &priv_key_full[..sep_pos];
+
         let key_pair = Ed25519KeyPair::from_pkcs8(key_pair_bytes)
             .map_err(|e| format!("Failed to create key pair for signing: {:?}", e))?;
 
@@ -684,8 +694,15 @@ impl EncryptionManager {
         public_key: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Verify Ed25519 signature
+        // Extract plain Ed25519 public key (first 32 bytes) if hybrid
+        let ed25519_pub_key = if public_key.len() >= 32 {
+            &public_key[..32]
+        } else {
+            return Err("Invalid public key length".into());
+        };
+
         let public_key =
-            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key);
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, ed25519_pub_key);
 
         public_key
             .verify(message, signature)

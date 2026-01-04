@@ -331,6 +331,48 @@ impl SecurityManager {
     pub async fn get_config(&self) -> SecurityConfig {
         self.config.read().await.clone()
     }
+
+    /// Calculate real security score (0-100)
+    pub async fn calculate_security_score(&self) -> u8 {
+        let stats = self.stats.read().await;
+        let mut score: i16 = 50;
+
+        // Verified peers bonus
+        if stats.peers_verified > 0 {
+            score += 15;
+        }
+
+        // Rate limit violations penalty
+        if stats.rate_limit_violations == 0 {
+            score += 15;
+        } else {
+            score -= (stats.rate_limit_violations as i16 * 5).min(30);
+        }
+
+        // Blocked connections bonus/penalty
+        if stats.blocked_connections == 0 {
+            score += 10;
+        }
+
+        // Threat level impact
+        match stats.threat_level {
+            ThreatLevel::Low => score += 10,
+            ThreatLevel::Medium => score += 0,
+            ThreatLevel::High => score -= 20,
+            ThreatLevel::Critical => score -= 50,
+        }
+
+        // Feature checks
+        let config = self.config.read().await;
+        if config.blacklist_enabled {
+            score += 5;
+        }
+        if config.threat_detection_enabled {
+            score += 5;
+        }
+
+        score.clamp(0, 100) as u8
+    }
 }
 
 /// Trait for Sybil attack detection and mitigation.

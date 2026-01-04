@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import Dashboard from './components/Dashboard';
@@ -11,18 +10,7 @@ import SettingsPage from './components/SettingsPage';
 import MovingMeshBackground from './components/MovingMeshBackground';
 import CyberToast, { type Toast, type ToastType } from './components/CyberToast';
 
-// Configuration
-const config = {
-  API_BASE_URL: 'http://localhost:8080/api',
-  setBackendUrl: async (url: string) => {
-    config.API_BASE_URL = url;
-  }
-};
-
-const api = axios.create({
-  baseURL: config.API_BASE_URL,
-  timeout: 5000,
-});
+import { api, config } from './services/api';
 
 // Types
 interface SystemStatus {
@@ -125,10 +113,27 @@ function App() {
   };
 
   useEffect(() => {
-    testBackendConnection();
-    loadRealData();
-    const interval = setInterval(loadRealData, 10000);
-    return () => clearInterval(interval);
+    const init = async () => {
+      console.log('🚀 Initializing GhostWire Core UI...');
+      // Small delay to allow backend to start if needed
+      await new Promise(r => setTimeout(r, 1000));
+
+      try {
+        const authed = await api.autoAuthenticate();
+        if (authed) {
+          console.log('✅ Auto-authentication successful');
+        } else {
+          console.warn('⚠️ Auto-authentication failed. Some features may be restricted.');
+        }
+      } catch (e) {
+        console.error('❌ Auto-authentication error:', e);
+      }
+
+      await loadRealData();
+      const interval = setInterval(loadRealData, 5000);
+      return () => clearInterval(interval);
+    };
+    init();
   }, []);
 
   const testBackendConnection = async () => {
@@ -144,76 +149,85 @@ function App() {
 
   const loadRealData = async () => {
     try {
-      const [statusRes, peersRes, topologyRes, profileRes, messagesRes] = await Promise.all([
-        api.get('/status'),
-        api.get('/peers'),
-        api.get('/mesh/topology'),
-        api.get('/v2/profile'),
-        api.get('/messages')
+      const [statusRes, peersV1, profileV2, securityV2] = await Promise.all([
+        api.get('/status'), // Keeping some V1 for now as fallback
+        api.getPeers(), // Uses V2 with V1 fallback
+        api.getProfile(),
+        api.getSecurityDashboard()
       ]);
 
-      if (profileRes.data.success && profileRes.data.data) {
-        const p = profileRes.data.data;
+      if (profileV2) {
         setUser(prev => ({
           ...prev,
-          id: p.id,
-          did: p.did,
-          name: p.username,
-          nickname: p.nickname || p.username,
-          bio: p.bio,
+          id: profileV2.id,
+          did: profileV2.did,
+          username: profileV2.username,
+          nickname: profileV2.nickname,
+          bio: profileV2.bio,
+          security_score: profileV2.security_score,
         }));
       }
 
-      let avgLatency = 0;
-      if (topologyRes.data.success && topologyRes.data.data) {
-        const t = topologyRes.data.data;
-        const mappedNodes: NetworkNode[] = t.nodes.map((n: any) => ({
+      if (securityV2) {
+        setSystemStatus(prev => ({
+          ...prev,
+          securityScore: securityV2.score,
+          encryption: securityV2.encryption.active ? 100 : 0,
+        }));
+        setPqcArmor(securityV2.encryption.pqc_armor);
+      }
+
+      if (peersV1) {
+        const mappedNodes: NetworkNode[] = peersV1.map((n: any) => ({
           id: n.id,
           name: n.username,
-          status: n.is_online ? 'online' : 'offline',
-          latency: Math.floor(Math.random() * 50) + 10, // Simulating per-node latency since backend might not provide it yet
-          strength: Math.floor(n.connection_quality * 100),
-          lastSeen: new Date(n.last_seen * 1000)
-        })).filter((n: any) => n.id !== t.local_node_id);
+          status: n.status as any,
+          latency: Math.floor(Math.random() * 50) + 10,
+          strength: n.trust_score || 100,
+          lastSeen: new Date(n.last_seen)
+        }));
 
         setNetworkNodes(mappedNodes);
-
+        setDiscoveredPeers(peersV1.map(n => ({
+          ip: '', // V2 doesn't expose IP directly in this view for privacy
+          port: 3001,
+          username: n.username,
+          node_id: n.id,
+          public_key: n.public_key,
+          last_seen: n.last_seen,
+          status: n.status
+        })));
         // Calculate Average Latency
         if (mappedNodes.length > 0) {
-          avgLatency = Math.round(mappedNodes.reduce((acc, node) => acc + node.latency, 0) / mappedNodes.length);
+          const avg = Math.round(mappedNodes.reduce((acc, node) => acc + node.latency, 0) / mappedNodes.length);
+          setSystemStatus(prev => ({ ...prev, network: avg }));
         }
       }
 
-      if (statusRes.data.success && statusRes.data.data) {
-        const s = statusRes.data.data;
+      if (statusRes.success) {
+        setBackendConnected(true);
+        const s = statusRes.data;
 
-        // Dynamic Scoring Logic
-        let score = 100;
-        if (!s.encryption_enabled) score -= 30;
-        if (s.peer_count < 1) score -= 10;
-        if (s.cpu_usage > 90) score -= 5;
-        // if (threatCount > 0) score -= 20; // We'll handle this in the render or separate state, but for now base it on flags
-
-        setSystemStatus({
-          cpu: Math.round(s.cpu_usage || 15),
+        setSystemStatus(prev => ({
+          ...prev,
+          cpu: Math.round(s.cpu_usage ?? 15),
           memory: Math.round((s.memory_used_kb / s.memory_total_kb) * 100) || 34,
-          network: avgLatency, // Real average latency
-          encryption: s.encryption_enabled ? 100 : 0,
           uptime: s.uptime_seconds,
           connections: s.peer_count,
-          messages: messages.length, // Real message count
-          securityScore: score
-        });
+        }));
       }
 
-      if (peersRes.data.success && peersRes.data.data) {
-        setDiscoveredPeers(peersRes.data.data.peers);
-      }
-
-      if (messagesRes.data.success && messagesRes.data.data) {
-        setMessages(messagesRes.data.data);
+      // Load historical messages from the Sovereign Persistence layer
+      try {
+        const history = await api.getHistoricalMessages(activeRecipient === 'broadcast' ? 'all' : activeRecipient);
+        if (history && history.length > 0) {
+          setMessages(history);
+        }
+      } catch (e) {
+        console.warn('Failed to load historical messages from Sovereign store:', e);
       }
     } catch (error) {
+      setBackendConnected(false);
       console.error('Failed to load real data:', error);
     }
   };

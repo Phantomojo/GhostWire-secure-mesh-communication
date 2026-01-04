@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../services/api';
 
 interface SettingsPageProps {
     backendConnected: boolean;
@@ -74,9 +74,9 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
 
     const loadSettings = async () => {
         try {
-            const response = await axios.get('http://localhost:3001/api/settings');
-            if (response.data.success) {
-                setSettings(prev => ({ ...prev, ...response.data.data }));
+            const data = await api.get('/settings');
+            if (data.success) {
+                setSettings(prev => ({ ...prev, ...data.data }));
             }
         } catch (error) {
             console.error('Failed to load settings:', error);
@@ -85,14 +85,27 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
 
     const saveSettings = async () => {
         setSaving(true);
+        console.log('💾 Initiating settings save...', settings);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
         try {
-            await axios.put('http://localhost:3001/api/settings', settings);
+            await api.put('/settings', settings);
+            console.log('✅ Settings save successful');
             setSaved(true);
             setTimeout(() => setSaved(false), 2000);
-        } catch (error) {
-            console.error('Failed to save settings:', error);
+        } catch (error: any) {
+            console.error('❌ Failed to save settings:', error);
+            if (error.name === 'AbortError') {
+                alert('Save operation timed out. Backend might be unresponsive.');
+            } else {
+                alert(`Save failed: ${error.message}`);
+            }
         } finally {
+            clearTimeout(timeoutId);
             setSaving(false);
+            console.log('🏁 Save operation finished');
         }
     };
 
@@ -126,8 +139,8 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
                     onClick={saveSettings}
                     disabled={saving}
                     className={`px-6 py-2 rounded-xl font-semibold transition-all ${saved
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                        ? 'bg-emerald-500 text-white'
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white'
                         }`}
                 >
                     {saving ? 'Saving...' : saved ? '✓ Saved' : 'Save Changes'}
@@ -142,8 +155,8 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
                             key={section.id}
                             onClick={() => setActiveSection(section.id)}
                             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${activeSection === section.id
-                                    ? 'bg-indigo-600/20 text-white border border-indigo-500/30'
-                                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                                ? 'bg-indigo-600/20 text-white border border-indigo-500/30'
+                                : 'text-slate-400 hover:bg-white/5 hover:text-white'
                                 }`}
                         >
                             <span className="text-xl">{section.icon}</span>

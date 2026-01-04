@@ -2,16 +2,14 @@
 //! Allows nodes to publish and lookup username → PeerID mappings across the internet
 
 // TODO: Fix libp2p imports
-// use libp2p::kad::{Kademlia, KademliaEvent, QueryResult, Record, RecordKey};
-// TODO: Fix libp2p imports
-// use libp2p::kad::store::MemoryStore;
-use libp2p::{PeerId, Multiaddr};
-use serde::{Serialize, Deserialize};
+use anyhow::{anyhow, Result};
+use libp2p::kad::{Event as KademliaEvent, GetRecordOk, QueryResult, RecordKey};
+use libp2p::PeerId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, anyhow};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, info, warn};
 
 /// Username record stored in DHT
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,19 +32,19 @@ impl UsernameRecord {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
-            
+
         // Create signature data
         let mut sig_data = Vec::new();
         sig_data.extend_from_slice(username.as_bytes());
         sig_data.extend_from_slice(peer_id.as_bytes());
         sig_data.extend_from_slice(&timestamp.to_le_bytes());
-        
+
         // Sign with Ed25519
         use ring::signature::Ed25519KeyPair;
         let key_pair = Ed25519KeyPair::from_pkcs8(private_key)
             .map_err(|e| anyhow!("Failed to load key pair: {:?}", e))?;
         let signature = key_pair.sign(&sig_data);
-        
+
         Ok(Self {
             username,
             peer_id,
@@ -55,7 +53,7 @@ impl UsernameRecord {
             signature: signature.as_ref().to_vec(),
         })
     }
-    
+
     /// Verify the signature on this record
     pub fn verify(&self) -> Result<()> {
         // Reconstruct signature data
@@ -63,25 +61,23 @@ impl UsernameRecord {
         sig_data.extend_from_slice(self.username.as_bytes());
         sig_data.extend_from_slice(self.peer_id.as_bytes());
         sig_data.extend_from_slice(&self.timestamp.to_le_bytes());
-        
+
         // Verify signature
-        let public_key = ring::signature::UnparsedPublicKey::new(
-            &ring::signature::ED25519,
-            &self.public_key,
-        );
-        
-        public_key.verify(&sig_data, &self.signature)
+        let public_key =
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &self.public_key);
+
+        public_key
+            .verify(&sig_data, &self.signature)
             .map_err(|e| anyhow!("Signature verification failed: {:?}", e))?;
-            
+
         Ok(())
     }
-    
+
     /// Serialize to bytes for DHT storage
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        bincode::serialize(self)
-            .map_err(|e| anyhow!("Failed to serialize username record: {}", e))
+        bincode::serialize(self).map_err(|e| anyhow!("Failed to serialize username record: {}", e))
     }
-    
+
     /// Deserialize from bytes
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         bincode::deserialize(data)
@@ -93,34 +89,33 @@ impl UsernameRecord {
 pub struct UsernameDiscovery {
     local_peer_id: PeerId,
     local_username: String,
-    kad: Arc<RwLock<Kademlia<MemoryStore>>>,
+    // kad: Arc<RwLock<Kademlia<MemoryStore>>>, // Removed: Kademlia is owned by Swarm
     username_cache: Arc<RwLock<HashMap<String, UsernameRecord>>>,
     peer_cache: Arc<RwLock<HashMap<String, String>>>, // PeerID -> Username
 }
 
 impl UsernameDiscovery {
-    pub fn new(
-        local_peer_id: PeerId,
-        local_username: String,
-        kad: Kademlia<MemoryStore>,
-    ) -> Self {
+    pub fn new(local_peer_id: PeerId, local_username: String) -> Self {
         Self {
             local_peer_id,
             local_username,
-            kad: Arc::new(RwLock::new(kad)),
             username_cache: Arc::new(RwLock::new(HashMap::new())),
             peer_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
-    /// Publish our username to the DHT
-    pub async fn publish_username(
+
+    /// Prepare a username record for publication
+    /// Returns (Key, Value) to be put into DHT by MeshTransport
+    pub fn prepare_username_publication(
         &self,
         public_key: Vec<u8>,
         private_key: &[u8],
-    ) -> Result<()> {
-        info!("Publishing username '{}' to DHT", self.local_username);
-        
+    ) -> Result<(RecordKey, Vec<u8>)> {
+        info!(
+            "Preparing username '{}' for DHT publication",
+            self.local_username
+        );
+
         // Create signed record
         let record = UsernameRecord::new(
             self.local_username.clone(),
@@ -128,29 +123,19 @@ impl UsernameDiscovery {
             public_key,
             private_key,
         )?;
-        
+
         // Derive DHT key from username (hash for privacy)
         let username_key = self.derive_username_key(&self.local_username);
-        
-        // Store in DHT
+
+        // Serialize record
         let record_bytes = record.to_bytes()?;
-        let kad_record = Record {
-            key: RecordKey::new(&username_key),
-            value: record_bytes,
-            publisher: Some(self.local_peer_id),
-            expires: None, // We'll republish periodically
-        };
-        
-        let mut kad = self.kad.write().await;
-        kad.put_record(kad_record, libp2p::kad::Quorum::One)
-            .map_err(|e| anyhow!("Failed to put username record in DHT: {:?}", e))?;
-            
-        info!("Username published successfully");
-        Ok(())
+
+        Ok((RecordKey::new(&username_key), record_bytes))
     }
-    
+
     /// Lookup a peer by username
-    pub async fn find_peer_by_username(&self, username: &str) -> Result<UsernameRecord> {
+    /// Returns Cached(Record) or DhtQuery(Key)
+    pub async fn find_peer_by_username(&self, username: &str) -> Result<UsernameLookupResult> {
         // Check cache first
         {
             let cache = self.username_cache.read().await;
@@ -159,66 +144,59 @@ impl UsernameDiscovery {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs();
-                    
+
                 if now - record.timestamp < 3600 {
                     debug!("Found username '{}' in cache", username);
-                    return Ok(record.clone());
+                    return Ok(UsernameLookupResult::Cached(record.clone()));
                 }
             }
         }
-        
+
         info!("Looking up username '{}' in DHT", username);
-        
+
         // Derive DHT key
         let username_key = self.derive_username_key(username);
-        
-        // Query DHT
-        let mut kad = self.kad.write().await;
-        kad.get_record(RecordKey::new(&username_key));
-        
-        // Note: In real implementation, we'd wait for the KademliaEvent::OutboundQueryProgressed
-        // For now, return error indicating async lookup is in progress
-        Err(anyhow!("DHT lookup in progress - check events"))
+
+        Ok(UsernameLookupResult::DhtQuery(RecordKey::new(
+            &username_key,
+        )))
     }
-    
+
     /// Handle DHT events (call this from swarm event loop)
-    pub async fn handle_kad_event(&self, event: KademliaEvent) -> Result<()> {
+    pub async fn handle_kad_event(&self, event: &KademliaEvent) -> Result<()> {
         match event {
             KademliaEvent::OutboundQueryProgressed { result, .. } => {
                 match result {
-                    QueryResult::GetRecord(Ok(ok)) => {
+                    QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
                         // Got a username record from DHT
-                        if let Some(record) = ok.records.first() {
-                            match UsernameRecord::from_bytes(&record.record.value) {
-                                Ok(username_record) => {
-                                    // Verify signature
-                                    if let Err(e) = username_record.verify() {
-                                        warn!("Invalid signature on username record: {}", e);
-                                        return Ok(());
-                                    }
-                                    
-                                    info!(
-                                        "Found username '{}' -> PeerID {}",
-                                        username_record.username,
-                                        username_record.peer_id
-                                    );
-                                    
-                                    // Cache it
-                                    let mut cache = self.username_cache.write().await;
-                                    cache.insert(
-                                        username_record.username.clone(),
-                                        username_record.clone(),
-                                    );
-                                    
-                                    let mut peer_cache = self.peer_cache.write().await;
-                                    peer_cache.insert(
-                                        username_record.peer_id.clone(),
-                                        username_record.username.clone(),
-                                    );
+                        match UsernameRecord::from_bytes(&record.record.value) {
+                            Ok(username_record) => {
+                                // Verify signature
+                                if let Err(e) = username_record.verify() {
+                                    warn!("Invalid signature on username record: {}", e);
+                                    return Ok(());
                                 }
-                                Err(e) => {
-                                    warn!("Failed to parse username record: {}", e);
-                                }
+
+                                info!(
+                                    "Found username '{}' -> PeerID {}",
+                                    username_record.username, username_record.peer_id
+                                );
+
+                                // Cache it
+                                let mut cache = self.username_cache.write().await;
+                                cache.insert(
+                                    username_record.username.clone(),
+                                    username_record.clone(),
+                                );
+
+                                let mut peer_cache = self.peer_cache.write().await;
+                                peer_cache.insert(
+                                    username_record.peer_id.clone(),
+                                    username_record.username.clone(),
+                                );
+                            }
+                            Err(e) => {
+                                warn!("Failed to parse username record: {}", e);
                             }
                         }
                     }
@@ -233,78 +211,75 @@ impl UsernameDiscovery {
             }
             _ => {}
         }
-        
+
         Ok(())
     }
-    
+
     /// Derive a consistent DHT key from username
     /// Uses SHA-256 hash for privacy (username not directly visible in DHT)
     fn derive_username_key(&self, username: &str) -> Vec<u8> {
         use ring::digest;
-        
+
         // Hash username for privacy
         let hash = digest::digest(&digest::SHA256, username.as_bytes());
         hash.as_ref().to_vec()
     }
-    
+
     /// Get username for a peer (from cache)
     pub async fn get_username_for_peer(&self, peer_id: &str) -> Option<String> {
         let cache = self.peer_cache.read().await;
         cache.get(peer_id).cloned()
     }
-    
-    /// Periodically republish our username (call every ~15 minutes)
-    pub async fn refresh_username_publication(
-        &self,
-        public_key: Vec<u8>,
-        private_key: &[u8],
-    ) -> Result<()> {
-        info!("Refreshing username publication");
-        self.publish_username(public_key, private_key).await
-    }
+}
+
+pub enum UsernameLookupResult {
+    Cached(UsernameRecord),
+    DhtQuery(RecordKey),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_username_record_creation() {
         use ring::rand::SystemRandom;
         use ring::signature::Ed25519KeyPair;
-        
+
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
-        
+
         let record = UsernameRecord::new(
             "alice".to_string(),
             "12D3KooWTest".to_string(),
             vec![1, 2, 3, 4],
             pkcs8.as_ref(),
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         assert_eq!(record.username, "alice");
         assert!(record.verify().is_ok());
     }
-    
+
     #[test]
     fn test_username_record_serialization() {
         use ring::rand::SystemRandom;
         use ring::signature::Ed25519KeyPair;
-        
+
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
-        
+
         let record = UsernameRecord::new(
             "bob".to_string(),
             "12D3KooWTest2".to_string(),
             vec![5, 6, 7, 8],
             pkcs8.as_ref(),
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let bytes = record.to_bytes().unwrap();
         let decoded = UsernameRecord::from_bytes(&bytes).unwrap();
-        
+
         assert_eq!(record.username, decoded.username);
         assert_eq!(record.peer_id, decoded.peer_id);
         assert!(decoded.verify().is_ok());

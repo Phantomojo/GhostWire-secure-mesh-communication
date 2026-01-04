@@ -7,11 +7,12 @@ interface Node {
     y: number;
     vx: number;
     vy: number;
-    status: 'online' | 'offline' | 'warning';
+    status: string;
+    trust_score?: number;
 }
 
 interface MeshVisualizerProps {
-    nodes: { id: string; name: string; status: 'online' | 'offline' | 'warning' }[];
+    nodes: { id: string; name: string; status: string; trust_score?: number }[];
     onNodeClick?: (nodeId: string) => void;
 }
 
@@ -27,7 +28,7 @@ const MeshVisualizer: React.FC<MeshVisualizerProps> = ({ nodes, onNodeClick }) =
         const currentNodes = nodesRef.current;
         nodesRef.current = nodes.map((node) => {
             const existing = currentNodes.find(n => n.id === node.id);
-            if (existing) return { ...existing, status: node.status, name: node.name };
+            if (existing) return { ...existing, status: node.status, name: node.name, trust_score: node.trust_score };
 
             const angle = Math.random() * Math.PI * 2;
             const dist = 100 + Math.random() * 150;
@@ -179,7 +180,7 @@ const MeshVisualizer: React.FC<MeshVisualizerProps> = ({ nodes, onNodeClick }) =
                 const isOnline = node.status === 'online';
                 const isHovered = node.id === hoveredNodeId;
                 const isSelected = node.id === selectedNodeId;
-                const baseColor = isOnline ? '#6366f1' : node.status === 'warning' ? '#f59e0b' : '#ef4444';
+                const baseColor = isOnline ? '#6366f1' : (node.status === 'warning' || (node.trust_score && node.trust_score < 70)) ? '#f59e0b' : '#ef4444';
 
                 // Outer glow
                 const pulse = Math.sin(Date.now() / 400) * 0.3 + 1;
