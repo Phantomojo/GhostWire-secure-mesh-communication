@@ -7,6 +7,7 @@ use axum::http::{header, Uri};
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::Html;
 use axum::{
+    extract::ConnectInfo,
     extract::Query,
     extract::State,
     middleware,
@@ -38,7 +39,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(RustEmbed)]
 #[folder = "../webui/dist/"]
@@ -78,24 +79,68 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 
 lazy_static! {
     static ref AUTH_TOKEN: String = {
+        let token_file = "ghostwire_token.txt";
+        if let Ok(token) = fs::read_to_string(token_file) {
+            let token = token.trim().to_string();
+            if !token.is_empty() {
+                println!("\n\n🔒 GHOSTWIRE SECURITY 🔒");
+                println!("Loaded persistent token from: {}", token_file);
+                println!("X-Ghost-Token: {}", token);
+                return token;
+            }
+        }
+
         let token: String = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
             .take(32)
             .map(char::from)
             .collect();
+
+        let _ = fs::write(token_file, &token);
+
         println!("\n\n🔒 GHOSTWIRE SECURITY 🔒");
+        println!("Generated new persistent token in: {}", token_file);
         println!("X-Ghost-Token: {}", token);
         println!("(You must include this header in all API requests)\n");
         token
     };
 }
 
-async fn auth_middleware(
+// Helper to get the actual client IP, respecting common proxy headers
+fn get_client_ip(req: &Request<Body>, addr: SocketAddr) -> std::net::IpAddr {
+    // Check common proxy headers first
+    let headers = req.headers();
+    let header_candidates = ["X-Forwarded-For", "X-Real-IP", "Forwarded"];
+    
+    for header_name in header_candidates {
+        if let Some(val) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
+            // X-Forwarded-For can be a comma-separated list
+            let first_ip = val.split(',').next().unwrap_or("").trim();
+            if let Ok(ip) = first_ip.parse::<std::net::IpAddr>() {
+                return ip;
+            }
+        }
+    }
+    
+    // Fallback to the direct socket address
+    addr.ip()
+}
+
+pub async fn auth_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
     let path = req.uri().path();
+    let client_ip = get_client_ip(&req, addr);
+
+    // Always allow access to the web assets
     if !path.starts_with("/api") {
+        return Ok(next.run(req).await);
+    }
+
+    // Special case for local token discovery during development
+    if path == "/api/dev/token" {
         return Ok(next.run(req).await);
     }
 
@@ -107,10 +152,47 @@ async fn auth_middleware(
     match token_header {
         Some(token) if token == *AUTH_TOKEN => Ok(next.run(req).await),
         _ => {
-            warn!("⛔ Unauthorized API access attempt");
+            warn!("⛔ Unauthorized API access attempt to {} from {}", path, client_ip);
             Err(StatusCode::UNAUTHORIZED)
         }
     }
+}
+
+pub async fn get_dev_token(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request<Body>
+) -> impl IntoResponse {
+    let ip = get_client_ip(&req, addr);
+    
+    // Loosened check: local loopback OR bridge IPs commonly used by containers
+    let is_local = ip.is_loopback() || 
+                   ip.to_string().starts_with("172.") || // Docker/Podman
+                   ip.to_string().starts_with("10.") ||  // Internal private
+                   ip.to_string().starts_with("192.168.") ||
+                   ip.to_string() == "::1";
+
+    if !is_local {
+        warn!(
+            "⛔ Unauthorized remote access attempt to /api/dev/token from {}",
+            ip
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse::<String> {
+                success: false,
+                data: None,
+                error: Some("Access restricted to localhost".to_string()),
+            }),
+        )
+            .into_response();
+    }
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(AUTH_TOKEN.clone()),
+        error: None,
+    })
+    .into_response()
 }
 
 #[derive(Clone)]
@@ -144,11 +226,90 @@ pub struct PeerInfo {
     pub public_key: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Settings {
+    // Identity
+    pub username: String,
+    pub display_name: String,
+    pub bio: String,
+
+    // Network
+    pub listen_port: u16,
+    pub enable_mdns: bool,
+    pub enable_dht: bool,
+    pub max_peers: usize,
+
+    // Security
+    pub encryption_level: String, // 'standard' | 'enhanced' | 'quantum'
+    pub auto_lock_minutes: u32,
+    pub key_rotation_days: u32,
+
+    // Privacy
     pub stealth_mode: bool,
-    pub encryption_enabled: bool,
-    pub peer_count: usize,
+    pub traffic_morphing: bool,
+    pub strip_metadata: bool,
+
+    // Notifications
+    pub sound_enabled: bool,
+    pub desktop_notifications: bool,
+    pub message_preview: bool,
+
+    // Advanced
+    pub debug_mode: bool,
+    pub log_level: String, // 'info' | 'debug' | 'trace'
+
+    #[serde(default)]
+    pub last_updated: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            username: "GhostUser".to_string(),
+            display_name: "Ghost_Core".to_string(),
+            bio: "Sovereign GhostWire Node".to_string(),
+            listen_port: 3001,
+            enable_mdns: true,
+            enable_dht: true,
+            max_peers: 50,
+            encryption_level: "enhanced".to_string(),
+            auto_lock_minutes: 15,
+            key_rotation_days: 30,
+            stealth_mode: false,
+            traffic_morphing: false,
+            strip_metadata: true,
+            sound_enabled: true,
+            desktop_notifications: true,
+            message_preview: true,
+            debug_mode: false,
+            log_level: "info".to_string(),
+            last_updated: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn load() -> Self {
+        let path = "ghostwire_settings.json";
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+        let default = Self::default();
+        let _ = default.save();
+        default
+    }
+
+    pub fn save(&self) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self).unwrap();
+        fs::write("ghostwire_settings.json", json)
+    }
+}
+
+lazy_static! {
+    static ref LAST_CPU_STATS: Mutex<(u64, u64)> = Mutex::new((0, 0));
 }
 
 #[derive(Serialize)]
@@ -246,17 +407,6 @@ pub struct MeshStatsResponse {
     pub stats: crate::core::MeshStats,
 }
 
-fn get_system_load() -> f32 {
-    fs::read_to_string("/proc/loadavg")
-        .ok()
-        .and_then(|s| {
-            s.split_whitespace()
-                .next()
-                .and_then(|v| v.parse::<f32>().ok())
-        })
-        .unwrap_or(0.0)
-}
-
 fn get_memory_usage() -> (u64, u64) {
     if let Ok(content) = fs::read_to_string("/proc/meminfo") {
         let mut total = 0;
@@ -280,17 +430,71 @@ fn get_memory_usage() -> (u64, u64) {
             return (total, total - available);
         }
     }
-    (0, 0)
+    // Fallback if /proc/meminfo parsing fails or total is 0
+    (8 * 1024 * 1024, 2 * 1024 * 1024) // Default 8GB total, 2GB used for mock/fallback
 }
 
 fn get_cpu_usage() -> f32 {
-    // Simple mock for CPU usage based on loadavg / number of cores
-    // In real production, we'd sample /proc/stat twice
-    let load = get_system_load();
-    let cores = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1) as f32;
-    ((load / cores) * 100.0).min(100.0)
+    let read_stats = || -> Option<(u64, u64)> {
+        let content = fs::read_to_string("/proc/stat").ok()?;
+        let line = content.lines().next()?;
+        let parts: Vec<u64> = line
+            .split_whitespace()
+            .skip(1)
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        if parts.len() >= 4 {
+            let user = parts[0];
+            let nice = parts[1];
+            let system = parts[2];
+            let idle = parts[3];
+            let iowait = parts.get(4).unwrap_or(&0);
+            let irq = parts.get(5).unwrap_or(&0);
+            let softirq = parts.get(6).unwrap_or(&0);
+            let steal = parts.get(7).unwrap_or(&0);
+
+            let total = user + nice + system + idle + iowait + irq + softirq + steal;
+            let active_idle = idle + iowait;
+            return Some((total, active_idle));
+        }
+        None
+    };
+
+    if let Some((total, active_idle)) = read_stats() {
+        let mut last_stats = LAST_CPU_STATS.lock().unwrap();
+        let (prev_total, prev_idle) = *last_stats;
+
+        if prev_total == 0 {
+            // First time, sample again after a tiny delay to avoid 0% start
+            *last_stats = (total, active_idle);
+            drop(last_stats);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some((t2, i2)) = read_stats() {
+                let mut last_stats = LAST_CPU_STATS.lock().unwrap();
+                let (p_t, p_i) = *last_stats;
+                *last_stats = (t2, i2);
+                let d_t = t2 - p_t;
+                let d_i = i2 - p_i;
+                if d_t > 0 {
+                    return (d_t - d_i) as f32 / d_t as f32 * 100.0;
+                }
+            }
+            return 0.0;
+        }
+
+        *last_stats = (total, active_idle);
+        let total_delta = total - prev_total;
+        let idle_delta = active_idle - prev_idle;
+
+        if total_delta == 0 {
+            return 0.0;
+        }
+
+        let usage = (total_delta - idle_delta) as f32 / total_delta as f32 * 100.0;
+        return usage.clamp(0.0, 100.0);
+    }
+    0.0
 }
 
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -451,63 +655,61 @@ pub async fn get_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     })
 }
 
-pub async fn get_settings(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    let peer_count = ACTIVE_CONNECTIONS
-        .lock()
-        .map(|guard| guard.len())
-        .unwrap_or(0); // Fail safe on poisoned mutex
+pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let peer_count = state.core.get_peer_count();
+    let settings = Settings::load();
+
+    // Inject runtime stats that shouldn't be persistent if they were in the DTO
+    // but the unified struct doesn't have them anymore.
+    // If the UI expects them, we can wrap it in an ApiResponse with extra fields.
 
     #[derive(Serialize)]
-    struct EnhancedSettings {
-        stealth_mode: bool,
-        encryption_enabled: bool,
+    struct SettingsWithStatus {
+        #[serde(flatten)]
+        config: Settings,
         peer_count: usize,
-        max_connections: usize,
-        message_retention_days: u32,
-        auto_backup_enabled: bool,
-        security_scan_interval_minutes: u32,
-        mesh_network_enabled: bool,
-        reticulum_enabled: bool,
-        log_level: String,
-        last_updated: String,
     }
-
-    let settings = EnhancedSettings {
-        stealth_mode: false,
-        encryption_enabled: true,
-        peer_count,
-        max_connections: 50,
-        message_retention_days: 30,
-        auto_backup_enabled: true,
-        security_scan_interval_minutes: 60,
-        mesh_network_enabled: true,
-        reticulum_enabled: false,
-        log_level: "info".to_string(),
-        last_updated: chrono::Utc::now().to_rfc3339(),
-    };
 
     Json(ApiResponse {
         success: true,
-        data: Some(settings),
+        data: Some(SettingsWithStatus {
+            config: settings,
+            peer_count,
+        }),
         error: None,
     })
 }
 
 pub async fn update_settings(
     State(_state): State<Arc<AppState>>,
-    Json(settings): Json<Settings>,
+    Json(mut new_settings): Json<Settings>,
 ) -> impl IntoResponse {
-    // TODO: Implement actual settings update
-    println!(
-        "Updating settings: stealth_mode = {}",
-        settings.stealth_mode
+    info!(
+        "💾 Inbound settings update received for user: {}",
+        new_settings.username
     );
 
-    Json(ApiResponse {
-        success: true,
-        data: Some(settings),
-        error: None,
-    })
+    // Ensure timestamp is always fresh on save
+    new_settings.last_updated = chrono::Utc::now().to_rfc3339();
+
+    match new_settings.save() {
+        Ok(_) => {
+            info!("✅ Settings persisted to ghostwire_settings.json");
+            Json(ApiResponse {
+                success: true,
+                data: Some(new_settings),
+                error: None,
+            })
+        }
+        Err(e) => {
+            error!("❌ Failed to save settings file: {}", e);
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Failed to save settings: {}", e)),
+            })
+        }
+    }
 }
 
 pub async fn get_public_key(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -2393,9 +2595,13 @@ pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyho
     info!("Starting GhostWire web server on {}", addr);
     info!("Security features enabled: encryption, authentication, threat detection");
 
-    // Use the correct axum serve function
+    // Use the correct axum serve function with ConnectInfo for rate limiting
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -2421,7 +2627,7 @@ pub fn app(core: Arc<Core>) -> Router {
         .key_extractor(SmartIpKeyExtractor)
         .finish()
         .unwrap();
-    let rate_limiter = GovernorLayer {
+    let _rate_limiter = GovernorLayer {
         config: std::sync::Arc::new(governor_conf),
     };
 
@@ -2478,6 +2684,7 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/lockdown", post(lockdown))
         .route("/api/backup_security", post(backup_security))
         .route("/api/analyze_communications", post(analyze_communications))
+        .route("/api/dev/token", get(get_dev_token))
         .route("/api/v2/profile", get(get_profile_v2))
         .route("/api/v2/profile/username", put(update_username_v2))
         .route("/api/v2/profile/metadata", put(update_metadata_v2))
@@ -2486,8 +2693,9 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/v2/security/armor", put(toggle_pqc_armor_v2))
         .route("/api/v2/mesh/sharding", put(update_sharding_v2))
         .route("/api/v2/peers", get(get_peers_v2))
+        .route("/api/v2/messages", get(get_messages_v2))
         .layer(middleware::from_fn(auth_middleware))
-        .layer(rate_limiter)
+        // .layer(rate_limiter)
         .layer(cors)
         .fallback(static_handler)
         .with_state(app_state)

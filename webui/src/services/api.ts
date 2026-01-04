@@ -4,20 +4,21 @@ import type { User, Chat, Message, Contact, Group } from '../types';
 
 // Dynamic API base URL - supports cross-PC communication
 const getApiBaseUrl = () => {
-  // Check for environment variable first
+  // Check for localStorage configuration (highest priority for manual overrides)
+  const savedBackendUrl = localStorage.getItem('ghostwire_backend_url');
+  if (savedBackendUrl) {
+    if (savedBackendUrl.startsWith('http')) return savedBackendUrl;
+    return `http://${savedBackendUrl}/api`;
+  }
+
+  // Check for environment variable
   if (import.meta.env.VITE_API_BASE_URL) {
     return import.meta.env.VITE_API_BASE_URL;
   }
 
-  // Check for localStorage configuration
-  const savedBackendUrl = localStorage.getItem('ghostwire_backend_url');
-  if (savedBackendUrl) {
-    return savedBackendUrl;
-  }
-
   // Default to localhost, but use window.location.hostname for cross-PC
   const hostname = window.location.hostname;
-  const port = window.location.port || '3001';
+  const port = '8080'; // Default backend port for GhostWire
 
   // If we're not on localhost, assume we're accessing from another PC
   if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
@@ -25,14 +26,17 @@ const getApiBaseUrl = () => {
   }
 
   // Default local development
-  return 'http://localhost:3001/api';
+  return 'http://localhost:8080/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
 
 // Auth token for X-Ghost-Token header
 const getAuthToken = (): string | null => {
-  return localStorage.getItem('ghostwire_auth_token');
+  // Check multiple possible keys used by different versions
+  return localStorage.getItem('ghostwire_auth_token') ||
+    localStorage.getItem('ghostwire_token') ||
+    localStorage.getItem('token');
 };
 
 // Get auth headers for API requests
@@ -83,6 +87,96 @@ export interface NetworkInfo {
   timestamp: string;
 }
 
+// --- API V2 Interfaces ---
+
+export interface V2Response<T> {
+  version: string;
+  timestamp: string;
+  request_id: string;
+  data?: T;
+  error?: V2Error;
+  pagination?: PaginationMeta;
+  links?: HateoasLinks;
+  rate_limit?: RateLimitInfo;
+}
+
+export interface V2Error {
+  code: string;
+  message: string;
+  details?: any;
+  help_url?: string;
+  trace_id?: string;
+}
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface HateoasLinks {
+  self: string;
+  next?: string;
+  prev?: string;
+  related?: Record<string, string>;
+}
+
+export interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: string;
+}
+
+export interface ProfileV2 {
+  id: string;
+  did: string;
+  username: string;
+  nickname: string;
+  bio: string;
+  public_key: string;
+  key_id: string;
+  created_at: string;
+  dht_published: boolean;
+  security_score: number;
+}
+
+export interface SecurityDashboardV2 {
+  score: number;
+  encryption: {
+    method: string;
+    active: boolean;
+    pqc_armor: boolean;
+  };
+  stats: {
+    messages_encrypted: number;
+    peers_verified: number;
+    rate_limit_violations: number;
+    blacklisted_peers: number;
+  };
+  threat_level: string;
+}
+
+export interface PeerV2 {
+  id: string;
+  username: string;
+  status: string;
+  last_seen: string;
+  trust_score: number;
+  public_key: string;
+}
+
+export interface MessageV2 {
+  id: string; // Now a string thanks to our backend update
+  sender: string;
+  recipient: string;
+  content: string;
+  timestamp: number;
+  encrypted: boolean;
+  message_type: string;
+  encryption_status: string;
+}
+
 // Configuration management
 export const config = {
   setBackendUrl: (url: string) => {
@@ -116,7 +210,9 @@ export const config = {
 
   isAuthenticated: (): boolean => {
     return !!getAuthToken();
-  }
+  },
+
+  API_BASE_URL: API_BASE_URL
 };
 
 async function reportFrontendError(errorMsg: string) {
@@ -144,13 +240,20 @@ export const api = {
     const url = `${getApiBaseUrl()}${endpoint}`;
     console.log(`API GET: ${url}`);
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) {
-      if (response.status === 401) {
-        console.error('🔒 Unauthorized! Set your token with: config.setAuthToken("YOUR_TOKEN")');
+
+    if (response.status === 401) {
+      console.warn('🔒 Unauthorized, attempting auto-discovery...');
+      if (await this.autoAuthenticate()) {
+        response = await fetch(url, {
+          headers: getAuthHeaders(),
+        });
       }
+    }
+
+    if (!response.ok) {
       throw new Error(`GET ${endpoint} failed: ${response.statusText}`);
     }
     return response.json();
@@ -160,18 +263,110 @@ export const api = {
     const url = `${getApiBaseUrl()}${endpoint}`;
     console.log(`API POST: ${url}`, data);
 
+    let response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: data ? JSON.stringify(data) : undefined,
+    });
+
+    if (response.status === 401) {
+      console.warn('🔒 Unauthorized, attempting auto-discovery...');
+      if (await this.autoAuthenticate()) {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: data ? JSON.stringify(data) : undefined,
+        });
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async put(endpoint: string, data?: any): Promise<any> {
+    const url = `${getApiBaseUrl()}${endpoint}`;
+    console.log(`API PUT: ${url}`, data);
+
+    let response = await fetch(url, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: data ? JSON.stringify(data) : undefined,
+    });
+
+    if (response.status === 401) {
+      console.warn('🔒 Unauthorized, attempting auto-discovery...');
+      if (await this.autoAuthenticate()) {
+        response = await fetch(url, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: data ? JSON.stringify(data) : undefined,
+        });
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`PUT ${endpoint} failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async delete(endpoint: string): Promise<any> {
+    const url = `${getApiBaseUrl()}${endpoint}`;
+    console.log(`API DELETE: ${url}`);
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`DELETE ${endpoint} failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  // --- API V2 Methods ---
+
+  async v2Get<T>(endpoint: string): Promise<T> {
+    const url = `${getApiBaseUrl()}/v2${endpoint}`;
+    console.log(`🚀 API V2 GET: ${url}`);
+
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    const envelope: V2Response<T> = await response.json();
+
+    if (!response.ok || envelope.error) {
+      const error = envelope.error || { code: 'UNKNOWN', message: response.statusText };
+      console.error(`❌ API V2 Error (${error.code}): ${error.message}`);
+      throw new Error(error.message);
+    }
+
+    return envelope.data!;
+  },
+
+  async v2Post<T>(endpoint: string, data?: any): Promise<T> {
+    const url = `${getApiBaseUrl()}/v2${endpoint}`;
+    console.log(`🚀 API V2 POST: ${url}`, data);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: data ? JSON.stringify(data) : undefined,
     });
-    if (!response.ok) {
-      if (response.status === 401) {
-        console.error('🔒 Unauthorized! Set your token with: config.setAuthToken("YOUR_TOKEN")');
-      }
-      throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
+
+    const envelope: V2Response<T> = await response.json();
+
+    if (!response.ok || envelope.error) {
+      const error = envelope.error || { code: 'UNKNOWN', message: response.statusText };
+      console.error(`❌ API V2 Error (${error.code}): ${error.message}`);
+      throw new Error(error.message);
     }
-    return response.json();
+
+    return envelope.data!;
   },
 
   // Send a message
@@ -198,21 +393,53 @@ export const api = {
   },
 
   // Get list of peers
-  async getPeers(): Promise<Peer[]> {
-    const response = await fetch(`${getApiBaseUrl()}/peers`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get peers: ${response.statusText}`);
+  async getPeers(page = 1, perPage = 20): Promise<PeerV2[]> {
+    try {
+      return await this.v2Get<PeerV2[]>(`/peers?page=${page}&per_page=${perPage}`);
+    } catch (e) {
+      console.warn('Falling back to V1 peers...');
+      const response = await fetch(`${getApiBaseUrl()}/peers`, {
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json();
+      return (data.data?.peers || []).map((p: any) => ({
+        id: p.id,
+        username: p.name,
+        status: p.status,
+        last_seen: p.lastSeen,
+        trust_score: 100,
+        public_key: '',
+      }));
     }
+  },
 
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to get peers');
+  // Get Profile V2
+  async getProfile(): Promise<ProfileV2> {
+    return this.v2Get<ProfileV2>('/profile');
+  },
+
+  // Get Security Dashboard V2
+  async getSecurityDashboard(): Promise<SecurityDashboardV2> {
+    return this.v2Get<SecurityDashboardV2>('/security/dashboard');
+  },
+
+  // Get historical messages from the Sovereign Persistence layer
+  async getHistoricalMessages(peerId: string = 'all'): Promise<any[]> {
+    try {
+      const messages = await this.v2Get<MessageV2[]>(`/messages?peer_id=${peerId}`);
+      return messages.map(m => ({
+        id: m.id,
+        content: m.content,
+        sender: m.sender,
+        recipient: m.recipient,
+        timestamp: new Date(m.timestamp * 1000),
+        status: 'sent',
+        encrypted: m.encrypted
+      }));
+    } catch (e) {
+      console.warn('🚀 Persistence Fetch Failed, falling back to empty stream.', e);
+      return [];
     }
-
-    return data.data?.peers || [];
   },
 
   // Get settings
@@ -358,12 +585,49 @@ export const api = {
     return data.data;
   },
 
+  // --- Auto-Authentication ---
+  async autoAuthenticate(): Promise<boolean> {
+    const existingToken = getAuthToken();
+    if (existingToken && existingToken.trim() !== '') return true;
+
+    try {
+      // Direct fetch to the discovery endpoint on the backend
+      const response = await fetch(`${getApiBaseUrl()}/dev/token`);
+      const data = await response.json();
+      if (data.success && data.data) {
+        console.log('✅ Auto-authenticated with local dev token');
+        config.setAuthToken(data.data);
+        return true;
+      }
+    } catch (e) {
+      // Quietly fail discovery
+    }
+    return false;
+  },
+
   // Test backend connectivity
   async testConnection(): Promise<boolean> {
     try {
+      // Try to auto-authenticate first if needed
+      if (!getAuthToken()) {
+        await this.autoAuthenticate();
+      }
+
       const response = await fetch(`${getApiBaseUrl()}/status`, {
         headers: getAuthHeaders(),
       });
+
+      // If unauthorized, try discovery once more (case where token was expired/invalid)
+      if (response.status === 401) {
+        if (await this.autoAuthenticate()) {
+          // Retry the status check
+          const retryResponse = await fetch(`${getApiBaseUrl()}/status`, {
+            headers: getAuthHeaders(),
+          });
+          return retryResponse.ok;
+        }
+      }
+
       return response.ok;
     } catch {
       return false;

@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
-    #[serde(with = "uuid::serde::compact")]
     pub id: Uuid,
     pub sender: String,
     pub recipient: String,

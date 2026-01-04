@@ -9,6 +9,7 @@ use base64::Engine;
 use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
+use libp2p::kad::Event as KademliaEvent;
 use libp2p::kad::{Behaviour as Kad, Event as KadEvent, QueryResult};
 use libp2p::tcp::Transport as TcpTransport;
 use libp2p::{
@@ -63,6 +64,7 @@ pub struct MeshBehaviour {
     pub kad: Kad<MemoryStore>,
     pub identify: Identify,
     pub mdns: Mdns,
+    pub autonat: libp2p::autonat::Behaviour,
 }
 
 /// A libp2p transport that wraps TCP in a Stealth Handshake
@@ -76,7 +78,7 @@ impl StealthTransport {
         Self {
             _provider: provider,
             inner: TcpTransport::<libp2p_tcp::tokio::Tcp>::new(
-                libp2p_tcp::Config::default().nodelay(true),
+                libp2p_tcp::Config::default().nodelay(true).port_reuse(true),
             ),
         }
     }
@@ -92,6 +94,10 @@ pub struct MeshTransport {
     stealth_provider: StealthTCPProvider,
     _stats: Arc<RwLock<MeshStats>>,
     current_shard: String,
+    _core_messages: Arc<RwLock<Vec<Message>>>,
+    _message_store: Arc<crate::core::store::SecureMessageStore>,
+    pub bootstrap_nodes: Vec<Multiaddr>,
+    username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
 }
 
 impl MeshTransport {
@@ -99,6 +105,10 @@ impl MeshTransport {
         identity: Arc<Identity>,
         security_manager: Arc<SecurityManager>,
         encryption_manager: Arc<EncryptionManager>,
+        core_messages: Arc<RwLock<Vec<Message>>>,
+        message_store: Arc<crate::core::store::SecureMessageStore>,
+        bootstrap_nodes: Vec<Multiaddr>,
+        username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair();
@@ -152,11 +162,15 @@ impl MeshTransport {
 
         let mdns = Mdns::new(MdnsConfig::default(), local_peer_id)?;
 
+        let autonat =
+            libp2p::autonat::Behaviour::new(local_peer_id, libp2p::autonat::Config::default());
+
         let behaviour = MeshBehaviour {
             gossipsub,
             identify,
             kad,
             mdns,
+            autonat,
         };
 
         let swarm = Swarm::new(
@@ -182,6 +196,10 @@ impl MeshTransport {
                 security_stats: SecurityStats::default(),
             })),
             current_shard: shard_id.to_string(),
+            _core_messages: core_messages,
+            _message_store: message_store,
+            bootstrap_nodes,
+            username_discovery,
         })
     }
 
@@ -214,6 +232,31 @@ impl MeshTransport {
         let topic = IdentTopic::new("ghostwire-messages");
         self.swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
+        // Connect to bootstrap nodes
+        for addr in &self.bootstrap_nodes {
+            if let Some(peer_id) = addr.iter().find_map(|p| {
+                if let libp2p::multiaddr::Protocol::P2p(peer_id) = p {
+                    Some(peer_id)
+                } else {
+                    None
+                }
+            }) {
+                info!("Adding bootstrap node: {} ({})", peer_id, addr);
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&peer_id, addr.clone());
+            } else {
+                warn!("Bootstrap address missing PeerId: {}", addr);
+            }
+        }
+
+        // Kick off Kademlia bootstrap
+        if !self.bootstrap_nodes.is_empty() {
+            info!("Initiating DHT bootstrap...");
+            self.swarm.behaviour_mut().kad.bootstrap()?;
+        }
+
         // Start the swarm event loop
         self.run_swarm_loop().await?;
 
@@ -224,56 +267,73 @@ impl MeshTransport {
     async fn run_swarm_loop(&mut self) -> Result<()> {
         loop {
             tokio::select! {
-                swarm_event = self.swarm.next() => {
-                    match swarm_event {
-                        Some(SwarmEvent::NewListenAddr { address, .. }) => {
-                            info!("Listening on {}", address);
-                        }
-                        Some(SwarmEvent::Behaviour(event)) => {
-                            match event {
-                                MeshBehaviourEvent::Gossipsub(event) => {
-                                    match event {
-                                        GossipsubEvent::Message { propagation_source, message_id, message } => {
-                                            self.handle_gossipsub_message(propagation_source, message_id, message).await?;
-                        }
-                                        _ => {}
-                                    }
+                        swarm_event = self.swarm.next() => {
+                            match swarm_event {
+                                Some(SwarmEvent::NewListenAddr { address, .. }) => {
+                                    info!("Listening on {}", address);
                                 }
-                                MeshBehaviourEvent::Identify(event) => {
+                                Some(SwarmEvent::Behaviour(event)) => {
                                     match event {
-                                        IdentifyEvent::Received { peer_id, info, .. } => {
-                            self.handle_identify_info(peer_id, info).await?;
-                        }
-                                        _ => {}
-                                    }
+                                        MeshBehaviourEvent::Gossipsub(event) => {
+                                            match event {
+                                                GossipsubEvent::Message { propagation_source, message_id, message } => {
+                                                    self.handle_gossipsub_message(propagation_source, message_id, message).await?;
                                 }
-                                MeshBehaviourEvent::Kad(event) => {
-                                    match event {
-                                        KadEvent::OutboundQueryProgressed { result, .. } => {
-                                            if let QueryResult::Bootstrap(result) = result {
-                            info!("Kademlia bootstrap completed: {:?}", result);
-                        }
+                                                _ => {}
+                                            }
                                         }
-                                        _ => {}
+                                        MeshBehaviourEvent::Identify(event) => {
+                                            match event {
+                                                IdentifyEvent::Received { peer_id, info, .. } => {
+                                    self.handle_identify_info(peer_id, info).await?;
+                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        MeshBehaviourEvent::Kad(event) => {
+                                            match event {
+                                                KadEvent::OutboundQueryProgressed { ref result, .. } => {
+                                                    if let QueryResult::Bootstrap(result) = result {
+                                                        info!("Kademlia bootstrap completed: {:?}", result);
+                                                    }
+                                                    // Pass to username discovery
+                                                    if let Err(e) = self.username_discovery.handle_kad_event(&event).await {
+                                                        debug!("Username discovery failed to handle Kademlia event: {:?}", e);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        MeshBehaviourEvent::Mdns(event) => {
+                                            match event {
+                                                MdnsEvent::Discovered(list) => {
+                                    for (peer_id, multiaddr) in list {
+                                        info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
+                                        self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
+                                        self.send_handshake().await?;
                                     }
                                 }
-                                MeshBehaviourEvent::Mdns(event) => {
-                                    match event {
-                                        MdnsEvent::Discovered(list) => {
-                            for (peer_id, multiaddr) in list {
-                                info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
-                                self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
-                                self.send_handshake().await?;
-                            }
-                        }
                                         MdnsEvent::Expired(list) => {
-                            for (peer_id, multiaddr) in list {
-                                tracing::info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
-                                self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
-                            }
-                        }
-                    }
-                }
+                                            for (peer_id, multiaddr) in list {
+                                                tracing::info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
+                                                self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
+                                            }
+                                        }
+                                    }
+                                }
+                                MeshBehaviourEvent::Autonat(event) => {
+                                     match event {
+                                        libp2p::autonat::Event::StatusChanged { old, new } => {
+                                            info!("AutoNAT status changed: {:?} -> {:?}", old, new);
+                                        }
+                                        libp2p::autonat::Event::InboundProbe(e) => {
+                                            debug!("AutoNAT Inbound Probe: {:?}", e);
+                                        }
+                                        libp2p::autonat::Event::OutboundProbe(e) => {
+                                            debug!("AutoNAT Outbound Probe: {:?}", e);
+                                        }
+                                     }
+                                }
                             }
                         }
                         _ => {}
@@ -408,18 +468,77 @@ impl MeshTransport {
         tracing::info!("MeshTransport switching to DHT Shard: {}", shard);
         Ok(())
     }
+
+    pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
+        for addr in nodes {
+            if let Some(peer_id) = addr.iter().find_map(|p| {
+                if let libp2p::multiaddr::Protocol::P2p(peer_id) = p {
+                    Some(peer_id)
+                } else {
+                    None
+                }
+            }) {
+                info!("Dynamically adding bootstrap node: {} ({})", peer_id, addr);
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&peer_id, addr.clone());
+                self.bootstrap_nodes.push(addr);
+            } else {
+                warn!("Bootstrap address missing PeerId: {}", addr);
+            }
+        }
+        // Force a bootstrap or bucket refresh
+        if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
+            warn!("Failed to trigger DHT bootstrap: {}", e);
+        }
+    }
+
+    /// Publish username to DHT
+    pub async fn publish_username(&mut self) -> Result<()> {
+        // Placeholder: In a real implementation we need the private key to sign the record.
+        warn!("Publishing username is currently a placeholder until Identity key access is refactored");
+        Ok(())
+    }
+
+    /// Lookup username in DHT
+    pub async fn lookup_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<crate::core::username_discovery::UsernameRecord>> {
+        use crate::core::username_discovery::UsernameLookupResult;
+
+        match self
+            .username_discovery
+            .find_peer_by_username(username)
+            .await?
+        {
+            UsernameLookupResult::Cached(record) => Ok(Some(record)),
+            UsernameLookupResult::DhtQuery(key) => {
+                self.swarm.behaviour_mut().kad.get_record(key);
+                Ok(None) // Async lookup started
+            }
+        }
+    }
 }
 
 pub struct MeshManager {
     transport: MeshTransport,
     _local_identity: Arc<Identity>,
     _security_manager: Arc<SecurityManager>,
+    _core_messages: Arc<RwLock<Vec<Message>>>,
+    _message_store: Arc<crate::core::store::SecureMessageStore>,
 }
 
 impl MeshManager {
     pub async fn new(
         identity: Arc<Identity>,
         encryption_manager: Arc<EncryptionManager>,
+        core_messages: Arc<RwLock<Vec<Message>>>,
+
+        message_store: Arc<crate::core::store::SecureMessageStore>,
+        bootstrap_nodes: Vec<Multiaddr>,
+        username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
@@ -428,6 +547,10 @@ impl MeshManager {
             identity.clone(),
             security_manager.clone(),
             encryption_manager,
+            core_messages.clone(),
+            message_store.clone(),
+            bootstrap_nodes,
+            username_discovery,
         )
         .await?;
 
@@ -435,6 +558,8 @@ impl MeshManager {
             transport,
             _local_identity: identity,
             _security_manager: security_manager,
+            _core_messages: core_messages,
+            _message_store: message_store,
         })
     }
 
@@ -467,6 +592,38 @@ impl MeshManager {
 
     pub async fn get_topology(&self) -> MeshTopology {
         self.transport.get_topology().await
+    }
+
+    pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
+        self.transport.add_bootstrap_nodes(nodes);
+    }
+
+    /// Publish username to DHT
+    pub async fn publish_username(&mut self) -> Result<()> {
+        self.transport.publish_username().await
+    }
+
+    /// Lookup username in DHT
+    pub async fn lookup_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<crate::core::username_discovery::UsernameRecord>> {
+        self.transport.lookup_username(username).await
+    }
+
+    // This method is needed to process Kademlia events for UsernameDiscovery
+    pub(crate) async fn handle_kad_event(&mut self, event: &KademliaEvent) {
+        if let Err(e) = self
+            .transport
+            .username_discovery
+            .handle_kad_event(event)
+            .await
+        {
+            tracing::debug!(
+                "Username discovery failed to handle Kademlia event: {:?}",
+                e
+            );
+        }
     }
 }
 
