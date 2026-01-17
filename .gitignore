@@ -42,3 +42,12 @@ webui/dist/
 
 # TypeScript
 *.tsbuildinfo astro-site/
+
+# Secrets and tokens
+ghostwire_token.txt
+*.token
+*.key
+*.pem
+
+# Encrypted credential files
+*.enc

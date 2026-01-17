@@ -91,180 +91,48 @@ pub enum MessageType {
 
 impl ChatState {
     pub fn new() -> Self {
-        let mut chat_state = Self {
+        Self {
             messages: VecDeque::new(),
             input_buffer: String::new(),
             cursor_position: 0,
             current_channel: "#ghostwire".to_string(),
-            nickname: "ghostwire_user".to_string(),
-            channels: Vec::new(),
+            nickname: "gw-user".to_string(),
+            channels: vec![Channel {
+                name: "ghostwire".to_string(),
+                topic: "Mesh Status".to_string(),
+                user_count: 1,
+                is_joined: true,
+                messages: VecDeque::new(),
+                users: vec!["gw-user".to_string()],
+            }],
             users: Vec::new(),
             is_connected: true,
             server_info: ServerInfo {
-                name: "GhostWire IRC".to_string(),
+                name: "GhostWire".to_string(),
                 version: "1.0.0".to_string(),
-                uptime: 3600,
-                user_count: 5,
-                channel_count: 3,
-                max_users: 1000,
-                motd: vec![
-                    "Welcome to GhostWire IRC Network".to_string(),
-                    "Secure, encrypted, anonymous messaging".to_string(),
-                    "Type /help for available commands".to_string(),
-                ],
+                uptime: 0,
+                user_count: 1,
+                channel_count: 1,
+                max_users: 100,
+                motd: vec!["Welcome to GhostWire Secure TUI".to_string()],
             },
             message_history: VecDeque::new(),
+        }
+    }
+
+    /// Ingest a message from the GhostWire Core backend
+    pub fn ingest_core_message(&mut self, message: Message) {
+        // Map raw GhostWire messages to TUI chat messages
+        let msg_type = if message.content.starts_with("[SYSTEM]") {
+            MessageType::System
+        } else {
+            MessageType::PrivMsg
         };
 
-        // Initialize default channels
-        chat_state.channels = vec![
-            Channel {
-                name: "#ghostwire".to_string(),
-                topic: "Main GhostWire discussion channel".to_string(),
-                user_count: 3,
-                is_joined: true,
-                messages: VecDeque::new(),
-                users: vec![
-                    "ghostwire_user".to_string(),
-                    "alice".to_string(),
-                    "bob".to_string(),
-                ],
-            },
-            Channel {
-                name: "#general".to_string(),
-                topic: "General discussion".to_string(),
-                user_count: 2,
-                is_joined: false,
-                messages: VecDeque::new(),
-                users: vec!["alice".to_string(), "bob".to_string()],
-            },
-            Channel {
-                name: "#tech".to_string(),
-                topic: "Technical discussions".to_string(),
-                user_count: 1,
-                is_joined: false,
-                messages: VecDeque::new(),
-                users: vec!["alice".to_string()],
-            },
-        ];
+        // Determine channel - for now we default to #ghostwire
+        let channel = Some("#ghostwire".to_string());
 
-        // Initialize users
-        chat_state.users = vec![
-            User {
-                nickname: "ghostwire_user".to_string(),
-                username: "user".to_string(),
-                hostname: "ghostwire.local".to_string(),
-                realname: "GhostWire User".to_string(),
-                is_operator: false,
-                is_voice: false,
-                is_away: false,
-                away_message: None,
-                last_seen: Utc::now(),
-                channels: vec!["#ghostwire".to_string()],
-            },
-            User {
-                nickname: "alice".to_string(),
-                username: "alice".to_string(),
-                hostname: "node1.local".to_string(),
-                realname: "Alice".to_string(),
-                is_operator: true,
-                is_voice: true,
-                is_away: false,
-                away_message: None,
-                last_seen: Utc::now(),
-                channels: vec![
-                    "#ghostwire".to_string(),
-                    "#general".to_string(),
-                    "#tech".to_string(),
-                ],
-            },
-            User {
-                nickname: "bob".to_string(),
-                username: "bob".to_string(),
-                hostname: "node2.local".to_string(),
-                realname: "Bob".to_string(),
-                is_operator: false,
-                is_voice: false,
-                is_away: true,
-                away_message: Some("Gone fishing".to_string()),
-                last_seen: Utc::now(),
-                channels: vec!["#ghostwire".to_string(), "#general".to_string()],
-            },
-        ];
-
-        // Add some sample messages to demonstrate the IRC interface
-        let sample_messages = vec![
-            (
-                "System",
-                "Welcome to GhostWire IRC Network!",
-                MessageType::System,
-                None,
-            ),
-            (
-                "System",
-                "Your nickname is ghostwire_user",
-                MessageType::System,
-                None,
-            ),
-            (
-                "alice",
-                "Hello everyone! 👋",
-                MessageType::PrivMsg,
-                Some("#ghostwire".to_string()),
-            ),
-            (
-                "ghostwire_user",
-                "Hi alice! How's the network?",
-                MessageType::PrivMsg,
-                Some("#ghostwire".to_string()),
-            ),
-            (
-                "bob",
-                "Network is running smoothly",
-                MessageType::PrivMsg,
-                Some("#ghostwire".to_string()),
-            ),
-            (
-                "alice",
-                "Just joined #tech",
-                MessageType::Join,
-                Some("#tech".to_string()),
-            ),
-            (
-                "System",
-                "Topic for #ghostwire: Main GhostWire discussion channel",
-                MessageType::Topic,
-                Some("#ghostwire".to_string()),
-            ),
-        ];
-
-        for (sender, content, msg_type, channel) in sample_messages {
-            let message = Message {
-                id: uuid::Uuid::new_v4(),
-                content: content.to_string(),
-                sender: sender.to_string(),
-                recipient: channel.clone().unwrap_or_else(|| "all".to_string()),
-                timestamp: Utc::now().timestamp() as u64,
-                encrypted: true,
-                message_type: "irc".to_string(),
-                encryption_status: "encrypted".to_string(),
-            };
-
-            let chat_message = ChatMessage {
-                message,
-                display_name: sender.to_string(),
-                is_own: sender == "ghostwire_user",
-                encryption_status: EncryptionStatus::Encrypted,
-                message_type: msg_type,
-                timestamp: Utc::now(),
-                channel,
-            };
-
-            chat_state.messages.push_back(chat_message.clone());
-            chat_state.message_history.push_back(chat_message);
-        }
-
-        chat_state
+        self.add_message(message, msg_type, channel);
     }
 
     pub fn add_message(
@@ -529,9 +397,108 @@ fn handle_irc_command(app: &mut crate::tui::TuiApp, command: &str) {
             add_system_message(app, "Disconnecting from server...");
             app.chat_state.is_connected = false;
         }
+        "/window" | "/w" => {
+            handle_window_command(app, &parts);
+        }
+        "/set" => {
+            handle_set_command(app, &parts);
+        }
+        "/save" => {
+            add_system_message(app, "💾 Configuration and layout saved to disk (Stub)");
+        }
         _ => {
             add_system_message(app, &format!("Unknown command: {}", parts[0]));
         }
+    }
+}
+fn handle_window_command(app: &mut crate::tui::TuiApp, parts: &[&str]) {
+    use crate::tui::{SplitDirection, TuiLayoutTree};
+
+    if parts.len() < 2 {
+        add_system_message(app, "Usage: /window <split|show|hide|list>");
+        return;
+    }
+
+    match parts[1] {
+        "split" => {
+            let direction = match parts.get(2) {
+                Some(&"v") => SplitDirection::Vertical,
+                _ => SplitDirection::Horizontal,
+            };
+
+            // Recursive split: current tree becomes a child of a new split, alongside a new window
+            let current_tree = app.layout_tree.clone();
+            // Default to showing window 1 (Status) in the new pane for now
+            let new_pane = TuiLayoutTree::Window(0);
+
+            app.layout_tree = TuiLayoutTree::Split {
+                direction,
+                ratios: vec![50, 50],
+                children: vec![current_tree, new_pane],
+            };
+
+            add_system_message(app, &format!("Window split {:?}", direction));
+        }
+        "show" => {
+            if let Some(i_str) = parts.get(2) {
+                if let Ok(i) = i_str.parse::<usize>() {
+                    if i > 0 && i <= app.windows.len() {
+                        app.active_window_index = i - 1;
+                        // For non-split mode, we just update active_window_index.
+                        // In split mode, this is more complex because we need to know WHICH split to update.
+                        // For now, if it's a single window tree, we update it.
+                        if let TuiLayoutTree::Window(_) = app.layout_tree {
+                            app.layout_tree = TuiLayoutTree::Window(i - 1);
+                        }
+                        add_system_message(app, &format!("Focused window {}", i));
+                    }
+                }
+            }
+        }
+        "hide" => {
+            // Reset to single window view of active window
+            app.layout_tree = TuiLayoutTree::Window(app.active_window_index);
+            add_system_message(app, "Layout reset to single window.");
+        }
+        "list" => {
+            add_system_message(app, "Active Windows:");
+            let names: Vec<String> = app
+                .windows
+                .iter()
+                .map(|window| match window {
+                    crate::tui::TuiWindow::Status => "Status".to_string(),
+                    crate::tui::TuiWindow::Channel(c) => format!("#{}", c),
+                    crate::tui::TuiWindow::Query(q) => format!("@{}", q),
+                    crate::tui::TuiWindow::Network => "Network".to_string(),
+                    crate::tui::TuiWindow::Logs => "Logs".to_string(),
+                    crate::tui::TuiWindow::Config => "Config".to_string(),
+                })
+                .collect();
+
+            for (i, name) in names.iter().enumerate() {
+                add_system_message(app, &format!("  {}: {}", i + 1, name));
+            }
+        }
+        _ => {
+            add_system_message(app, &format!("Unknown window command: {}", parts[1]));
+        }
+    }
+}
+
+fn handle_set_command(app: &mut crate::tui::TuiApp, parts: &[&str]) {
+    if parts.len() < 2 {
+        add_system_message(app, "Usage: /set <key> [value]");
+        return;
+    }
+
+    let key = parts[1];
+    if parts.len() == 2 {
+        // Query setting
+        add_system_message(app, &format!("Setting {} = (Current Value Stub)", key));
+    } else {
+        // Change setting
+        let value = parts[2..].join(" ");
+        add_system_message(app, &format!("Setting {} changed to {} (Stub)", key, value));
     }
 }
 

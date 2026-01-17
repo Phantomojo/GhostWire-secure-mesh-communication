@@ -103,3 +103,35 @@ impl SignalManager {
         Ok(encrypted.ciphertext.clone()) // In reality, decrypted
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_signal_session_establishment() {
+        let manager = SignalManager::new(vec![1, 2, 3]);
+        let peer = "peer1";
+        assert!(manager
+            .establish_session(peer.to_string(), &[4, 5, 6])
+            .is_ok());
+
+        // Verify session exists
+        let sessions = manager.sessions.lock().unwrap();
+        assert!(sessions.contains_key(peer));
+    }
+
+    #[test]
+    fn test_signal_ratchet_simulation() {
+        let manager = SignalManager::new(vec![1, 2, 3]);
+        let peer = "peer1";
+        manager
+            .establish_session(peer.to_string(), &[4, 5, 6])
+            .unwrap();
+
+        let msg = manager.encrypt_with_signal(peer, b"hello").unwrap();
+        assert_eq!(msg.version, 0x03);
+
+        let sessions = manager.sessions.lock().unwrap();
+        assert_eq!(sessions.get(peer).unwrap().message_index_send, 1);
+    }
+}

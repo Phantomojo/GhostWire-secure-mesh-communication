@@ -663,3 +663,93 @@ impl Default for PersistentBlacklistManager {
         Self::new(10000) // Max 10k blacklisted peers
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[tokio::test]
+    async fn test_security_manager_ip_filtering() {
+        let mut config = SecurityConfig::default();
+        config.blocked_ips.push("1.2.3.4".to_string());
+        config.allowed_ips.push("127.0.0.1".to_string());
+
+        let manager = SecurityManager::new(config);
+
+        assert!(
+            manager
+                .is_ip_allowed(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+                .await
+        );
+        assert!(
+            !manager
+                .is_ip_allowed(&IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)))
+                .await
+        );
+        // Not in allowlist when allowlist is non-empty
+        assert!(
+            !manager
+                .is_ip_allowed(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn test_security_score_calculation() {
+        let manager = SecurityManager::new(SecurityConfig::default());
+        let score = manager.calculate_security_score().await;
+        // Default score should be high (base 50 + feature bonuses + no violations)
+        assert!(score >= 60);
+
+        manager.set_lockdown(true).await;
+        let score_lockdown = manager.calculate_security_score().await;
+        assert!(score_lockdown < score);
+    }
+
+    #[test]
+    fn test_pow_verification() {
+        let pow = ProofOfWorkSybilDefense::new(4, 100); // 4 bits is very easy
+        let challenge = vec![1, 2, 3, 4];
+
+        // Brute force a solution
+        let mut solution = 0;
+        let mut found = false;
+        for s in 0..1000 {
+            if pow.verify_proof(&challenge, s) {
+                solution = s;
+                found = true;
+                break;
+            }
+        }
+
+        assert!(
+            found,
+            "Should find a solution for 4-bit PoW within 1000 tries"
+        );
+        assert!(pow.verify_proof(&challenge, solution));
+    }
+
+    #[tokio::test]
+    async fn test_sliding_window_quota() {
+        let enforcer = SlidingWindowQuotaEnforcer::new(2, 1000);
+        let peer = "peer1";
+
+        assert!(enforcer.record_message(peer, 100).await);
+        assert!(enforcer.record_message(peer, 100).await);
+        // Third message should fail (limit 2)
+        assert!(!enforcer.record_message(peer, 100).await);
+    }
+
+    #[tokio::test]
+    async fn test_blacklist_expiry() {
+        let mut manager = PersistentBlacklistManager::new(10);
+        let peer = "evil_peer";
+
+        manager.add_entry(peer, "test".to_string(), Some(1)).await; // 1 second expiry
+        assert!(manager.is_blacklisted(peer));
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        manager.cleanup_expired().await;
+        assert!(!manager.is_blacklisted(peer));
+    }
+}

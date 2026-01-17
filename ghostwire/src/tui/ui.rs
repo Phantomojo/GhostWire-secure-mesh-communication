@@ -1,6 +1,6 @@
 //! UI rendering for GhostWire TUI
 
-use crate::tui::{AppState, InputMode, Tab, TuiApp};
+use crate::tui::{AppState, InputMode, SplitDirection, TuiApp, TuiLayoutTree, TuiWindow};
 use ratatui::prelude::Alignment;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -15,9 +15,8 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     let size = frame.size();
 
     // Check if terminal is too small
-    if size.height < 10 || size.width < 40 {
-        // Render minimal interface for small terminals
-        let error_text = "Terminal too small. Please resize to at least 40x10.";
+    if size.height < 15 || size.width < 60 {
+        let error_text = "Terminal too small. Please resize to at least 60x15.";
         let error_widget = Paragraph::new(error_text)
             .style(Style::default().fg(Color::Red).bold())
             .alignment(Alignment::Center);
@@ -25,59 +24,38 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
         return;
     }
 
+    // Unified layout shell (Irssi-style ultra-compact)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Window Bar: {1:STATUS} {2:#ghostwire}
+            Constraint::Length(1), // Title Bar: --- STATUS ---
+            Constraint::Min(0),    // Main Content Area
+            Constraint::Length(1), // Status Bar (Compact)
+            Constraint::Length(1), // Input Line (Prioritized)
+        ])
+        .split(size);
+
+    render_window_bar(frame, chunks[0], app);
+    render_title_bar(frame, chunks[1], app);
+
     match app.app_state {
-        AppState::MainMenu => render_main_menu(frame, app),
-        AppState::Dashboard => render_dashboard(frame, app),
+        AppState::MainMenu => render_menu_items(frame, chunks[2], app),
+        AppState::Dashboard => render_dashboard_content(frame, chunks[2], app),
         AppState::Chat | AppState::Network | AppState::Config | AppState::Logs => {
-            render_tab_interface(frame, app)
+            render_main_content(frame, chunks[2], app)
         }
-        AppState::About => render_about(frame, frame.size(), app),
-        AppState::Help => render_help(frame, frame.size(), app),
-        AppState::Security => render_security(frame, app),
-        AppState::Advanced => render_advanced(frame, app),
-        AppState::Diagnostics => render_diagnostics(frame, app),
-        AppState::Settings => render_settings(frame, app),
+        AppState::About => render_about_content(frame, chunks[2], app),
+        AppState::Help => render_help_content(frame, chunks[2], app),
+        AppState::Security => render_security_content(frame, chunks[2], app),
+        AppState::Advanced => render_advanced_content(frame, chunks[2], app),
+        AppState::Diagnostics => render_diagnostics_content(frame, chunks[2], app),
+        AppState::Settings => render_settings_content(frame, chunks[2], app),
     }
 
-    // Always render status bar and input mode
-    render_status_bar(frame, app);
-    render_input_mode(frame, app);
+    render_status_bar_compact(frame, chunks[3], app);
+    render_input_bar_compact(frame, chunks[4], app);
     render_notifications(frame, app);
-}
-
-/// Render input mode indicator
-fn render_input_mode(frame: &mut Frame, app: &TuiApp) {
-    let height = frame.size().height;
-    let width = frame.size().width;
-
-    // Ensure we don't overflow
-    if height < 1 {
-        return; // Terminal too small
-    }
-
-    let area = Rect::new(0, height - 1, width, 1);
-
-    let mode_text = match app.input_mode {
-        InputMode::Normal => "NORMAL",
-        InputMode::Insert => "INSERT",
-        InputMode::Command => "COMMAND",
-        InputMode::Search => "SEARCH",
-        InputMode::Menu => "MENU",
-    };
-
-    let mode_color = match app.input_mode {
-        InputMode::Normal => Color::Rgb(0, 255, 0),    // Green
-        InputMode::Insert => Color::Rgb(255, 255, 0),  // Yellow
-        InputMode::Command => Color::Rgb(255, 165, 0), // Orange
-        InputMode::Search => Color::Rgb(0, 255, 255),  // Cyan
-        InputMode::Menu => Color::Rgb(255, 0, 255),    // Magenta
-    };
-
-    let mode_widget = Paragraph::new(format!("-- {} --", mode_text))
-        .style(Style::default().fg(mode_color).bold())
-        .alignment(Alignment::Center);
-
-    frame.render_widget(mode_widget, area);
 }
 
 /// Render command buffer
@@ -130,328 +108,331 @@ fn render_notifications(frame: &mut Frame, app: &mut TuiApp) {
     }
 }
 
-/// Render enhanced status bar
-fn render_status_bar(frame: &mut Frame, app: &TuiApp) {
-    let height = frame.size().height;
-    let width = frame.size().width;
-
-    // Ensure we don't overflow
-    if height < 3 {
-        return; // Terminal too small
-    }
-
-    let area = Rect::new(0, height - 3, width, 2);
-
-    let status_info = vec![
-        format!("⚡ {}%", app.system_stats.cpu_usage as i32),
-        format!("💾 {}%", app.system_stats.memory_usage as i32),
-        format!(
-            "🌐 {}",
+/// Render compact status bar (Irssi-style)
+fn render_status_bar_compact(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    let stats = vec![
+        Span::styled(
+            " GHOSTWIRE ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(0, 255, 255))
+                .bold(),
+        ),
+        Span::raw(" | "),
+        Span::styled(
+            format!("CPU:{}%", app.system_stats.cpu_usage.round()),
+            Style::default().fg(Color::Rgb(200, 200, 200)),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("MEM:{}%", app.system_stats.memory_usage.round()),
+            Style::default().fg(Color::Rgb(200, 200, 200)),
+        ),
+        Span::raw(" | "),
+        Span::styled(
             if app.network_state.is_connected {
-                "CONNECTED"
+                "NET:ON"
             } else {
-                "DISCONNECTED"
-            }
-        ),
-        format!("👥 {}", app.network_state.peer_count),
-        format!(
-            "🆔 GW-{}",
-            if app.identity_id.len() >= 8 {
-                &app.identity_id[..8]
+                "NET:OFF"
+            },
+            Style::default().fg(if app.network_state.is_connected {
+                Color::Green
             } else {
-                &app.identity_id
-            }
+                Color::Red
+            }),
         ),
-        format!("🔐 {:.0}%", app.system_stats.security_score),
-        format!("⏱️  {}s", app.system_stats.uptime_seconds),
+        Span::raw(" | "),
+        Span::styled(
+            format!("P:{} ", app.network_state.peer_count),
+            Style::default().fg(Color::Rgb(255, 255, 0)),
+        ),
+        Span::styled(
+            format!(
+                "ID:{} ",
+                if app.identity_id.len() >= 8 {
+                    &app.identity_id[..8]
+                } else {
+                    &app.identity_id
+                }
+            ),
+            Style::default().fg(Color::Rgb(150, 150, 150)),
+        ),
+        Span::raw("| "),
+        Span::styled(
+            format!("SEC:{:.0}% ", app.system_stats.security_score),
+            Style::default().fg(Color::Rgb(0, 255, 0)),
+        ),
     ];
 
-    let status_text = status_info.join(" | ");
+    let p = Paragraph::new(Line::from(stats)).style(Style::default().bg(Color::Rgb(20, 20, 20)));
 
-    let status_widget = Paragraph::new(status_text)
-        .block(
-            Block::default()
-                .title("SYSTEM STATUS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(Style::default().fg(Color::White))
-        .alignment(Alignment::Center);
+    frame.render_widget(p, area);
+}
 
-    frame.render_widget(status_widget, area);
+/// Render compact input bar (Irssi-style)
+fn render_input_bar_compact(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    let current_channel = match app.windows.get(app.active_window_index) {
+        Some(TuiWindow::Channel(c)) => format!("#{}", c),
+        Some(TuiWindow::Query(q)) => format!("@{}", q),
+        Some(TuiWindow::Status) => "system".to_string(),
+        Some(TuiWindow::Network) => "net".to_string(),
+        Some(TuiWindow::Logs) => "logs".to_string(),
+        Some(TuiWindow::Config) => "config".to_string(),
+        _ => "main".to_string(),
+    };
+
+    let prompt = Span::styled(
+        format!("[{}] {} > ", app.chat_state.nickname, current_channel),
+        Style::default().fg(Color::Rgb(255, 0, 255)).bold(),
+    );
+
+    let input_text = Span::raw(&app.chat_state.input_buffer);
+
+    let line = Line::from(vec![prompt, input_text]);
+    let widget = Paragraph::new(line);
+
+    frame.render_widget(widget, area);
 }
 
 /// Render the header with ASCII art and title
-fn render_header(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    let ascii_art = vec![
-        "██╗    ██╗ ██████╗ ███████╗██╗  ██╗███████╗██╗    ██╗██╗██████╗ ███████╗",
-        "██║    ██║██╔════╝ ██╔════╝██║  ██║██╔════╝██║    ██║██║██╔══██╗██╔════╝",
-        "██║ █╗ ██║██║  ███╗███████╗███████║█████╗  ██║ █╗ ██║██║██████╔╝█████╗  ",
-        "██║███╗██║██║   ██║╚════██║██╔══██║██╔══╝  ██║███╗██║██║██╔══██╗██╔══╝  ",
-        "╚███╔███╔╝╚██████╔╝███████║██║  ██║██║     ╚███╔███╔╝██║██║  ██║███████╗",
-        " ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝      ╚══╝╚══╝ ╚═╝╚═╝  ╚═╝╚══════╝",
-    ];
-
-    // Render ASCII art with cyan color
-    for (i, line) in ascii_art.iter().enumerate() {
-        if i < area.height as usize {
-            let y = area.y + i as u16;
-            let text = Span::styled(
-                *line,
-                Style::default()
-                    .fg(Color::Rgb(0, 255, 255)) // Bright cyan
-                    .add_modifier(Modifier::BOLD),
-            );
-            frame.render_widget(
-                Paragraph::new(Line::from(text)),
-                Rect::new(area.x, y, area.width, 1),
-            );
-        }
-    }
-
-    // Render subtitle
-    let subtitle = "🌐 SECURE MESH NETWORKING TERMINAL";
-    let subtitle_style = Style::default()
-        .fg(Color::Rgb(255, 255, 0)) // Bright yellow
-        .add_modifier(Modifier::BOLD);
-
-    let subtitle_y = area.y + ascii_art.len() as u16;
-    if subtitle_y < area.y + area.height {
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(subtitle, subtitle_style))),
-            Rect::new(area.x, subtitle_y, area.width, 1),
-        );
-    }
-
-    // Render tab navigation
-    let tabs = vec![
-        ("[1] CHAT", app.current_tab == Tab::Chat),
-        ("[2] NETWORK", app.current_tab == Tab::Network),
-        ("[3] CONFIG", app.current_tab == Tab::Config),
-        ("[4] LOGS", app.current_tab == Tab::Logs),
-    ];
-
-    let tab_text: Vec<Span> = tabs
+/// Render the window navigation bar (Top line)
+fn render_window_bar(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    let window_spans: Vec<Span> = app
+        .windows
         .iter()
-        .map(|(text, active)| {
-            let style = if *active {
-                Style::default()
-                    .fg(Color::Rgb(255, 255, 0)) // Bright yellow
-                    .add_modifier(Modifier::BOLD)
-                    .bg(Color::Rgb(0, 100, 0)) // Dark green background
-            } else {
-                Style::default().fg(Color::Rgb(128, 128, 128)) // Gray
+        .enumerate()
+        .map(|(i, window)| {
+            let active = i == app.active_window_index;
+            let name = match window {
+                TuiWindow::Status => "STATUS",
+                TuiWindow::Channel(c) => c,
+                TuiWindow::Query(q) => q,
+                TuiWindow::Network => "NETWORK",
+                TuiWindow::Logs => "LOGS",
+                TuiWindow::Config => "CONFIG",
             };
-            Span::styled(*text, style)
+
+            let text = format!(" {}:{} ", i + 1, name);
+            if active {
+                Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Rgb(0, 255, 255)) // Cyan highlight
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(text, Style::default().fg(Color::Rgb(120, 120, 120)))
+            }
         })
         .collect();
 
-    let tab_y = subtitle_y + 1;
-    if tab_y < area.y + area.height {
-        frame.render_widget(
-            Paragraph::new(Line::from(tab_text)),
-            Rect::new(area.x, tab_y, area.width, 1),
-        );
+    // Add separator
+    let mut final_spans = Vec::new();
+    for span in window_spans {
+        final_spans.push(span);
+        final_spans.push(Span::raw(" | "));
     }
+
+    frame.render_widget(Paragraph::new(Line::from(final_spans)), area);
 }
 
-/// Render the main content area
+/// Render a condensed, elegant header
+fn render_title_bar(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    let title = match app.windows.get(app.active_window_index) {
+        Some(TuiWindow::Status) => "DASHBOARD",
+        Some(TuiWindow::Channel(c)) => c,
+        Some(TuiWindow::Query(q)) => q,
+        Some(TuiWindow::Network) => "NETWORK TOPOLOGY",
+        Some(TuiWindow::Logs) => "SYSTEM LOGS",
+        Some(TuiWindow::Config) => "CONFIGURATION",
+        _ => "GHOSTWIRE",
+    };
+
+    let title_line = format!("--- {} ---", title.to_uppercase());
+    let widget = Paragraph::new(title_line)
+        .style(
+            Style::default()
+                .fg(Color::Rgb(0, 150, 255))
+                .add_modifier(Modifier::BOLD),
+        )
+        .alignment(Alignment::Center);
+
+    frame.render_widget(widget, area);
+}
+
+/// Render the main content area (recursive layout tree)
 fn render_main_content(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    match app.current_tab {
-        Tab::Chat => render_chat_tab(frame, area, app),
-        Tab::Network => render_network_tab(frame, area, app),
-        Tab::Config => render_config_tab(frame, area, app),
-        Tab::Logs => render_logs_tab(frame, area, app),
+    render_layout_tree(frame, area, app, &app.layout_tree);
+}
+
+/// Recursively render the layout tree
+fn render_layout_tree(frame: &mut Frame, area: Rect, app: &TuiApp, node: &TuiLayoutTree) {
+    match node {
+        TuiLayoutTree::Window(index) => {
+            if let Some(window) = app.windows.get(*index) {
+                match window {
+                    TuiWindow::Status => render_dashboard_content(frame, area, app),
+                    TuiWindow::Channel(_) | TuiWindow::Query(_) => {
+                        render_chat_tab_for_window(frame, area, app, *index)
+                    }
+                    TuiWindow::Network => render_network_tab(frame, area, app),
+                    TuiWindow::Config => render_config_tab(frame, area, app),
+                    TuiWindow::Logs => render_logs_tab(frame, area, app),
+                }
+            }
+        }
+        TuiLayoutTree::Split {
+            direction,
+            ratios,
+            children,
+        } => {
+            let ratatui_direction = match direction {
+                SplitDirection::Horizontal => Direction::Horizontal,
+                SplitDirection::Vertical => Direction::Vertical,
+            };
+
+            let constraints: Vec<Constraint> =
+                ratios.iter().map(|&r| Constraint::Percentage(r)).collect();
+
+            let chunks = Layout::default()
+                .direction(ratatui_direction)
+                .constraints(constraints)
+                .split(area);
+
+            for (i, child) in children.iter().enumerate() {
+                if let Some(chunk) = chunks.get(i) {
+                    render_layout_tree(frame, *chunk, app, child);
+                }
+            }
+        }
     }
 }
 
-/// Render IRC-style chat interface
-fn render_chat_tab(frame: &mut Frame, area: Rect, app: &TuiApp) {
+/// Render IRC-style chat interface for a specific window index
+fn render_chat_tab_for_window(frame: &mut Frame, area: Rect, app: &TuiApp, window_index: usize) {
+    let window = app.windows.get(window_index);
+    let target = match window {
+        Some(TuiWindow::Channel(c)) => c.as_str(),
+        Some(TuiWindow::Query(q)) => q.as_str(),
+        _ => return,
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20), // Channel list
+            Constraint::Length(25), // Side bar (Channel list)
             Constraint::Min(40),    // Main chat area
-            Constraint::Length(15), // User list
+            Constraint::Length(20), // User list (Irssi-style right side)
         ])
         .split(area);
 
-    // Left: Channel list
-    render_channel_list(frame, chunks[0], app);
+    // Left: Channel/Window list
+    render_window_list_sidebar(frame, chunks[0], app);
 
     // Center: Main chat area
-    render_chat_area(frame, chunks[1], app);
+    render_chat_area_with_target(frame, chunks[1], app, target);
 
-    // Right: User list
-    render_user_list(frame, chunks[2], app);
+    // Right: User list for this target
+    render_user_list_with_target(frame, chunks[2], app, target);
 }
 
-fn render_channel_list(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    let title = "CHANNELS";
-    let title_widget = Paragraph::new(title)
-        .block(
-            Block::default()
-                .title("📺 CHANNELS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(Style::default().fg(Color::Rgb(255, 255, 0)).bold())
-        .alignment(Alignment::Center);
+fn render_window_list_sidebar(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    let block = Block::default()
+        .title("🗔 WINDOWS")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(0, 255, 255)));
 
-    frame.render_widget(title_widget, Rect::new(area.x, area.y, area.width, 1));
-
-    let channel_area = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
-
-    let mut channel_items = Vec::new();
-    for channel in &app.chat_state.channels {
-        let prefix = if channel.is_joined { "●" } else { "○" };
-        let current = if channel.name == app.chat_state.current_channel {
-            ">"
-        } else {
-            " "
-        };
-        let style = if channel.is_joined {
-            Style::default().fg(Color::Rgb(0, 255, 0))
-        } else {
-            Style::default().fg(Color::Rgb(128, 128, 128))
+    let mut items = Vec::new();
+    for (i, window) in app.windows.iter().enumerate() {
+        let active = i == app.active_window_index;
+        let prefix = if active { ">" } else { " " };
+        let name = match window {
+            TuiWindow::Status => "Status".to_string(),
+            TuiWindow::Channel(c) => format!("#{}", c),
+            TuiWindow::Query(q) => format!("@{}", q),
+            TuiWindow::Network => "Network".to_string(),
+            TuiWindow::Logs => "Logs".to_string(),
+            TuiWindow::Config => "Config".to_string(),
         };
 
-        let text = format!(
-            "{} {} {} ({})",
-            current, prefix, channel.name, channel.user_count
-        );
-        channel_items.push(Line::from(Span::styled(text, style)));
+        let style = if active {
+            Style::default().fg(Color::Rgb(255, 255, 0)).bold()
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        items.push(Line::from(Span::styled(
+            format!("{} {}:{}", prefix, i + 1, name),
+            style,
+        )));
     }
 
-    let channels_widget = Paragraph::new(channel_items)
-        .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::White));
-
-    frame.render_widget(channels_widget, channel_area);
+    let widget = Paragraph::new(items).block(block);
+    frame.render_widget(widget, area);
 }
 
-fn render_chat_area(frame: &mut Frame, area: Rect, app: &TuiApp) {
+fn render_chat_area_with_target(frame: &mut Frame, area: Rect, app: &TuiApp, target: &str) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Channel header
-            Constraint::Min(10),   // Messages
-            Constraint::Length(1), // Separator
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Messages
         ])
         .split(area);
 
-    // Channel header with topic
-    let current_channel = &app.chat_state.current_channel;
-    let channel_info = app
-        .chat_state
-        .channels
-        .iter()
-        .find(|c| c.name == *current_channel);
-
-    let default_topic = "".to_string();
-    let topic = channel_info.map(|c| &c.topic).unwrap_or(&default_topic);
-    let user_count = channel_info.map(|c| c.user_count).unwrap_or(0);
-
-    let header_text = format!("💬 {} - {} ({})", current_channel, topic, user_count);
-    let header_widget = Paragraph::new(header_text)
+    // Window Header
+    let header_widget = Paragraph::new(format!("💬 target: {}", target))
         .block(
             Block::default()
-                .title("CHAT")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
         )
-        .style(Style::default().fg(Color::Rgb(255, 255, 0)).bold())
-        .alignment(Alignment::Left);
-
+        .style(Style::default().fg(Color::Rgb(255, 255, 0)).bold());
     frame.render_widget(header_widget, chunks[0]);
 
-    // Messages area
-    let messages = app.chat_state.get_current_channel_messages();
-    let mut message_lines = Vec::new();
+    // Messages
+    let messages = app
+        .chat_state
+        .messages
+        .iter()
+        .filter(|m| {
+            m.channel.as_deref() == Some(target)
+                || (target.starts_with('@') && m.display_name == target[1..])
+        })
+        .collect::<Vec<_>>();
 
-    for msg in messages.iter().take(50) {
-        // Show last 50 messages
+    let mut message_lines = Vec::new();
+    for msg in messages.iter().rev().take(area.height as usize) {
         let formatted = crate::tui::chat::format_message(msg);
         let style = if msg.is_own {
-            Style::default().fg(Color::Rgb(255, 255, 0)) // Yellow for own messages
-        } else if msg.message_type == crate::tui::chat::MessageType::System {
-            Style::default().fg(Color::Rgb(255, 165, 0)) // Orange for system messages
-        } else if msg.message_type == crate::tui::chat::MessageType::Action {
-            Style::default().fg(Color::Rgb(255, 192, 203)) // Pink for actions
+            Style::default().fg(Color::Rgb(255, 255, 0))
         } else {
-            Style::default().fg(Color::White) // White for regular messages
+            Style::default().fg(Color::White)
         };
-
         message_lines.push(Line::from(Span::styled(formatted, style)));
     }
+    message_lines.reverse();
 
-    let messages_widget = Paragraph::new(message_lines)
-        .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::White))
-        .scroll((app.chat_state.messages.len().saturating_sub(20) as u16, 0));
-
+    let messages_widget = Paragraph::new(message_lines);
     frame.render_widget(messages_widget, chunks[1]);
-
-    // Input area separator
-    let separator = Line::from(Span::styled(
-        "─".repeat(area.width as usize),
-        Style::default().fg(Color::Rgb(128, 128, 128)),
-    ));
-    let separator_widget = Paragraph::new(separator);
-    frame.render_widget(separator_widget, chunks[2]);
 }
 
-fn render_user_list(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    let title = "USERS";
-    let title_widget = Paragraph::new(title)
-        .block(
-            Block::default()
-                .title("👥 USERS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(Style::default().fg(Color::Rgb(255, 255, 0)).bold())
-        .alignment(Alignment::Center);
+fn render_user_list_with_target(frame: &mut Frame, area: Rect, app: &TuiApp, target: &str) {
+    let block = Block::default()
+        .title("👥 USERS")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(0, 255, 255)));
 
-    frame.render_widget(title_widget, Rect::new(area.x, area.y, area.width, 1));
-
-    let user_area = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
-
-    let users = app
-        .chat_state
-        .get_channel_users(&app.chat_state.current_channel);
+    // Placeholder users for now
+    let users = app.chat_state.get_channel_users(target);
     let mut user_items = Vec::new();
-
     for user in users {
-        let prefix = if user.is_operator {
-            "@"
-        } else if user.is_voice {
-            "+"
-        } else {
-            ""
-        };
-        let away_indicator = if user.is_away { " (away)" } else { "" };
-        let style = if user.nickname == app.chat_state.nickname {
-            Style::default().fg(Color::Rgb(255, 255, 0)).bold() // Yellow for self
-        } else if user.is_operator {
-            Style::default().fg(Color::Rgb(255, 0, 0)) // Red for operators
-        } else if user.is_voice {
-            Style::default().fg(Color::Rgb(0, 255, 0)) // Green for voiced users
-        } else if user.is_away {
-            Style::default().fg(Color::Rgb(128, 128, 128)) // Gray for away users
-        } else {
-            Style::default().fg(Color::White) // White for regular users
-        };
-
-        let text = format!("{}{}{}", prefix, user.nickname, away_indicator);
-        user_items.push(Line::from(Span::styled(text, style)));
+        user_items.push(Line::from(Span::raw(format!(" {}", user.nickname))));
     }
 
-    let users_widget = Paragraph::new(user_items)
-        .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::White));
-
-    frame.render_widget(users_widget, user_area);
+    let widget = Paragraph::new(user_items).block(block);
+    frame.render_widget(widget, area);
 }
 
 /// Render network tab with comprehensive network information
@@ -655,87 +636,6 @@ fn render_logs_tab(frame: &mut Frame, area: Rect, _app: &TuiApp) {
     frame.render_widget(logs_widget, area);
 }
 
-/// Render IRC-style input bar
-fn render_input_bar(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    let input_text = if app.chat_state.input_buffer.is_empty() {
-        format!(
-            "[{}] {}: ",
-            app.chat_state.nickname, app.chat_state.current_channel
-        )
-    } else {
-        format!(
-            "[{}] {}: {}",
-            app.chat_state.nickname, app.chat_state.current_channel, app.chat_state.input_buffer
-        )
-    };
-
-    let input_widget = Paragraph::new(input_text)
-        .block(
-            Block::default()
-                .title("💬 INPUT")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(Style::default().fg(Color::Rgb(255, 255, 255)).bold())
-        .alignment(Alignment::Left);
-
-    frame.render_widget(input_widget, area);
-}
-
-/// Render the main menu
-fn render_main_menu(frame: &mut Frame, app: &TuiApp) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8), // Header with ASCII art
-            Constraint::Length(3), // Status bar
-            Constraint::Min(0),    // Menu items
-            Constraint::Length(3), // Footer
-        ])
-        .split(frame.size());
-
-    render_header(frame, chunks[0], app);
-    render_status_bar(frame, app);
-    render_menu_items(frame, chunks[2], app);
-    render_footer(frame, chunks[3], app);
-}
-
-/// Render the dashboard
-fn render_dashboard(frame: &mut Frame, app: &TuiApp) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Header
-            Constraint::Length(3), // Status bar
-            Constraint::Min(0),    // Dashboard content
-            Constraint::Length(3), // Footer
-        ])
-        .split(frame.size());
-
-    render_header(frame, chunks[0], app);
-    render_status_bar(frame, app);
-    render_dashboard_content(frame, chunks[2], app);
-    render_footer(frame, chunks[3], app);
-}
-
-/// Render the tab interface (original chat/network/config/logs)
-fn render_tab_interface(frame: &mut Frame, app: &mut TuiApp) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Header with ASCII art
-            Constraint::Length(3), // Status bar
-            Constraint::Min(0),    // Main content
-            Constraint::Length(3), // Input bar
-        ])
-        .split(frame.size());
-
-    render_header(frame, chunks[0], app);
-    render_status_bar(frame, app);
-    render_main_content(frame, chunks[2], app);
-    render_input_bar(frame, chunks[3], app);
-}
-
 /// Render menu items
 fn render_menu_items(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let menu_items = vec![
@@ -782,33 +682,18 @@ fn render_menu_items(frame: &mut Frame, area: Rect, app: &TuiApp) {
 /// Render the main dashboard with comprehensive backend features
 fn render_dashboard_content(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = Layout::default()
-        .direction(Direction::Vertical)
+        .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Content
+            Constraint::Percentage(60), // Status Info
+            Constraint::Percentage(40), // Quick Actions & Alerts
         ])
         .split(area);
 
-    // Dashboard header
-    let header = Paragraph::new("🌐 GHOSTWIRE DASHBOARD")
-        .style(Style::default().fg(Color::Rgb(255, 255, 0)).bold())
-        .alignment(Alignment::Center);
-    frame.render_widget(header, chunks[0]);
-
-    // Dashboard content in scrollable area
-    let content_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50), // Left column
-            Constraint::Percentage(50), // Right column
-        ])
-        .split(chunks[1]);
-
     // Left column - Network & Security
-    render_dashboard_left_column(frame, content_chunks[0], app);
+    render_dashboard_left_column(frame, chunks[0], app);
 
     // Right column - Actions & Status
-    render_dashboard_right_column(frame, content_chunks[1], app);
+    render_dashboard_right_column(frame, chunks[1], app);
 }
 
 /// Render left column of dashboard
@@ -822,59 +707,80 @@ fn render_dashboard_left_column(frame: &mut Frame, area: Rect, app: &TuiApp) {
         ])
         .split(area);
 
-    // Network Status
+    // Network Status (High density text)
     let network_status = vec![
-        format!(
-            "📡 Status: {}",
+        Line::from(vec![
+            Span::styled("NETWORK: ", Style::default().fg(Color::Rgb(150, 150, 150))),
             if app.network_state.is_connected {
-                "🟢 CONNECTED"
+                Span::styled("CONNECTED", Style::default().fg(Color::Green).bold())
             } else {
-                "🔴 DISCONNECTED"
-            }
-        ),
-        format!("👥 Peers: {}", app.network_state.peer_count),
-        format!("📨 Messages: {}", app.network_state.message_count),
-        format!("⏱️  Uptime: {}s", app.network_state.uptime_seconds),
-        format!("🆔 Key ID: GW-{}", &app.identity_id[..8]),
-        format!(
-            "🔑 Transport: {}",
-            if app.network_state.is_connected {
-                "Active"
-            } else {
-                "None"
-            }
-        ),
+                Span::styled("DISCONNECTED", Style::default().fg(Color::Red).bold())
+            },
+        ]),
+        Line::from(vec![
+            Span::styled("PEERS:   ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled(
+                app.network_state.peer_count.to_string(),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("IDENT:   ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled(
+                format!("GW-{}", &app.identity_id[..8]),
+                Style::default().fg(Color::Rgb(255, 255, 0)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("UPTIME:  ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled(
+                format!("{}s", app.network_state.uptime_seconds),
+                Style::default().fg(Color::White),
+            ),
+        ]),
     ];
 
-    let network_block = Paragraph::new(network_status.join("\n"))
-        .block(
-            Block::default()
-                .title("🌐 NETWORK STATUS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(network_block, chunks[0]);
+    let network_p = Paragraph::new(network_status).block(
+        Block::default()
+            .title(" [ Status ] ")
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Rgb(80, 80, 80))),
+    );
+    frame.render_widget(network_p, chunks[0]);
 
-    // Security Status
-    let security_status = vec![
-        "🔒 Encryption: AES-256-GCM".to_string(),
-        "🛡️  Authentication: Ed25519".to_string(),
-        "⚡ Perfect Forward Secrecy: Enabled".to_string(),
-        format!("🚨 Alerts: {}", app.security_alerts.len()),
-        "🛡️  Threat Detection: Active".to_string(),
-        "🔐 Zero-Knowledge: Enabled".to_string(),
+    // Security Status (Clean text)
+    let security_content = vec![
+        Line::from(vec![
+            Span::styled("SECURITY: ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled("ACTIVE", Style::default().fg(Color::Green).bold()),
+        ]),
+        Line::from(vec![
+            Span::styled("ENCRYPT:  ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled(
+                "AES-256-GCM",
+                Style::default().fg(Color::Rgb(200, 200, 200)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("ALERTS:   ", Style::default().fg(Color::Rgb(150, 150, 150))),
+            Span::styled(
+                app.security_alerts.len().to_string(),
+                Style::default().fg(if app.security_alerts.is_empty() {
+                    Color::Green
+                } else {
+                    Color::Red
+                }),
+            ),
+        ]),
     ];
 
-    let security_block = Paragraph::new(security_status.join("\n"))
-        .block(
-            Block::default()
-                .title("🛡️ SECURITY STATUS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(255, 0, 0))),
-        )
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(security_block, chunks[1]);
+    let security_p = Paragraph::new(security_content).block(
+        Block::default()
+            .title(" [ Security ] ")
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Rgb(80, 80, 80))),
+    );
+    frame.render_widget(security_p, chunks[1]);
 
     // Scan Results
     let scan_content = if app.scan_results.is_empty() {
@@ -883,14 +789,15 @@ fn render_dashboard_left_column(frame: &mut Frame, area: Rect, app: &TuiApp) {
         app.scan_results.clone()
     };
 
+    // Scan Results
     let scan_block = Paragraph::new(scan_content.join("\n"))
         .block(
             Block::default()
-                .title("🔍 NETWORK SCAN RESULTS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 0))),
+                .title(" [ Scan Results ] ")
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::Rgb(80, 80, 80))),
         )
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::Rgb(150, 150, 150)));
     frame.render_widget(scan_block, chunks[2]);
 }
 
@@ -922,11 +829,11 @@ fn render_dashboard_right_column(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let actions_block = Paragraph::new(actions.join("\n"))
         .block(
             Block::default()
-                .title("⚡ QUICK ACTIONS")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(255, 255, 0))),
+                .title(" [ Quick Actions ] ")
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::Rgb(80, 80, 80))),
         )
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::Rgb(200, 200, 200)));
     frame.render_widget(actions_block, chunks[0]);
 
     // Security Alerts
@@ -967,26 +874,8 @@ fn render_dashboard_right_column(frame: &mut Frame, area: Rect, app: &TuiApp) {
     frame.render_widget(system_block, chunks[2]);
 }
 
-/// Render footer with navigation info
-fn render_footer(frame: &mut Frame, area: Rect, _app: &TuiApp) {
-    let footer_text = "↑↓ Navigate | Enter Select | Q Quit | ESC Back | H Help";
-    let footer_widget = Paragraph::new(footer_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(0, 255, 255))),
-        )
-        .style(
-            Style::default()
-                .fg(Color::Rgb(128, 128, 128))
-                .add_modifier(Modifier::BOLD),
-        );
-
-    frame.render_widget(footer_widget, area);
-}
-
 /// Render about screen
-fn render_about(frame: &mut Frame, area: Rect, _app: &TuiApp) {
+fn render_about_content(frame: &mut Frame, area: Rect, _app: &TuiApp) {
     let about_text = format!(
         "🌐 GHOSTWIRE - SECURE MESH NETWORKING\n\
          \n\
@@ -1034,7 +923,7 @@ fn render_about(frame: &mut Frame, area: Rect, _app: &TuiApp) {
 }
 
 /// Render help screen
-fn render_help(frame: &mut Frame, area: Rect, _app: &TuiApp) {
+fn render_help_content(frame: &mut Frame, area: Rect, _app: &TuiApp) {
     let help_text = format!(
         "🎮 GHOSTWIRE TUI - CONTROLS & NAVIGATION\n\
          \n\
@@ -1097,14 +986,19 @@ fn render_help(frame: &mut Frame, area: Rect, _app: &TuiApp) {
 }
 
 /// Render security interface
-fn render_security(frame: &mut Frame, app: &TuiApp) {
+fn render_security_content(frame: &mut Frame, area: Rect, app: &TuiApp) {
+    render_security_subcontent(frame, area, app);
+}
+
+/// Helper for security (Refactored)
+fn render_security_subcontent(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Min(0),    // Content
         ])
-        .split(frame.size());
+        .split(area);
 
     // Security header
     let header = Paragraph::new("🛡️ SECURITY CENTER")
@@ -1204,14 +1098,14 @@ fn render_security(frame: &mut Frame, app: &TuiApp) {
 }
 
 /// Render advanced features interface
-fn render_advanced(frame: &mut Frame, app: &TuiApp) {
+fn render_advanced_content(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Min(0),    // Content
         ])
-        .split(frame.size());
+        .split(area);
 
     // Advanced header
     let header = Paragraph::new("⚡ ADVANCED FEATURES")
@@ -1348,14 +1242,14 @@ fn render_advanced(frame: &mut Frame, app: &TuiApp) {
 }
 
 /// Render diagnostics interface
-fn render_diagnostics(frame: &mut Frame, app: &TuiApp) {
+fn render_diagnostics_content(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Min(0),    // Content
         ])
-        .split(frame.size());
+        .split(area);
 
     // Diagnostics header
     let header = Paragraph::new("🔧 SYSTEM DIAGNOSTICS")
@@ -1438,14 +1332,14 @@ fn render_diagnostics(frame: &mut Frame, app: &TuiApp) {
 }
 
 /// Render settings interface
-fn render_settings(frame: &mut Frame, _app: &TuiApp) {
+fn render_settings_content(frame: &mut Frame, area: Rect, _app: &TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Min(0),    // Content
         ])
-        .split(frame.size());
+        .split(area);
 
     // Settings header
     let header = Paragraph::new("⚙️ SYSTEM SETTINGS")

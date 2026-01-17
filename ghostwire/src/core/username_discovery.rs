@@ -240,6 +240,7 @@ pub enum UsernameLookupResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ring::signature::KeyPair;
 
     #[test]
     fn test_username_record_creation() {
@@ -248,11 +249,13 @@ mod tests {
 
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let public_key = keypair.public_key().as_ref().to_vec();
 
         let record = UsernameRecord::new(
             "alice".to_string(),
             "12D3KooWTest".to_string(),
-            vec![1, 2, 3, 4],
+            public_key,
             pkcs8.as_ref(),
         )
         .unwrap();
@@ -268,11 +271,13 @@ mod tests {
 
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let public_key = keypair.public_key().as_ref().to_vec();
 
         let record = UsernameRecord::new(
             "bob".to_string(),
             "12D3KooWTest2".to_string(),
-            vec![5, 6, 7, 8],
+            public_key,
             pkcs8.as_ref(),
         )
         .unwrap();
