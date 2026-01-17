@@ -2235,19 +2235,14 @@ pub async fn scan_network(State(_state): State<Arc<AppState>>) -> impl IntoRespo
 
 #[allow(dead_code)]
 pub async fn set_username(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<UsernameRequest>,
 ) -> impl IntoResponse {
-    // Store username in persistent storage (username.txt)
-    let result = fs::write("username.txt", &req.username);
-    if let Err(e) = result {
-        return Json(ApiResponse {
-            success: false,
-            data: None,
-            error: Some(format!("Failed to save username: {}", e)),
-        });
-    }
-    println!("Username set to: {}", req.username);
+    // Update the persistent identity with the new username
+    state.core.identity.update_metadata(Some(req.username.clone()), None, None);
+    
+    info!("Username updated in persistent identity: {}", req.username);
+    
     Json(ApiResponse {
         success: true,
         data: Some(format!("Username set to: {}", req.username)),
@@ -2256,12 +2251,10 @@ pub async fn set_username(
 }
 
 #[allow(dead_code)]
-pub async fn get_username(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // Get username from persistent storage (username.txt)
-    let username = match fs::read_to_string("username.txt") {
-        Ok(name) => name.trim().to_string(),
-        Err(_) => "GhostUser".to_string(),
-    };
+pub async fn get_username(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Get username from persistent identity
+    let username = state.core.identity.get_metadata().nickname;
+    
     Json(ApiResponse {
         success: true,
         data: Some(username),

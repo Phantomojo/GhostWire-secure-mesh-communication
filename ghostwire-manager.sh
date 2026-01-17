@@ -171,6 +171,73 @@ cmd_check_updates() {
     fi
 }
 
+# Show identity information
+cmd_show_identity() {
+    log_info "Retrieving GhostWire identity..."
+    
+    local identity_file="$HOME/.ghostwire/identity.json"
+    
+    if [ ! -f "$identity_file" ]; then
+        log_warning "No identity file found. GhostWire hasn't been run yet."
+        log_info "Start GhostWire to create an identity: $0 start"
+        exit 0
+    fi
+    
+    echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║        GhostWire Identity                 ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Extract identity information using jq if available
+    if command -v jq &> /dev/null; then
+        local username=$(jq -r '.metadata.nickname' "$identity_file" 2>/dev/null || echo "Unknown")
+        local did=$(jq -r '.did' "$identity_file" 2>/dev/null || echo "Unknown")
+        local id=$(jq -r '.id' "$identity_file" 2>/dev/null || echo "Unknown")
+        
+        echo -e "Username: ${GREEN}$username${NC}"
+        echo -e "DID: ${BLUE}$did${NC}"
+        echo -e "Node ID: ${BLUE}$id${NC}"
+    else
+        cat "$identity_file"
+    fi
+    
+    echo ""
+}
+
+# Set username
+cmd_set_username() {
+    local new_username=$1
+    
+    if [ -z "$new_username" ]; then
+        log_error "Please specify a username"
+        log_info "Usage: $0 set-username <your-username>"
+        exit 1
+    fi
+    
+    local identity_file="$HOME/.ghostwire/identity.json"
+    
+    if [ ! -f "$identity_file" ]; then
+        log_warning "No identity file found. Creating new identity with username: $new_username"
+        log_info "Start GhostWire to create the identity: $0 start"
+        exit 0
+    fi
+    
+    log_info "Updating username to: $new_username"
+    
+    # Update using jq if available
+    if command -v jq &> /dev/null; then
+        local temp_file="${identity_file}.tmp"
+        jq ".metadata.nickname = \"$new_username\" | .metadata.last_updated = $(date +%s)" "$identity_file" > "$temp_file"
+        mv "$temp_file" "$identity_file"
+        log_success "Username updated to: $new_username"
+        log_info "Restart GhostWire for changes to take effect: $0 restart"
+    else
+        log_error "jq is required for username updates. Please install jq."
+        log_info "Alternative: Use the WebUI at http://localhost:3001"
+        exit 1
+    fi
+}
+
 # Enable automatic updates
 cmd_enable_auto_update() {
     log_info "Configuring automatic updates..."
@@ -322,6 +389,8 @@ ${PURPLE}Commands:${NC}
   ${GREEN}auto-update off${NC}    Disable automatic updates
   ${GREEN}backup${NC}             Create backup of config and data
   ${GREEN}restore <file>${NC}    Restore from backup
+  ${GREEN}show-identity${NC}      Show your GhostWire username and DID
+  ${GREEN}set-username <name>${NC} Set your username
   ${GREEN}uninstall${NC}          Uninstall GhostWire
   ${GREEN}help${NC}               Show this help
 
@@ -385,6 +454,13 @@ main() {
         restore)
             shift
             cmd_restore "$@"
+            ;;
+        show-identity)
+            cmd_show_identity
+            ;;
+        set-username)
+            shift
+            cmd_set_username "$@"
             ;;
         uninstall)
             cmd_uninstall
