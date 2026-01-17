@@ -47,13 +47,31 @@ pub enum AppState {
     Settings,
 }
 
-/// Tab navigation
+/// TUI Window types for Irssi-style switching
+#[derive(Debug, Clone, PartialEq)]
+pub enum TuiWindow {
+    Status,          // System status/dashboard
+    Channel(String), // Chat channel
+    Query(String),   // Private message
+    Network,         // Network graph/peers
+    Logs,            // System logs
+    Config,          // Settings
+}
+/// Layout tree for recursive window splits
+#[derive(Debug, Clone, PartialEq)]
+pub enum TuiLayoutTree {
+    Window(usize), // Index into windows Vec
+    Split {
+        direction: SplitDirection,
+        ratios: Vec<u16>, // Percentage ratios
+        children: Vec<TuiLayoutTree>,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Tab {
-    Chat,
-    Network,
-    Config,
-    Logs,
+pub enum SplitDirection {
+    Vertical,
+    Horizontal,
 }
 
 /// Message types for async communication
@@ -78,6 +96,7 @@ pub enum TuiMessage {
     NetworkDiagnostics,
     SecurityAudit,
     PerformanceTest,
+    SyncMessages(Vec<crate::core::message::Message>),
     Quit,
 }
 
@@ -88,7 +107,6 @@ pub struct TuiApp {
     pub network_state: NetworkState,
     pub config_state: ConfigState,
     pub logs_state: LogsState,
-    pub current_tab: Tab,
     pub app_state: AppState,
     pub input_mode: InputMode,
     pub menu_selection: usize,
@@ -103,6 +121,11 @@ pub struct TuiApp {
     pub notification: Option<(String, std::time::Instant)>,
     pub system_stats: SystemStats,
     pub advanced_features: AdvancedFeatures,
+
+    // Irssi-style windowing
+    pub windows: Vec<TuiWindow>,
+    pub active_window_index: usize,
+    pub layout_tree: TuiLayoutTree,
 }
 
 /// System statistics and monitoring
@@ -187,8 +210,7 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
         network_state: NetworkState::new(),
         config_state: ConfigState::new(),
         logs_state: LogsState::new(),
-        current_tab: Tab::Chat,
-        app_state: AppState::MainMenu,
+        app_state: AppState::Chat,
         input_mode: InputMode::Normal,
         menu_selection: 0,
         should_quit: false,
@@ -202,6 +224,15 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
         notification: None,
         system_stats: SystemStats::default(),
         advanced_features: AdvancedFeatures::default(),
+        windows: vec![
+            TuiWindow::Status,
+            TuiWindow::Channel("#ghostwire".to_string()),
+            TuiWindow::Network,
+            TuiWindow::Logs,
+            TuiWindow::Config,
+        ],
+        active_window_index: 0,
+        layout_tree: TuiLayoutTree::Window(0),
     };
 
     // Initialize default transport for basic functionality
@@ -212,6 +243,54 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
         }
         app.identity_id = core_guard.get_identity_id(); // Set identity_id after initialization
     }
+
+    // Spawn background task to subscribe to Core events (REAL-TIME, NO POLLING)
+    let core_for_events = app.core.clone();
+    let sender_events = app.message_sender.clone();
+    tokio::spawn(async move {
+        let mut event_rx = {
+            let core_guard = core_for_events.lock().await;
+            core_guard.event_bus.subscribe()
+        };
+
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    match event {
+                        crate::core::CoreEvent::NewMessage(msg) => {
+                            if let Err(e) = sender_events.send(TuiMessage::SyncMessages(vec![msg]))
+                            {
+                                eprintln!("Failed to send event message: {}", e);
+                                break;
+                            }
+                        }
+                        crate::core::CoreEvent::PeerConnected(peer_id) => {
+                            // Update peer count or UI state
+                            tracing::info!("TUI: Peer connected: {}", peer_id);
+                        }
+                        crate::core::CoreEvent::PeerDisconnected(peer_id) => {
+                            tracing::info!("TUI: Peer disconnected: {}", peer_id);
+                        }
+                        crate::core::CoreEvent::NetworkUpdate {
+                            active_peers,
+                            latency_ms,
+                        } => {
+                            tracing::debug!(
+                                "TUI: Network update - peers: {}, latency: {}ms",
+                                active_peers,
+                                latency_ms
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Core event bus disconnected");
+                    break;
+                }
+            }
+        }
+    });
 
     // Main event loop
     loop {
@@ -224,6 +303,11 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
         // Handle async messages
         while let Ok(message) = message_receiver.try_recv() {
             match message {
+                TuiMessage::SyncMessages(new_msgs) => {
+                    for msg in new_msgs {
+                        app.chat_state.ingest_core_message(msg);
+                    }
+                }
                 TuiMessage::SendMessage(content) => {
                     let message = crate::core::message::Message {
                         id: uuid::Uuid::new_v4(),
@@ -405,18 +489,9 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
             app.search_buffer.clear();
         }
 
-        // Quick actions (Ctrl+ combinations)
-        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.app_state = AppState::Help
-        }
-        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.app_state = AppState::Dashboard
-        }
-        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.app_state = AppState::Security
-        }
-        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.app_state = AppState::Advanced
+        // Escape returns to main menu if in a deep state, or toggles menu mode
+        KeyCode::Esc => {
+            app.app_state = AppState::MainMenu;
         }
         KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Err(e) = app.message_sender.send(TuiMessage::SystemDiagnostics) {
@@ -465,19 +540,48 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
             }
         }
 
+        // Alt+Number window switching (Irssi-style) - The primary navigation
+        KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::ALT) && c.is_ascii_digit() => {
+            let digit = c.to_digit(10).unwrap_or(0) as usize;
+            let index = if digit == 0 { 9 } else { digit - 1 };
+            if index < app.windows.len() {
+                app.active_window_index = index;
+                app.app_state = AppState::Chat; // Ensure we are in windowed view
+
+                // If the selected window is a specific tool state, we can sync app_state if needed,
+                // but Chat's render_window_interface handles all variants now.
+            }
+        }
+
         // Navigation
         KeyCode::Tab => {
-            app.current_tab = match app.current_tab {
-                Tab::Chat => Tab::Network,
-                Tab::Network => Tab::Config,
-                Tab::Config => Tab::Logs,
-                Tab::Logs => Tab::Chat,
-            };
+            app.active_window_index = (app.active_window_index + 1) % app.windows.len();
         }
-        KeyCode::Char('1') => app.current_tab = Tab::Chat,
-        KeyCode::Char('2') => app.current_tab = Tab::Network,
-        KeyCode::Char('3') => app.current_tab = Tab::Config,
-        KeyCode::Char('4') => app.current_tab = Tab::Logs,
+        KeyCode::Char('1') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.windows.len() >= 1 {
+                app.active_window_index = 0;
+            }
+        }
+        KeyCode::Char('2') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.windows.len() >= 2 {
+                app.active_window_index = 1;
+            }
+        }
+        KeyCode::Char('3') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.windows.len() >= 3 {
+                app.active_window_index = 2;
+            }
+        }
+        KeyCode::Char('4') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.windows.len() >= 4 {
+                app.active_window_index = 3;
+            }
+        }
+        KeyCode::Char('5') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.windows.len() >= 5 {
+                app.active_window_index = 4;
+            }
+        }
         KeyCode::Char('7') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Err(e) = app.message_sender.send(TuiMessage::SecurityAudit) {
                 eprintln!("Failed to send security audit message: {}", e);
@@ -528,7 +632,10 @@ fn handle_normal_mode(app: &mut TuiApp, key: KeyEvent) {
         }
 
         // Quit
-        KeyCode::Char('q') | KeyCode::Esc => {
+        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
+        KeyCode::Char('q') => {
             if app.app_state == AppState::MainMenu {
                 app.should_quit = true;
             } else {
@@ -551,8 +658,14 @@ fn handle_insert_mode(app: &mut TuiApp, key: KeyEvent) {
             if app.app_state == AppState::Chat {
                 let message = app.chat_state.get_input();
                 if !message.trim().is_empty() {
-                    if let Err(e) = app.message_sender.send(TuiMessage::SendMessage(message)) {
-                        eprintln!("Failed to send message: {}", e);
+                    // Irssi-style: Redirect / prefixed text to command execution
+                    if message.starts_with('/') {
+                        let cmd = &message[1..];
+                        execute_command(app, cmd);
+                    } else {
+                        if let Err(e) = app.message_sender.send(TuiMessage::SendMessage(message)) {
+                            eprintln!("Failed to send message: {}", e);
+                        }
                     }
                     app.chat_state.clear_input();
                 }

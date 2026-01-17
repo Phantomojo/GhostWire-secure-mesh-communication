@@ -808,10 +808,56 @@ mod tests {
     }
 
     #[test]
-    fn test_key_generation() {
+    fn test_signature_verification() {
         let encryption = EncryptionManager::new().unwrap();
-        assert!(!encryption.get_public_key().is_empty());
-        assert!(!encryption.get_key_id().is_empty());
+        let message = b"Verify me!";
+        let signature = encryption.sign_message(message).unwrap();
+
+        // Verify with own public key
+        assert!(encryption
+            .verify_signature(message, &signature, encryption.get_public_key())
+            .is_ok());
+
+        // Fail with wrong message
+        assert!(encryption
+            .verify_signature(b"Wrong", &signature, encryption.get_public_key())
+            .is_err());
+    }
+
+    #[test]
+    fn test_hybrid_key_generation() {
+        let rng = SystemRandom::new();
+        let key_pair = EncryptionManager::generate_hybrid_key_pair(&rng).unwrap();
+
+        assert_eq!(key_pair.public_key.len(), 64); // 32 Ed25519 + 32 X25519
+        assert!(key_pair.private_key.len() > 32);
+        assert!(key_pair
+            .private_key
+            .windows(12)
+            .any(|w| w == b"---X25519---"));
+    }
+
+    #[test]
+    fn test_secure_storage() {
+        let file_path = std::path::Path::new("test_secure_storage.json");
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct TestData {
+            name: String,
+            val: i32,
+        }
+        let data = TestData {
+            name: "test".to_string(),
+            val: 42,
+        };
+
+        EncryptionManager::secure_save(&file_path, &data).unwrap();
+        let loaded: TestData = EncryptionManager::secure_load(&file_path).unwrap();
+
+        assert_eq!(data, loaded);
+
+        // Cleanup
+        let _ = std::fs::remove_file(file_path);
     }
 }
 
