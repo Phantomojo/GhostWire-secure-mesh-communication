@@ -1,15 +1,14 @@
-use crate::core::message::Message;
 use crate::core::identity::Identity;
+use crate::core::message::Message;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug, error};
+use tracing::{info, warn};
 use uuid::Uuid;
-use std::time::{SystemTime, UNIX_EPOCH};
-use crate::core::transport::Transport;
 
 /// Reticulum-inspired secure mesh networking stack
 /// Based on cryptography-based networking with strong privacy guarantees
@@ -38,7 +37,7 @@ pub struct ReticulumMessage {
     pub id: String,
     pub sender: String,
     pub recipient: String,
-    pub content: Vec<u8>, // Encrypted content
+    pub content: Vec<u8>,           // Encrypted content
     pub onion_layers: Vec<Vec<u8>>, // For onion routing
     pub timestamp: u64,
     pub ttl: u32, // Time to live
@@ -47,7 +46,6 @@ pub struct ReticulumMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Serialize)]
 pub struct ReticulumStats {
     pub total_nodes: usize,
     pub online_nodes: usize,
@@ -71,10 +69,10 @@ pub struct ReticulumManager {
 impl ReticulumManager {
     pub async fn new(identity: Arc<Identity>) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
-        
+
         // Generate encryption key from identity
         let encryption_key = Self::derive_encryption_key(&identity)?;
-        
+
         let topology = Arc::new(RwLock::new(ReticulumTopology {
             nodes: HashMap::new(),
             routes: HashMap::new(),
@@ -107,14 +105,14 @@ impl ReticulumManager {
         // Use BLAKE2b to derive a 32-byte key from the identity's public key
         let public_key = identity.keypair().public().encode_protobuf();
         let mut key = [0u8; 32];
-        
+
         // Simple key derivation - in production, use proper KDF
         let mut hasher = blake2b_simd::State::new();
         hasher.update(&public_key);
         hasher.update(b"ghostwire-reticulum-key");
         let hash = hasher.finalize();
         key.copy_from_slice(&hash.as_bytes()[..32]);
-        
+
         Ok(key.to_vec())
     }
 
@@ -128,10 +126,10 @@ impl ReticulumManager {
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
             .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
-        // Generate random nonce
+        use rand::Rng;
+
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce)
-            .map_err(|e| anyhow::anyhow!("Failed to generate nonce: {}", e))?;
+        rand::thread_rng().fill(&mut nonce);
 
         let ciphertext = cipher
             .encrypt(&nonce.into(), content)
@@ -141,7 +139,7 @@ impl ReticulumManager {
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce);
         result.extend_from_slice(&ciphertext);
-        
+
         Ok(result)
     }
 
@@ -170,7 +168,11 @@ impl ReticulumManager {
     }
 
     /// Create onion routing layers for anonymous communication
-    pub fn create_onion_message(&self, content: &[u8], route: &[String]) -> Result<ReticulumMessage> {
+    pub fn create_onion_message(
+        &self,
+        content: &[u8],
+        route: &[String],
+    ) -> Result<ReticulumMessage> {
         let mut onion_layers = Vec::new();
         let mut current_content = content.to_vec();
 
@@ -206,7 +208,7 @@ impl ReticulumManager {
         let mut layer_data = Vec::new();
         layer_data.extend_from_slice(target_node.as_bytes());
         layer_data.extend_from_slice(content);
-        
+
         self.encrypt_message(&layer_data)
     }
 
@@ -217,7 +219,7 @@ impl ReticulumManager {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         if current_time > message.timestamp + message.ttl as u64 {
             warn!("Message expired: {}", message.id);
             return Ok(None);
@@ -246,7 +248,10 @@ impl ReticulumManager {
     }
 
     /// Process onion-routed message
-    async fn process_onion_message(&mut self, mut message: ReticulumMessage) -> Result<Option<Vec<u8>>> {
+    async fn process_onion_message(
+        &mut self,
+        mut message: ReticulumMessage,
+    ) -> Result<Option<Vec<u8>>> {
         if message.onion_layers.is_empty() {
             return Ok(None);
         }
@@ -260,13 +265,19 @@ impl ReticulumManager {
         }
 
         // Extract target node ID (first 4 bytes for simplicity)
-        let target_node_len = u32::from_le_bytes([decrypted_layer[0], decrypted_layer[1], decrypted_layer[2], decrypted_layer[3]]) as usize;
+        let target_node_len = u32::from_le_bytes([
+            decrypted_layer[0],
+            decrypted_layer[1],
+            decrypted_layer[2],
+            decrypted_layer[3],
+        ]) as usize;
         if decrypted_layer.len() < 4 + target_node_len {
             return Err(anyhow::anyhow!("Invalid onion layer structure"));
         }
 
-        let target_node = String::from_utf8_lossy(&decrypted_layer[4..4+target_node_len]).to_string();
-        let remaining_content = &decrypted_layer[4+target_node_len..];
+        let target_node =
+            String::from_utf8_lossy(&decrypted_layer[4..4 + target_node_len]).to_string();
+        let remaining_content = &decrypted_layer[4 + target_node_len..];
 
         // Check if we're the target
         if target_node == self.identity.id {
@@ -295,7 +306,7 @@ impl ReticulumManager {
         // For now, we'll just queue it
         let mut queue = self.message_queue.write().await;
         queue.push(message);
-        
+
         info!("Relayed message to next hop");
         Ok(())
     }
@@ -335,13 +346,14 @@ impl ReticulumManager {
     /// Find onion route to recipient
     async fn find_onion_route(&self, recipient: &str) -> Result<Vec<String>> {
         let topology = self.topology.read().await;
-        
+
         // Simple route finding - in production, use proper routing algorithm
         if let Some(route) = topology.onion_routes.get(recipient) {
             Ok(route.clone())
         } else {
             // Create a simple route through available nodes
-            let available_nodes: Vec<String> = topology.nodes
+            let available_nodes: Vec<String> = topology
+                .nodes
                 .values()
                 .filter(|node| node.is_online && node.onion_routing_capable)
                 .map(|node| node.id.clone())
@@ -355,7 +367,7 @@ impl ReticulumManager {
             let mut route = Vec::new();
             route.push(available_nodes[0].clone());
             route.push(recipient.to_string());
-            
+
             Ok(route)
         }
     }
@@ -364,12 +376,12 @@ impl ReticulumManager {
     pub async fn get_stats(&self) -> ReticulumStats {
         let mut stats = self.stats.read().await.clone();
         let topology = self.topology.read().await;
-        
+
         stats.total_nodes = topology.nodes.len();
         stats.online_nodes = topology.nodes.values().filter(|n| n.is_online).count();
         stats.routes_count = topology.routes.len();
         stats.onion_routes_count = topology.onion_routes.len();
-        
+
         stats
     }
 
@@ -377,13 +389,18 @@ impl ReticulumManager {
     pub async fn add_node(&mut self, node: ReticulumNode) -> Result<()> {
         let mut topology = self.topology.write().await;
         topology.nodes.insert(node.id.clone(), node);
-        
+
         info!("Added node to Reticulum topology");
         Ok(())
     }
 
     /// Update node status
-    pub async fn update_node_status(&mut self, node_id: &str, is_online: bool, quality: f32) -> Result<()> {
+    pub async fn update_node_status(
+        &mut self,
+        node_id: &str,
+        is_online: bool,
+        quality: f32,
+    ) -> Result<()> {
         let mut topology = self.topology.write().await;
         if let Some(node) = topology.nodes.get_mut(node_id) {
             node.is_online = is_online;
@@ -393,24 +410,7 @@ impl ReticulumManager {
                 .unwrap_or_default()
                 .as_secs();
         }
-        
+
         Ok(())
     }
 }
-
-#[async_trait]
-impl Transport for ReticulumManager {
-    fn name(&self) -> &'static str { "reticulum" }
-    fn description(&self) -> &'static str { "Reticulum-inspired secure mesh networking transport" }
-    fn feature_flag(&self) -> Option<&'static str> { Some("reticulum-transport") }
-    async fn send_message(&mut self, message: &crate::core::message::Message) -> anyhow::Result<()> {
-        self.send_message(message).await
-    }
-    async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
-        // TODO: Implement actual message receiving logic
-        Ok(None)
-    }
-} 
-// Registration example (in main/core):
-// #[cfg(feature = "reticulum-transport")]
-// registry.register(ReticulumManager::new(...)); 

@@ -15,19 +15,21 @@ pub mod transport;
 pub mod transport_manager;
 pub mod username_discovery; // DHT-based username discovery
 
+pub mod bluetooth;
 #[cfg(feature = "briar")]
 pub mod briar;
 #[cfg(feature = "mesh")]
 pub mod mesh;
+pub mod qr;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
+pub mod sim_transport;
 pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
-use matrix_sdk::{
-    config::SyncSettings, ruma::events::room::message::RoomMessageEventContent, ruma::RoomId,
-    Client, Room,
-};
+use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
+#[cfg(feature = "matrix-bridge")]
+use matrix_sdk::{config::SyncSettings, Client, Room};
 
 pub use encryption::Encryption;
 pub use identity::Identity;
@@ -48,7 +50,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 // using explicit paths for tracing macros
+use std::time::Duration;
+use tokio::sync::broadcast;
 use transport::TransportRegistry;
+
+/// System-wide events for real-time reactivity
+#[derive(Debug, Clone, Serialize)]
+pub enum CoreEvent {
+    NewMessage(Message),
+    PeerConnected(String),
+    PeerDisconnected(String),
+    SystemAlert(String),
+    NetworkUpdate { active_peers: u32, latency_ms: u32 },
+    SecurityLockdown(bool),
+}
 
 // Protocol Adapter Enum for async dispatch
 #[derive(Clone)]
@@ -175,7 +190,11 @@ impl MatrixAdapter {
                 .await?;
             client
                 .matrix_auth()
-                .login_username(&self.user, "password") // TODO: get from config
+                .login_username(
+                    &self.user,
+                    &std::env::var("GHOSTWIRE_MATRIX_PASSWORD")
+                        .unwrap_or_else(|_| "password".to_string()),
+                ) // Use env var
                 .send()
                 .await?;
             self.client = Some(Arc::new(client));
@@ -262,6 +281,7 @@ impl MeshtasticAdapter {
 }
 
 /// Core application state and management
+#[derive(Clone)]
 pub struct Core {
     pub identity: Arc<Identity>,
     pub encryption: Arc<Encryption>,
@@ -282,10 +302,11 @@ pub struct Core {
     pub messages: Arc<RwLock<Vec<Message>>>,
     pub message_store: Arc<store::SecureMessageStore>,
     pub bootstrap_nodes: Vec<Multiaddr>,
+    pub event_bus: broadcast::Sender<CoreEvent>,
 }
 
 impl Core {
-    pub async fn new(bootstrap_nodes: Vec<Multiaddr>) -> Result<Self> {
+    pub async fn new(bootstrap_nodes: Vec<Multiaddr>, sim_addr: Option<String>) -> Result<Self> {
         let identity = Arc::new(
             Identity::new().map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
@@ -300,18 +321,35 @@ impl Core {
 
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
-        let registry = TransportRegistry::new();
+        let mut registry = TransportRegistry::new();
+        let mut active_transport = None; // Set this based on user config or default
 
-        // Register available transports using feature flags
-        // TODO: Add transport registration when transports are implemented
+        if let Some(addr) = sim_addr {
+            let sim_transport = Arc::new(RwLock::new(
+                crate::core::sim_transport::SimTransport::new(identity.id.clone(), &addr).await?,
+            ));
+            let sim_kind = crate::core::transport::TransportKind::Simulated(sim_transport);
+            registry.register(sim_kind.clone());
+            active_transport = Some(sim_kind);
+        }
 
         let registry = Arc::new(RwLock::new(registry));
-        let active_transport = None; // Set this based on user config or default
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
         // Load configuration
         let config = crate::config::Config::load().unwrap_or_default();
+
+        // Use default bootstraps if none provided
+        let mut bootstrap_nodes = bootstrap_nodes;
+        if bootstrap_nodes.is_empty() {
+            tracing::info!("🌐 No bootstrap nodes provided. Using default public gateways for zero-config discovery.");
+            for addr_str in crate::core::mesh::DEFAULT_BOOTSTRAPS {
+                if let Ok(addr) = addr_str.parse() {
+                    bootstrap_nodes.push(addr);
+                }
+            }
+        }
 
         // Register Matrix adapter if enabled
         if config.features.matrix_bridge {
@@ -320,6 +358,8 @@ impl Core {
                     homeserver: matrix_config.homeserver,
                     user: matrix_config.user,
                     access_token: matrix_config.access_token,
+                    #[cfg(feature = "matrix-bridge")]
+                    client: None,
                 }));
             }
         }
@@ -346,6 +386,7 @@ impl Core {
 
         let messages = Arc::new(RwLock::new(Vec::new()));
         let message_store = Arc::new(store::SecureMessageStore::new()?);
+        let (event_bus, _) = broadcast::channel(1024); // Large buffer for high traffic
 
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
@@ -364,6 +405,7 @@ impl Core {
                     message_store.clone(),
                     bootstrap_nodes.clone(),
                     username_discovery,
+                    Some(event_bus.clone()),
                 )
                 .await?,
             )))
@@ -373,6 +415,7 @@ impl Core {
         let mesh_manager_inner = None;
 
         let monitor = Arc::new(monitor::NetworkMonitor::new(
+            #[cfg(feature = "mesh")]
             mesh_manager_inner.clone(),
             std::time::Duration::from_secs(5), // Check every 5 seconds
         ));
@@ -395,6 +438,7 @@ impl Core {
             messages,
             message_store,
             bootstrap_nodes,
+            event_bus,
         })
     }
 
@@ -447,7 +491,24 @@ impl Core {
             // Bind to the specified IP, with a random port (0) for P2P
             let listen_addr = format!("/ip4/{}/tcp/0", mesh_bind_ip);
             match core_mesh.start_mesh(&listen_addr).await {
-                Ok(_) => tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr),
+                Ok(_) => {
+                    tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr);
+                    // Give the swarm a moment to bind, then print addresses
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    let listeners = core_mesh.get_mesh_listeners().await;
+                    if !listeners.is_empty() {
+                        println!("\n--- GhostWire Mesh Node Started ---");
+                        println!(
+                            "Peer ID: {}",
+                            core_mesh.identity.keypair().public().to_peer_id()
+                        );
+                        println!("Listening on:");
+                        for addr in listeners {
+                            println!("  {}", addr);
+                        }
+                        println!("------------------------------------\n");
+                    }
+                }
                 Err(e) => tracing::warn!("⚠️ Failed to auto-start mesh: {}", e),
             }
         });
@@ -490,6 +551,9 @@ impl Core {
 
         // Record message for security stats
         self.security_manager.record_message(&message.sender).await;
+
+        // Broadcast to Event Bus
+        let _ = self.event_bus.send(CoreEvent::NewMessage(message.clone()));
 
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = &self.mesh_manager {
@@ -620,6 +684,7 @@ impl Core {
                     self.message_store.clone(),
                     self.bootstrap_nodes.clone(),
                     username_discovery,
+                    Some(self.event_bus.clone()),
                 )
                 .await?;
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
@@ -684,9 +749,13 @@ impl Core {
             if let Some(reticulum_manager) = &self.reticulum_manager {
                 let manager = reticulum_manager.read().await;
                 Some(ReticulumStats {
-                    node_count: 0,     // TODO: Implement node counting
-                    message_count: 0,  // TODO: Implement message counting
-                    uptime_seconds: 0, // TODO: Implement uptime tracking
+                    total_nodes: 0,
+                    online_nodes: 0,
+                    local_node_id: self.get_identity_id().to_string(),
+                    routes_count: 0,
+                    onion_routes_count: 0,
+                    messages_relayed: 0,
+                    encryption_errors: 0,
                 })
             } else {
                 None
@@ -763,6 +832,14 @@ impl Core {
         Ok(())
     }
 
+    pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            return mesh_manager.read().await.get_listeners();
+        }
+        Vec::new()
+    }
+
     // Add convenience methods for backward compatibility
     pub fn get_peer_count(&self) -> usize {
         #[cfg(feature = "mesh")]
@@ -819,6 +896,7 @@ impl MeshManager {
     }
 }
 
+#[cfg(not(feature = "reticulum"))]
 #[derive(Serialize)]
 pub struct ReticulumStats {
     pub node_count: usize,

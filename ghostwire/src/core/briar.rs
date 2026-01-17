@@ -1,15 +1,15 @@
-use crate::core::message::Message;
 use crate::core::identity::Identity;
+use crate::core::message::Message;
 use anyhow::Result;
 use async_trait::async_trait;
+use blake2b_simd::{Params, State};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
-use std::time::{SystemTime, UNIX_EPOCH};
-use crate::core::transport::Transport;
 
 /// Briar-inspired secure messaging system
 /// Focuses on metadata resistance and peer-to-peer communication
@@ -88,10 +88,10 @@ pub struct BriarManager {
 impl BriarManager {
     pub async fn new(identity: Arc<Identity>) -> Result<Self> {
         let local_id = identity.id.clone();
-        
+
         // Generate encryption key from identity
         let encryption_key = Self::derive_encryption_key(&identity)?;
-        
+
         let stats = Arc::new(RwLock::new(BriarStats {
             total_contacts: 0,
             online_contacts: 0,
@@ -116,18 +116,23 @@ impl BriarManager {
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
         let public_key = identity.keypair().public().encode_protobuf();
         let mut key = [0u8; 32];
-        
+
         let mut hasher = blake2b_simd::State::new();
         hasher.update(&public_key);
         hasher.update(b"ghostwire-briar-key");
         let hash = hasher.finalize();
         key.copy_from_slice(&hash.as_bytes()[..32]);
-        
+
         Ok(key.to_vec())
     }
 
     /// Add a new contact
-    pub async fn add_contact(&mut self, name: &str, public_key: Vec<u8>, connection_method: ConnectionMethod) -> Result<()> {
+    pub async fn add_contact(
+        &mut self,
+        name: &str,
+        public_key: Vec<u8>,
+        connection_method: ConnectionMethod,
+    ) -> Result<()> {
         let contact_id = Uuid::new_v4().to_string();
         let contact = BriarContact {
             id: contact_id.clone(),
@@ -144,10 +149,10 @@ impl BriarManager {
 
         let mut contacts = self.contacts.write().await;
         contacts.insert(contact_id.clone(), contact);
-        
+
         let mut stats = self.stats.write().await;
         stats.total_contacts = contacts.len();
-        
+
         info!("Added new contact: {}", name);
         Ok(())
     }
@@ -188,7 +193,7 @@ impl BriarManager {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         if current_time > message.timestamp + message.ttl as u64 {
             warn!("Message expired: {}", message.id);
             return Ok(None);
@@ -234,7 +239,7 @@ impl BriarManager {
 
         let mut queue = self.message_queue.write().await;
         queue.push(ack_message);
-        
+
         debug!("Sent ACK for message: {}", message_id);
         Ok(())
     }
@@ -249,9 +254,9 @@ impl BriarManager {
         let cipher = Aes256Gcm::new_from_slice(&self.identity.keypair().public().encode_protobuf())
             .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
+        use rand::Rng;
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce)
-            .map_err(|e| anyhow::anyhow!("Failed to generate nonce: {}", e))?;
+        rand::thread_rng().fill(&mut nonce);
 
         let ciphertext = cipher
             .encrypt(&nonce.into(), content)
@@ -260,7 +265,7 @@ impl BriarManager {
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce);
         result.extend_from_slice(&ciphertext);
-        
+
         Ok(result)
     }
 
@@ -351,11 +356,16 @@ impl BriarManager {
         }
 
         let mut stats = self.stats.write().await;
-        stats.online_contacts = contacts.values()
-            .filter(|c| c.last_seen > SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() - 300) // Online if seen in last 5 minutes
+        stats.online_contacts = contacts
+            .values()
+            .filter(|c| {
+                c.last_seen
+                    > SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                        - 300
+            }) // Online if seen in last 5 minutes
             .count();
 
         Ok(())
@@ -369,13 +379,19 @@ impl BriarManager {
     /// Enable/disable contact discovery
     pub fn set_discovery_enabled(&mut self, enabled: bool) {
         self.discovery_enabled = enabled;
-        info!("Contact discovery {}", if enabled { "enabled" } else { "disabled" });
+        info!(
+            "Contact discovery {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     /// Enable/disable Tor routing
     pub fn set_tor_enabled(&mut self, enabled: bool) {
         self.tor_enabled = enabled;
-        info!("Tor routing {}", if enabled { "enabled" } else { "disabled" });
+        info!(
+            "Tor routing {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     /// Process incoming messages
@@ -386,24 +402,6 @@ impl BriarManager {
     }
 }
 
-#[async_trait]
-impl Transport for BriarManager {
-    fn name(&self) -> &'static str { "briar" }
-    fn description(&self) -> &'static str { "Briar-inspired secure messaging transport" }
-    fn feature_flag(&self) -> Option<&'static str> { Some("briar-transport") }
-    async fn send_message(&mut self, message: &crate::core::message::Message) -> anyhow::Result<()> {
-        // Convert Message to BriarMessage and send
-        let mut manager = BriarManager::new(self.identity.clone()).await?;
-        // TODO: Implement proper message sending
-        println!("[Briar] Would send message: {}", message.content);
-        Ok(())
-    }
-    async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
-        // TODO: Implement proper message receiving
-        println!("[Briar] Would receive message");
-        Ok(None)
-    }
-} 
 // Registration example (in main/core):
 // #[cfg(feature = "briar-transport")]
-// registry.register(BriarManager::new(...)); 
+// registry.register(BriarManager::new(...));

@@ -16,12 +16,13 @@ tokio = { version = "1.0", features = ["full"] }
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4" }
-tower-http = { version = "0.5", features = ["cors", "fs"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "auth"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 toml = { version = "0.8" }
+jsonwebtoken = { version = "9.0" }
 
 # Networking
 libp2p = { version = "0.53", features = ["tokio", "macros", "tcp", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping"] }
@@ -29,13 +30,14 @@ reqwest = { version = "0.11", features = ["json"] }
 libp2p-tcp = { version = "0.41" }
 
 # Cryptography
-ring = { version = "0.17" }
+ring = { version = "0.17.12" }
 ed25519-dalek = { version = "2.0" }
 x25519-dalek = { version = "2.0" }
 aes-gcm = { version = "0.10" }
 chacha20poly1305 = { version = "0.10" }
-pqcrypto-kyber = { version = "0.8" }
+pqcrypto-mlkem = { version = "0.1.1" }
 pqcrypto-traits = { version = "0.3" }
+blake2b_simd = "1.0"
 
 # Utilities
 anyhow = { version = "1.0" }
@@ -68,12 +70,16 @@ governor = { version = "0.6" }
 hostname = { version = "0.3" }
 local-ip-address = { version = "0.5" }
 
+# Bluetooth & QR (Phase P2)
+btleplug = "0.11"
+qrcode-generator = "5.0"
+
 # Optional features
 neli = { version = "0.6" }
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
-matrix-sdk = { version = "0.7", optional = true }
+matrix-sdk = { version = "0.16", optional = true }
 serialport = { version = "4.3", optional = true }
 
 # TUI dependencies
@@ -82,7 +88,7 @@ crossterm = { version = "0.27" }
 dirs = "6.0.0"
 
 [features]
-default = ["web", "cli", "mesh", "security", "tui", "stealth"]
+default = ["web", "cli", "mesh", "security", "tui", "stealth", "bluetooth", "qr"]
 web = []
 cli = []
 mesh = []
@@ -94,6 +100,8 @@ reticulum = []
 briar = []
 stealth = []
 tui = []
+bluetooth = []
+qr = []
 
 # Minimal build for embedded systems
 minimal = []

@@ -60,6 +60,11 @@ pub enum Commands {
         #[arg(short = 'd', long)]
         encrypted: String,
     },
+    /// Connect to a peer by username
+    Connect {
+        #[arg(short = 'u', long)]
+        username: String,
+    },
 }
 
 /// Run the CLI application
@@ -72,7 +77,7 @@ pub async fn run_cli() -> Result<()> {
     };
 
     // Initialize core components with no bootstraps for CLI mode
-    let core = Core::new(Vec::new()).await?;
+    let core = Core::new(Vec::new(), None).await?;
     let core_arc = Arc::new(core);
 
     match cli.command {
@@ -106,6 +111,9 @@ pub async fn run_cli() -> Result<()> {
         }
         Commands::Decrypt { encrypted } => {
             decrypt_message(&core_arc, &encrypted).await?;
+        }
+        Commands::Connect { username } => {
+            connect_by_username(&core_arc, &username).await?;
         }
     }
 
@@ -177,10 +185,32 @@ async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Resul
     use crate::core::Message;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    let mut final_recipient = recipient.to_string();
+
+    // Resolve @username if provided
+    if recipient.starts_with('@') {
+        let username = &recipient[1..];
+        println!("🔍 Discovering peer for username: {}...", username);
+
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &core.mesh_manager {
+            let mut mgr = mesh_manager.write().await;
+            if let Ok(Some(record)) = mgr.lookup_username(username).await {
+                final_recipient = record.peer_id.to_string();
+                println!("✅ Resolved {} to {}", recipient, final_recipient);
+            } else {
+                println!(
+                    "⚠️ Could not resolve username {}. Attempting broadcast/manual discovery.",
+                    recipient
+                );
+            }
+        }
+    }
+
     let msg = Message {
         id: uuid::Uuid::new_v4(),
         sender: core.get_identity_id(),
-        recipient: recipient.to_string(),
+        recipient: final_recipient,
         content: message.to_string(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -199,6 +229,44 @@ async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Resul
             error!("Failed to send message: {}", e);
             return Err(anyhow::anyhow!("Failed to send message: {}", e));
         }
+    }
+
+    Ok(())
+}
+
+async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
+    let name = if username.starts_with('@') {
+        &username[1..]
+    } else {
+        username
+    };
+    println!("🔍 Searching for peer: {}...", name);
+
+    #[cfg(feature = "mesh")]
+    if let Some(mesh_manager) = &core.mesh_manager {
+        let mut mgr = mesh_manager.write().await;
+        match mgr.lookup_username(name).await {
+            Ok(Some(record)) => {
+                println!(
+                    "✅ Found peer {} at {:?}",
+                    record.peer_id, record.last_seen_addresses
+                );
+                // Dial the peer
+                if let Err(e) = mgr.connect_peer(record.peer_id).await {
+                    println!("❌ Failed to dial peer: {}", e);
+                } else {
+                    println!("🚀 Dialing initiated via DHT discovery.");
+                }
+            }
+            Ok(None) => {
+                println!("⌛ Discovery started. Please wait a moment and try again if connection doesn't happen automatically.");
+            }
+            Err(e) => {
+                println!("❌ Error during discovery: {}", e);
+            }
+        }
+    } else {
+        println!("❌ Mesh network not enabled.");
     }
 
     Ok(())
