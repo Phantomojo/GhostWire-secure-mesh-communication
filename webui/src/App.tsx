@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
+import LoginScreen from './components/LoginScreen';
+import FirstTimeSetup from './components/FirstTimeSetup';
 import Dashboard from './components/Dashboard';
 import NetworkPanel from './components/NetworkPanel';
 import SecurityPanel from './components/SecurityPanel';
@@ -9,6 +11,7 @@ import CommunicationPanel from './components/CommunicationPanel';
 import SettingsPage from './components/SettingsPage';
 import MovingMeshBackground from './components/MovingMeshBackground';
 import CyberToast, { type Toast, type ToastType } from './components/CyberToast';
+import { TutorialOverlay } from './components/TutorialOverlay';
 
 import { api, config } from './services/api';
 
@@ -70,6 +73,7 @@ function App() {
   const [showConfig, setShowConfig] = useState(false);
   const [backendUrl, setBackendUrl] = useState(config.API_BASE_URL);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
 
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     cpu: 15,
@@ -104,6 +108,8 @@ function App() {
   // Feedback System
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [activeRecipient, setActiveRecipient] = useState<string>('broadcast');
+  const [isLocked, setIsLocked] = useState(true);
+  const [profileStatus, setProfileStatus] = useState<any>(null);
 
   const addToast = (type: ToastType, message: string) => {
     setToasts(prev => [...prev, { id: Math.random().toString(36).substring(7), type, message }]);
@@ -117,6 +123,21 @@ function App() {
       console.log('🚀 Initializing GhostWire Core UI...');
       // Small delay to allow backend to start if needed
       await new Promise(r => setTimeout(r, 1000));
+
+      // Check Profile Status
+      try {
+        const status = await api.getIdentityStatus();
+        setProfileStatus(status);
+        setIsLocked(status.locked);
+        if (status.locked) {
+          console.log('🔒 Profile is locked. Showing login screen.');
+        } else {
+          console.log('🔓 Profile unlocked.');
+        }
+      } catch (e) {
+        console.error('Failed to get profile status:', e);
+        // Assuming locked if failed to reach backend or error
+      }
 
       try {
         const authed = await api.autoAuthenticate();
@@ -177,7 +198,7 @@ function App() {
         setPqcArmor(securityV2.encryption.pqc_armor);
       }
 
-      if (peersV1) {
+      if (Array.isArray(peersV1)) {
         const mappedNodes: NetworkNode[] = peersV1.map((n: any) => ({
           id: n.id,
           name: n.username,
@@ -445,6 +466,29 @@ function App() {
 
   return (
     <div className={`flex h-[100dvh] w-screen overflow-hidden relative ${isEmergencyMode ? 'emergency-state' : ''}`}>
+      {isLocked && profileStatus && (
+        <LoginScreen
+          status={profileStatus}
+          onUnlock={() => {
+            setIsLocked(false);
+            addToast('success', 'Profile Decrypted. Access Granted.');
+            // Refresh status to check setup_complete
+            api.getIdentityStatus().then(setStatus => setProfileStatus(setStatus));
+            loadRealData();
+          }}
+        />
+      )}
+
+      {!isLocked && profileStatus && !profileStatus.setup_complete && (
+        <FirstTimeSetup
+          onComplete={() => {
+            setProfileStatus({ ...profileStatus, setup_complete: true });
+            addToast('success', 'Sovereign Profile Established.');
+            loadRealData();
+          }}
+        />
+      )}
+
       <MovingMeshBackground />
       <CyberToast toasts={toasts} onRemove={removeToast} />
 
@@ -469,6 +513,7 @@ function App() {
           systemStatus={systemStatus}
           backendConnected={backendConnected}
           onConfigClick={() => setShowConfig(true)}
+          onTutorialClick={() => setShowTutorial(true)}
         />
 
         {showConfig && (
@@ -573,6 +618,10 @@ function App() {
           </div>
         </main>
       </div>
+      {/* Tutorial Overlay */}
+      <TutorialOverlay isOpen={showTutorial} onClose={() => setShowTutorial(false)} />
+
+      {/* Configuration Dialog */}
     </div>
   );
 }

@@ -114,7 +114,7 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
     };
 
     const sections = [
-        { id: 'identity', label: 'Identity', icon: '👤' },
+        { id: 'profile', label: 'Profile', icon: '👤' },
         { id: 'network', label: 'Network', icon: '🌐' },
         { id: 'security', label: 'Security', icon: '🔐' },
         { id: 'privacy', label: 'Privacy', icon: '👁️' },
@@ -167,44 +167,99 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
 
                 {/* Settings Content */}
                 <div className="col-span-3 bg-slate-900/50 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
-                    {/* Identity Section */}
-                    {activeSection === 'identity' && (
-                        <div className="space-y-6">
+                    {/* Profile Section */}
+                    {activeSection === 'profile' && (
+                        <div className="space-y-8">
                             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                👤 Identity Settings
+                                👤 Sovereign Profile
                             </h2>
 
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-white/60 mb-2">Username</label>
-                                    <input
-                                        type="text"
-                                        value={settings.username}
-                                        onChange={(e) => updateSetting('username', e.target.value)}
-                                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none"
-                                        placeholder="your_username"
-                                    />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Metadata</h3>
+                                    <div>
+                                        <label className="block text-xs font-medium text-white/40 mb-2 uppercase">Username</label>
+                                        <input
+                                            type="text"
+                                            value={settings.username}
+                                            onChange={(e) => updateSetting('username', e.target.value)}
+                                            className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none"
+                                            placeholder="your_username"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-medium text-white/40 mb-2 uppercase">Display Name</label>
+                                        <input
+                                            type="text"
+                                            value={settings.displayName}
+                                            onChange={(e) => updateSetting('displayName', e.target.value)}
+                                            className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none"
+                                            placeholder="Your Display Name"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-medium text-white/40 mb-2 uppercase">Bio</label>
+                                        <textarea
+                                            value={settings.bio}
+                                            onChange={(e) => updateSetting('bio', e.target.value)}
+                                            className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none resize-none h-24"
+                                            placeholder="A short description about yourself..."
+                                        />
+                                    </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-white/60 mb-2">Display Name</label>
-                                    <input
-                                        type="text"
-                                        value={settings.displayName}
-                                        onChange={(e) => updateSetting('displayName', e.target.value)}
-                                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none"
-                                        placeholder="Your Display Name"
-                                    />
-                                </div>
+                                <div className="space-y-6 bg-indigo-500/5 p-6 rounded-2xl border border-indigo-500/10">
+                                    <h3 className="text-sm font-bold text-indigo-400/80 uppercase tracking-widest">Cryptographic Credentials</h3>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-white/60 mb-2">Bio</label>
-                                    <textarea
-                                        value={settings.bio}
-                                        onChange={(e) => updateSetting('bio', e.target.value)}
-                                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-indigo-500 focus:outline-none resize-none h-24"
-                                        placeholder="A short description about yourself..."
-                                    />
+                                    <div className="space-y-4">
+                                        <div>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <label className="block text-[10px] font-black text-white/30 uppercase tracking-tighter">Sovereign_DID</label>
+                                                <button
+                                                    onClick={() => {
+                                                        const did = localStorage.getItem('ghostwire_did') || 'did:ghost:...';
+                                                        navigator.clipboard.writeText(did);
+                                                        alert('DID copied to clipboard');
+                                                    }}
+                                                    className="text-[10px] text-indigo-400 hover:text-white transition-colors"
+                                                >
+                                                    COPY
+                                                </button>
+                                            </div>
+                                            <div className="bg-black/40 rounded-lg p-3 border border-white/5 text-[10px] font-mono text-slate-400 break-all select-all">
+                                                {localStorage.getItem('ghostwire_did') || 'Establishing link...'}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <label className="block text-[10px] font-black text-white/30 uppercase tracking-tighter">Public_Key_Hex</label>
+                                                <button
+                                                    onClick={() => alert('Feature coming soon: Cross-Signing Keys')}
+                                                    className="text-[10px] text-indigo-400 hover:text-white transition-colors"
+                                                >
+                                                    COPY
+                                                </button>
+                                            </div>
+                                            <div className="bg-black/40 rounded-lg p-3 border border-white/5 text-[10px] font-mono text-slate-500 break-all opacity-60">
+                                                0x736f7665726569676e5f6b65795f64617461...
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-white/5 space-y-3">
+                                        <button
+                                            onClick={() => alert('Generating cryptographic backup bundle...')}
+                                            className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                        >
+                                            Export Profile Bundle
+                                        </button>
+                                        <p className="text-[9px] text-slate-500 text-center italic">
+                                            Never share your private keys. GhostWire support will NEVER ask for your passphrase.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

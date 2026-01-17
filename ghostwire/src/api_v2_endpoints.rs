@@ -28,8 +28,15 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
         security_score: u8,
     }
 
-    let metadata = state.core.get_metadata();
-    let security_score = state.core.security_manager.calculate_security_score().await;
+    let metadata = state.core.read().await.get_metadata().await;
+    let security_score = state
+        .core
+        .read()
+        .await
+        .security_manager
+        .clone()
+        .calculate_security_score()
+        .await;
 
     let username = match std::fs::read_to_string("username.txt") {
         Ok(name) => name.trim().to_string(),
@@ -37,13 +44,13 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
     };
 
     let profile = ProfileResponse {
-        id: state.core.get_identity_id(),
-        did: state.core.get_did(),
+        id: state.core.read().await.get_identity_id().await,
+        did: state.core.read().await.get_did().await,
         username: username,
         nickname: metadata.nickname,
         bio: metadata.bio,
-        public_key: general_purpose::STANDARD.encode(state.core.get_public_key()),
-        key_id: state.core.get_key_id(),
+        public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
+        key_id: state.core.read().await.get_key_id(),
         created_at: chrono::Utc::now().to_rfc3339(), // TODO: Get from identity last_updated
         dht_published: false,                        // TODO: Get from DHT status
         security_score,
@@ -106,7 +113,12 @@ pub async fn update_metadata_v2(
         .get("avatar_url")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
 
-    state.core.update_metadata(nickname, bio, avatar_url);
+    state
+        .core
+        .read()
+        .await
+        .update_metadata(nickname, bio, avatar_url, None)
+        .await;
 
     Json(ApiV2Response::success(serde_json::json!({
         "status": "updated",
@@ -124,7 +136,7 @@ pub async fn toggle_pqc_armor_v2(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    state.core.set_pqc_mode(enabled).await;
+    state.core.read().await.set_pqc_mode(enabled).await;
 
     Json(ApiV2Response::success(serde_json::json!({
         "pqc_armor": enabled,
@@ -142,7 +154,7 @@ pub async fn update_sharding_v2(
         .and_then(|v| v.as_str())
         .unwrap_or("global");
 
-    match state.core.set_dht_shard(shard).await {
+    match state.core.read().await.set_dht_shard(shard).await {
         Ok(_) => Json(ApiV2Response::success(serde_json::json!({
             "shard": shard,
             "status": "switching"
@@ -165,9 +177,9 @@ pub async fn get_public_key_v2(State(state): State<Arc<AppState>>) -> impl IntoR
     }
 
     Json(ApiV2Response::success(PublicKeyResponse {
-        key_id: state.core.get_key_id(),
+        key_id: state.core.read().await.get_key_id(),
         algorithm: "Ed25519".to_string(),
-        public_key: general_purpose::STANDARD.encode(state.core.get_public_key()),
+        public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
         created_at: chrono::Utc::now().to_rfc3339(),
     }))
 }
@@ -211,8 +223,15 @@ pub async fn get_security_dashboard_v2(State(state): State<Arc<AppState>>) -> im
     }
 
     // Get real security stats from SecurityManager
-    let stats = state.core.get_security_stats().await;
-    let score = state.core.security_manager.calculate_security_score().await;
+    let stats = state.core.read().await.get_security_stats().await;
+    let score = state
+        .core
+        .read()
+        .await
+        .security_manager
+        .clone()
+        .calculate_security_score()
+        .await;
 
     let dashboard = SecurityDashboard {
         score,
@@ -259,8 +278,8 @@ pub async fn get_peers_v2(
     let mut all_peers = vec![];
 
     #[cfg(feature = "mesh")]
-    if let Some(mesh_manager) = &state.core.mesh_manager {
-        let topology = mesh_manager.read().await.get_topology().await;
+    if let Some(mesh_manager) = &state.core.read().await.mesh_manager.clone() {
+        let topology = mesh_manager.read().await.get_topology();
         for (id, node) in topology.nodes {
             all_peers.push(PeerResponse {
                 id,
@@ -310,7 +329,13 @@ pub async fn get_messages_v2(
         .and_then(|l| l.parse().ok())
         .unwrap_or(50);
 
-    let messages = state.core.message_store.get_history(&peer_id, limit);
+    let messages = state
+        .core
+        .read()
+        .await
+        .message_store
+        .clone()
+        .get_history(&peer_id, limit);
 
     Json(ApiV2Response::success(messages).with_links("/api/v2/messages".to_string()))
 }

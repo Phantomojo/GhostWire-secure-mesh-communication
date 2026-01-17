@@ -12,8 +12,6 @@ use ghostwire::core::Core;
 #[cfg(feature = "tui")]
 use ghostwire::tui;
 #[cfg(feature = "web")]
-use ghostwire::web;
-
 #[derive(Parser)]
 #[cfg(feature = "cli")]
 #[command(name = "ghostwire")]
@@ -30,7 +28,7 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0")]
     mesh_host: String,
 
-    #[arg(long, default_value_t = 8080)]
+    #[arg(long, default_value_t = 5050)]
     port: u16,
 
     #[arg(long)]
@@ -47,6 +45,9 @@ struct Args {
 
     #[arg(long)]
     sim_addr: Option<String>,
+
+    #[arg(long)]
+    profile: Option<String>,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -58,6 +59,7 @@ struct Args {
     bootstrap: Vec<String>,
     web: bool,
     cli: bool,
+    profile: Option<String>,
 }
 
 #[cfg(feature = "cli")]
@@ -93,11 +95,6 @@ enum Commands {
     Tui,
 }
 
-#[cfg(feature = "web")]
-async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> Result<()> {
-    web::start_web_server(core, host, port).await
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -130,6 +127,7 @@ async fn main() -> Result<()> {
         web: false,
         cli: false,
         sim_addr: None,
+        profile: None,
     };
 
     // Parse bootstrap nodes
@@ -143,7 +141,13 @@ async fn main() -> Result<()> {
     }
 
     // Initialize core components
-    let core = Core::new(bootstrap_multiaddrs, args.sim_addr).await?;
+    // Initialize core components
+    let core = Core::new(
+        bootstrap_multiaddrs.clone(),
+        args.sim_addr.clone(),
+        args.profile,
+    )
+    .await?;
     let core_arc = Arc::new(core);
 
     // Activate the autonomic nervous system (DNA 10/10)
@@ -157,7 +161,7 @@ async fn main() -> Result<()> {
             let listeners = core_arc.get_mesh_listeners().await;
 
             println!("--- GhostWire Node Status ---");
-            println!("Identity: {}", core_arc.get_identity_id());
+            println!("Identity: {}", core_arc.get_identity_id().await);
             println!("Peers:    {}", peers);
             if !listeners.is_empty() {
                 println!("Mesh Addresses:");
@@ -174,7 +178,7 @@ async fn main() -> Result<()> {
             println!("--- Known Mesh Peers ---");
             #[cfg(feature = "mesh")]
             if let Some(mesh) = &core_arc.mesh_manager {
-                let topology = mesh.read().await.get_topology().await;
+                let topology = mesh.read().await.get_topology();
                 for (id, node) in topology.nodes {
                     println!(
                         "ID: {} | Name: {} | Status: {}",
@@ -190,7 +194,8 @@ async fn main() -> Result<()> {
         #[cfg(feature = "cli")]
         Some(Commands::Send { recipient, content }) => {
             println!("📤 Sending message to {}...", recipient);
-            let msg = ghostwire::core::Message::new(core_arc.get_identity_id(), recipient, content);
+            let msg =
+                ghostwire::core::Message::new(core_arc.get_identity_id().await, recipient, content);
             match core_arc.send_message(&msg).await {
                 Ok(_) => println!("✅ Message dispatched to transport."),
                 Err(e) => println!("❌ Failed to send: {}", e),
@@ -228,9 +233,16 @@ async fn main() -> Result<()> {
             core_arc.clone().start_nervous_system(mesh_host).await;
 
             info!("Starting web server mode on {}:{}", api_host, port);
-            start_web_server(core_arc, api_host, port)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
+            ghostwire::web::start_web_server(
+                Some(core_arc),
+                api_host,
+                port,
+                bootstrap_multiaddrs.clone(),
+                args.sim_addr.clone(),
+                args.mesh_host.clone(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
         }
         #[cfg(feature = "tui")]
         Some(Commands::Tui) => {
@@ -262,18 +274,32 @@ async fn main() -> Result<()> {
                     "Starting web server mode on {}:{}",
                     args.api_host, args.port
                 );
-                start_web_server(core_arc, args.api_host, args.port)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                ghostwire::web::start_web_server(
+                    Some(core_arc),
+                    args.api_host,
+                    args.port,
+                    bootstrap_multiaddrs.clone(),
+                    args.sim_addr.clone(),
+                    args.mesh_host.clone(),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
             } else {
                 // Default to web server
                 info!(
                     "Starting web server mode on {}:{}",
                     args.api_host, args.port
                 );
-                start_web_server(core_arc, args.api_host, args.port)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                ghostwire::web::start_web_server(
+                    Some(core_arc),
+                    args.api_host,
+                    args.port,
+                    bootstrap_multiaddrs.clone(),
+                    args.sim_addr.clone(),
+                    args.mesh_host.clone(),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
 
                 #[cfg(not(feature = "web"))]
                 {

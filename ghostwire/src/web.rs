@@ -29,7 +29,6 @@ use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 use uuid;
 
 use lazy_static::lazy_static;
@@ -88,13 +87,23 @@ lazy_static! {
     };
 
     static ref AUTH_TOKEN: String = {
-        let token_file = "ghostwire_token.txt";
-        if let Ok(token) = fs::read_to_string(token_file) {
+        let config_dir = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ghostwire");
+            
+        if !config_dir.exists() {
+            let _ = fs::create_dir_all(&config_dir);
+        }
+        
+        let token_file = config_dir.join("token");
+        
+        if let Ok(token) = fs::read_to_string(&token_file) {
             let token = token.trim().to_string();
             if !token.is_empty() {
                 println!("\n\n🔒 GHOSTWIRE SECURITY 🔒");
-                println!("Loaded persistent token from: {}", token_file);
-                println!("X-Ghost-Token: {}", token);
+                println!("Loaded persistent token from: {:?}", token_file);
+                // Don't print the token in production for better security
+                println!("X-Ghost-Token: <HIDDEN_FOR_SECURITY>"); 
                 return token;
             }
         }
@@ -105,10 +114,10 @@ lazy_static! {
             .map(char::from)
             .collect();
 
-        let _ = fs::write(token_file, &token);
+        let _ = fs::write(&token_file, &token);
 
         println!("\n\n🔒 GHOSTWIRE SECURITY 🔒");
-        println!("Generated new persistent token in: {}", token_file);
+        println!("Generated new persistent token in: {:?}", token_file);
         println!("X-Ghost-Token: {}", token);
         println!("(You must include this header in all API requests)\n");
         token
@@ -245,6 +254,77 @@ pub async fn login_handler(
     }
 }
 
+pub async fn list_profiles(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let ghost_dir = home.join(".ghostwire");
+    let mut profiles = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(ghost_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if let Some(fname) = entry.file_name().to_str() {
+                if fname.starts_with("identity_") && fname.ends_with(".json") {
+                    let profile_name = fname
+                        .trim_start_matches("identity_")
+                        .trim_end_matches(".json");
+                    if !profile_name.is_empty() {
+                        profiles.push(profile_name.to_string());
+                    }
+                } else if fname == "identity.json" {
+                     profiles.push("default".to_string());
+                }
+            }
+        }
+    }
+
+    let current = state.core.read().await.identity.clone().read().await.profile.clone();
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(ProfileListResponse { profiles, current }),
+        error: None,
+    })
+}
+
+pub async fn create_profile(
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<CreateProfileRequest>,
+) -> impl IntoResponse {
+    // Validate name (alphanumeric only for safety)
+    if !req.name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+         return (StatusCode::BAD_REQUEST, Json(ApiResponse::<String> {
+            success: false,
+            data: None,
+            error: Some("Invalid profile name. Use alphanumeric, _, -".to_string()),
+        })).into_response();
+    }
+
+    // Check if exists
+    let home = dirs::home_dir().unwrap();
+    let path = home.join(".ghostwire").join(format!("identity_{}.json", req.name));
+    if path.exists() {
+         return (StatusCode::CONFLICT, Json(ApiResponse::<String> {
+            success: false,
+            data: None,
+            error: Some("Profile already exists".to_string()),
+        })).into_response();
+    }
+
+    // We don't actually create the FILE here. The Core initialization does that.
+    // But we can trigger a "select" to create it.
+    // Or we can just say "Created" (it will be created on first use).
+    
+    // Better: Allow "select" to create.
+    // So this endpoint just explicitly validates availability.
+    
+    Json(ApiResponse {
+        success: true,
+        data: Some(format!("Profile '{}' available for selection", req.name)),
+        error: None,
+    }).into_response()
+}
+
+// Select profile will be implemented after main logic refactor
+
 pub async fn verify_token_handler() -> impl IntoResponse {
     Json(ApiResponse {
         success: true,
@@ -252,6 +332,8 @@ pub async fn verify_token_handler() -> impl IntoResponse {
         error: None,
     })
 }
+
+
 
 pub async fn get_dev_token(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -290,9 +372,19 @@ pub async fn get_dev_token(
     .into_response()
 }
 
+use tokio::sync::RwLock;
+
+#[derive(Clone)]
+pub struct StartupConfig {
+    pub bootstrap_nodes: Vec<libp2p::Multiaddr>,
+    pub sim_addr: Option<String>,
+    pub mesh_host: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
-    pub core: Arc<Core>,
+    pub core: Arc<RwLock<Arc<Core>>>,
+    pub config: StartupConfig,
 }
 
 #[derive(Deserialize)]
@@ -364,7 +456,7 @@ impl Default for Settings {
             username: "GhostUser".to_string(),
             display_name: "Ghost_Core".to_string(),
             bio: "Sovereign GhostWire Node".to_string(),
-            listen_port: 3001,
+            listen_port: 5050,
             enable_mdns: true,
             enable_dht: true,
             max_peers: 50,
@@ -385,9 +477,21 @@ impl Default for Settings {
 }
 
 impl Settings {
+    fn get_config_path() -> std::path::PathBuf {
+        let config_dir = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ghostwire");
+            
+        if !config_dir.exists() {
+            let _ = fs::create_dir_all(&config_dir);
+        }
+        
+        config_dir.join("settings.json")
+    }
+
     pub fn load() -> Self {
-        let path = "ghostwire_settings.json";
-        if let Ok(content) = fs::read_to_string(path) {
+        let path = Self::get_config_path();
+        if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(settings) = serde_json::from_str(&content) {
                 return settings;
             }
@@ -399,7 +503,7 @@ impl Settings {
 
     pub fn save(&self) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self).unwrap();
-        fs::write("ghostwire_settings.json", json)
+        fs::write(Self::get_config_path(), json)
     }
 }
 
@@ -502,6 +606,22 @@ pub struct MeshStatsResponse {
     pub stats: crate::core::MeshStats,
 }
 
+#[derive(Deserialize)]
+pub struct CreateProfileRequest {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct SelectProfileRequest {
+    pub profile_name: String,
+}
+
+#[derive(Serialize)]
+pub struct ProfileListResponse {
+    pub profiles: Vec<String>,
+    pub current: Option<String>,
+}
+
 fn get_memory_usage() -> (u64, u64) {
     if let Ok(content) = fs::read_to_string("/proc/meminfo") {
         let mut total = 0;
@@ -601,8 +721,8 @@ pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
     let (mem_total, mem_used) = get_memory_usage();
     let cpu_usage = get_cpu_usage();
-    let sec_stats = state.core.get_security_stats().await;
-    let peer_count = state.core.get_peer_count();
+    let sec_stats = state.core.read().await.get_security_stats().await;
+    let peer_count = state.core.read().await.get_peer_count();
 
     #[derive(Serialize)]
     struct SystemStatus {
@@ -642,12 +762,13 @@ pub async fn send_message(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SendMessageRequest>,
 ) -> impl IntoResponse {
-    let mut core_messages = state.core.messages.write().await;
+    let messages_arc = state.core.read().await.messages.clone();
+    let mut core_messages = messages_arc.write().await;
 
     let (final_content, is_encrypted, status_msg) = if req.recipient == "broadcast" {
         (req.message.clone(), false, "NONE (Broadcast)".to_string())
     } else {
-        match state.core.encryption.encrypt_message(
+        match state.core.read().await.encryption.clone().encrypt_message(
             &req.message,
             &req.recipient,
             crate::core::encryption::MessageType::Text,
@@ -681,7 +802,7 @@ pub async fn send_message(
     // Create new message
     let message = crate::core::Message {
         id: uuid::Uuid::new_v4(),
-        sender: state.core.get_identity_id(),
+        sender: state.core.read().await.get_identity_id().await,
         recipient: req.recipient.clone(),
         content: final_content.clone(),
         timestamp: SystemTime::now()
@@ -696,7 +817,7 @@ pub async fn send_message(
     core_messages.push(message.clone());
 
     // Dispatch via Active Transport (StealthTCP/Mesh)
-    match state.core.send_message(&message).await {
+    match state.core.read().await.send_message(&message).await {
         Ok(_) => tracing::info!("Message dispatched to transport layer"),
         Err(e) => tracing::error!("Transport dispatch failed: {}", e),
     }
@@ -723,8 +844,8 @@ pub async fn get_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     let mut peers: Vec<PeerInfo> = Vec::new();
 
     #[cfg(feature = "mesh")]
-    if let Some(mesh_manager) = &state.core.mesh_manager {
-        let topology = mesh_manager.read().await.get_topology().await;
+    if let Some(mesh_manager) = &state.core.read().await.mesh_manager.clone() {
+        let topology = mesh_manager.read().await.get_topology();
         for (id, node) in topology.nodes {
             peers.push(PeerInfo {
                 id,
@@ -751,7 +872,7 @@ pub async fn get_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse 
 }
 
 pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let peer_count = state.core.get_peer_count();
+    let peer_count = state.core.read().await.get_peer_count();
     let settings = Settings::load();
 
     // Inject runtime stats that shouldn't be persistent if they were in the DTO
@@ -808,8 +929,8 @@ pub async fn update_settings(
 }
 
 pub async fn get_public_key(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let public_key = general_purpose::STANDARD.encode(state.core.get_public_key());
-    let key_id = state.core.get_key_id();
+    let public_key = general_purpose::STANDARD.encode(state.core.read().await.get_public_key());
+    let key_id = state.core.read().await.get_key_id();
 
     #[derive(Serialize)]
     struct KeyInfo {
@@ -1470,7 +1591,7 @@ pub async fn configure_firewall(
     // Real Firewall Configuration
     tracing::info!("Applying firewall rules: {:?}", req);
 
-    let mut new_config = state.core.security_manager.get_config().await;
+    let mut new_config = state.core.read().await.security_manager.clone().get_config().await;
 
     // Parse request
     if let Some(allowed) = req.get("allowed_ips").and_then(|v| v.as_array()) {
@@ -1487,11 +1608,11 @@ pub async fn configure_firewall(
     }
 
     // Update runtime config
-    state.core.security_manager.update_config(new_config).await;
+    state.core.read().await.security_manager.clone().update_config(new_config).await;
 
     // Persist to disk
     let path = "security_config.json";
-    match state.core.security_manager.save_config(path) {
+    match state.core.read().await.security_manager.clone().save_config(path) {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some("Firewall rules applied and persisted to security_config.json"),
@@ -1507,7 +1628,7 @@ pub async fn configure_firewall(
 
 pub async fn test_firewall(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Real Self-Test
-    let mgr = &state.core.security_manager;
+    let mgr = &state.core.read().await.security_manager.clone();
     let is_lockdown = mgr.is_lockdown().await;
 
     let result = if is_lockdown {
@@ -1528,7 +1649,7 @@ pub async fn test_firewall(State(state): State<Arc<AppState>>) -> impl IntoRespo
 }
 
 pub async fn lockdown(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let mgr = &state.core.security_manager;
+    let mgr = &state.core.read().await.security_manager.clone();
     let current = mgr.is_lockdown().await;
     let new_state = !current;
 
@@ -1988,7 +2109,7 @@ pub async fn backup_security(State(state): State<Arc<AppState>>) -> impl IntoRes
 
     let filename = format!("security_backup_{}.json", timestamp);
 
-    match state.core.security_manager.save_config(&filename) {
+    match state.core.read().await.security_manager.clone().save_config(&filename) {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some(format!("Security configuration backed up to {}", filename)),
@@ -2114,7 +2235,8 @@ pub async fn analyze_communications(State(_state): State<Arc<AppState>>) -> impl
 }
 
 pub async fn get_messages(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let messages = state.core.messages.read().await;
+    let messages_arc = state.core.read().await.messages.clone();
+    let messages = messages_arc.read().await;
     let msgs: Vec<crate::core::Message> = messages.clone();
 
     Json(ApiResponse {
@@ -2239,7 +2361,7 @@ pub async fn set_username(
     Json(req): Json<UsernameRequest>,
 ) -> impl IntoResponse {
     // Update the persistent identity with the new username
-    state.core.identity.update_metadata(Some(req.username.clone()), None, None);
+    state.core.read().await.update_metadata(Some(req.username.clone()), None, None, None).await;
     
     info!("Username updated in persistent identity: {}", req.username);
     
@@ -2253,7 +2375,7 @@ pub async fn set_username(
 #[allow(dead_code)]
 pub async fn get_username(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Get username from persistent identity
-    let username = state.core.identity.get_metadata().nickname;
+    let username = state.core.read().await.get_metadata().await.nickname;
     
     Json(ApiResponse {
         success: true,
@@ -2326,7 +2448,7 @@ pub async fn start_mesh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MeshConnectRequest>,
 ) -> impl IntoResponse {
-    match state.core.start_mesh(&req.address).await {
+    match state.core.read().await.start_mesh(&req.address).await {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some("Mesh network started"),
@@ -2344,7 +2466,7 @@ pub async fn connect_meshtastic(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MeshConnectRequest>,
 ) -> impl IntoResponse {
-    match state.core.connect_meshtastic(&req.address).await {
+    match state.core.read().await.connect_meshtastic(&req.address).await {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some("Connected to Meshtastic device"),
@@ -2365,7 +2487,7 @@ pub async fn send_mesh_message(
     // Create a proper Message object for mesh
     let message = Message {
         id: uuid::Uuid::new_v4(),
-        sender: state.core.get_identity_id(),
+        sender: state.core.read().await.get_identity_id().await,
         recipient: "mesh".to_string(),
         content: req.content.clone(),
         timestamp: SystemTime::now()
@@ -2377,7 +2499,7 @@ pub async fn send_mesh_message(
         encryption_status: "none".to_string(),
     };
 
-    match state.core.send_message(&message).await {
+    match state.core.read().await.send_message(&message).await {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some("Mesh message sent successfully"),
@@ -2392,7 +2514,7 @@ pub async fn send_mesh_message(
 }
 
 pub async fn get_mesh_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.core.get_mesh_stats().await {
+    match state.core.read().await.get_mesh_stats().await {
         Some(stats) => Json(ApiResponse {
             success: true,
             data: Some(MeshStatsResponse { stats }),
@@ -2448,7 +2570,7 @@ impl From<&crate::core::MeshTopology> for MeshTopologyDto {
 
 pub async fn get_mesh_topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Enhanced mesh topology with real network data
-    let local_node_id = state.core.get_identity_id();
+    let local_node_id = state.core.read().await.get_identity_id().await;
 
     // Create simulated mesh nodes
     let nodes = vec![
@@ -2559,7 +2681,7 @@ pub async fn init_reticulum(State(_state): State<Arc<AppState>>) -> impl IntoRes
 }
 
 pub async fn get_reticulum_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.core.get_reticulum_stats().await {
+    match state.core.read().await.get_reticulum_stats().await {
         Some(stats) => Json(ApiResponse {
             success: true,
             data: Some(ReticulumStatsResponse { stats }),
@@ -2584,7 +2706,7 @@ pub async fn send_reticulum_message(
 ) -> impl IntoResponse {
     let message = Message {
         id: uuid::Uuid::new_v4(),
-        sender: state.core.get_identity_id(),
+        sender: state.core.read().await.get_identity_id().await,
         recipient: "reticulum".to_string(),
         content: req.content.clone(),
         timestamp: SystemTime::now()
@@ -2596,7 +2718,7 @@ pub async fn send_reticulum_message(
         encryption_status: "none".to_string(),
     };
 
-    match state.core.send_message(&message).await {
+    match state.core.read().await.send_message(&message).await {
         Ok(_) => Json(ApiResponse {
             success: true,
             data: Some("Reticulum message sent successfully"),
@@ -2620,10 +2742,10 @@ pub async fn get_identity(State(state): State<Arc<AppState>>) -> impl IntoRespon
     }
 
     let identity_info = IdentityInfo {
-        id: state.core.get_identity_id(),
+        id: state.core.read().await.get_identity_id().await,
         username: "GhostWire User".to_string(), // TODO: Get from config
-        public_key: general_purpose::STANDARD.encode(state.core.get_public_key()),
-        key_id: state.core.get_key_id(),
+        public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
+        key_id: state.core.read().await.get_key_id(),
     };
 
     Json(ApiResponse {
@@ -2675,27 +2797,248 @@ pub async fn get_security_stats(State(_state): State<Arc<AppState>>) -> impl Int
     })
 }
 
-pub async fn start_web_server(core: Arc<Core>, host: String, port: u16) -> anyhow::Result<()> {
-    let app = app(core);
-
-    let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
-
-    info!("Starting GhostWire web server on {}", addr);
-    info!("Security features enabled: encryption, authentication, threat detection");
-
-    // Use the correct axum serve function with ConnectInfo for rate limiting
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await?;
-
-    Ok(())
+#[derive(Deserialize)]
+pub struct UnlockIdentityRequest {
+    pub password: String,
 }
 
-pub fn app(core: Arc<Core>) -> Router {
-    let app_state = Arc::new(AppState { core });
+#[derive(Serialize)]
+pub struct IdentityStatusResponse {
+    pub locked: bool,
+    pub has_identity: bool,
+    pub did: Option<String>,
+    pub username: Option<String>,
+    pub setup_complete: bool,
+}
+
+#[derive(Deserialize)]
+pub struct SetupIdentityRequest {
+    pub nickname: String,
+    pub password: String,
+}
+
+pub async fn setup_identity(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetupIdentityRequest>,
+) -> impl IntoResponse {
+    state
+        .core
+        .read()
+        .await
+        .update_metadata(Some(req.nickname), None, None, Some(true))
+        .await;
+
+    // 2. Save with password
+    match state.core.read().await.save_to_disk(&req.password).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Setup complete"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to save: {}", e)),
+        }),
+    }
+}
+
+pub async fn unlock_identity(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UnlockIdentityRequest>,
+) -> impl IntoResponse {
+    match state.core.read().await.unlock(&req.password).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Identity unlocked"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to unlock: {}", e)),
+        }),
+    }
+}
+
+pub async fn lock_identity(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.core.read().await.lock().await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Identity locked"),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to lock: {}", e)),
+        }),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RecoverAccountRequest {
+    pub username: String,
+    pub recovery_password: String,
+}
+
+#[derive(Deserialize)]
+pub struct EnableRecoveryRequest {
+    pub recovery_password: String,
+}
+
+#[derive(Serialize)]
+pub struct EnableRecoveryResponse {
+    pub stored_indices: Vec<String>,
+}
+
+pub async fn recover_account(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RecoverAccountRequest>,
+) -> impl IntoResponse {
+    match state.core.read().await.recover_account(&req.username, &req.recovery_password).await {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some("Account recovered successfully".to_string()),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Recovery failed: {}", e)),
+        }),
+    }
+}
+
+pub async fn enable_recovery(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<EnableRecoveryRequest>,
+) -> impl IntoResponse {
+    match state.core.read().await.enable_recovery(&req.recovery_password).await {
+        Ok(indices) => Json(ApiResponse {
+            success: true,
+            data: Some(EnableRecoveryResponse { stored_indices: indices }),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to enable recovery: {}", e)),
+        }),
+    }
+}
+
+pub async fn get_identity_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let locked = state.core.read().await.is_locked().await;
+    let metadata = state.core.read().await.get_metadata().await;
+    let has_identity = true;
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(IdentityStatusResponse {
+            locked,
+            has_identity,
+            did: Some(state.core.read().await.get_did().await),
+            username: Some(metadata.nickname),
+            setup_complete: metadata.setup_complete,
+        }),
+        error: None,
+    })
+}
+
+pub async fn get_tutorial() -> impl IntoResponse {
+    Json(ApiResponse {
+        success: true,
+        data: Some(crate::core::tutorial::get_tutorial_steps()),
+        error: None,
+    })
+}
+
+pub async fn select_profile(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SelectProfileRequest>,
+) -> impl IntoResponse {
+    let profile_name = if req.profile_name == "default" {
+        None
+    } else {
+        Some(req.profile_name)
+    };
+
+    tracing::info!("🔄 Switching to profile: {:?}", profile_name);
+
+    // Initialize new Core
+    // We reuse startup config from AppState
+    let new_core_res = Core::new(
+        state.config.bootstrap_nodes.clone(),
+        state.config.sim_addr.clone(),
+        profile_name,
+    ).await;
+
+    match new_core_res {
+        Ok(new_core) => {
+            let core_arc = Arc::new(new_core);
+
+            // Swap the core in AppState
+            {
+                let mut core_guard = state.core.write().await;
+                *core_guard = core_arc.clone();
+            }
+
+            // Start background tasks for the new core
+            let mesh_host = state.config.mesh_host.clone();
+            tokio::spawn(async move {
+                core_arc.start_nervous_system(mesh_host).await;
+            });
+
+            Json(ApiResponse {
+                success: true,
+                data: Some("Profile loaded successfully".to_string()),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to load profile: {}", e);
+             Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Failed to load profile: {}", e)),
+            })
+        }
+    }
+}
+
+pub async fn start_web_server(
+    core: Option<Arc<Core>>,
+    host: String,
+    port: u16,
+    bootstrap_nodes: Vec<libp2p::Multiaddr>,
+    sim_addr: Option<String>,
+    mesh_host: String,
+) -> anyhow::Result<()> {
+    // If core is provided, use it. If not, create a "Guest" core (volatile).
+    let initial_core = if let Some(c) = core {
+        c
+    } else {
+        tracing::info!("👤 No profile selected. Initializing Guest Core...");
+        // Initialize Guest Core
+        // Note: We need to update Core::new to handle empty inputs gracefully if we haven't already
+        // But assuming Core::new works with standard inputs:
+        let guest_core = Core::new(
+             bootstrap_nodes.clone(),
+             sim_addr.clone(),
+             None // No profile = Guest/Volatile Identity
+        ).await?;
+        Arc::new(guest_core)
+    };
+
+    let app_state = Arc::new(AppState {
+        core: Arc::new(RwLock::new(initial_core)),
+        config: StartupConfig {
+            bootstrap_nodes,
+            sim_addr,
+            mesh_host,
+        },
+    });
 
     // Initialize token immediately
     let _ = &*AUTH_TOKEN;
@@ -2709,7 +3052,6 @@ pub fn app(core: Arc<Core>) -> Router {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, HeaderName::from_static("x-ghost-token")]);
 
     // Rate limiting policies
-    // Auth: 5 requests per 60 seconds
     let auth_governor_conf = GovernorConfigBuilder::default()
         .per_second(60)
         .burst_size(5)
@@ -2720,7 +3062,6 @@ pub fn app(core: Arc<Core>) -> Router {
         config: std::sync::Arc::new(auth_governor_conf),
     };
 
-    // Messaging: 10 requests per 60 seconds
     let msg_governor_conf = GovernorConfigBuilder::default()
         .per_second(60)
         .burst_size(10)
@@ -2731,7 +3072,6 @@ pub fn app(core: Arc<Core>) -> Router {
         config: std::sync::Arc::new(msg_governor_conf),
     };
 
-    // Default: 60 requests per 60 seconds
     let default_governor_conf = GovernorConfigBuilder::default()
         .per_second(60)
         .burst_size(60)
@@ -2742,7 +3082,7 @@ pub fn app(core: Arc<Core>) -> Router {
         config: std::sync::Arc::new(default_governor_conf),
     };
 
-    // Define sub-routers for cleaner organization and specific middleware
+    // Define sub-routers
     let auth_routes = Router::new()
         .route("/login", post(login_handler))
         .route("/verify", get(verify_token_handler))
@@ -2755,76 +3095,100 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/v2", get(get_messages_v2))
         .layer(msg_rate_limiter);
 
-    Router::new()
-        .nest_service("/", ServeDir::new("../webui/dist"))
-        .route("/api", get(root))
-        .route("/api/", get(root))
-        .nest("/api/auth", auth_routes)
-        .route("/api/status", get(status))
-        .route("/api/identity", get(get_identity))
-        .route("/api/public-key", get(get_public_key))
-        .route("/api/public_key", get(get_public_key))
-        .nest("/api/messages", message_routes)
-        // Keep legacy routes for compatibility
-        .route("/api/send", post(send_message))
-        .route("/api/send_message", post(send_message))
-        .route("/api/messages", get(get_messages))
-        .route("/api/peers", get(get_peers))
-        .route("/api/settings", get(get_settings))
-        .route("/api/settings", put(update_settings))
-        .route("/api/mesh/init", post(init_mesh))
-        .route("/api/mesh/start", post(start_mesh))
-        .route("/api/mesh/connect_meshtastic", post(connect_meshtastic))
-        .route("/api/mesh/send", post(send_mesh_message))
-        .route("/api/mesh/stats", get(get_mesh_stats))
-        .route("/api/mesh/topology", get(get_mesh_topology))
-        .route("/api/mesh/nodes", get(get_mesh_nodes))
-        .route("/api/reticulum/init", post(init_reticulum))
-        .route("/api/reticulum/stats", get(get_reticulum_stats))
-        .route("/api/reticulum/send", post(send_reticulum_message))
-        .route("/api/security/stats", get(get_security_stats))
+    let api_routes = Router::new()
+        .route("/", get(root))
+        .nest("/auth", auth_routes)
+        // Profile Management
+        .route("/profile/list", get(list_profiles))
+        .route("/profile/create", post(create_profile))
+        .route("/profile/select", post(select_profile))
+        // Core functionality
+        .route("/status", get(status))
+        .route("/identity", get(get_identity))
+        .route("/identity/lock", post(lock_identity))
+        .route("/identity/unlock", post(unlock_identity))
+        .route("/identity/status", get(get_identity_status))
+        .route("/identity/setup", post(setup_identity))
+        .route("/identity/recovery/recover", post(recover_account))
+        .route("/identity/recovery/enable", post(enable_recovery))
+        .route("/public-key", get(get_public_key))
+        .route("/public_key", get(get_public_key))
+        .nest("/messages", message_routes)
+        .route("/send", post(send_message))
+        .route("/send_message", post(send_message))
+        .route("/messages", get(get_messages))
+        .route("/peers", get(get_peers))
+        .route("/settings", get(get_settings))
+        .route("/settings", put(update_settings))
+        .route("/mesh/init", post(init_mesh))
+        .route("/mesh/start", post(start_mesh))
+        .route("/mesh/connect_meshtastic", post(connect_meshtastic))
+        .route("/mesh/send", post(send_mesh_message))
+        .route("/mesh/stats", get(get_mesh_stats))
+        .route("/mesh/topology", get(get_mesh_topology))
+        .route("/mesh/nodes", get(get_mesh_nodes))
+        .route("/reticulum/init", post(init_reticulum))
+        .route("/reticulum/stats", get(get_reticulum_stats))
+        .route("/reticulum/send", post(send_reticulum_message))
+        .route("/security/stats", get(get_security_stats))
+        .route("/register_peer", post(register_peer))
+        .route("/scan_network", get(scan_network))
+        .route("/set_username", post(set_username))
+        .route("/get_username", get(get_username))
+        .route("/get_network_info", get(get_network_info))
+        .route("/report_error", post(report_error))
+        .route("/connect_peer", post(connect_to_peer))
+        .route("/connection_request", post(connection_request_handler))
+        .route("/accept_connection", post(accept_connection))
+        .route("/get_connection_requests", get(get_connection_requests))
+        .route("/disconnect_peer", post(disconnect_peer))
+        .route("/ping_peer", post(ping_peer))
+        .route("/broadcast", post(broadcast_message))
+        .route("/backup", post(backup_system))
+        .route("/logs", get(get_system_logs))
+        .route("/rotate_keys", post(rotate_keys))
+        .route("/upgrade_encryption", post(upgrade_encryption))
+        .route("/configure_firewall", post(configure_firewall))
+        .route("/test_firewall", post(test_firewall))
+        .route("/auth_users", get(get_auth_users))
+        .route("/audit_auth", post(audit_auth))
+        .route("/security_scan", post(security_scan))
+        .route("/threat_hunt", post(threat_hunt))
+        .route("/security_audit", post(security_audit))
+        .route("/lockdown", post(lockdown))
+        .route("/backup_security", post(backup_security))
+        .route("/analyze_communications", post(analyze_communications))
+        .route("/dev/token", get(get_dev_token))
+        .route("/v2/profile", get(get_profile_v2))
+        .route("/v2/profile/username", put(update_username_v2))
+        .route("/v2/profile/metadata", put(update_metadata_v2))
+        .route("/v2/profile/public-key", get(get_public_key_v2))
+        .route("/v2/security/dashboard", get(get_security_dashboard_v2))
+        .route("/v2/security/armor", put(toggle_pqc_armor_v2))
+        .route("/v2/mesh/sharding", put(update_sharding_v2))
+        .route("/v2/peers", get(get_peers_v2))
+        .route("/v2/messages", get(get_messages_v2))
+        .layer(default_rate_limiter);
+
+    let app = Router::new()
+        .nest("/api", api_routes)
+        .route("/api/help/tutorial", get(get_tutorial))
         .route("/ws", get(ws_handler))
-        .route("/api/register_peer", post(register_peer))
-        .route("/api/scan_network", get(scan_network))
-        .route("/api/set_username", post(set_username))
-        .route("/api/get_username", get(get_username))
-        .route("/api/get_network_info", get(get_network_info))
-        .route("/api/report_error", post(report_error))
-        .route("/api/connect_peer", post(connect_to_peer))
-        .route("/api/connection_request", post(connection_request_handler))
-        .route("/api/accept_connection", post(accept_connection))
-        .route("/api/get_connection_requests", get(get_connection_requests))
-        .route("/api/disconnect_peer", post(disconnect_peer))
-        .route("/api/ping_peer", post(ping_peer))
-        .route("/api/broadcast", post(broadcast_message))
-        .route("/api/backup", post(backup_system))
-        .route("/api/logs", get(get_system_logs))
-        .route("/api/rotate_keys", post(rotate_keys))
-        .route("/api/upgrade_encryption", post(upgrade_encryption))
-        .route("/api/configure_firewall", post(configure_firewall))
-        .route("/api/test_firewall", post(test_firewall))
-        .route("/api/auth_users", get(get_auth_users))
-        .route("/api/audit_auth", post(audit_auth))
-        .route("/api/security_scan", post(security_scan))
-        .route("/api/threat_hunt", post(threat_hunt))
-        .route("/api/security_audit", post(security_audit))
-        .route("/api/lockdown", post(lockdown))
-        .route("/api/backup_security", post(backup_security))
-        .route("/api/analyze_communications", post(analyze_communications))
-        .route("/api/dev/token", get(get_dev_token))
-        .route("/api/v2/profile", get(get_profile_v2))
-        .route("/api/v2/profile/username", put(update_username_v2))
-        .route("/api/v2/profile/metadata", put(update_metadata_v2))
-        .route("/api/v2/profile/public-key", get(get_public_key_v2))
-        .route("/api/v2/security/dashboard", get(get_security_dashboard_v2))
-        .route("/api/v2/security/armor", put(toggle_pqc_armor_v2))
-        .route("/api/v2/mesh/sharding", put(update_sharding_v2))
-        .route("/api/v2/peers", get(get_peers_v2))
-        .route("/api/v2/messages", get(get_messages_v2))
         .layer(middleware::from_fn(auth_middleware))
-        .layer(default_rate_limiter)
-        // .layer(rate_limiter)
-        .layer(cors)
+        .layer(cors.clone())
         .fallback(static_handler)
-        .with_state(app_state)
+        .with_state(app_state);
+
+    let address = format!("{}:{}", host, port);
+    info!("Starting GhostWire web server on http://{}", address);
+    info!("Security features enabled: encryption, authentication, threat detection");
+
+    let listener = tokio::net::TcpListener::bind(&address).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
+
+    Ok(())
 }

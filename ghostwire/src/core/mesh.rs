@@ -5,23 +5,21 @@ use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, Thre
 use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
 use anyhow::Result;
 // use async_trait::async_trait;
+use crate::core::username_discovery::UsernameDiscovery;
 use base64::Engine;
 use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
-use libp2p::kad::{Behaviour as Kad, Event as KadEvent, QueryResult};
+use libp2p::kad::Behaviour as Kad;
 use libp2p::tcp::Transport as TcpTransport;
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
-        Behaviour as Gossipsub, Config as GossipsubConfig, Event as GossipsubEvent,
-        Message as GossipsubMessage, MessageAuthenticity, MessageId,
+        Behaviour as Gossipsub, Config as GossipsubConfig, Message as GossipsubMessage,
+        MessageAuthenticity, MessageId,
     },
-    identify::{
-        Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent,
-        Info as IdentifyInfo,
-    },
-    mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent},
+    identify::{Behaviour as Identify, Config as IdentifyConfig},
+    mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig},
     swarm::{Config as SwarmConfig, NetworkBehaviour, Swarm, SwarmEvent},
     Multiaddr, PeerId,
 };
@@ -29,8 +27,36 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+pub enum MeshCommand {
+    PutRecord {
+        key: Vec<u8>,
+        value: Vec<u8>,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    GetRecord {
+        key: Vec<u8>,
+        reply: oneshot::Sender<Result<Vec<u8>>>,
+    },
+    ConnectPeer {
+        peer_id: PeerId,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    PublishUsername {
+        reply: oneshot::Sender<Result<()>>,
+    },
+    SetShard {
+        shard: String,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    BroadcastMessage {
+        message: Message,
+        reply: oneshot::Sender<Result<()>>,
+    },
+}
 
 /// Mesh network node information
 #[derive(Debug, Clone, Serialize)]
@@ -48,7 +74,7 @@ pub struct MeshNode {
     pub threat_level: ThreatLevel,
 }
 
-pub const DEFAULT_BOOTSTRAPS: &'static [&'static str] = &[
+pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooP36J7RSRM8uXCc8p6Y74G56EPV45UFSy9Pr7T79F",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCUuY6vS7705XT5ZqUhc4G3n9PqEqH5D3S8Y8xYFSy9Pr",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMo6pXhvG2SFTkS5rTfyS28y2XbY3R7wF1pG4z5W",
@@ -93,7 +119,9 @@ impl StealthTransport {
 
 /// Mesh transport implementation with enhanced security
 pub struct MeshTransport {
-    swarm: Swarm<MeshBehaviour>,
+    swarm: Option<Swarm<MeshBehaviour>>,
+    command_tx: mpsc::Sender<MeshCommand>,
+    command_rx: Option<mpsc::Receiver<MeshCommand>>,
     node_id: String,
     identity: Arc<Identity>,
     security_manager: Arc<SecurityManager>,
@@ -120,7 +148,9 @@ impl MeshTransport {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
     ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
-        let local_key = identity.keypair();
+        let local_key = identity.keypair().ok_or_else(|| {
+            anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
+        })?;
         let local_peer_id = PeerId::from(local_key.public());
 
         // Create enhanced StealthTCP provider with security integration
@@ -196,8 +226,12 @@ impl MeshTransport {
             SwarmConfig::with_tokio_executor(),
         );
 
+        let (command_tx, command_rx) = mpsc::channel(100);
+
         Ok(Self {
-            swarm,
+            swarm: Some(swarm),
+            command_tx,
+            command_rx: Some(command_rx),
             node_id: node_id.clone(),
             identity,
             security_manager,
@@ -224,6 +258,15 @@ impl MeshTransport {
     pub async fn start(&mut self, listen_addr: Multiaddr) -> Result<()> {
         info!("Starting secure mesh network on {}", listen_addr);
 
+        let mut swarm = self
+            .swarm
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Swarm already started or missing"))?;
+        let command_rx = self
+            .command_rx
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Channels missing"))?;
+
         // Security check for listen address
         if let Some(ip) = listen_addr.iter().find_map(|proto| {
             if let libp2p::multiaddr::Protocol::Ip4(ip) = proto {
@@ -243,11 +286,11 @@ impl MeshTransport {
         }
 
         // Listen on the specified address
-        self.swarm.listen_on(listen_addr)?;
+        swarm.listen_on(listen_addr.clone())?;
 
         // Subscribe to broadcast topic
         let topic = IdentTopic::new("ghostwire-messages");
-        self.swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+        swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
@@ -259,7 +302,7 @@ impl MeshTransport {
                 }
             }) {
                 info!("Adding bootstrap node: {} ({})", peer_id, addr);
-                self.swarm
+                swarm
                     .behaviour_mut()
                     .kad
                     .add_address(&peer_id, addr.clone());
@@ -268,150 +311,250 @@ impl MeshTransport {
             }
         }
 
-        // Kick off Kademlia bootstrap
-        if !self.bootstrap_nodes.is_empty() {
-            info!("Initiating DHT bootstrap...");
-            self.swarm.behaviour_mut().kad.bootstrap()?;
-        }
+        let driver = MeshDriver {
+            swarm,
+            command_rx,
+            _node_id: self.node_id.clone(),
+            _identity: self.identity.clone(),
+            security_manager: self.security_manager.clone(),
+            encryption_manager: self.encryption_manager.clone(),
+            _username_discovery: self.username_discovery.clone(),
+            event_bus: self.event_bus.clone(),
+            pending_get_queries: HashMap::new(),
+        };
 
-        // Publish username to DHT
-        let username_discovery = self.username_discovery.clone();
-        let local_key = self.identity.keypair().clone();
-        let pk_bytes = local_key.public().encode_protobuf();
-        let sk_bytes = local_key
-            .to_protobuf_encoding()
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        if let Ok((key, value)) =
-            username_discovery.prepare_username_publication(pk_bytes, &sk_bytes)
-        {
-            self.swarm.behaviour_mut().kad.put_record(
-                libp2p::kad::Record {
-                    key,
-                    value,
-                    publisher: Some(self.identity.keypair().public().to_peer_id()),
-                    expires: None,
-                },
-                libp2p::kad::Quorum::One,
-            )?;
-            info!("Auto-published username to DHT");
-        }
-
-        // Start the swarm event loop
-        self.run_swarm_loop().await?;
-
+        tokio::spawn(driver.run());
         Ok(())
     }
 
-    /// Run the swarm event loop with security monitoring
-    async fn run_swarm_loop(&mut self) -> Result<()> {
+    pub async fn put_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::PutRecord {
+                key,
+                value,
+                reply: tx,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn get_record(&self, key: Vec<u8>) -> Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::GetRecord { key, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn broadcast_message(&self, message: &Message) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::BroadcastMessage {
+                message: message.clone(),
+                reply: tx,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn connect_peer(&self, peer_id: PeerId) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::ConnectPeer { peer_id, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub fn get_listeners(&self) -> Vec<Multiaddr> {
+        vec![]
+    }
+
+    pub async fn get_security_stats(&self) -> crate::core::security::SecurityStats {
+        self.security_manager.get_security_stats().await
+    }
+
+    pub fn get_connection_stats(&self) -> ConnectionStats {
+        self.stealth_provider.get_connection_stats()
+    }
+
+    pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
+        self.current_shard = shard.to_string();
+        tracing::info!("MeshTransport switching to DHT Shard: {}", shard);
+        Ok(())
+    }
+
+    pub fn add_bootstrap_nodes(&mut self, _nodes: Vec<Multiaddr>) {
+        warn!("Adding bootstrap nodes dynamically not supported in actor model yet");
+    }
+
+    pub async fn publish_username(&mut self) -> Result<()> {
+        warn!("Publishing username is currently a placeholder");
+        Ok(())
+    }
+
+    pub async fn lookup_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<crate::core::username_discovery::UsernameRecord>> {
+        use crate::core::username_discovery::UsernameLookupResult;
+
+        match self
+            .username_discovery
+            .find_peer_by_username(username)
+            .await?
+        {
+            UsernameLookupResult::Cached(record) => Ok(Some(record)),
+            UsernameLookupResult::DhtQuery(key) => {
+                let _ = self.get_record(key.to_vec()).await;
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn get_topology(&self) -> MeshTopology {
+        MeshTopology {
+            nodes: HashMap::new(),
+            routes: HashMap::new(),
+            local_node_id: self.node_id.clone(),
+        }
+    }
+
+    pub fn find_route(&self, _target_node: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    pub async fn update_connection_quality(&mut self, node_id: &str, quality: f32) {
+        info!("Updated connection quality for {}: {}", node_id, quality);
+    }
+}
+
+struct MeshDriver {
+    swarm: Swarm<MeshBehaviour>,
+    command_rx: mpsc::Receiver<MeshCommand>,
+    _node_id: String,
+    _identity: Arc<Identity>,
+    security_manager: Arc<SecurityManager>,
+    encryption_manager: Arc<EncryptionManager>,
+    _username_discovery: Arc<UsernameDiscovery>,
+    event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+    pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
+}
+
+impl MeshDriver {
+    async fn run(mut self) {
         loop {
             tokio::select! {
-                        swarm_event = self.swarm.next() => {
-                            match swarm_event {
-                                Some(SwarmEvent::NewListenAddr { address, .. }) => {
-                                    info!("Listening on {}", address);
-                                }
-                                Some(SwarmEvent::Behaviour(event)) => {
-                                    match event {
-                                        MeshBehaviourEvent::Gossipsub(event) => {
-                                            match event {
-                                                GossipsubEvent::Message { propagation_source, message_id, message } => {
-                                                    self.handle_gossipsub_message(propagation_source, message_id, message).await?;
-                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        MeshBehaviourEvent::Identify(event) => {
-                                            match event {
-                                                IdentifyEvent::Received { peer_id, info, .. } => {
-                                    self.handle_identify_info(peer_id, info).await?;
-                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        MeshBehaviourEvent::Kad(event) => {
-                                            match event {
-                                                KadEvent::OutboundQueryProgressed { ref result, .. } => {
-                                                    if let QueryResult::Bootstrap(result) = result {
-                                                        info!("Kademlia bootstrap completed: {:?}", result);
-                                                    }
-                                                    // Pass to username discovery
-                                                    if let Err(e) = self.username_discovery.handle_kad_event(&event).await {
-                                                        debug!("Username discovery failed to handle Kademlia event: {:?}", e);
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        MeshBehaviourEvent::Mdns(event) => {
-                                            match event {
-                                                MdnsEvent::Discovered(list) => {
-                                    for (peer_id, multiaddr) in list {
-                                        info!("mDNS discovered peer: {} at {}", peer_id, multiaddr);
-                                        self.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
-                                        self.send_handshake().await?;
-                                        // Broadcast peer connection event
-                                        if let Some(bus) = &self.event_bus {
-                                            let _ = bus.send(crate::core::CoreEvent::PeerConnected(peer_id.to_string()));
-                                        }
-                                    }
-                                }
-                                        MdnsEvent::Expired(list) => {
-                                            for (peer_id, multiaddr) in list {
-                                                tracing::info!("mDNS expired peer: {} at {}", peer_id, multiaddr);
-                                                self.swarm.behaviour_mut().kad.remove_address(&peer_id, &multiaddr);
-                                            }
-                                        }
-                                    }
-                                }
-                                MeshBehaviourEvent::Autonat(event) => {
-                                     match event {
-                                        libp2p::autonat::Event::StatusChanged { old, new } => {
-                                            info!("AutoNAT status changed: {:?} -> {:?}", old, new);
-                                        }
-                                        libp2p::autonat::Event::InboundProbe(e) => {
-                                            debug!("AutoNAT Inbound Probe: {:?}", e);
-                                        }
-                                        libp2p::autonat::Event::OutboundProbe(e) => {
-                                            debug!("AutoNAT Outbound Probe: {:?}", e);
-                                        }
-                                     }
-                                }
-                                MeshBehaviourEvent::Relay(event) => {
-                                    debug!("Relay client event: {:?}", event);
-                                }
-                                MeshBehaviourEvent::Dcutr(event) => {
-                                    debug!("DCUtR event: {:?}", event);
-                                }
-                            }
-                        }
-                        _ => {}
+                event = self.swarm.next() => {
+                    if let Some(event) = event {
+                        self.handle_swarm_event(event).await;
+                    } else {
+                        break;
+                    }
+                }
+                command = self.command_rx.recv() => {
+                    if let Some(cmd) = command {
+                        self.handle_command(cmd).await;
+                    } else {
+                        break;
                     }
                 }
             }
         }
     }
 
-    async fn send_handshake(&mut self) -> Result<()> {
-        let pub_key = self.encryption_manager.export_public_key();
-        let encoded_key = base64::engine::general_purpose::STANDARD.encode(pub_key);
+    async fn handle_command(&mut self, cmd: MeshCommand) {
+        match cmd {
+            MeshCommand::PutRecord { key, value, reply } => {
+                let record = libp2p::kad::Record {
+                    key: libp2p::kad::RecordKey::new(&key),
+                    value,
+                    publisher: None,
+                    expires: None,
+                };
+                let res = self
+                    .swarm
+                    .behaviour_mut()
+                    .kad
+                    .put_record(record, libp2p::kad::Quorum::One);
+                let _ = reply.send(res.map(|_| ()).map_err(|e| anyhow::anyhow!("{:?}", e)));
+            }
+            MeshCommand::GetRecord { key, reply } => {
+                let query_id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kad
+                    .get_record(libp2p::kad::RecordKey::new(&key));
+                self.pending_get_queries.insert(query_id, reply);
+            }
+            MeshCommand::BroadcastMessage { message, reply } => {
+                let topic = IdentTopic::new("ghostwire-messages");
+                let res = (|| -> Result<()> {
+                    let data = serde_json::to_vec(&message)?;
+                    self.swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(topic.clone(), data)?;
+                    info!("Broadcasted message to topic: {}", topic);
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            MeshCommand::ConnectPeer { peer_id, reply } => {
+                let res = self
+                    .swarm
+                    .dial(peer_id)
+                    .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
+                let _ = reply.send(res);
+            }
+            _ => {
+                let _ = anyhow::anyhow!("Command not fully implemented");
+            }
+        }
+    }
 
-        let msg = Message {
-            id: Uuid::new_v4(),
-            sender: self.node_id.clone(),
-            recipient: "broadcast".to_string(),
-            content: encoded_key,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs(),
-            encrypted: false,
-            message_type: "handshake".to_string(),
-            encryption_status: "none".to_string(),
-        };
+    async fn handle_swarm_event(&mut self, event: SwarmEvent<MeshBehaviourEvent>) {
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Kad(
+            libp2p::kad::Event::OutboundQueryProgressed { id, result, .. },
+        )) = event
+        {
+            if let Some(reply) = self.pending_get_queries.remove(&id) {
+                match result {
+                    libp2p::kad::QueryResult::GetRecord(Ok(ok)) => {
+                        if let libp2p::kad::GetRecordOk::FoundRecord(record) = ok {
+                            let _ = reply.send(Ok(record.record.value));
+                        } else {
+                            let _ = reply.send(Err(anyhow::anyhow!("Record not found")));
+                        }
+                    }
+                    libp2p::kad::QueryResult::GetRecord(Err(e)) => {
+                        let _ = reply.send(Err(anyhow::anyhow!("GetRecord error: {:?}", e)));
+                    }
+                    _ => {
+                        let _ = reply.send(Err(anyhow::anyhow!("Unexpected query result")));
+                    }
+                }
+            }
+            return;
+        }
 
-        self.broadcast_message(&msg).await?;
-        Ok(())
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Gossipsub(
+            libp2p::gossipsub::Event::Message {
+                propagation_source,
+                message_id,
+                message,
+            },
+        )) = event
+        {
+            let _ = self
+                .handle_gossipsub_message(propagation_source, message_id, message)
+                .await;
+            return;
+        }
     }
 
     async fn handle_gossipsub_message(
@@ -425,10 +568,10 @@ impl MeshTransport {
             peer_id, message_id
         );
 
-        // Security check for message processing
-        let peer_ip = self.get_peer_ip(&peer_id).await;
+        let peer_ip = self.get_peer_ip(&peer_id);
         if let Some(ip) = peer_ip {
-            if !self.security_manager.is_ip_allowed(&ip).await {
+            let sm = self.security_manager.clone();
+            if !sm.is_ip_allowed(&ip).await {
                 warn!("Rejected message from blacklisted peer: {}", peer_id);
                 return Ok(());
             }
@@ -437,7 +580,6 @@ impl MeshTransport {
         if let Ok(msg) = serde_json::from_slice::<Message>(&message.data) {
             info!("Processed message from {}: {:?}", peer_id, msg);
 
-            // Broadcast message received event (except handshakes)
             if msg.message_type != "handshake" {
                 if let Some(bus) = &self.event_bus {
                     let _ = bus.send(crate::core::CoreEvent::NewMessage(msg.clone()));
@@ -466,130 +608,8 @@ impl MeshTransport {
         Ok(())
     }
 
-    async fn handle_identify_info(&mut self, peer_id: PeerId, info: IdentifyInfo) -> Result<()> {
-        info!("Received identify info from {}: {:?}", peer_id, info);
-        Ok(())
-    }
-
-    pub async fn broadcast_message(&mut self, message: &Message) -> Result<()> {
-        let topic = IdentTopic::new("ghostwire-messages");
-        let data = serde_json::to_vec(message)?;
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(topic.clone(), data)?;
-        info!("Broadcasted message to topic: {}", topic);
-        Ok(())
-    }
-
-    pub async fn get_topology(&self) -> MeshTopology {
-        // For now, return a simple topology
-        MeshTopology {
-            nodes: HashMap::new(),
-            routes: HashMap::new(),
-            local_node_id: self.node_id.clone(),
-        }
-    }
-
-    pub async fn find_route(&self, _target_node: &str) -> Option<Vec<String>> {
-        // For now, return None
+    fn get_peer_ip(&self, _peer_id: &PeerId) -> Option<std::net::IpAddr> {
         None
-    }
-
-    pub async fn update_connection_quality(&mut self, node_id: &str, quality: f32) {
-        // For now, do nothing
-        info!("Updated connection quality for {}: {}", node_id, quality);
-    }
-
-    /// Get connection statistics from StealthTCP provider
-    pub fn get_connection_stats(&self) -> ConnectionStats {
-        self.stealth_provider.get_connection_stats()
-    }
-
-    /// Get listening multiaddresses
-    pub fn get_listeners(&self) -> Vec<Multiaddr> {
-        self.swarm.listeners().cloned().collect()
-    }
-
-    /// Get security statistics
-    pub async fn get_security_stats(&self) -> crate::core::security::SecurityStats {
-        self.security_manager.get_security_stats().await
-    }
-
-    /// Helper method to get peer IP (simplified)
-    async fn get_peer_ip(&self, _peer_id: &PeerId) -> Option<std::net::IpAddr> {
-        // In a real implementation, this would look up the peer's IP from the swarm
-        None
-    }
-
-    pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
-        self.current_shard = shard.to_string();
-        // Since Kad protocol names are usually fixed at creation in current libp2p,
-        // we'll log this as a switch. Real implementation might need to restart the swarm
-        // or support dynamic protocols if the underlying transport allows.
-        tracing::info!("MeshTransport switching to DHT Shard: {}", shard);
-        Ok(())
-    }
-
-    pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
-        for addr in nodes {
-            if let Some(peer_id) = addr.iter().find_map(|p| {
-                if let libp2p::multiaddr::Protocol::P2p(peer_id) = p {
-                    Some(peer_id)
-                } else {
-                    None
-                }
-            }) {
-                info!("Dynamically adding bootstrap node: {} ({})", peer_id, addr);
-                self.swarm
-                    .behaviour_mut()
-                    .kad
-                    .add_address(&peer_id, addr.clone());
-                self.bootstrap_nodes.push(addr);
-            } else {
-                warn!("Bootstrap address missing PeerId: {}", addr);
-            }
-        }
-        // Force a bootstrap or bucket refresh
-        if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
-            warn!("Failed to trigger DHT bootstrap: {}", e);
-        }
-    }
-
-    /// Publish username to DHT
-    pub async fn publish_username(&mut self) -> Result<()> {
-        // Placeholder: In a real implementation we need the private key to sign the record.
-        warn!("Publishing username is currently a placeholder until Identity key access is refactored");
-        Ok(())
-    }
-
-    /// Connect to a peer by ID
-    pub async fn connect_peer(&mut self, peer_id: PeerId) -> Result<()> {
-        self.swarm
-            .dial(peer_id)
-            .map_err(|e| anyhow::anyhow!("Dial error: {}", e))?;
-        info!("Dialing peer: {}", peer_id);
-        Ok(())
-    }
-
-    /// Lookup username in DHT
-    pub async fn lookup_username(
-        &mut self,
-        username: &str,
-    ) -> Result<Option<crate::core::username_discovery::UsernameRecord>> {
-        use crate::core::username_discovery::UsernameLookupResult;
-
-        match self
-            .username_discovery
-            .find_peer_by_username(username)
-            .await?
-        {
-            UsernameLookupResult::Cached(record) => Ok(Some(record)),
-            UsernameLookupResult::DhtQuery(key) => {
-                self.swarm.behaviour_mut().kad.get_record(key);
-                Ok(None) // Async lookup started
-            }
-        }
     }
 }
 
@@ -643,6 +663,14 @@ impl MeshManager {
         self.transport.broadcast_message(message).await
     }
 
+    pub async fn put_dht_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.transport.put_record(key, value).await
+    }
+
+    pub async fn get_dht_record(&self, key: Vec<u8>) -> Result<Vec<u8>> {
+        self.transport.get_record(key).await
+    }
+
     pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
         self.transport.set_shard(shard).await
     }
@@ -650,7 +678,7 @@ impl MeshManager {
     pub async fn get_stats(&self) -> MeshStats {
         let connection_stats = self.transport.get_connection_stats();
         let security_stats = self.transport.get_security_stats().await;
-        let topology = self.transport.get_topology().await;
+        let topology = self.transport.get_topology();
 
         MeshStats {
             total_nodes: topology.nodes.len(),
@@ -666,8 +694,8 @@ impl MeshManager {
         self.transport.get_listeners()
     }
 
-    pub async fn get_topology(&self) -> MeshTopology {
-        self.transport.get_topology().await
+    pub fn get_topology(&self) -> MeshTopology {
+        self.transport.get_topology()
     }
 
     pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {

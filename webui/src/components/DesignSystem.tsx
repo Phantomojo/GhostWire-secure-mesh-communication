@@ -5,8 +5,14 @@ interface ComponentProps {
     className?: string;
 }
 
-export const GlassCard: React.FC<ComponentProps> = ({ children, className = '' }) => (
-    <div className={`glass-card p-6 ${className}`}>
+interface GlassCardProps {
+    children: React.ReactNode;
+    className?: string;
+    id?: string;
+}
+
+export const GlassCard: React.FC<GlassCardProps> = ({ children, className = '', id }) => (
+    <div id={id} className={`glass-panel border border-white/5 rounded-3xl p-6 transition-all duration-500 hover:border-white/10 ${className}`}>
         {children}
     </div>
 );

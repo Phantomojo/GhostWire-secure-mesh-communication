@@ -128,6 +128,20 @@ export interface RateLimitInfo {
   reset: string;
 }
 
+export interface IdentityStatus {
+  locked: boolean;
+  has_identity: boolean;
+  did?: string;
+  username?: string;
+  setup_complete?: boolean;
+}
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data: T;
+  error?: string;
+}
+
 export interface ProfileV2 {
   id: string;
   did: string;
@@ -567,6 +581,31 @@ export const api = {
     return data.data;
   },
 
+  // Identity management
+  async unlockIdentity(password: string): Promise<boolean> {
+    try {
+      const response = await this.post('/identity/unlock', { password });
+      return response.success;
+    } catch (e) {
+      console.error('Unlock failed', e);
+      return false;
+    }
+  },
+
+  async getIdentityStatus(): Promise<IdentityStatus> {
+    const response = await this.get('/identity/status');
+    return response.data;
+  },
+
+  async setupIdentity(data: { nickname: string; password: string }): Promise<ApiResponse<string>> {
+    return this.post('/identity/setup', data);
+  },
+
+  async lockIdentity(): Promise<boolean> {
+    const response = await this.post('/identity/lock');
+    return response.success;
+  },
+
   // Get network information (local IP)
   async getNetworkInfo(): Promise<NetworkInfo> {
     const response = await fetch(`${getApiBaseUrl()}/get_network_info`, {
@@ -632,7 +671,15 @@ export const api = {
     } catch {
       return false;
     }
-  }
+  },
+  // --- Project Checklist ---
+  // - [x] Implement Interactive Tutorial System <!-- id: 34 -->
+  //     - [x] Backend: Add tutorial steps API <!-- id: 34a -->
+  //     - [x] Frontend: Add TutorialOverlay component <!-- id: 34b -->
+  //     - [x] Frontend: Integrate tutorial into main App <!-- id: 34c -->
+  // - [/] Final Verification & Polish <!-- id: 35 -->
+  //     - [ ] Robust Tutorial Walkthrough <!-- id: 35a -->
+  //     - [x] User Documentation Review <!-- id: 35b -->
 };
 
 // WebSocket connection for real-time updates
