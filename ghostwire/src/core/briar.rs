@@ -2,13 +2,12 @@ use crate::core::identity::Identity;
 use crate::core::message::Message;
 use anyhow::Result;
 use async_trait::async_trait;
-use blake2b_simd::{Params, State};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 /// Briar-inspired secure messaging system
@@ -90,7 +89,7 @@ impl BriarManager {
         let local_id = identity.id.clone();
 
         // Generate encryption key from identity
-        let encryption_key = Self::derive_encryption_key(&identity)?;
+        let _encryption_key = Self::derive_encryption_key(&identity)?;
 
         let stats = Arc::new(RwLock::new(BriarStats {
             total_contacts: 0,
@@ -346,7 +345,11 @@ impl BriarManager {
     }
 
     /// Update contact status
-    pub async fn update_contact_status(&mut self, contact_id: &str, is_online: bool) -> Result<()> {
+    pub async fn update_contact_status(
+        &mut self,
+        contact_id: &str,
+        _is_online: bool,
+    ) -> Result<()> {
         let mut contacts = self.contacts.write().await;
         if let Some(contact) = contacts.get_mut(contact_id) {
             contact.last_seen = SystemTime::now()

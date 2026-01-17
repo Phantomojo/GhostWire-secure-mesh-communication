@@ -18,6 +18,20 @@ log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
+# Parse arguments
+AUTO_CONFIRM=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -y|--yes)
+            AUTO_CONFIRM=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 # Find installation directory
 find_install_dir() {
     if [ -n "$GHOSTWIRE_INSTALL_DIR" ]; then
@@ -179,12 +193,16 @@ EOF
     echo ""
     log_warning "This will update GhostWire to the latest version."
     log_warning "A backup will be created automatically."
-    read -p "Continue? [Y/n] " -n 1 -r
-    echo ""
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ -n $REPLY ]]; then
-        log_info "Update cancelled"
-        exit 0
+    if [ "$AUTO_CONFIRM" = "true" ]; then
+        log_info "Auto-confirm enabled, skipping confirmation prompt."
+    else
+        read -p "Continue? [Y/n] " -n 1 -r
+        echo ""
+        
+        if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ -n $REPLY ]]; then
+            log_info "Update cancelled"
+            exit 0
+        fi
     fi
     
     echo ""

@@ -13,7 +13,8 @@ pub mod signal;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
-pub mod username_discovery; // DHT-based username discovery
+pub mod updater;
+pub mod username_discovery; // DHT-based username discovery // Background and startup updates
 
 pub mod bluetooth;
 #[cfg(feature = "briar")]
@@ -29,7 +30,7 @@ pub mod stealth_tcp;
 #[cfg(feature = "matrix-bridge")]
 use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 #[cfg(feature = "matrix-bridge")]
-use matrix_sdk::{config::SyncSettings, Client, Room};
+use matrix_sdk::Client;
 
 pub use encryption::Encryption;
 pub use identity::Identity;
@@ -50,7 +51,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 // using explicit paths for tracing macros
-use std::time::Duration;
 use tokio::sync::broadcast;
 use transport::TransportRegistry;
 
@@ -176,7 +176,6 @@ impl MatrixAdapter {
             // Real sync logic would go here
             return Ok(None);
         }
-        println!("[MOCK] Matrix: Would receive message");
         Ok(None)
     }
 
@@ -747,7 +746,7 @@ impl Core {
         #[cfg(feature = "reticulum")]
         {
             if let Some(reticulum_manager) = &self.reticulum_manager {
-                let manager = reticulum_manager.read().await;
+                let _manager = reticulum_manager.read().await;
                 Some(ReticulumStats {
                     total_nodes: 0,
                     online_nodes: 0,

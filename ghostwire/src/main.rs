@@ -3,15 +3,16 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{error, info};
 
 // Use modules from the library crate
+use ghostwire::config::Config;
+use ghostwire::core::updater;
 use ghostwire::core::Core;
 #[cfg(feature = "tui")]
 use ghostwire::tui;
 #[cfg(feature = "web")]
 use ghostwire::web;
-// use ghostwire::config; // If needed
 
 #[derive(Parser)]
 #[cfg(feature = "cli")]
@@ -104,6 +105,18 @@ async fn main() -> Result<()> {
 
     info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
     info!("🔒 Security features: End-to-end encryption, threat detection, anonymity");
+
+    // Load configuration for startup features
+    if let Ok(config) = Config::load() {
+        if config.server.auto_update {
+            if updater::is_update_available() {
+                info!("✨ Applying automatic update...");
+                if let Err(e) = updater::apply_update() {
+                    error!("❌ Automatic update failed: {}", e);
+                }
+            }
+        }
+    }
 
     #[cfg(feature = "cli")]
     let args = Args::parse();
