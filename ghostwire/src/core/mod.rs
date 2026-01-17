@@ -13,6 +13,7 @@ pub mod signal;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
+pub mod tutorial;
 pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
 
@@ -282,7 +283,7 @@ impl MeshtasticAdapter {
 /// Core application state and management
 #[derive(Clone)]
 pub struct Core {
-    pub identity: Arc<Identity>,
+    pub identity: Arc<RwLock<Arc<Identity>>>,
     pub encryption: Arc<Encryption>,
     #[cfg(feature = "mesh")]
     pub mesh_manager: Option<Arc<RwLock<MeshManager>>>,
@@ -305,9 +306,14 @@ pub struct Core {
 }
 
 impl Core {
-    pub async fn new(bootstrap_nodes: Vec<Multiaddr>, sim_addr: Option<String>) -> Result<Self> {
+    pub async fn new(
+        bootstrap_nodes: Vec<Multiaddr>,
+        sim_addr: Option<String>,
+        profile: Option<String>,
+    ) -> Result<Self> {
         let identity = Arc::new(
-            Identity::new().map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
+            Identity::new(profile)
+                .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
         let _traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
 
@@ -389,25 +395,30 @@ impl Core {
 
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
-            let username = identity.get_metadata().nickname;
-            let peer_id = identity.keypair().public().to_peer_id();
+            if let Some(kp) = identity.keypair() {
+                let username = identity.get_metadata().nickname;
+                let peer_id = kp.public().to_peer_id();
 
-            let username_discovery = Arc::new(
-                crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
-            );
+                let username_discovery = Arc::new(
+                    crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
+                );
 
-            Some(Arc::new(RwLock::new(
-                MeshManager::new(
-                    identity.clone(),
-                    encryption.clone(),
-                    messages.clone(),
-                    message_store.clone(),
-                    bootstrap_nodes.clone(),
-                    username_discovery,
-                    Some(event_bus.clone()),
-                )
-                .await?,
-            )))
+                Some(Arc::new(RwLock::new(
+                    MeshManager::new(
+                        identity.clone(),
+                        encryption.clone(),
+                        messages.clone(),
+                        message_store.clone(),
+                        bootstrap_nodes.clone(),
+                        username_discovery,
+                        Some(event_bus.clone()),
+                    )
+                    .await?,
+                )))
+            } else {
+                tracing::info!("Identity is locked. Deferring MeshManager initialization.");
+                None
+            }
         };
 
         #[cfg(not(feature = "mesh"))]
@@ -420,7 +431,7 @@ impl Core {
         ));
 
         Ok(Self {
-            identity,
+            identity: Arc::new(RwLock::new(identity)),
             encryption,
             security_manager,
             transport_registry: registry,
@@ -475,7 +486,7 @@ impl Core {
                 if core_chaff.active_adapter.is_some() {
                     tracing::debug!("📡 Sending Military-Grade Chaff Traffic (DPI Evasion)");
                     let dummy = crate::core::message::Message::new(
-                        core_chaff.identity.id.clone(),
+                        core_chaff.get_identity_id().await,
                         "CHAFF_TARGET".to_string(),
                         "DUMMY_TRAFFIC_DATA_NOOP".to_string(),
                     );
@@ -497,10 +508,11 @@ impl Core {
                     let listeners = core_mesh.get_mesh_listeners().await;
                     if !listeners.is_empty() {
                         println!("\n--- GhostWire Mesh Node Started ---");
-                        println!(
-                            "Peer ID: {}",
-                            core_mesh.identity.keypair().public().to_peer_id()
-                        );
+                        if let Some(kp) = core_mesh.identity.read().await.keypair() {
+                            println!("Peer ID: {}", kp.public().to_peer_id());
+                        } else {
+                            println!("Peer ID: <Locked>");
+                        }
                         println!("Listening on:");
                         for addr in listeners {
                             println!("  {}", addr);
@@ -606,33 +618,123 @@ impl Core {
     }
 
     /// Get the identity ID
-    pub fn get_identity_id(&self) -> String {
-        self.identity.id.clone()
+    pub async fn get_identity_id(&self) -> String {
+        self.identity.read().await.id.clone()
     }
 
     /// Get the DID
-    pub fn get_did(&self) -> String {
-        self.identity.did.clone()
+    pub async fn get_did(&self) -> String {
+        self.identity.read().await.did.clone()
     }
 
     /// Get the metadata
-    pub fn get_metadata(&self) -> crate::core::identity::IdentityMetadata {
-        self.identity.get_metadata()
+    pub async fn get_metadata(&self) -> crate::core::identity::IdentityMetadata {
+        self.identity.read().await.get_metadata()
     }
 
     /// Update metadata
-    pub fn update_metadata(
+    pub async fn update_metadata(
         &self,
         nickname: Option<String>,
         bio: Option<String>,
         avatar_url: Option<String>,
+        setup_complete: Option<bool>,
     ) {
-        self.identity.update_metadata(nickname, bio, avatar_url);
+        self.identity
+            .read()
+            .await
+            .update_metadata(nickname, bio, avatar_url, setup_complete);
     }
 
     /// Get the public key
     pub fn get_public_key(&self) -> Vec<u8> {
         self.encryption.export_public_key()
+    }
+
+    pub async fn is_locked(&self) -> bool {
+        self.identity.read().await.is_locked()
+    }
+
+    pub async fn lock(&self) -> Result<()> {
+        self.identity
+            .read()
+            .await
+            .lock()
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
+    pub async fn unlock(&self, password: &str) -> Result<()> {
+        self.identity
+            .read()
+            .await
+            .unlock(password)
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
+    pub async fn save_to_disk(&self, password: &str) -> Result<()> {
+        self.identity
+            .read()
+            .await
+            .save_to_disk(password)
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
+    /// Recover account from DHT
+    pub async fn recover_account(&self, username: &str, recovery_password: &str) -> Result<()> {
+        use sha2::Digest;
+        let mut shares = Vec::new();
+        let threshold = 3;
+
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let mgr = mesh_manager.read().await;
+            for i in 0..5 {
+                let dht_key_preimage = format!("{}:recovery:{}", username, i);
+                let dht_key = hex::encode(sha2::Sha256::digest(dht_key_preimage.as_bytes()));
+
+                if let Ok(data) = mgr
+                    .get_dht_record(hex::decode(dht_key).unwrap_or_default())
+                    .await
+                {
+                    if let Ok(share) = serde_json::from_slice::<
+                        crate::core::identity::EncryptedRecoveryShare,
+                    >(&data)
+                    {
+                        shares.push(share);
+                    }
+                }
+
+                if shares.len() >= threshold {
+                    break;
+                }
+            }
+        }
+
+        if shares.len() < threshold {
+            return Err(anyhow::anyhow!(
+                "Finding recovery shares failed ({} found, threshold {})",
+                shares.len(),
+                threshold
+            ));
+        }
+
+        // Recover secret
+        let secret = crate::core::identity::RecoveryManager::recover_identity_secret(
+            shares,
+            recovery_password,
+        )?;
+
+        // Create matching identity
+        let new_identity = Arc::new(Identity::from_seed(&secret)?);
+
+        // Atomic swap
+        {
+            let mut id_lock = self.identity.write().await;
+            *id_lock = new_identity;
+        }
+
+        tracing::info!("Account recovered successfully for {}", username);
+        Ok(())
     }
 
     /// Get the key ID
@@ -669,15 +771,21 @@ impl Core {
         #[cfg(feature = "mesh")]
         {
             if self.mesh_manager.is_none() {
-                let username = self.identity.get_metadata().nickname;
-                let peer_id = self.identity.keypair().public().to_peer_id();
+                let kp = self
+                    .identity
+                    .read()
+                    .await
+                    .keypair()
+                    .ok_or_else(|| anyhow::anyhow!("Cannot init mesh: Identity is locked"))?;
+                let username = self.identity.read().await.get_metadata().nickname;
+                let peer_id = kp.public().to_peer_id();
 
                 let username_discovery = Arc::new(
                     crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
                 );
 
                 let mesh_manager = MeshManager::new(
-                    self.identity.clone(),
+                    self.identity.read().await.clone(),
                     self.encryption.clone(),
                     self.messages.clone(),
                     self.message_store.clone(),
@@ -707,12 +815,47 @@ impl Core {
         }
     }
 
+    /// Enable DHT-based account recovery
+    pub async fn enable_recovery(&self, recovery_password: &str) -> Result<Vec<String>> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let shares = crate::core::identity::RecoveryManager::create_recovery_shares(
+                &(*self.identity.read().await),
+                recovery_password,
+                3, // Threshold
+                5, // Total shares
+            )?;
+
+            let mgr = mesh_manager.write().await;
+            let mut stored_indices = Vec::new();
+
+            for share in shares {
+                // index_hash is hex string of the DHT key
+                let key = hex::decode(&share.index_hash)?;
+                // We serialize the share struct to bytes for storage
+                let value = serde_json::to_vec(&share)?;
+                mgr.put_dht_record(key, value).await?;
+                stored_indices.push(share.index_hash);
+            }
+
+            tracing::info!("Recovery enabled. Shares stored at: {:?}", stored_indices);
+            Ok(stored_indices)
+        } else {
+            Err(anyhow::anyhow!(
+                "Mesh network not active. Please start the mesh first."
+            ))
+        }
+        #[cfg(not(feature = "mesh"))]
+        Err(anyhow::anyhow!("Mesh feature not enabled"))
+    }
+
     /// Initialize Reticulum network
     pub async fn init_reticulum(&mut self) -> Result<()> {
         #[cfg(feature = "reticulum")]
         {
             if self.reticulum_manager.is_none() {
-                let reticulum_manager = ReticulumManager::new(self.identity.clone()).await?;
+                let reticulum_manager =
+                    ReticulumManager::new(self.identity.read().await.clone()).await?;
                 self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
                 tracing::info!("Reticulum network initialized");
             }
@@ -919,7 +1062,8 @@ impl ReticulumManager {
     pub async fn new(_identity: Arc<Identity>) -> Result<Self> {
         Ok(Self {
             identity: Arc::new(
-                Identity::new().map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?,
+                Identity::new(None)
+                    .map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?,
             ),
         })
     }

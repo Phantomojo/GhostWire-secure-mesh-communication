@@ -241,8 +241,15 @@ pub async fn start_tui(core: Arc<Mutex<Core>>) -> Result<()> {
         if let Err(e) = core_guard.init_default_transport().await {
             eprintln!("Warning: Failed to initialize default transport: {}", e);
         }
-        app.identity_id = core_guard.get_identity_id(); // Set identity_id after initialization
     }
+    app.identity_id = {
+        let identity = {
+            let core_guard = app.core.lock().await;
+            core_guard.identity.clone()
+        };
+        let id = identity.read().await.id.clone();
+        id
+    };
 
     // Spawn background task to subscribe to Core events (REAL-TIME, NO POLLING)
     let core_for_events = app.core.clone();

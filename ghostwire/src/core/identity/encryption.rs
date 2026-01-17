@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Result};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
 };
 use pbkdf2::pbkdf2_hmac;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 const PBKDF2_ITERATIONS: u32 = 100_000;
 const SALT_LEN: usize = 32;
-const NONCE_LEN: usize = 12;
 
 /// Encrypted identity storage format
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,26 +20,33 @@ pub struct EncryptedIdentity {
     pub nonce: Vec<u8>,
 }
 
+/// Derive key from password and salt using PBKDF2
+pub fn derive_key(password: &str, salt: &[u8]) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ITERATIONS, &mut key[..]);
+    key
+}
+
 /// Encrypt identity data with a password
 pub fn encrypt_identity(data: &[u8], password: &str) -> Result<EncryptedIdentity> {
     // Generate random salt
     let mut salt = vec![0u8; SALT_LEN];
     getrandom::getrandom(&mut salt)?;
 
-    // Derive key from password using PBKDF2
-    let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut key);
+    // Derive key from password
+    let key = derive_key(password, &salt);
 
     // Create cipher
     let cipher = ChaCha20Poly1305::new(&key.into());
 
     // Generate random nonce
-    let nonce_bytes = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes[..]);
+    let nonce = Nonce::from(nonce_bytes);
 
     // Encrypt
     let encrypted_data = cipher
-        .encrypt(nonce, data)
+        .encrypt(&nonce, data)
         .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
     Ok(EncryptedIdentity {
@@ -52,14 +59,8 @@ pub fn encrypt_identity(data: &[u8], password: &str) -> Result<EncryptedIdentity
 
 /// Decrypt identity data with a password
 pub fn decrypt_identity(encrypted: &EncryptedIdentity, password: &str) -> Result<Vec<u8>> {
-    // Derive key from password using same parameters
-    let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        &encrypted.salt,
-        PBKDF2_ITERATIONS,
-        &mut key,
-    );
+    // Derive key using same parameters
+    let key = derive_key(password, &encrypted.salt);
 
     // Create cipher
     let cipher = ChaCha20Poly1305::new(&key.into());
@@ -82,10 +83,10 @@ mod tests {
         let data = b"test identity data";
         let password = "correct_password";
 
-        let encrypted = encrypt_identity(data, password).unwrap();
+        let encrypted = encrypt_identity(&data[..], password).unwrap();
         let decrypted = decrypt_identity(&encrypted, password).unwrap();
 
-        assert_eq!(data, decrypted.as_slice());
+        assert_eq!(&data[..], decrypted.as_slice());
     }
 
     #[test]
@@ -94,7 +95,7 @@ mod tests {
         let password = "correct_password";
         let wrong_password = "wrong_password";
 
-        let encrypted = encrypt_identity(data, password).unwrap();
+        let encrypted = encrypt_identity(&data[..], password).unwrap();
         let result = decrypt_identity(&encrypted, wrong_password);
 
         assert!(result.is_err());
@@ -105,8 +106,8 @@ mod tests {
         let data = b"test identity data";
         let password = "same_password";
 
-        let encrypted1 = encrypt_identity(data, password).unwrap();
-        let encrypted2 = encrypt_identity(data, password).unwrap();
+        let encrypted1 = encrypt_identity(&data[..], password).unwrap();
+        let encrypted2 = encrypt_identity(&data[..], password).unwrap();
 
         // Same password but different salts/nonces should produce different ciphertext
         assert_ne!(encrypted1.encrypted_data, encrypted2.encrypted_data);

@@ -121,7 +121,7 @@ const NetworkPanel: React.FC<NetworkPanelProps> = ({
               </div>
             </div>
 
-            <div className="w-full h-full">
+            <div id="mesh-topology" className="w-full h-full">
               <MeshVisualizer nodes={networkNodes} onNodeClick={onNodeClick} />
             </div>
 

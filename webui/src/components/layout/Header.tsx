@@ -1,5 +1,6 @@
 import React from 'react';
-import { HiOutlineSignal, HiOutlineCpuChip, HiOutlineShieldCheck, HiOutlineServerStack } from 'react-icons/hi2';
+import { HiOutlineSignal, HiOutlineCpuChip, HiOutlineShieldCheck, HiOutlineServerStack, HiOutlineLockClosed } from 'react-icons/hi2';
+import { api } from '../../services/api';
 
 interface HeaderProps {
     systemStatus: {
@@ -10,9 +11,20 @@ interface HeaderProps {
     };
     backendConnected: boolean;
     onConfigClick: () => void;
+    onTutorialClick: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected }) => {
+const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected, onConfigClick, onTutorialClick }) => {
+    const handleLock = async () => {
+        try {
+            await api.lockIdentity();
+            // Force reload to trigger identity status refresh and show LoginScreen
+            window.location.reload();
+        } catch (error) {
+            console.error("Failed to lock identity:", error);
+        }
+    };
+
     return (
         <header className="h-16 md:h-20 glass-panel border-b border-white/5 flex items-center justify-between px-4 md:px-8 z-10 sticky top-0 bg-slate-950/40 backdrop-blur-xl">
             {/* Left Section: Node Status */}
@@ -38,7 +50,7 @@ const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected }) => {
                 <div className="h-8 w-[1px] bg-white/5 hidden lg:block" />
 
                 {/* Tactical Metrics Group */}
-                <div className="hidden lg:flex items-center gap-8">
+                <div id="tactical-hud" className="hidden lg:flex items-center gap-8">
                     <div className="flex items-center gap-3 group cursor-default">
                         <div className="p-2 bg-indigo-500/10 rounded-xl group-hover:bg-indigo-500/20 transition-colors">
                             <HiOutlineSignal className="text-indigo-400 text-lg" />
@@ -102,10 +114,31 @@ const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected }) => {
                     </div>
                 </div>
 
-                {/* Tactical Controls - Removed per user request for single source of truth */}
-                <div className="flex items-center gap-2">
-                    {/* Placeholder for future specific actions if needed */}
-                </div>
+                <div className="h-8 w-[1px] bg-white/5 mx-2" />
+
+                <button
+                    onClick={onTutorialClick}
+                    className="p-3 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/20 transition-all group"
+                    title="Launch Tutorial"
+                >
+                    <HiOutlineServerStack className="text-xl group-hover:scale-110 transition-transform" />
+                </button>
+
+                <button
+                    id="config-button"
+                    onClick={onConfigClick}
+                    className="p-3 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-white/5 transition-all"
+                >
+                    <HiOutlineServerStack className="text-xl" />
+                </button>
+
+                <button
+                    onClick={handleLock}
+                    className="p-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20 transition-all group"
+                    title="Lock Identity"
+                >
+                    <HiOutlineLockClosed className="text-xl group-hover:rotate-12 transition-transform" />
+                </button>
             </div>
         </header>
     );

@@ -51,6 +51,25 @@ A premium messaging experience designed for high-stakes coordination.
 
 ---
 
+## 👥 **Multi-Profile Support**
+
+GhostWire supports multiple user profiles, allowing you to maintain separate identities and networks on the same machine.
+
+### **Creating & Switching Profiles**
+
+To create a new profile (or switch to an existing one), simply run GhostWire with the `--profile` argument:
+
+```bash
+# Create or switch to a profile named 'stealth_ops'
+./release/ghostwire_node --profile stealth_ops
+```
+
+- If the profile doesn't exist, **it will be automatically created**.
+- If it exists, it will be loaded.
+- Each profile has its own identity keypair and peer database stored in `~/.ghostwire/`.
+
+---
+
 ## 🚀 **Quick Start - Install GhostWire**
 
 ### **One-Line Installation**
@@ -88,6 +107,14 @@ cd GhostWire-secure-mesh-communication
 ```
 
 **📖 Full Installation Guide:** See [INSTALL.md](INSTALL.md) for detailed instructions, configuration, multi-PC deployment, and troubleshooting.
+
+---
+
+## 📚 **Learning GhostWire**
+
+- **[🏗️ ARCHITECTURE.md](ARCHITECTURE.md)** - Deep dive into GhostWire's modular design, security model, and data flow.
+- **[🎓 Interactive Tutorial]** - Launch GhostWire and click the **Help** button for a guided tour of the system.
+- **[📖 Wiki](docs/wiki/index.md)** - Comprehensive guides on transports, security, and protocol adapters.
 
 ---
 

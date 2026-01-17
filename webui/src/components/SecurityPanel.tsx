@@ -234,7 +234,7 @@ const SecurityPanel: React.FC<SecurityPanelProps> = ({
 
         {/* Security Actions */}
         <div className="space-y-8">
-          <GlassCard>
+          <GlassCard id="security-controls">
             <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
               <HiOutlineFingerPrint className="text-indigo-400" />
               Defense Actions
