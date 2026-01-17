@@ -10,6 +10,8 @@ pub enum TransportKind {
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
     Dummy, // Placeholder for now
     StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
+    Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
+    Simulated(Arc<tokio::sync::RwLock<crate::core::sim_transport::SimTransport>>),
 }
 
 impl TransportKind {
@@ -19,6 +21,8 @@ impl TransportKind {
             TransportKind::Mesh(_) => "mesh",
             TransportKind::Dummy => "dummy",
             TransportKind::StealthTCP(_) => "stealth_tcp",
+            TransportKind::Bluetooth(_) => "bluetooth",
+            TransportKind::Simulated(_) => "simulated",
         }
     }
     pub fn description(&self) -> &'static str {
@@ -27,6 +31,8 @@ impl TransportKind {
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (placeholder)",
             TransportKind::StealthTCP(_) => "Stealth TCP with Traffic Morphing",
+            TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
+            TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
         }
     }
     pub async fn send_message(&self, message: &Message) -> Result<()> {
@@ -48,6 +54,23 @@ impl TransportKind {
                 // In future: Resolve ID -> IP and provider.connect(ip).await
                 Ok(())
             }
+            TransportKind::Bluetooth(transport) => {
+                let transport = transport.read().await;
+                transport
+                    .send_ble_data(&message.recipient, message.content.as_bytes())
+                    .await
+            }
+            TransportKind::Simulated(transport) => {
+                let transport = transport.read().await;
+                // Default to Bluetooth mock for теперь
+                transport
+                    .send_simulated(
+                        &message.recipient,
+                        crate::core::sim_transport::SimLinkType::Bluetooth,
+                        message.content.as_bytes(),
+                    )
+                    .await
+            }
         }
     }
     pub async fn receive_message(&self) -> Result<Option<Message>> {
@@ -56,6 +79,16 @@ impl TransportKind {
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
             TransportKind::StealthTCP(_) => Ok(None),
+            TransportKind::Bluetooth(_) => Ok(None),
+            TransportKind::Simulated(transport) => {
+                let transport = transport.read().await;
+                let packet = transport.receive_next().await?;
+                Ok(Some(Message::new(
+                    packet.sender_id,
+                    "me".to_string(), // In reality would be our ID
+                    String::from_utf8_lossy(&packet.payload).to_string(),
+                )))
+            }
         }
     }
 }

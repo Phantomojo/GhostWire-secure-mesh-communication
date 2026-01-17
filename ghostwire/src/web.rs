@@ -3,8 +3,7 @@ use crate::core::{Core, Message};
 use axum::body::Body;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::http::Method;
-use axum::http::{header, Uri};
-use axum::http::{HeaderValue, Request, StatusCode};
+use axum::http::{header, HeaderName, HeaderValue, Request, StatusCode, Uri};
 use axum::response::Html;
 use axum::{
     extract::ConnectInfo,
@@ -23,12 +22,13 @@ use reqwest;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use jsonwebtoken;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use uuid;
 
@@ -78,6 +78,15 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 }
 
 lazy_static! {
+    static ref JWT_SECRET: String = {
+        let secret: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(64)
+            .map(char::from)
+            .collect();
+        secret
+    };
+
     static ref AUTH_TOKEN: String = {
         let token_file = "ghostwire_token.txt";
         if let Ok(token) = fs::read_to_string(token_file) {
@@ -104,6 +113,22 @@ lazy_static! {
         println!("(You must include this header in all API requests)\n");
         token
     };
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: usize,
+}
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub token: String,
+}
+
+#[derive(Serialize)]
+pub struct LoginResponse {
+    pub token: String,
 }
 
 // Helper to get the actual client IP, respecting common proxy headers
@@ -139,23 +164,93 @@ pub async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
-    // Special case for local token discovery during development
-    if path == "/api/dev/token" {
+    // Special case for local token discovery and authentication entry points
+    if path == "/api/dev/token" || path == "/api/auth/login" {
         return Ok(next.run(req).await);
     }
 
+    // Check for X-Ghost-Token (legacy) OR Authorization: Bearer <JWT>
     let token_header = req
         .headers()
         .get("X-Ghost-Token")
         .and_then(|val| val.to_str().ok());
 
-    match token_header {
-        Some(token) if token == *AUTH_TOKEN => Ok(next.run(req).await),
-        _ => {
-            warn!("⛔ Unauthorized API access attempt to {} from {}", path, client_ip);
-            Err(StatusCode::UNAUTHORIZED)
+    let auth_header = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|val| val.to_str().ok());
+
+    let authenticated = if let Some(token) = token_header {
+        token == *AUTH_TOKEN
+    } else if let Some(auth_val) = auth_header {
+        if auth_val.starts_with("Bearer ") {
+            let jwt = &auth_val[7..];
+            let token_data = jsonwebtoken::decode::<Claims>(
+                jwt,
+                &jsonwebtoken::DecodingKey::from_secret(JWT_SECRET.as_bytes()),
+                &jsonwebtoken::Validation::default(),
+            );
+            token_data.is_ok()
+        } else {
+            false
         }
+    } else {
+        false
+    };
+
+    if authenticated {
+        Ok(next.run(req).await)
+    } else {
+        warn!("⛔ Unauthorized API access attempt to {} from {}", path, client_ip);
+        Err(StatusCode::UNAUTHORIZED)
     }
+}
+
+pub async fn login_handler(
+    Json(payload): Json<LoginRequest>,
+) -> impl IntoResponse {
+    if payload.token == *AUTH_TOKEN {
+        let expiration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs() + 60 * 60 * 24; // 24 hours
+
+        let claims = Claims {
+            sub: "admin".to_owned(),
+            exp: expiration as usize,
+        };
+
+        match jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(JWT_SECRET.as_bytes()),
+        ) {
+            Ok(token) => (StatusCode::OK, Json(ApiResponse {
+                success: true,
+                data: Some(LoginResponse { token }),
+                error: None,
+            })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::<String> {
+                success: false,
+                data: None,
+                error: Some(format!("Failed to generate token: {}", e)),
+            })).into_response(),
+        }
+    } else {
+        (StatusCode::UNAUTHORIZED, Json(ApiResponse::<String> {
+            success: false,
+            data: None,
+            error: Some("Invalid authentication token".to_string()),
+        })).into_response()
+    }
+}
+
+pub async fn verify_token_handler() -> impl IntoResponse {
+    Json(ApiResponse {
+        success: true,
+        data: Some("Token is valid".to_string()),
+        error: None,
+    })
 }
 
 pub async fn get_dev_token(
@@ -2618,29 +2713,68 @@ pub fn app(core: Arc<Core>) -> Router {
             "http://127.0.0.1:5173".parse::<HeaderValue>().unwrap(),
         ])
         .allow_methods([Method::GET, Method::POST, Method::PUT])
-        .allow_headers(Any);
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, HeaderName::from_static("x-ghost-token")]);
 
-    // Rate limiting: 100 requests per 60 seconds per IP
-    let governor_conf = GovernorConfigBuilder::default()
+    // Rate limiting policies
+    // Auth: 5 requests per 60 seconds
+    let auth_governor_conf = GovernorConfigBuilder::default()
         .per_second(60)
-        .burst_size(100)
+        .burst_size(5)
         .key_extractor(SmartIpKeyExtractor)
         .finish()
         .unwrap();
-    let _rate_limiter = GovernorLayer {
-        config: std::sync::Arc::new(governor_conf),
+    let auth_rate_limiter = GovernorLayer {
+        config: std::sync::Arc::new(auth_governor_conf),
     };
 
+    // Messaging: 10 requests per 60 seconds
+    let msg_governor_conf = GovernorConfigBuilder::default()
+        .per_second(60)
+        .burst_size(10)
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .unwrap();
+    let msg_rate_limiter = GovernorLayer {
+        config: std::sync::Arc::new(msg_governor_conf),
+    };
+
+    // Default: 60 requests per 60 seconds
+    let default_governor_conf = GovernorConfigBuilder::default()
+        .per_second(60)
+        .burst_size(60)
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .unwrap();
+    let default_rate_limiter = GovernorLayer {
+        config: std::sync::Arc::new(default_governor_conf),
+    };
+
+    // Define sub-routers for cleaner organization and specific middleware
+    let auth_routes = Router::new()
+        .route("/login", post(login_handler))
+        .route("/verify", get(verify_token_handler))
+        .layer(auth_rate_limiter);
+
+    let message_routes = Router::new()
+        .route("/send", post(send_message))
+        .route("/send_message", post(send_message))
+        .route("/broadcast", post(broadcast_message))
+        .route("/v2", get(get_messages_v2))
+        .layer(msg_rate_limiter);
+
     Router::new()
+        .nest_service("/", ServeDir::new("../webui/dist"))
         .route("/api", get(root))
         .route("/api/", get(root))
-        .nest_service("/", ServeDir::new("../webui/dist"))
+        .nest("/api/auth", auth_routes)
         .route("/api/status", get(status))
         .route("/api/identity", get(get_identity))
         .route("/api/public-key", get(get_public_key))
-        .route("/api/public_key", get(get_public_key)) // alias for underscore
+        .route("/api/public_key", get(get_public_key))
+        .nest("/api/messages", message_routes)
+        // Keep legacy routes for compatibility
         .route("/api/send", post(send_message))
-        .route("/api/send_message", post(send_message)) // alias for docs/UI
+        .route("/api/send_message", post(send_message))
         .route("/api/messages", get(get_messages))
         .route("/api/peers", get(get_peers))
         .route("/api/settings", get(get_settings))
@@ -2695,6 +2829,7 @@ pub fn app(core: Arc<Core>) -> Router {
         .route("/api/v2/peers", get(get_peers_v2))
         .route("/api/v2/messages", get(get_messages_v2))
         .layer(middleware::from_fn(auth_middleware))
+        .layer(default_rate_limiter)
         // .layer(rate_limiter)
         .layer(cors)
         .fallback(static_handler)

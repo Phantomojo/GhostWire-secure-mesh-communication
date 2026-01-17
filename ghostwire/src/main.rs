@@ -43,6 +43,9 @@ struct Args {
 
     #[arg(long)]
     help: bool,
+
+    #[arg(long)]
+    sim_addr: Option<String>,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -74,6 +77,12 @@ enum Commands {
     },
     /// Run TUI mode
     Tui,
+    /// Get node status
+    Status,
+    /// List known peers
+    Peers,
+    /// Send a message: send <recipient_id> <content>
+    Send { recipient: String, content: String },
 }
 
 #[cfg(not(feature = "cli"))]
@@ -107,6 +116,7 @@ async fn main() -> Result<()> {
         bootstrap: Vec::new(),
         web: false,
         cli: false,
+        sim_addr: None,
     };
 
     // Parse bootstrap nodes
@@ -120,7 +130,7 @@ async fn main() -> Result<()> {
     }
 
     // Initialize core components
-    let core = Core::new(bootstrap_multiaddrs).await?;
+    let core = Core::new(bootstrap_multiaddrs, args.sim_addr).await?;
     let core_arc = Arc::new(core);
 
     // Activate the autonomic nervous system (DNA 10/10)
@@ -128,9 +138,57 @@ async fn main() -> Result<()> {
 
     match args.command {
         #[cfg(feature = "cli")]
+        Some(Commands::Status) => {
+            let status = core_arc.get_security_stats().await;
+            let peers = core_arc.get_peer_count();
+            let listeners = core_arc.get_mesh_listeners().await;
+
+            println!("--- GhostWire Node Status ---");
+            println!("Identity: {}", core_arc.get_identity_id());
+            println!("Peers:    {}", peers);
+            if !listeners.is_empty() {
+                println!("Mesh Addresses:");
+                for addr in listeners {
+                    println!("  {}", addr);
+                }
+            }
+            println!("Threat:   {:?}", status.threat_level);
+            println!("Blocked:  {}", status.blocked_connections);
+        }
+
+        #[cfg(feature = "cli")]
+        Some(Commands::Peers) => {
+            println!("--- Known Mesh Peers ---");
+            #[cfg(feature = "mesh")]
+            if let Some(mesh) = &core_arc.mesh_manager {
+                let topology = mesh.read().await.get_topology().await;
+                for (id, node) in topology.nodes {
+                    println!(
+                        "ID: {} | Name: {} | Status: {}",
+                        id,
+                        node.username,
+                        if node.is_online { "Online" } else { "Offline" }
+                    );
+                }
+            } else {
+                println!("Mesh networking not active.");
+            }
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Send { recipient, content }) => {
+            println!("📤 Sending message to {}...", recipient);
+            let msg = ghostwire::core::Message::new(core_arc.get_identity_id(), recipient, content);
+            match core_arc.send_message(&msg).await {
+                Ok(_) => println!("✅ Message dispatched to transport."),
+                Err(e) => println!("❌ Failed to send: {}", e),
+            }
+        }
+        #[cfg(feature = "cli")]
         Some(Commands::Cli) => {
-            info!("Starting CLI mode");
-            println!("CLI mode is currently disabled.");
+            info!("Starting interactive CLI mode");
+            println!("GhostWire Interactive Shell (Type 'exit' to quit)");
+            // Simple interactive loop could go here, but for now we prioritize subcommands
+            // which are better for simulation scripts.
         }
         #[cfg(feature = "web")]
         Some(Commands::Web {
@@ -163,15 +221,14 @@ async fn main() -> Result<()> {
         }
         #[cfg(feature = "tui")]
         Some(Commands::Tui) => {
-            // TUI defaults to 0.0.0.0 for mesh since it's local interactive
+            // Start nervous system for mesh networking
             core_arc
                 .clone()
-                .start_nervous_system("0.0.0.0".to_string())
+                .start_nervous_system(args.mesh_host.clone())
                 .await;
 
             info!("Starting TUI mode");
-            // For now, TUI gets no bootstraps unless we pass 'em through
-            let core_mutex = Arc::new(Mutex::new(Core::new(Vec::new()).await?));
+            let core_mutex = Arc::new(Mutex::new(core_arc.as_ref().clone()));
             tui::start_tui(core_mutex)
                 .await
                 .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
