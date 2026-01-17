@@ -1792,6 +1792,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "futures-util",
+ "getrandom 0.2.16",
  "governor",
  "hex",
  "hostname",
@@ -1803,6 +1804,7 @@ dependencies = [
  "matrix-sdk",
  "mime_guess",
  "neli",
+ "pbkdf2",
  "pqcrypto-mlkem",
  "pqcrypto-traits",
  "qrcode-generator",
@@ -1814,6 +1816,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.2",
@@ -4356,6 +4359,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4369,6 +4383,8 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest",
  "hmac",
+ "password-hash",
+ "sha2",
 ]
 
 [[package]]
