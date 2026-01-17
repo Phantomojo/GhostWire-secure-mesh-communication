@@ -18,6 +18,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub web_enabled: bool,
     pub cli_enabled: bool,
+    pub auto_update: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +66,7 @@ impl Default for Config {
                 port: 8080,
                 web_enabled: true,
                 cli_enabled: true,
+                auto_update: true,
             },
             security: SecurityConfig {
                 max_connections_per_ip: 10,
@@ -159,6 +161,11 @@ impl Config {
         config.features.matrix_bridge = env::var("GHOSTWIRE_MATRIX_BRIDGE").is_ok();
         config.features.meshtastic_bridge = env::var("GHOSTWIRE_MESHTASTIC_BRIDGE").is_ok();
 
+        // Auto-update from environment
+        if let Ok(val) = env::var("GHOSTWIRE_AUTO_UPDATE") {
+            config.server.auto_update = val.to_lowercase() == "true" || val == "1";
+        }
+
         config
     }
 
@@ -176,10 +183,8 @@ impl Config {
         Some(MatrixConfig {
             homeserver: env::var("MATRIX_HOMESERVER")
                 .unwrap_or_else(|_| "https://matrix.org".to_string()),
-            user: env::var("MATRIX_USER")
-                .unwrap_or_else(|_| "@ghostwire:matrix.org".to_string()),
-            access_token: env::var("MATRIX_ACCESS_TOKEN")
-                .unwrap_or_else(|_| "".to_string()),
+            user: env::var("MATRIX_USER").unwrap_or_else(|_| "@ghostwire:matrix.org".to_string()),
+            access_token: env::var("MATRIX_ACCESS_TOKEN").unwrap_or_else(|_| "".to_string()),
         })
     }
 
@@ -191,8 +196,7 @@ impl Config {
         Some(MeshtasticConfig {
             device_path: env::var("MESHTASTIC_DEVICE_PATH")
                 .unwrap_or_else(|_| "/dev/ttyUSB0".to_string()),
-            channel: env::var("MESHTASTIC_CHANNEL")
-                .unwrap_or_else(|_| "main".to_string()),
+            channel: env::var("MESHTASTIC_CHANNEL").unwrap_or_else(|_| "main".to_string()),
         })
     }
 }
@@ -211,9 +215,9 @@ pub struct MeshtasticConfig {
 }
 
 // Constants that can be overridden by config
-pub const DEFAULT_MAGIC_BYTES: &[u8] = b"GWSTH";
+pub const DEFAULT_MAGIC_BYTES: &[u8; 5] = b"GWSTH";
 pub const DEFAULT_HANDSHAKE_TIMEOUT_SECS: u64 = 1;
 pub const DEFAULT_MAX_CONN_PER_MIN: usize = 10;
 pub const DEFAULT_STEALTH_VERSION: u8 = 0x01;
 pub const DEFAULT_MAX_HANDSHAKE_ATTEMPTS: usize = 3;
-pub const DEFAULT_CONNECTION_TIMEOUT_SECS: u64 = 30; 
+pub const DEFAULT_CONNECTION_TIMEOUT_SECS: u64 = 30;
