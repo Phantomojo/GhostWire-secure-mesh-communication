@@ -38,6 +38,9 @@ chacha20poly1305 = { version = "0.10" }
 pqcrypto-mlkem = { version = "0.1.1" }
 pqcrypto-traits = { version = "0.3" }
 blake2b_simd = "1.0"
+pbkdf2 = { version = "0.12", features = ["simple"] }
+sha2 = "0.10"
+getrandom = "0.2"
 
 # Utilities
 anyhow = { version = "1.0" }
