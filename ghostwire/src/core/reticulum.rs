@@ -413,4 +413,9 @@ impl ReticulumManager {
 
         Ok(())
     }
+
+    pub async fn stop(&self) -> Result<()> {
+        info!("Stopping ReticulumManager...");
+        Ok(())
+    }
 }

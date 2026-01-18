@@ -64,13 +64,26 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
     const [activeSection, setActiveSection] = useState<string>('identity');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [profiles, setProfiles] = useState<string[]>([]);
+    const [currentProfile, setCurrentProfile] = useState<string | null>(null);
 
     // Load settings on mount
     useEffect(() => {
         if (backendConnected) {
             loadSettings();
+            loadProfiles();
         }
     }, [backendConnected]);
+
+    const loadProfiles = async () => {
+        try {
+            const data = await api.listProfiles();
+            setProfiles(data.profiles);
+            setCurrentProfile(data.current);
+        } catch (error) {
+            console.error('Failed to load profiles:', error);
+        }
+    };
 
     const loadSettings = async () => {
         try {
@@ -111,6 +124,36 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
 
     const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
         setSettings(prev => ({ ...prev, [key]: value }));
+    };
+
+    const handleDeleteProfile = async (name: string) => {
+        if (!confirm(`Are you absolutely sure you want to delete profile "${name}"? This will purge all message history and keys for this identity.`)) {
+            return;
+        }
+
+        const success = await api.deleteProfile(name);
+        if (success) {
+            alert(`Profile ${name} deleted successfully.`);
+            loadProfiles();
+        } else {
+            alert(`Failed to delete profile ${name}. Check logs.`);
+        }
+    };
+
+    const handleEmergencyWipe = async () => {
+        if (!confirm('⚠️ CRITICAL WARNING: This will PERMANENTLY ERASE ALL PROFILES, message history, and settings on this machine. Proceed with emergency "Self-Destruct" wipe?')) {
+            return;
+        }
+
+        if (!confirm('FINAL CONFIRMATION: You are about to wipe GhostWire entirely. Continue?')) {
+            return;
+        }
+
+        const success = await api.wipeSystem();
+        if (success) {
+            alert('System wiped. The application will now terminate.');
+            window.location.reload();
+        }
     };
 
     const sections = [
@@ -518,15 +561,64 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
                                     </select>
                                 </div>
 
-                                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-                                    <div className="text-red-400 font-medium mb-2">Danger Zone</div>
-                                    <div className="flex gap-3">
-                                        <button className="px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/30 transition-colors text-sm">
-                                            Export Data
-                                        </button>
-                                        <button className="px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/30 transition-colors text-sm">
-                                            Clear All Data
-                                        </button>
+                                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl space-y-4">
+                                    <div className="text-red-400 font-bold flex items-center gap-2">
+                                        <span className="text-lg">⚠️</span> DANGER ZONE
+                                    </div>
+                                    <div className="text-[10px] text-red-100/40 leading-relaxed uppercase tracking-tighter">
+                                        The following actions are irreversible and will result in permanent data loss.
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <div className="bg-black/20 p-4 rounded-xl border border-white/5">
+                                            <div className="flex justify-between items-center mb-3">
+                                                <div>
+                                                    <div className="text-xs font-black text-white/80 uppercase">Profile Deletion</div>
+                                                    <div className="text-[9px] text-slate-500">Purge specific identity and vault files</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                                                {profiles.map(p => (
+                                                    <div key={p} className="flex items-center justify-between p-2 bg-white/5 rounded-lg border border-white/5">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${p === currentProfile ? 'bg-indigo-500' : 'bg-slate-700'}`} />
+                                                            <span className={`text-[11px] font-mono ${p === currentProfile ? 'text-indigo-400 font-bold' : 'text-slate-300'}`}>
+                                                                {p} {p === currentProfile && '(Active)'}
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            disabled={p === currentProfile}
+                                                            onClick={() => handleDeleteProfile(p)}
+                                                            className={`px-3 py-1 rounded-md text-[9px] font-black uppercase transition-all ${p === currentProfile
+                                                                ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                                                                : 'bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white'
+                                                                }`}
+                                                        >
+                                                            PURGE
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {profiles.length === 0 && (
+                                                    <div className="text-center py-4 text-[10px] text-slate-600 italic">
+                                                        No additional profiles detected
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-red-950/20 p-4 rounded-xl border border-red-500/20 flex items-center justify-between">
+                                            <div>
+                                                <div className="text-xs font-black text-red-400 uppercase">Emergency System Wipe</div>
+                                                <div className="text-[9px] text-red-100/40">Total purge of .ghostwire directory and shutdown</div>
+                                            </div>
+                                            <button
+                                                onClick={handleEmergencyWipe}
+                                                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-all text-[10px] font-black uppercase shadow-lg shadow-red-900/20"
+                                            >
+                                                SELF DESTRUCT
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

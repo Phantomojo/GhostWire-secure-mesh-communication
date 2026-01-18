@@ -267,10 +267,18 @@ export const api = {
       }
     }
 
+    const contentType = response.headers.get('content-type');
     if (!response.ok) {
-      throw new Error(`GET ${endpoint} failed: ${response.statusText}`);
+      const errorText = contentType && contentType.includes('application/json')
+        ? (await response.json()).error || response.statusText
+        : await response.text();
+      throw new Error(`GET ${endpoint} failed (${response.status}): ${errorText}`);
     }
-    return response.json();
+
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+    return response.text();
   },
 
   async post(endpoint: string, data?: any): Promise<any> {
@@ -294,10 +302,18 @@ export const api = {
       }
     }
 
+    const contentType = response.headers.get('content-type');
     if (!response.ok) {
-      throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
+      const errorText = contentType && contentType.includes('application/json')
+        ? (await response.json()).error || response.statusText
+        : await response.text();
+      throw new Error(`POST ${endpoint} failed (${response.status}): ${errorText}`);
     }
-    return response.json();
+
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+    return response.text();
   },
 
   async put(endpoint: string, data?: any): Promise<any> {
@@ -321,10 +337,18 @@ export const api = {
       }
     }
 
+    const contentType = response.headers.get('content-type');
     if (!response.ok) {
-      throw new Error(`PUT ${endpoint} failed: ${response.statusText}`);
+      const errorText = contentType && contentType.includes('application/json')
+        ? (await response.json()).error || response.statusText
+        : await response.text();
+      throw new Error(`PUT ${endpoint} failed (${response.status}): ${errorText}`);
     }
-    return response.json();
+
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+    return response.text();
   },
 
   async delete(endpoint: string): Promise<any> {
@@ -351,6 +375,13 @@ export const api = {
       headers: getAuthHeaders(),
     });
 
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error(`❌ API V2 Non-JSON Response: ${text.substring(0, 100)}`);
+      throw new Error(`Expected JSON but got ${contentType || 'plain text'}`);
+    }
+
     const envelope: V2Response<T> = await response.json();
 
     if (!response.ok || envelope.error) {
@@ -371,6 +402,13 @@ export const api = {
       headers: getAuthHeaders(),
       body: data ? JSON.stringify(data) : undefined,
     });
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error(`❌ API V2 Non-JSON Response: ${text.substring(0, 100)}`);
+      throw new Error(`Expected JSON but got ${contentType || 'plain text'}`);
+    }
 
     const envelope: V2Response<T> = await response.json();
 
@@ -604,6 +642,52 @@ export const api = {
   async lockIdentity(): Promise<boolean> {
     const response = await this.post('/identity/lock');
     return response.success;
+  },
+
+  // Profile Management
+  async listProfiles(): Promise<{ profiles: string[]; current: string | null }> {
+    const response = await this.get('/profile/list');
+    return response.data;
+  },
+
+  async selectProfile(profileName: string): Promise<boolean> {
+    try {
+      const response = await this.post('/profile/select', { profile_name: profileName });
+      return response.success;
+    } catch (e) {
+      console.error('Select profile failed', e);
+      return false;
+    }
+  },
+
+  async createProfile(name: string): Promise<boolean> {
+    try {
+      const response = await this.post('/profile/create', { name });
+      return response.success;
+    } catch (e) {
+      console.error('Create profile failed', e);
+      return false;
+    }
+  },
+
+  async deleteProfile(name: string): Promise<boolean> {
+    try {
+      const response = await this.delete(`/profile/delete/${name}`);
+      return response.success;
+    } catch (e) {
+      console.error('Delete profile failed', e);
+      return false;
+    }
+  },
+
+  async wipeSystem(): Promise<boolean> {
+    try {
+      const response = await this.post('/system/wipe');
+      return response.success;
+    } catch (e) {
+      console.error('Emergency wipe failed', e);
+      return false;
+    }
   },
 
   // Get network information (local IP)

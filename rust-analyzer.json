@@ -1,0 +1,14 @@
+{
+    "lru.capacity": 512,
+    "checkOnSave.command": "check",
+    "diagnostics.disabled": [
+        "inactive-code"
+    ],
+    "files.excludeDirs": [
+        "webui/node_modules",
+        "target",
+        ".git"
+    ],
+    "cargo.buildScripts.enable": true,
+    "procMacro.enable": true
+}

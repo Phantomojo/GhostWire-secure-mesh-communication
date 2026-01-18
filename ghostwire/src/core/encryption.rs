@@ -145,7 +145,7 @@ impl EncryptionManager {
             match Self::load_from_disk(&storage_path) {
                 Ok(manager) => {
                     tracing::info!(
-                        "🔐 Loaded persistent encryption keys: {}",
+                        "🔐 Loaded persistent encryption keys for key_id: {}",
                         manager.key_pair.key_id
                     );
                     return Ok(manager);
@@ -278,6 +278,21 @@ impl EncryptionManager {
         let plaintext_bytes = Self::decrypt_with_aes_gcm(ciphertext, nonce, &master_key)?;
         let object: T = serde_json::from_slice(&plaintext_bytes)?;
         Ok(object)
+    }
+
+    /// Public helper for byte-level encryption using Master Key
+    pub fn encrypt_bytes(data: &[u8]) -> Result<AesGcmResult, Box<dyn std::error::Error>> {
+        let master_key = Self::get_master_key()?;
+        Self::encrypt_with_aes_gcm(data, &master_key)
+    }
+
+    /// Public helper for byte-level decryption using Master Key
+    pub fn decrypt_bytes(
+        ciphertext: &[u8],
+        nonce: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let master_key = Self::get_master_key()?;
+        Self::decrypt_with_aes_gcm(ciphertext, nonce, &master_key)
     }
 
     pub fn save_to_disk(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -618,7 +633,7 @@ impl EncryptionManager {
                 combined
             }
             Err(e) => {
-                tracing::error!("CLI encryption failed: {}", e);
+                tracing::error!(inner_error = %e, "CLI encryption failed");
                 panic!(
                     "Encryption failed - this should never happen in production: {}",
                     e
@@ -657,7 +672,7 @@ impl EncryptionManager {
         match Self::decrypt_with_aes_gcm(ciphertext, nonce, &key) {
             Ok(decrypted) => decrypted,
             Err(e) => {
-                tracing::error!("CLI decryption failed: {}", e);
+                tracing::error!(inner_error = %e, "CLI decryption failed");
                 panic!(
                     "Decryption failed - data may be corrupted or tampered: {}",
                     e
@@ -718,7 +733,7 @@ impl EncryptionManager {
     fn increment_key_usage(&self) {
         // In a real implementation, this would be thread-safe
         // For now, we'll just log the usage
-        tracing::debug!("Key usage incremented for key: {}", self.key_pair.key_id);
+        tracing::debug!(key_id = %self.key_pair.key_id, "Key usage incremented");
     }
 
     pub fn export_public_key(&self) -> Vec<u8> {
@@ -739,10 +754,9 @@ impl EncryptionManager {
         now - self.last_key_rotation > self.key_rotation_interval
     }
 
-    /// Rotate keys if needed
     pub fn rotate_keys_if_needed(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.should_rotate_keys() {
-            tracing::info!("Rotating encryption keys");
+            tracing::info!(msg = "Rotating encryption keys");
             let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
             self.key_pair = new_key_pair;
             self.last_key_rotation = SystemTime::now()
@@ -757,10 +771,10 @@ impl EncryptionManager {
     }
 }
 
-#[derive(Debug)]
-struct AesGcmResult {
-    ciphertext: Vec<u8>,
-    nonce: Vec<u8>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AesGcmResult {
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
 }
 
 impl Default for EncryptionManager {

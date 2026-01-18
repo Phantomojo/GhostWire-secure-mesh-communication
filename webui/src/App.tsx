@@ -12,6 +12,8 @@ import SettingsPage from './components/SettingsPage';
 import MovingMeshBackground from './components/MovingMeshBackground';
 import CyberToast, { type Toast, type ToastType } from './components/CyberToast';
 import { TutorialOverlay } from './components/TutorialOverlay';
+import LoadingScreen from './components/LoadingScreen';
+import About from './components/About';
 
 import { api, config } from './services/api';
 
@@ -66,7 +68,8 @@ interface DiscoveredPeer {
 }
 
 function App() {
-  const [activePanel, setActivePanel] = useState<'dashboard' | 'network' | 'security' | 'system' | 'communication' | 'settings'>('dashboard');
+  const [activePanel, setActivePanel] = useState<'dashboard' | 'network' | 'security' | 'system' | 'communication' | 'settings' | 'about'>('dashboard');
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isEmergencyMode, setIsEmergencyMode] = useState(false);
   const [isStealthMode, setIsStealthMode] = useState(false);
   const [isPanicMode, setIsPanicMode] = useState(false);
@@ -118,39 +121,51 @@ function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const refreshStatus = async () => {
+    try {
+      const status = await api.getIdentityStatus();
+      setProfileStatus(status);
+      setIsLocked(status.locked);
+      return status;
+    } catch (e) {
+      console.error('Failed to refresh status:', e);
+      setIsLocked(true);
+      setProfileStatus({ locked: true, has_identity: true });
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       console.log('🚀 Initializing GhostWire Core UI...');
-      // Small delay to allow backend to start if needed
-      await new Promise(r => setTimeout(r, 1000));
-
-      // Check Profile Status
       try {
-        const status = await api.getIdentityStatus();
-        setProfileStatus(status);
-        setIsLocked(status.locked);
-        if (status.locked) {
-          console.log('🔒 Profile is locked. Showing login screen.');
-        } else {
-          console.log('🔓 Profile unlocked.');
+        // Small delay to allow backend to start if needed
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Check Profile Status
+        await refreshStatus();
+
+        try {
+          const authed = await api.autoAuthenticate();
+          if (authed) {
+            console.log('✅ Auto-authentication successful');
+          } else {
+            console.warn('⚠️ Auto-authentication failed. Some features may be restricted.');
+          }
+        } catch (e) {
+          console.error('❌ Auto-authentication error:', e);
         }
-      } catch (e) {
-        console.error('Failed to get profile status:', e);
-        // Assuming locked if failed to reach backend or error
+
+        try {
+          await loadRealData();
+        } catch (e) {
+          console.warn('Initial data load failed, proceeding to UI anyway.', e);
+        }
+      } catch (err) {
+        console.error('Critical initialization error:', err);
+      } finally {
+        setIsInitializing(false);
       }
 
-      try {
-        const authed = await api.autoAuthenticate();
-        if (authed) {
-          console.log('✅ Auto-authentication successful');
-        } else {
-          console.warn('⚠️ Auto-authentication failed. Some features may be restricted.');
-        }
-      } catch (e) {
-        console.error('❌ Auto-authentication error:', e);
-      }
-
-      await loadRealData();
       const interval = setInterval(loadRealData, 5000);
       return () => clearInterval(interval);
     };
@@ -445,9 +460,8 @@ function App() {
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, recipient: string) => {
     try {
-      const recipient = activeRecipient;
       await api.post('/send_message', { content, recipient });
       loadRealData();
       addToast('success', `Packet sent via ${recipient === 'broadcast' ? 'OMNI-WAVE' : 'DIRECT-BEAM'}`);
@@ -466,31 +480,39 @@ function App() {
 
   return (
     <div className={`flex h-[100dvh] w-screen overflow-hidden relative ${isEmergencyMode ? 'emergency-state' : ''}`}>
-      {isLocked && profileStatus && (
+      {/* Initialization Overlay */}
+      {isInitializing && <LoadingScreen onComplete={() => setIsInitializing(false)} />}
+
+      {isLocked && (
         <LoginScreen
-          status={profileStatus}
+          status={profileStatus || { locked: true, has_identity: true }}
+          onProfileChange={refreshStatus}
           onUnlock={() => {
             setIsLocked(false);
             addToast('success', 'Profile Decrypted. Access Granted.');
             // Refresh status to check setup_complete
-            api.getIdentityStatus().then(setStatus => setProfileStatus(setStatus));
+            refreshStatus();
             loadRealData();
           }}
         />
       )}
 
-      {!isLocked && profileStatus && !profileStatus.setup_complete && (
+      {!isLocked && (!profileStatus || !profileStatus.setup_complete) && (
         <FirstTimeSetup
           onComplete={() => {
-            setProfileStatus({ ...profileStatus, setup_complete: true });
+            if (profileStatus) {
+              setProfileStatus({ ...profileStatus, setup_complete: true });
+            }
+            setShowTutorial(true); // Always show tutorial after first time setup
             addToast('success', 'Sovereign Profile Established.');
             loadRealData();
           }}
         />
       )}
 
-      <MovingMeshBackground />
+      <MovingMeshBackground severity={isEmergencyMode ? 0.3 : 0.05} />
       <CyberToast toasts={toasts} onRemove={removeToast} />
+      <TutorialOverlay isOpen={showTutorial} onClose={() => setShowTutorial(false)} />
 
       {/* Sidebar - z-Index 20 to sit above background */}
       <div className="relative z-20 h-full">
@@ -605,9 +627,11 @@ function App() {
                 user={user}
                 peers={discoveredPeers}
                 activeRecipient={activeRecipient}
-                onSelectRecipient={setActiveRecipient}
+                onRecipientSelect={setActiveRecipient}
               />
             )}
+
+            {activePanel === 'about' && <About />}
 
             {activePanel === 'settings' && (
               <SettingsPage
@@ -618,10 +642,6 @@ function App() {
           </div>
         </main>
       </div>
-      {/* Tutorial Overlay */}
-      <TutorialOverlay isOpen={showTutorial} onClose={() => setShowTutorial(false)} />
-
-      {/* Configuration Dialog */}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 use crate::core::disaster::DisasterMetrics;
 #[cfg(feature = "mesh")]
 use crate::core::mesh::MeshManager;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -13,6 +14,7 @@ pub struct NetworkMonitor {
     current_metrics: Arc<RwLock<DisasterMetrics>>,
     monitor_interval: Duration,
     canary_target: String, // e.g., "8.8.8.8" or a known bootstrap node
+    running: Arc<AtomicBool>,
 }
 
 impl NetworkMonitor {
@@ -26,6 +28,7 @@ impl NetworkMonitor {
             current_metrics: Arc::new(RwLock::new(DisasterMetrics::default())),
             monitor_interval: interval,
             canary_target: "8.8.8.8:53".to_string(), // DNS for reachability check
+            running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -36,16 +39,25 @@ impl NetworkMonitor {
     /// Starts the background monitoring loop.
     pub async fn start(self: Arc<Self>) {
         info!("Starting Network Monitor heartbeat...");
+        self.running.store(true, Ordering::SeqCst);
         let monitor = self.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(monitor.monitor_interval);
-            loop {
+            while monitor.running.load(Ordering::SeqCst) {
                 interval.tick().await;
+                if !monitor.running.load(Ordering::SeqCst) {
+                    break;
+                }
                 if let Err(e) = monitor.update_metrics().await {
                     error!("Fatal error updating network metrics: {}", e);
                 }
             }
+            info!("Network Monitor heartbeat stopped.");
         });
+    }
+
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
     }
 
     async fn update_metrics(&self) -> anyhow::Result<()> {

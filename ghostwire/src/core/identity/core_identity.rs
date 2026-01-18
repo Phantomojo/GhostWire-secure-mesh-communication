@@ -178,7 +178,7 @@ impl Identity {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            setup_complete: true,
+            setup_complete: false,
         };
 
         Identity {
