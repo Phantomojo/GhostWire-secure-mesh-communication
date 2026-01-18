@@ -26,15 +26,15 @@ const ZONES = [
 
 interface CommunicationPanelProps {
   messages: any[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, recipient: string) => void;
   onEmergency: () => void;
   user: any;
   peers: any[];
   activeRecipient: string;
-  onSelectRecipient: (id: string) => void;
+  onRecipientSelect: (id: string) => void;
 }
 
-const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers, activeRecipient, onSelectRecipient }: CommunicationPanelProps) => {
+const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers, activeRecipient, onRecipientSelect }: CommunicationPanelProps) => {
   const [inputText, setInputText] = useState('');
   const [showNodeSidebar, setShowNodeSidebar] = useState(true);
   const [showStreamSidebar, setShowStreamSidebar] = useState(true);
@@ -47,7 +47,7 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
 
   const handleSend = () => {
     if (!inputText.trim()) return;
-    onSendMessage(inputText);
+    onSendMessage(inputText, activeRecipient);
     setInputText('');
   };
 
@@ -120,7 +120,7 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
           {currentStreams.map(stream => (
             <div
               key={stream.id}
-              onClick={() => onSelectRecipient(stream.name === 'CORE_UPLINK' ? 'broadcast' : stream.name)}
+              onClick={() => onRecipientSelect(stream.name === 'CORE_UPLINK' ? 'broadcast' : stream.name)}
               className={`flex items-center px-3 py-2 rounded-lg cursor-pointer group transition-all duration-200 border border-transparent
                 ${(activeRecipient === 'broadcast' && stream.name === 'CORE_UPLINK') || activeRecipient === stream.name
                   ? 'bg-cyan-900/20 border-cyan-500/20 text-cyan-100 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
@@ -285,7 +285,7 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
           {peers?.map((peer: any) => (
             <div
               key={peer.node_id || peer.id}
-              onClick={() => onSelectRecipient(peer.node_id)}
+              onClick={() => onRecipientSelect(peer.node_id)}
               className={`flex items-center p-2 rounded-lg border transition-all cursor-pointer
                 ${activeRecipient === peer.node_id
                   ? 'bg-cyan-900/30 border-cyan-500/40 shadow-md'

@@ -72,6 +72,7 @@ governor = { version = "0.6" }
 # System
 hostname = { version = "0.3" }
 local-ip-address = { version = "0.5" }
+sled = "0.34"
 
 # Bluetooth & QR (Phase P2)
 btleplug = "0.11"

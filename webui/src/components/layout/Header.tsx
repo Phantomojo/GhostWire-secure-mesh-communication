@@ -27,8 +27,27 @@ const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected, onConfi
 
     return (
         <header className="h-16 md:h-20 glass-panel border-b border-white/5 flex items-center justify-between px-4 md:px-8 z-10 sticky top-0 bg-slate-950/40 backdrop-blur-xl">
-            {/* Left Section: Node Status */}
+            {/* Left Section: Logo & Node Status */}
             <div className="flex items-center gap-6">
+                {/* GhostWire Logo */}
+                <div className="flex items-center gap-3">
+                    <img
+                        src="/logo.png"
+                        alt="GhostWire"
+                        className="h-10 md:h-12 w-auto object-contain drop-shadow-[0_0_20px_rgba(123,44,191,0.6)] hover:drop-shadow-[0_0_30px_rgba(123,44,191,0.9)] transition-all duration-300"
+                    />
+                    <div className="hidden xl:block">
+                        <div className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-indigo-400 to-cyan-400">
+                            GHOSTWIRE
+                        </div>
+                        <div className="text-[8px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+                            Node Cluster V2
+                        </div>
+                    </div>
+                </div>
+
+                <div className="h-8 w-[1px] bg-white/5 hidden md:block" />
+
                 <div className="flex items-center gap-3 bg-slate-900/40 px-4 py-2 rounded-2xl border border-white/5 shadow-inner transition-all duration-500 hover:border-indigo-500/30 group">
                     <div className="relative">
                         <div className={`w-2.5 h-2.5 rounded-full ${backendConnected ? 'bg-indigo-500' : 'bg-rose-500'} transition-all duration-500`} />

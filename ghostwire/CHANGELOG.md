@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security policy and code of conduct
 - Development roadmap and changelog
 - MIT License
+- **Decentralized Profile Management**: Secure first-time setup with password enforcement
+  - New `/api/identity/setup` endpoint for secure profile initialization
+  - `setup_complete` flag to trigger the "Sovereign Identity Phase" wizard
+  - Automatic unlock with default password and re-encryption with user's new password
+  - Refactored `IdentityController` to remove legacy `username.txt` dependency
+- **Rate Limit Optimization**: Increased API rate limits (200/s, burst 100) to support frontend initialization
 
 ### Changed
 - Refactored `TransportRegistry` to use `Arc<tokio::sync::Mutex<dyn Transport>>` for async, mutable access to all transports.

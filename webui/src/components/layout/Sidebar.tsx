@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HiOutlineHome, HiOutlineGlobeAlt, HiOutlineShieldCheck, HiOutlineCpuChip, HiOutlineChatBubbleLeftRight, HiOutlineExclamationTriangle, HiOutlineEye, HiOutlineLockClosed, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineShieldExclamation, HiOutlineCog6Tooth } from 'react-icons/hi2';
+import { HiOutlineHome, HiOutlineGlobeAlt, HiOutlineCpuChip, HiOutlineChatBubbleLeftRight, HiOutlineExclamationTriangle, HiOutlineEye, HiOutlineLockClosed, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineShieldExclamation, HiOutlineCog6Tooth, HiOutlineInformationCircle } from 'react-icons/hi2';
 import UserProfile from '../UserProfile';
 
 interface SidebarProps {
@@ -36,6 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         { id: 'security', label: 'Security', icon: HiOutlineShieldExclamation },
         { id: 'system', label: 'System', icon: HiOutlineCpuChip },
         { id: 'settings', label: 'Settings', icon: HiOutlineCog6Tooth },
+        { id: 'about', label: 'About', icon: HiOutlineInformationCircle },
     ];
 
     return (
@@ -51,18 +52,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div className={`
                             relative flex items-center justify-center shrink-0
                             ${isCollapsed ? 'w-12 h-12' : 'w-10 h-10'}
-                            bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30
-                            transition-all duration-500 group-hover:shadow-indigo-500/50
+                            transition-all duration-500
                         `}>
-                            <HiOutlineShieldCheck className="text-white text-2xl" />
-                            {isCollapsed && (
-                                <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full scale-150 -z-10" />
-                            )}
+                            <img
+                                src="/logo.png"
+                                alt="GhostWire"
+                                className={`
+                                    object-contain
+                                    drop-shadow-[0_0_15px_rgba(123,44,191,0.6)]
+                                    hover:drop-shadow-[0_0_25px_rgba(123,44,191,0.9)]
+                                    transition-all duration-300
+                                    ${isCollapsed ? 'w-12 h-12' : 'w-10 h-10'}
+                                `}
+                            />
                         </div>
                         {!isCollapsed && (
                             <div className="animate-fade-in whitespace-nowrap overflow-hidden">
-                                <h1 className="text-xl font-black tracking-tight text-white">GHOSTWIRE</h1>
-                                <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-indigo-400">Node Cluster V2</p>
+                                <h1 className="text-xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-indigo-400 to-cyan-400">
+                                    GHOSTWIRE
+                                </h1>
+                                <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-purple-400">Node Cluster V2</p>
                             </div>
                         )}
                     </div>

@@ -8,6 +8,7 @@ pub mod encryption;
 pub mod identity;
 pub mod message;
 pub mod monitor;
+pub mod persistence_manager;
 pub mod security;
 pub mod signal;
 pub mod store;
@@ -237,8 +238,10 @@ impl MeshtasticAdapter {
         // Apply Military-Grade Erasure Coding (Fountain Code simulation)
         let shards = self.erasure_armor.encode(message.content.as_bytes());
         tracing::info!(
-            "Meshtastic: Splitting message into {} shards for extreme resilience",
-            shards.len()
+            shards_len = shards.len(),
+            device_path = %self.device_path,
+            content = %message.content,
+            "Meshtastic: Splitting message into shards for extreme resilience"
         );
 
         #[cfg(feature = "meshtastic")]
@@ -296,6 +299,7 @@ pub struct Core {
     pub active_adapter: Option<AdapterKind>,
 
     // The Nervous System
+    pub persistence: Arc<persistence_manager::PersistenceManager>,
     pub monitor: Arc<monitor::NetworkMonitor>,
     pub switcher: Arc<RwLock<transport_manager::AutoTransportSwitcher>>,
     pub traffic_armor: Arc<armor::TrafficArmor>,
@@ -312,7 +316,7 @@ impl Core {
         profile: Option<String>,
     ) -> Result<Self> {
         let identity = Arc::new(
-            Identity::new(profile)
+            Identity::new(profile.clone())
                 .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
         let _traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
@@ -340,6 +344,11 @@ impl Core {
 
         let registry = Arc::new(RwLock::new(registry));
 
+        // Initialize Persistence
+        let persistence = Arc::new(persistence_manager::PersistenceManager::new(
+            profile.clone(),
+        )?);
+
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
         // Load configuration
@@ -348,7 +357,9 @@ impl Core {
         // Use default bootstraps if none provided
         let mut bootstrap_nodes = bootstrap_nodes;
         if bootstrap_nodes.is_empty() {
-            tracing::info!("🌐 No bootstrap nodes provided. Using default public gateways for zero-config discovery.");
+            tracing::info!(
+                msg = "🌐 No bootstrap nodes provided. Using default public gateways for zero-config discovery."
+            );
             for addr_str in crate::core::mesh::DEFAULT_BOOTSTRAPS {
                 if let Ok(addr) = addr_str.parse() {
                     bootstrap_nodes.push(addr);
@@ -390,7 +401,7 @@ impl Core {
         let traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
 
         let messages = Arc::new(RwLock::new(Vec::new()));
-        let message_store = Arc::new(store::SecureMessageStore::new()?);
+        let message_store = Arc::new(store::SecureMessageStore::new(persistence.clone()));
         let (event_bus, _) = broadcast::channel(1024); // Large buffer for high traffic
 
         #[cfg(feature = "mesh")]
@@ -441,6 +452,7 @@ impl Core {
             monitor,
             switcher,
             traffic_armor,
+            persistence,
             #[cfg(feature = "mesh")]
             mesh_manager: mesh_manager_inner,
             #[cfg(feature = "reticulum")]
@@ -992,6 +1004,33 @@ impl Core {
         }
         self.encryption.get_peer_count()
     }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        tracing::info!("Core initiating shutdown sequence...");
+
+        // 1. Stop Monitor
+        self.monitor.stop();
+
+        // 2. Stop Mesh
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_mgr) = &self.mesh_manager {
+            let mgr = mesh_mgr.read().await;
+            mgr.stop().await?;
+        }
+
+        // 3. Stop Reticulum
+        #[cfg(feature = "reticulum")]
+        if let Some(ret_mgr) = &self.reticulum_manager {
+            let mgr = ret_mgr.read().await;
+            mgr.stop().await?;
+        }
+
+        // 4. Flush Persistence
+        self.persistence.flush()?;
+
+        tracing::info!("Core shutdown complete.");
+        Ok(())
+    }
 }
 
 // Documentation: MatrixAdapter and MeshtasticAdapter now have config fields and stubbed logic. Replace stubs with real SDK/API calls for production bridging.
@@ -1036,6 +1075,10 @@ impl MeshManager {
         // TODO: Implement actual peer counting
         0
     }
+
+    pub async fn stop(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "reticulum"))]
@@ -1066,5 +1109,9 @@ impl ReticulumManager {
                     .map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?,
             ),
         })
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        Ok(())
     }
 }

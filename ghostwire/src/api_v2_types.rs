@@ -136,6 +136,35 @@ impl<T: Serialize> ApiV2Response<T> {
     }
 }
 
+/// Standard error codes for the API
+#[derive(Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StandardErrorCode {
+    ProfileLoadFailed,
+    InvalidCredentials,
+    CoreInitializationFailed,
+    Unauthorized,
+    NotFound,
+    InternalError,
+    InvalidInput,
+    IdentityLocked,
+}
+
+impl StandardErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProfileLoadFailed => "PROFILE_LOAD_FAILED",
+            Self::InvalidCredentials => "INVALID_CREDENTIALS",
+            Self::CoreInitializationFailed => "CORE_INITIALIZATION_FAILED",
+            Self::Unauthorized => "UNAUTHORIZED",
+            Self::NotFound => "NOT_FOUND",
+            Self::InternalError => "INTERNAL_ERROR",
+            Self::InvalidInput => "INVALID_INPUT",
+            Self::IdentityLocked => "IDENTITY_LOCKED",
+        }
+    }
+}
+
 // Example usage:
 /*
 pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResponse {

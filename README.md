@@ -1,9 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 # 🚀 **GhostWire** - Secure Mesh Networking & Communication
 
-<div align="center">
 
-![GhostWire Logo](https://img.shields.io/badge/GhostWire-Secure%20Mesh%20Networking-blue?style=for-the-badge&logo=shield)
+![GhostWire - Afrofuturistic Secure Mesh](webui/public/brand-header.png)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge)
 ![System](https://img.shields.io/badge/Entire%20System-WORKING%20✅-brightgreen?style=for-the-badge&logo=check-circle)
 ![Deployment](https://img.shields.io/badge/Deployment-Ready-blue?style=for-the-badge)

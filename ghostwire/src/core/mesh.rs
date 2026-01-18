@@ -56,6 +56,7 @@ pub enum MeshCommand {
         message: Message,
         reply: oneshot::Sender<Result<()>>,
     },
+    Shutdown,
 }
 
 /// Mesh network node information
@@ -256,7 +257,7 @@ impl MeshTransport {
 
     /// Start the mesh network with enhanced security
     pub async fn start(&mut self, listen_addr: Multiaddr) -> Result<()> {
-        info!("Starting secure mesh network on {}", listen_addr);
+        tracing::info!("Starting secure mesh network on {}", listen_addr);
 
         let mut swarm = self
             .swarm
@@ -301,13 +302,13 @@ impl MeshTransport {
                     None
                 }
             }) {
-                info!("Adding bootstrap node: {} ({})", peer_id, addr);
+                tracing::info!("Adding bootstrap node: {} ({})", peer_id, addr);
                 swarm
                     .behaviour_mut()
                     .kad
                     .add_address(&peer_id, addr.clone());
             } else {
-                warn!("Bootstrap address missing PeerId: {}", addr);
+                tracing::warn!("Bootstrap address missing PeerId: {}", addr);
             }
         }
 
@@ -389,11 +390,11 @@ impl MeshTransport {
     }
 
     pub fn add_bootstrap_nodes(&mut self, _nodes: Vec<Multiaddr>) {
-        warn!("Adding bootstrap nodes dynamically not supported in actor model yet");
+        tracing::warn!("Adding bootstrap nodes dynamically not supported in actor model yet");
     }
 
     pub async fn publish_username(&mut self) -> Result<()> {
-        warn!("Publishing username is currently a placeholder");
+        tracing::warn!("Publishing username is currently a placeholder");
         Ok(())
     }
 
@@ -429,7 +430,13 @@ impl MeshTransport {
     }
 
     pub async fn update_connection_quality(&mut self, node_id: &str, quality: f32) {
-        info!("Updated connection quality for {}: {}", node_id, quality);
+        tracing::info!("Updated connection quality for {}: {}", node_id, quality);
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        tracing::info!("Sending shutdown command to mesh driver...");
+        let _ = self.command_tx.send(MeshCommand::Shutdown).await;
+        Ok(())
     }
 }
 
@@ -458,13 +465,18 @@ impl MeshDriver {
                 }
                 command = self.command_rx.recv() => {
                     if let Some(cmd) = command {
+                        let is_shutdown = matches!(cmd, MeshCommand::Shutdown);
                         self.handle_command(cmd).await;
+                        if is_shutdown {
+                            break;
+                        }
                     } else {
                         break;
                     }
                 }
             }
         }
+        tracing::info!("Mesh driver task exited.");
     }
 
     async fn handle_command(&mut self, cmd: MeshCommand) {
@@ -499,7 +511,7 @@ impl MeshDriver {
                         .behaviour_mut()
                         .gossipsub
                         .publish(topic.clone(), data)?;
-                    info!("Broadcasted message to topic: {}", topic);
+                    tracing::info!("Broadcasted message to topic: {}", topic);
                     Ok(())
                 })();
                 let _ = reply.send(res);
@@ -510,6 +522,11 @@ impl MeshDriver {
                     .dial(peer_id)
                     .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
                 let _ = reply.send(res);
+            }
+            MeshCommand::Shutdown => {
+                tracing::info!("Mesh driver received shutdown command. Exiting...");
+                // Note: The loop will break automatically after this command is handled
+                // if we just return or let it finish.
             }
             _ => {
                 let _ = anyhow::anyhow!("Command not fully implemented");
@@ -572,13 +589,13 @@ impl MeshDriver {
         if let Some(ip) = peer_ip {
             let sm = self.security_manager.clone();
             if !sm.is_ip_allowed(&ip).await {
-                warn!("Rejected message from blacklisted peer: {}", peer_id);
+                tracing::warn!("Rejected message from blacklisted peer: {}", peer_id);
                 return Ok(());
             }
         }
 
         if let Ok(msg) = serde_json::from_slice::<Message>(&message.data) {
-            info!("Processed message from {}: {:?}", peer_id, msg);
+            tracing::info!("Processed message from {}: {:?}", peer_id, msg);
 
             if msg.message_type != "handshake" {
                 if let Some(bus) = &self.event_bus {
@@ -587,7 +604,7 @@ impl MeshDriver {
             }
 
             if msg.message_type == "handshake" {
-                info!("🤝 Received Handshake from {}", msg.sender);
+                tracing::info!("🤝 Received Handshake from {}", msg.sender);
                 if let Ok(pub_key_bytes) =
                     base64::engine::general_purpose::STANDARD.decode(&msg.content)
                 {
@@ -596,13 +613,13 @@ impl MeshDriver {
                         pub_key_bytes,
                         KeyType::Hybrid,
                     );
-                    info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
+                    tracing::info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
                 } else {
-                    warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
+                    tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
                 }
             }
         } else {
-            warn!("Failed to deserialize message from {}", peer_id);
+            tracing::warn!("Failed to deserialize message from {}", peer_id);
         }
 
         Ok(())
@@ -718,6 +735,10 @@ impl MeshManager {
     /// Connect to a peer by ID
     pub async fn connect_peer(&mut self, peer_id: PeerId) -> Result<()> {
         self.transport.connect_peer(peer_id).await
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        self.transport.stop().await
     }
 }
 
