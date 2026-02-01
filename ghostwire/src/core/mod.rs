@@ -10,7 +10,6 @@ pub mod message;
 pub mod monitor;
 pub mod persistence_manager;
 pub mod security;
-pub mod signal;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
