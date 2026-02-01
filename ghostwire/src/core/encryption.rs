@@ -2,8 +2,8 @@
 //! Next: integrate with key manager and web API.
 
 use crate::core::armor::TrafficArmor;
-use crate::core::signal::SignalManager;
 use ring::aead::{self, UnboundKey, AES_256_GCM};
+use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing;
-use x25519_dalek::x25519;
+use tracing::{info, warn};
+use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Enhanced encrypted message with additional security features
@@ -97,7 +97,6 @@ pub struct EncryptionManager {
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
     key_rotation_interval: u64,
     last_key_rotation: u64,
-    signal_manager: SignalManager,
     pub traffic_armor: Option<Arc<TrafficArmor>>,
 }
 
@@ -144,14 +143,14 @@ impl EncryptionManager {
         if storage_path.exists() {
             match Self::load_from_disk(&storage_path) {
                 Ok(manager) => {
-                    tracing::info!(
+                    info!(
                         "🔐 Loaded persistent encryption keys for key_id: {}",
                         manager.key_pair.key_id
                     );
                     return Ok(manager);
                 }
                 Err(e) => {
-                    tracing::warn!(
+                    warn!(
                         "⚠️ Failed to load encryption keys: {}. Rotating/Creating new.",
                         e
                     );
@@ -159,7 +158,7 @@ impl EncryptionManager {
             }
         }
 
-        tracing::info!("🆕 Generating new persistent encryption keys...");
+        info!("🆕 Generating new persistent encryption keys...");
         let manager = Self::create_new()?;
         manager.save_to_disk()?;
         Ok(manager)
@@ -170,7 +169,6 @@ impl EncryptionManager {
 
         // Generate hybrid key pair (both Ed25519 and X25519)
         let key_pair = Self::generate_hybrid_key_pair(&rng)?;
-        let identity_key = key_pair.public_key.clone();
 
         Ok(EncryptionManager {
             key_pair,
@@ -182,7 +180,6 @@ impl EncryptionManager {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            signal_manager: SignalManager::new(identity_key),
             traffic_armor: None,
         })
     }
@@ -209,7 +206,6 @@ impl EncryptionManager {
             session_keys: Arc::new(Mutex::new(HashMap::new())),
             key_rotation_interval: persisted.key_rotation_interval,
             last_key_rotation: persisted.last_key_rotation,
-            signal_manager: SignalManager::new(persisted.identity_key),
             traffic_armor: None,
         })
     }
@@ -301,7 +297,6 @@ impl EncryptionManager {
             key_pair: self.key_pair.clone(),
             key_rotation_interval: self.key_rotation_interval,
             last_key_rotation: self.last_key_rotation,
-            identity_key: self.key_pair.public_key.clone(),
         };
 
         Self::secure_save(&path, &persisted)?;
@@ -312,30 +307,35 @@ impl EncryptionManager {
         rng: &SystemRandom,
     ) -> Result<GhostKeyPair, Box<dyn std::error::Error>> {
         // Generate Ed25519 key pair for signing
-        let ed25519_pkcs8_key_pair = Ed25519KeyPair::generate_pkcs8(rng as &dyn SecureRandom)
+        let ed25519_pkcs8_key_pair = Ed25519KeyPair::generate_pkcs8(rng)
             .map_err(|e| format!("Failed to generate Ed25519 key pair: {:?}", e))?;
         let ed25519_key_pair = Ed25519KeyPair::from_pkcs8(ed25519_pkcs8_key_pair.as_ref())
             .map_err(|e| format!("Failed to create Ed25519 key pair: {:?}", e))?;
 
         // Generate X25519 key pair for encryption (persistent static secret)
-        let mut x25519_private_bytes = [0u8; 32];
-        rng.fill(&mut x25519_private_bytes[..])
-            .map_err(|e| format!("RNG failure: {:?}", e))?;
+        let x25519_secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let x25519_public = XPublicKey::from(&x25519_secret);
+        let x25519_public_bytes = *x25519_public.as_bytes();
+        let x25519_private_bytes = *x25519_secret.as_bytes();
 
-        // Generate public key using basepoint [9, 0, ...]
-        let mut basepoint = [0u8; 32];
-        basepoint[0] = 9;
-        let x25519_public_bytes = x25519(x25519_private_bytes, basepoint);
+        // Generate ML-KEM (Kyber768) key pair for post-quantum hardening
+        use pqcrypto_mlkem::mlkem768;
+        use pqcrypto_traits::kem::{PublicKey as _, SecretKey as _};
+        let (pq_pk, pq_sk) = mlkem768::keypair();
 
-        // Combine keys into a serialized format
-        // Public part: [Ed25519 Public (32 bytes)] [X25519 Public (32 bytes)]
+        // Combine keys into a serialized binary format
+        // Public part: [Ed25519 (32)] [X25519 (32)] [Kyber PK (1184 for 768)]
         let mut public_key = ed25519_key_pair.public_key().as_ref().to_vec();
         public_key.extend_from_slice(&x25519_public_bytes);
+        public_key.extend_from_slice(pq_pk.as_bytes());
 
-        // Private part: [Ed25519 PKCS8 (variable)] [SEPARATOR] [X25519 Private (32 bytes)]
-        let mut private_key = ed25519_pkcs8_key_pair.as_ref().to_vec();
-        private_key.extend_from_slice(b"---X25519---"); // Simple separator for now
+        // Private part: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 (32)] [Kyber SK (2400 for 768)]
+        let ed_pkcs8 = ed25519_pkcs8_key_pair.as_ref();
+        let ed_len = ed_pkcs8.len() as u16;
+        let mut private_key = ed_len.to_le_bytes().to_vec();
+        private_key.extend_from_slice(ed_pkcs8);
         private_key.extend_from_slice(&x25519_private_bytes);
+        private_key.extend_from_slice(pq_sk.as_bytes());
 
         let key_pair = GhostKeyPair {
             public_key,
@@ -400,22 +400,40 @@ impl EncryptionManager {
         recipient_id: &str,
         message_type: MessageType,
     ) -> Result<EncryptedMessage, Box<dyn std::error::Error>> {
-        // Try Signal encryption first if session exists
-        if let Ok(signal_msg) = self
-            .signal_manager
-            .encrypt_with_signal(recipient_id, message.as_bytes())
-        {
-            return Ok(signal_msg);
-        }
-
         let peer_keys = self.peer_keys.lock().unwrap();
         let peer_key = peer_keys.get(recipient_id).ok_or("Recipient not found")?;
 
-        // Derive session key
+        // Derive base session key via ECDH (existing)
         let session_key = self.derive_session_key(recipient_id, &peer_key.public_key)?;
 
-        // Encrypt the message using AES-256-GCM
-        let encrypted_data = Self::encrypt_with_aes_gcm(message.as_bytes(), &session_key)?;
+        // PQC Hardening: Kyber Encapsulation
+        let mut pq_key_out = None;
+        let mut final_key = session_key.clone();
+
+        if peer_key.public_key.len() >= 64 + 1184 {
+            use pqcrypto_mlkem::mlkem768;
+            use pqcrypto_traits::kem::PublicKey as _;
+
+            let pq_pk_bytes = &peer_key.public_key[64..64 + 1184];
+            let pk = mlkem768::PublicKey::from_bytes(pq_pk_bytes)
+                .map_err(|_| "Invalid peer PQ public key")?;
+            let (shared_secret, ciphertext) = mlkem768::encapsulate(&pk);
+            use pqcrypto_traits::kem::{Ciphertext, SharedSecret};
+            pq_key_out = Some(ciphertext.as_bytes().to_vec());
+
+            // Mix keys: HKDF(ECDH_key, Kyber_secret)
+            let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &final_key);
+            let prk = salt.extract(shared_secret.as_bytes());
+            let okm = prk
+                .expand(&[b"GhostWire-PQC-Mix"], hkdf::HKDF_SHA256)
+                .map_err(|_| "PQC mix failed")?;
+            let mut mixed = [0u8; 32];
+            okm.fill(&mut mixed).map_err(|_| "PQC fill failed")?;
+            final_key = mixed.to_vec();
+        }
+
+        // Encrypt the message using AES-256-GCM with the hardened key
+        let encrypted_data = Self::encrypt_with_aes_gcm(message.as_bytes(), &final_key)?;
 
         // Sign the encrypted message
         let signature = self.sign_message(&encrypted_data.ciphertext)?;
@@ -435,7 +453,7 @@ impl EncryptionManager {
             key_id: self.key_pair.key_id.clone(),
             message_type,
             version: 0x02, // Standard encryption
-            pq_key: None,  // TODO: Implement Kyber encapsulation
+            pq_key: pq_key_out,
         })
     }
 
@@ -458,28 +476,48 @@ impl EncryptionManager {
             &peer_public_key,
         )?;
 
-        // Check message version
-        if encrypted_msg.version == 0x03 {
-            // Signal protocol decryption
-            let decrypted = self
-                .signal_manager
-                .decrypt_with_signal(&encrypted_msg.sender_id, encrypted_msg)
-                .map_err(|e| format!("Signal decryption failed: {}", e))?;
-            return String::from_utf8(decrypted).map_err(|e| e.into());
-        }
-
         if encrypted_msg.version != 0x02 {
             return Err("Unsupported message version".into());
         }
 
-        // Derive session key for decryption
+        // Derive base session key for decryption
         let session_key = self.derive_session_key(&encrypted_msg.sender_id, &peer_public_key)?;
+        let mut final_key = session_key.clone();
+
+        // PQC Hardening: Kyber Decapsulation
+        if let Some(pq_ciphertext) = &encrypted_msg.pq_key {
+            use pqcrypto_mlkem::mlkem768;
+            use pqcrypto_traits::kem::{Ciphertext as _, SecretKey as _};
+
+            // Extract our Kyber Secret Key from private key blob
+            let priv_key_bytes = &self.key_pair.private_key;
+            let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
+            let pq_sk_bytes = &priv_key_bytes[2 + ed_len + 32..];
+
+            if let (Ok(pq_sk), Ok(pq_ct)) = (
+                mlkem768::SecretKey::from_bytes(pq_sk_bytes),
+                mlkem768::Ciphertext::from_bytes(pq_ciphertext),
+            ) {
+                let shared_secret = mlkem768::decapsulate(&pq_ct, &pq_sk);
+
+                use pqcrypto_traits::kem::SharedSecret;
+                // Mix keys: HKDF(ECDH_key, Kyber_secret)
+                let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &session_key);
+                let prk = salt.extract(shared_secret.as_bytes());
+                let okm = prk
+                    .expand(&[b"GhostWire-PQC-Mix"], hkdf::HKDF_SHA256)
+                    .map_err(|_| "PQC mix failed")?;
+                let mut mixed = [0u8; 32];
+                okm.fill(&mut mixed).map_err(|_| "PQC fill failed")?;
+                final_key = mixed.to_vec();
+            }
+        }
 
         // Decrypt using AES-256-GCM
         let decrypted_data = Self::decrypt_with_aes_gcm(
             &encrypted_msg.ciphertext,
             &encrypted_msg.nonce,
-            &session_key,
+            &final_key,
         )?;
 
         String::from_utf8(decrypted_data).map_err(|e| e.into())
@@ -582,25 +620,30 @@ impl EncryptionManager {
             return Err("Invalid peer public key length".into());
         }
         let x25519_peer_pub_bytes: [u8; 32] = peer_public_key[32..64].try_into()?;
+        let peer_x_pub = XPublicKey::from(x25519_peer_pub_bytes);
 
-        // Our private key structure: [Ed25519 PKCS8 | SEPARATOR | X25519 Private (32)]
-        let priv_key_str = self.key_pair.private_key.clone();
-        let sep = b"---X25519---";
-        let sep_pos = priv_key_str
-            .windows(sep.len())
-            .position(|window| window == sep)
-            .ok_or("Invalid private key format: missing separator")?;
-        let x25519_priv_bytes: [u8; 32] = priv_key_str[sep_pos + sep.len()..].try_into()?;
+        // Our private key structure: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 Private (32)]
+        let priv_key_bytes = &self.key_pair.private_key;
+        if priv_key_bytes.len() < 34 {
+            return Err("Private key too short".into());
+        }
+        let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
+        let x25519_priv_bytes: [u8; 32] = priv_key_bytes[2 + ed_len..2 + ed_len + 32].try_into()?;
+        let our_x_secret = StaticSecret::from(x25519_priv_bytes);
 
-        // Compute Shared Secret using functional API
-        let shared_secret = x25519(x25519_priv_bytes, x25519_peer_pub_bytes);
+        // Compute Shared Secret using X25519
+        let shared_secret = our_x_secret.diffie_hellman(&peer_x_pub);
 
-        // Derive session key using SHA-256 for domain separation and extraction
-        let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
-        hasher.update(&b"GhostWire-Session-Key-v1"[..]);
-        hasher.update(&shared_secret[..]);
+        // Derive session key using HKDF-SHA256 (Robust way)
+        let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"GhostWire-Salt-v1");
+        let prk = salt.extract(shared_secret.as_bytes());
+        let info = [b"GhostWire-Session-Key-v2".as_slice()];
+        let okm = prk
+            .expand(&info, hkdf::HKDF_SHA256)
+            .map_err(|_| "HKDF expand failed")?;
 
-        let key = hasher.finish().as_ref().to_vec();
+        let mut key = [0u8; 32];
+        okm.fill(&mut key).map_err(|_| "HKDF fill failed")?;
 
         // Cache the session key
         let now = SystemTime::now()
@@ -617,7 +660,7 @@ impl EncryptionManager {
             },
         );
 
-        Ok(key)
+        Ok(key.to_vec())
     }
 
     // Enhanced encryption method for CLI compatibility
@@ -684,16 +727,16 @@ impl EncryptionManager {
     // Enhanced signature methods
     pub fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Use Ed25519 for signing
-        // Extract plain Ed25519 PKCS8 bytes from hybrid key
-        let priv_key_full = &self.key_pair.private_key;
-        let sep = b"---X25519---";
-        let sep_pos = priv_key_full
-            .windows(sep.len())
-            .position(|window| window == sep)
-            // If separator not found in legacy keys, assume entire blob is Ed25519
-            .unwrap_or(priv_key_full.len());
-
-        let key_pair_bytes = &priv_key_full[..sep_pos];
+        // Extract plain Ed25519 PKCS8 bytes from binary hybrid key
+        let priv_key_bytes = &self.key_pair.private_key;
+        if priv_key_bytes.len() < 2 {
+            return Err("Invalid private key length".into());
+        }
+        let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
+        if priv_key_bytes.len() < 2 + ed_len {
+            return Err("Corrupted private key".into());
+        }
+        let key_pair_bytes = &priv_key_bytes[2..2 + ed_len];
 
         let key_pair = Ed25519KeyPair::from_pkcs8(key_pair_bytes)
             .map_err(|e| format!("Failed to create key pair for signing: {:?}", e))?;
@@ -844,11 +887,11 @@ mod tests {
         let key_pair = EncryptionManager::generate_hybrid_key_pair(&rng).unwrap();
 
         assert_eq!(key_pair.public_key.len(), 64); // 32 Ed25519 + 32 X25519
-        assert!(key_pair.private_key.len() > 32);
-        assert!(key_pair
-            .private_key
-            .windows(12)
-            .any(|w| w == b"---X25519---"));
+        assert!(key_pair.private_key.len() > 34);
+        // Header length prefix should be there
+        let ed_len =
+            u16::from_le_bytes([key_pair.private_key[0], key_pair.private_key[1]]) as usize;
+        assert!(ed_len > 0);
     }
 
     #[test]
@@ -880,5 +923,4 @@ struct PersistedEncryption {
     key_pair: GhostKeyPair,
     key_rotation_interval: u64,
     last_key_rotation: u64,
-    identity_key: Vec<u8>,
 }
