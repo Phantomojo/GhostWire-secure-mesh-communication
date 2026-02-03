@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.7.0",
-    "@types/react": "^19.1.8",
+    "@types/react": "^19.2.8",
     "@types/react-dom": "^19.1.6",
     "axios": "^1.13.2",
     "framer-motion": "^12.26.2",
