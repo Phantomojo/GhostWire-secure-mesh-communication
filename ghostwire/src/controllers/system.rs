@@ -298,4 +298,64 @@ impl SystemController {
             "Communication analysis completed".to_string(),
         ))
     }
+
+    /// GET /api/settings - Unified settings aggregation
+    pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let metadata = state.core.read().await.get_metadata().await;
+
+        // In a real app, we'd load this from a persistent config file.
+        // For now, we'll return defaults combined with metadata.
+        let settings = serde_json::json!({
+            "username": metadata.nickname.clone(),
+            "displayName": metadata.nickname,
+            "bio": metadata.bio,
+            "listenPort": 3001,
+            "enableMdns": true,
+            "enableDht": true,
+            "maxPeers": 50,
+            "encryptionLevel": "enhanced",
+            "autoLockMinutes": 15,
+            "keyRotationDays": 30,
+            "stealthMode": false,
+            "trafficMorphing": false,
+            "stripMetadata": true,
+            "soundEnabled": true,
+            "desktopNotifications": true,
+            "messagePreview": true,
+            "debugMode": false,
+            "logLevel": "info"
+        });
+
+        Json(ApiV2Response::success(settings))
+    }
+
+    /// PUT /api/settings - Update both metadata and config
+    pub async fn update_settings(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        let nickname = req
+            .get("displayName")
+            .or_else(|| req.get("username"))
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let bio = req
+            .get("bio")
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+
+        // Update Metadata
+        state
+            .core
+            .read()
+            .await
+            .update_metadata(nickname, bio, None, None)
+            .await;
+
+        // In a more complete implementation, we would also update the system config (ports, security levels, etc.)
+        // and persist it to ghostwire.toml.
+
+        Json(ApiV2Response::success(serde_json::json!({
+            "status": "settings_updated",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })))
+    }
 }

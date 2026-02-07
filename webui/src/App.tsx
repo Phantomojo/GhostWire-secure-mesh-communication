@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import LoginScreen from './components/LoginScreen';
-import FirstTimeSetup from './components/FirstTimeSetup';
 import Dashboard from './components/Dashboard';
 import NetworkPanel from './components/NetworkPanel';
 import SecurityPanel from './components/SecurityPanel';
@@ -483,28 +482,20 @@ function App() {
       {/* Initialization Overlay */}
       {isInitializing && <LoadingScreen onComplete={() => setIsInitializing(false)} />}
 
-      {isLocked && (
+      {(isLocked || (profileStatus && !profileStatus.setup_complete)) && (
         <LoginScreen
           status={profileStatus || { locked: true, has_identity: true }}
           onProfileChange={refreshStatus}
           onUnlock={() => {
             setIsLocked(false);
             addToast('success', 'Profile Decrypted. Access Granted.');
-            // Refresh status to check setup_complete
-            refreshStatus();
-            loadRealData();
-          }}
-        />
-      )}
-
-      {!isLocked && (!profileStatus || !profileStatus.setup_complete) && (
-        <FirstTimeSetup
-          onComplete={() => {
+            // Logic from FirstTimeSetup's onComplete
             if (profileStatus) {
               setProfileStatus({ ...profileStatus, setup_complete: true });
             }
             setShowTutorial(true); // Always show tutorial after first time setup
             addToast('success', 'Sovereign Profile Established.');
+            refreshStatus();
             loadRealData();
           }}
         />

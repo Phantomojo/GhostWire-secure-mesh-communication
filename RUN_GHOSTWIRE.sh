@@ -17,7 +17,7 @@ if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
 else
     echo "🔧 Starting backend..."
     cd ghostwire
-    cargo run --release --bin ghostwire -- --web --api-host 127.0.0.1 --port 8080 > /tmp/ghostwire-backend.log 2>&1 &
+    cargo run --release --bin ghostwire -- --web --api-host 0.0.0.0 --port 8080 > /tmp/ghostwire-backend.log 2>&1 &
     BACKEND_PID=$!
     echo "   Backend PID: $BACKEND_PID"
     cd ..
@@ -45,22 +45,35 @@ else
     echo "   Frontend PID: $FRONTEND_PID"
     
     echo ""
-    echo "⏳ Waiting for app to start..."
-    sleep 5
+    echo "⏳ Waiting for services to initialize..."
     
-    echo ""
-    echo "✨ GhostWire is ready!"
-    echo ""
-    echo "🌐 Opening in your browser..."
-    echo "   URL: http://localhost:5173"
+    # Wait for backend to be ready (port 8080)
+    MAX_RETRIES=60
+    COUNT=0
+    until lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 || [ $COUNT -eq $MAX_RETRIES ]; do
+        printf "."
+        sleep 2
+        let COUNT+=1
+    done
     
-    # Try to open browser
-    if command -v xdg-open &> /dev/null; then
-        xdg-open "http://localhost:5173" 2>/dev/null &
-    elif command -v firefox &> /dev/null; then
-        firefox "http://localhost:5173" 2>/dev/null &
-    elif command -v google-chrome &> /dev/null; then
-        google-chrome "http://localhost:5173" 2>/dev/null &
+    if [ $COUNT -eq $MAX_RETRIES ]; then
+        echo ""
+        echo "❌ Backend failed to start in time. Check logs: /tmp/ghostwire-backend.log"
+    else
+        echo ""
+        echo "✨ GhostWire is ready!"
+        echo ""
+        echo "🌐 Opening in your browser..."
+        echo "   URL: http://localhost:5173"
+        
+        # Try to open browser
+        if command -v xdg-open &> /dev/null; then
+            xdg-open "http://localhost:5173" 2>/dev/null &
+        elif command -v firefox &> /dev/null; then
+            firefox "http://localhost:5173" 2>/dev/null &
+        elif command -v google-chrome &> /dev/null; then
+            google-chrome "http://localhost:5173" 2>/dev/null &
+        fi
     fi
 fi
 

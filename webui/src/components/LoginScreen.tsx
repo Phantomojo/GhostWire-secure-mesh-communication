@@ -11,10 +11,11 @@ interface LoginScreenProps {
         has_identity: boolean;
         did?: string;
         username?: string;
+        setup_complete?: boolean;
     };
 }
 
-type LoginMode = 'unlock' | 'select' | 'create';
+type LoginMode = 'unlock' | 'select' | 'create' | 'setup';
 
 const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) => {
     const [mode, setMode] = useState<LoginMode>('unlock');
@@ -22,6 +23,11 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // Setup Phase State
+    const [setupNickname, setSetupNickname] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [setupStep, setSetupStep] = useState(1);
 
     // Profile Management State
     const [profiles, setProfiles] = useState<string[]>([]);
@@ -32,6 +38,8 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
         if (!status.username && !status.did) {
             setMode('select');
             fetchProfiles();
+        } else if (!status.locked && status.setup_complete === false) {
+            setMode('setup');
         }
     }, [status]);
 
@@ -55,7 +63,13 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
         try {
             const success = await api.unlockIdentity(password);
             if (success) {
-                onUnlock();
+                // Peek at status to see if setup is needed
+                const statusCheck = await api.getIdentityStatus();
+                if (statusCheck.setup_complete === false) {
+                    setMode('setup');
+                } else {
+                    onUnlock();
+                }
             } else {
                 setError('Incorrect password');
                 shake();
@@ -98,6 +112,41 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
             }
         } catch (err: any) {
             setError(err.message || 'Creation error');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSetup = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (password.length < 8) {
+            setError('Passphrase must be at least 8 characters');
+            shake();
+            return;
+        }
+        if (password !== confirmPassword) {
+            setError('Passphrases do not match');
+            shake();
+            return;
+        }
+
+        setIsLoading(true);
+        setError('');
+        try {
+            const response = await api.post('/identity/setup', {
+                nickname: setupNickname,
+                password
+            });
+
+            if (response && response.success) {
+                onUnlock();
+            } else {
+                setError(response?.error || 'Setup failed');
+                shake();
+            }
+        } catch (err: any) {
+            setError(err.message || 'Setup communication error');
+            shake();
         } finally {
             setIsLoading(false);
         }
@@ -304,6 +353,103 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
                             >
                                 Cancel
                             </button>
+                        </div>
+                    )}
+
+                    {mode === 'setup' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="text-center">
+                                <h2 className="text-xl font-bold text-white mb-1 uppercase tracking-wider">Establish Profile</h2>
+                                <p className="text-[10px] text-purple-400/50">Sovereign Identity Phase • Step {setupStep} of 2</p>
+                            </div>
+
+                            <div className="flex justify-center gap-2 mb-4">
+                                <div className={`h-1 w-10 rounded-full transition-colors ${setupStep >= 1 ? 'bg-purple-500' : 'bg-purple-900/50'}`}></div>
+                                <div className={`h-1 w-10 rounded-full transition-colors ${setupStep >= 2 ? 'bg-purple-500' : 'bg-purple-900/50'}`}></div>
+                            </div>
+
+                            <form onSubmit={(e) => { e.preventDefault(); if (setupStep === 1) setSetupStep(2); else handleSetup(e); }} className="space-y-4">
+                                {setupStep === 1 ? (
+                                    <div className="space-y-4 animate-fade-in">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-purple-500/60 uppercase tracking-widest pl-2">Display Nickname</label>
+                                            <input
+                                                type="text"
+                                                value={setupNickname}
+                                                onChange={(e) => setSetupNickname(e.target.value)}
+                                                placeholder="e.g. Ghost_Operative"
+                                                className="w-full bg-black/60 border border-purple-500/30 rounded-xl px-4 py-4 text-center text-lg focus:outline-none focus:border-purple-400 transition-all text-white font-bold"
+                                                autoFocus
+                                            />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSetupStep(2)}
+                                            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 group"
+                                        >
+                                            NEXT SEQUENCE <HiOutlineChevronRight className="group-hover:translate-x-1 transition-transform" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4 animate-fade-in">
+                                        <div className="space-y-4">
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] text-purple-500/60 uppercase tracking-widest pl-2">New Secure Passphrase</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type={showPassword ? "text" : "password"}
+                                                        value={password}
+                                                        onChange={(e) => setPassword(e.target.value)}
+                                                        placeholder="••••••••••••"
+                                                        className="w-full bg-black/60 border border-purple-500/30 rounded-xl px-4 py-4 text-center text-lg focus:outline-none focus:border-purple-400 transition-all text-white"
+                                                        autoFocus
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowPassword(!showPassword)}
+                                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-purple-500/40 hover:text-purple-400 transition-colors"
+                                                    >
+                                                        {showPassword ? '👁️‍🗨️' : '👁️'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] text-purple-500/60 uppercase tracking-widest pl-2">Confirm Passphrase</label>
+                                                <input
+                                                    type={showPassword ? "text" : "password"}
+                                                    value={confirmPassword}
+                                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                                    placeholder="••••••••••••"
+                                                    className="w-full bg-black/60 border border-purple-500/30 rounded-xl px-4 py-4 text-center text-lg focus:outline-none focus:border-purple-400 transition-all text-white"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {error && (
+                                            <div className="text-red-400 text-center text-xs font-bold bg-red-900/10 py-3 rounded-lg border border-red-500/20">
+                                                {error}
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setSetupStep(1)}
+                                                className="flex-1 py-4 border border-purple-500/30 rounded-xl text-purple-400 hover:text-purple-300 transition-all text-xs font-bold"
+                                            >
+                                                BACK
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={isLoading}
+                                                className="flex-[2] bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                            >
+                                                {isLoading ? 'ENCRYPTING...' : 'ESTABLISH IDENTITY'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </form>
                         </div>
                     )}
 

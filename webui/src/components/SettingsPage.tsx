@@ -107,6 +107,10 @@ export default function SettingsPage({ backendConnected, onBack }: SettingsPageP
             await api.put('/settings', settings);
             console.log('✅ Settings save successful');
             setSaved(true);
+
+            // Reload local profiles and trigger a potential global refresh
+            await loadProfiles();
+
             setTimeout(() => setSaved(false), 2000);
         } catch (error: any) {
             console.error('❌ Failed to save settings:', error);
