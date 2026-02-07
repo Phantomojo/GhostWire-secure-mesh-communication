@@ -1,0 +1,167 @@
+# Terminal Full Output
+# Terminal: repo_check
+# Command: cat /home/ubuntu/terminal_full_output/2026-02-05_09-42-26_197113_1962.txt
+# PID: 1962
+# Timestamp: 2026-02-05_09-42-32.734919
+# Original Length: 8824 characters
+# ----------------------------------------
+
+# Terminal Full Output
+# Terminal: repo_check
+# Command: gh repo list Phantomojo --limit 100 --json nameWithOwner,description,isPrivate
+# PID: 1962
+# Timestamp: 2026-02-05_09-42-26.197113
+# Original Length: 8558 characters
+# ----------------------------------------
+[1;38m[[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"SCHOOL PROJECT"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/GhostWire-secure-mesh-communication"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/Vanta-ledger"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Bio-Adaptive IoT Honeynet (Router + CCTV) — C-based morphing, quorum-sensing honeypot for cybersecurity research and education."[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/cerberus-honeypot"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Delivery over stealth"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/GhostWhisper"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/AFRIHUB"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/ouk-esports-arena"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"about me "[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/phantomojo"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Production-hardened algorithmic trading system with AI integration"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/hedgefund-lite"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"a new journey "[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/giteducation"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Opinionated Arch/Hyprland Setup"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/omarchy"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"AI agent development project with copilot integration and intelligent automation"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/mecagent-copilot"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Professional portfolio management with intelligence dossiers, skill documentation, and resume optimization tools"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/linkdln-portfolio"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Enterprise-grade privacy and security system with DNS filtering, proxy management, and complete documentation"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/privacy-stack-standalone"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Advanced cybersecurity research with multi-protocol honeypot systems, AWS integration, and threat intelligence collection"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/honeypot-guardian"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"🐄 Mali-Connect: AI Livestock Assessment Platform - 3D visualization, health scoring, and ecosystem integration for modern agriculture"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/mali-connect-app"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Self-hosted WireGuard VPN setup for Omarchy privacy stack"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/omarchy-wireguard-vpn"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Agricultural ecosystem platform for African farmers - CHAI Hackathon Week 3"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/maono-agriculture-platform"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/archlinux"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/SENTRI"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Climate Impact Verification Platform - Satellite analytics with community data collection"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/ORUN.IO"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Terminal-themed portfolio website for PhantoMojo - Digital Intelligence Operative"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/portfolio"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"Hierarchical Reasoning Model Official Release"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/HRM"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/SAMscope"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"some cubersec projects I worked on for practice"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/Cyopsproj"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/JARVIS"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/SMEPOS"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"“A heartfelt tribute web app for our African queen, Mama Charity. Built with love.”"[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/dear-mama-charity"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mtrue[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/VOID"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m""[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/Xgene"[m
+  [1;38m}[m[1;38m,[m
+  [1;38m{[m
+    [1;34m"description"[m[1;38m:[m [32m"A cross-platform, customizable science fiction terminal emulator with advanced monitoring & touchscreen support."[m[1;38m,[m
+    [1;34m"isPrivate"[m[1;38m:[m [33mfalse[m[1;38m,[m
+    [1;34m"nameWithOwner"[m[1;38m:[m [32m"Phantomojo/edex-ui"[m
+  [1;38m}[m
+[1;38m][m
