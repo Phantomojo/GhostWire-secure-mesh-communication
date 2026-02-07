@@ -24,9 +24,10 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_governor::governor::GovernorConfigBuilder;
-use tower_governor::key_extractor::SmartIpKeyExtractor;
-use tower_governor::GovernorLayer;
+// Rate limiter removed due to frontend init burst interference
+// use tower_governor::governor::GovernorConfigBuilder;
+// use tower_governor::key_extractor::SmartIpKeyExtractor;
+// use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
 
 use lazy_static::lazy_static;
@@ -258,6 +259,7 @@ pub async fn start_web_server(
             HeaderName::from_static("x-ghost-token"),
         ]);
 
+    /*
     let default_governor_conf = GovernorConfigBuilder::default()
         .per_second(200) // Increased from 60 to handle frontend init burst
         .burst_size(100) // Increased from 60 to handle parallel requests
@@ -267,6 +269,7 @@ pub async fn start_web_server(
     let default_rate_limiter = GovernorLayer {
         config: std::sync::Arc::new(default_governor_conf),
     };
+    */
 
     let auth_routes: Router<Arc<AppState>> = Router::new()
         .route("/login", post(AuthController::login))
@@ -309,6 +312,8 @@ pub async fn start_web_server(
         .route("/connect_peer", post(PeerController::connect))
         .route("/disconnect_peer", post(PeerController::disconnect))
         .route("/ping_peer", post(PeerController::ping))
+        .route("/settings", get(SystemController::get_settings))
+        .route("/settings", put(SystemController::update_settings))
         .route("/v2/profile", get(IdentityController::get_profile))
         .route(
             "/v2/profile/username",
@@ -329,8 +334,8 @@ pub async fn start_web_server(
         .route("/v2/peers", get(PeerController::list))
         .route("/v2/messages", get(MessagingController::get_messages))
         .route("/report_error", post(report_error))
-        .route("/help/tutorial", get(get_tutorial))
-        .layer(default_rate_limiter);
+        .route("/help/tutorial", get(get_tutorial));
+    // .layer(default_rate_limiter);
 
     let app: Router = Router::new()
         .nest("/api", api_routes)

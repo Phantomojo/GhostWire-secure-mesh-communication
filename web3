@@ -1,0 +1,48 @@
+# 👻 GhostWire: The Web3 / Crypto Roadmap
+
+This document outlines how Web3 and Cryptographic primitives can evolve GhostWire into a truly uncensorable, decentralized, and economically sustainable emergency communication infrastructure.
+
+---
+
+## 🏛️ 1. The Phantom Registry (Identity Concierge)
+**Problem**: How to have human-friendly IDs (@RescueTeam) without a central "Switchboard" or internet connection.
+**Solution**: Use a **Distributed Hash Table (DHT)** where every node in the mesh holds a piece of the "Phonebook."
+- **Handle Mapping**: Hashing human names to Public Keys (ED25519) across the mesh segments.
+- **Concierge Nodes**: Specific high-repute nodes that volunteer to index handles and announce them via the mesh-whisper protocol.
+
+## 🔒 2. Stealth Identities (Zero-Knowledge)
+**Problem**: Keeping metadata private while using a public identity.
+**Solution**: **ZK-Proofs and Stealth Addresses.**
+- Users prove they own a handle or have the right to use the mesh without revealing their transaction/chat history on any public ledger.
+- Audio and text content remains End-to-End Encrypted (E2EE) and never touches a blockchain.
+
+## 🚀 3. Emergency Priority (The Security Lane)
+**Problem**: Balancing civilian use with critical security/rescue traffic during a crisis.
+**Solution**: **Priority Tokens.**
+- Specialized tokens (issued to verified emergency services) allow their packets to "Jump the Queue" in the mesh routing layer.
+- **Status Tiers**: Civilian (standard), Security (Fast), Emergency (Instant).
+
+## 🔋 4. DePIN Incentive Layer (The Mining of Bandwidth)
+**Problem**: Why should users keep their gear running 24/7?
+**Solution**: **Proof of Service.**
+- Nodes are rewarded for the bytes they route, the uptime they provide, and the "Concierge" services they perform.
+- **$GHOST Tokens**: Earned for supporting the mesh; can be used to request higher-priority storage or data retrieval.
+
+## 📦 5. Store-and-Forward ("Carrier Pigeons")
+**Problem**: Fragmented mesh segments (e.g., Westlands and CBD are disconnected).
+**Solution**: **Encrypted Buffer Nodes.**
+- Messages are stored at the edge of a segment and "forwarded" when a mobile node (like a Matatu or an Emergency Vehicle) moves from one segment to another.
+
+## 💳 6. Offline-Settlement (Mesh IOUs)
+**Problem**: How to use "Crypto" when there is no internet?
+**Solution**: **State-Channel IOUs.**
+- Nodes sign cryptographic "I Owe You" notes for routing services. 
+- These are settled on a Layer 2 (L2) blockchain automatically when the node eventually finds a WiFi or 4G signal.
+
+---
+
+### **Engineering Goals**
+- [ ] Implement **DHT (Kademlia)** for handle lookup in the Rust backend.
+- [ ] Replace OIDC with **Local Public-Key Identity**.
+- [ ] Add **Priority-Queuing** logic to the packet router.
+- [ ] Create a **Lightweight Wallet Interface** for the React frontend.

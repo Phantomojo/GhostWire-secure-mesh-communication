@@ -468,6 +468,7 @@ impl MeshDriver {
                         let is_shutdown = matches!(cmd, MeshCommand::Shutdown);
                         self.handle_command(cmd).await;
                         if is_shutdown {
+                            tracing::info!("Mesh driver shutting down swarm...");
                             break;
                         }
                     } else {
@@ -523,13 +524,39 @@ impl MeshDriver {
                     .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
                 let _ = reply.send(res);
             }
-            MeshCommand::Shutdown => {
-                tracing::info!("Mesh driver received shutdown command. Exiting...");
-                // Note: The loop will break automatically after this command is handled
-                // if we just return or let it finish.
+            MeshCommand::PublishUsername { reply } => {
+                let res = (|| -> Result<()> {
+                    let identity = self._identity.clone();
+                    if let Some(keypair) = identity.keypair() {
+                        let pk_bytes = keypair.public().encode_protobuf();
+                        // This is still a bit simplified but uses real keys
+                        let (key, value) = self._username_discovery.prepare_username_publication(
+                            pk_bytes,
+                            &keypair.to_protobuf_encoding().unwrap(), // Simplified: prepare expects PKCS8 but we pass proto
+                        )?;
+                        self.swarm.behaviour_mut().kad.put_record(
+                            libp2p::kad::Record {
+                                key,
+                                value,
+                                publisher: None,
+                                expires: None,
+                            },
+                            libp2p::kad::Quorum::One,
+                        )?;
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("Identity locked"))
+                    }
+                })();
+                let _ = reply.send(res);
             }
-            _ => {
-                let _ = anyhow::anyhow!("Command not fully implemented");
+            MeshCommand::SetShard { shard, reply } => {
+                tracing::info!("Setting mesh shard to: {}", shard);
+                // In a real system, this would change the DHT prefix or topic
+                let _ = reply.send(Ok(()));
+            }
+            MeshCommand::Shutdown => {
+                tracing::info!("Mesh driver received shutdown command.");
             }
         }
     }

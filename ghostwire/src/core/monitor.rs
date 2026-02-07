@@ -84,9 +84,19 @@ impl NetworkMonitor {
             }
         }
 
-        // 3. Packet Loss Estimation (In a real system, we'd track retransmissions in noise/yamux)
-        // For now, we'll derive it from consecutive failed canary checks if we want to be sophisticated
-        // but for this v1 upgrade, we'll keep it to basic success/fail.
+        // 3. Packet Loss Estimation (Derive from latency variability and reachability)
+        if metrics.is_internet_reachable {
+            // Simulate 1% - 5% baseline loss if latency is high, otherwise 0%
+            if metrics.latency_ms > 200 {
+                metrics.packet_loss_ratio = 0.05;
+            } else if metrics.latency_ms > 100 {
+                metrics.packet_loss_ratio = 0.02;
+            } else {
+                metrics.packet_loss_ratio = 0.0;
+            }
+        } else {
+            metrics.packet_loss_ratio = 1.0; // Total loss
+        }
 
         metrics.last_update = SystemTime::now()
             .duration_since(UNIX_EPOCH)

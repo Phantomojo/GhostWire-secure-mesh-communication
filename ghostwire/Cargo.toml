@@ -42,6 +42,7 @@ pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
 getrandom = "0.2"
 shamir_secret_sharing = "0.1.1"
+vodozemac = { version = "0.6" }
 
 # Utilities
 anyhow = { version = "1.0" }

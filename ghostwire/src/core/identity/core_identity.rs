@@ -7,43 +7,39 @@ use std::sync::RwLock;
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
-    secret_key: Vec<u8>,
+    keypair: Keypair,
 }
 
 impl EphemeralIdentity {
     pub fn new() -> Result<Self> {
-        let mut secret_key = vec![0u8; 32];
-        let rng = SystemRandom::new();
-        rng.fill(&mut secret_key)
-            .map_err(|e| anyhow::anyhow!("RNG error: {:?}", e))?;
+        let keypair = Keypair::generate_ed25519();
         let mut id_bytes = [0u8; 8];
+        let rng = SystemRandom::new();
         rng.fill(&mut id_bytes[..])
             .map_err(|e| anyhow::anyhow!("RNG error: {:?}", e))?;
         let identity_id = format!("id_{:x}", u64::from_le_bytes(id_bytes));
         Ok(EphemeralIdentity {
             identity_id,
-            secret_key,
+            keypair,
         })
     }
 
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
-        // Simple hash-based signature for demo
-        let mut signature = Vec::new();
-        for (i, &byte) in message.iter().enumerate() {
-            let key_byte = self.secret_key[i % self.secret_key.len()];
-            signature.push(byte.wrapping_add(key_byte));
-        }
-        signature
+        self.keypair.sign(message).unwrap_or_default()
     }
 
-    pub fn verify(&self, signed_message: &[u8], _public_key: &[u8]) -> Result<Vec<u8>> {
-        // For demo purposes, just return the message as-is
-        Ok(signed_message.to_vec())
+    pub fn verify(&self, message: &[u8], signature: &[u8], public_key_bytes: &[u8]) -> Result<()> {
+        let public_key = PublicKey::from_protobuf_encoding(public_key_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to decode public key: {:?}", e))?;
+        if public_key.verify(message, signature) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Signature verification failed"))
+        }
     }
 
     pub fn public_key_bytes(&self) -> Vec<u8> {
-        // Return a simple public key for demo
-        self.secret_key.clone()
+        self.keypair.public().encode_protobuf()
     }
 }
 
@@ -51,7 +47,7 @@ impl Clone for EphemeralIdentity {
     fn clone(&self) -> Self {
         EphemeralIdentity {
             identity_id: self.identity_id.clone(),
-            secret_key: self.secret_key.clone(),
+            keypair: self.keypair.clone(),
         }
     }
 }
@@ -380,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_identity_lock_unlock() {
-        let identity = Identity::create_new().unwrap();
+        let identity = Identity::create_new(None).unwrap();
 
         // New identity should start unlocked
         assert!(!identity.is_locked());
@@ -399,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_metadata_update() {
-        let identity = Identity::create_new().unwrap();
+        let identity = Identity::create_new(None).unwrap();
 
         let original_name = identity.get_metadata().nickname.clone();
 
