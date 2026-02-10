@@ -38,11 +38,16 @@ This document outlines how Web3 and Cryptographic primitives can evolve GhostWir
 **Solution**: **State-Channel IOUs.**
 - Nodes sign cryptographic "I Owe You" notes for routing services. 
 - These are settled on a Layer 2 (L2) blockchain automatically when the node eventually finds a WiFi or 4G signal.
+- **Research Finding**: State channels enable infinite off-chain transactions between opening/closing, ideal for mesh scenarios
+- **Comparable Projects**: Study Helium Mobile (earning MOBILE tokens, 89-418Mbps benchmarks) and Pollen community bandwidth sharing
 
 ---
 
-### **Engineering Goals**
-- [ ] Implement **DHT (Kademlia)** for handle lookup in the Rust backend.
-- [ ] Replace OIDC with **Local Public-Key Identity**.
-- [ ] Add **Priority-Queuing** logic to the packet router.
-- [ ] Create a **Lightweight Wallet Interface** for the React frontend.
+### **Engineering Goals (Research-Validated)**
+- [ ] Implement **Kademlia DHT** for handle lookup (performs well in mobile/mesh with tuned churn handling)
+- [ ] Replace OIDC with **Local Public-Key Identity** (Ed25519 + X25519)
+- [ ] Add **Priority-Queuing** logic with QoS tiers (Civilian/Security/Emergency)
+- [ ] Implement **Gossipsub mesh pruning** and score-based peer selection to resist Sybil attacks
+- [ ] Create **State Channel IOU system** with cryptographic signing for offline payment settlement
+- [ ] Deploy **ONNX Runtime Micro** for on-device anomaly detection (MobileNetV3 INT8 quantized)
+- [ ] Design **Kiwix chunking strategy** for distributing 40-50GB Wikipedia across constrained storage nodes

@@ -28,3 +28,6 @@ A: The same technology that protects a dissident protects a criminal. However, w
 
 **Q: Isn't Bluetooth range too short?**
 A: Bluetooth is the "Last Mile". The "Backbone" relies on LoRa (Long Range - 5km+) and WiFi Direct. We are a *Heterogeneous* mesh; we use whatever link is strongest.
+
+**Q: How is GhostWire different from Telemesh?**
+A: Telemesh pioneered smartphone mesh + blockchain payments, which inspired our DePIN layer. However, GhostWire adds: (1) **Knowledge Ark** - 50GB offline Wikipedia/education, (2) **ONNX AI** - on-device threat detection, (3) **Heterogeneous mesh** - BLE + WiFi + LoRa simultaneously, (4) **Stealth features** - traffic morphing to evade DPI, (5) **Emergency tools** - priority routing + NGO mass deployment. Telemesh is a payment-enabled mesh; GhostWire is a complete civil defense platform.
