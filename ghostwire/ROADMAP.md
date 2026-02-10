@@ -164,28 +164,28 @@ GhostWire aims to become the most secure, private, and reliable decentralized co
   - [ ] Security automation
   - [ ] Incident response
 
-## 🔧 Technical Priorities
+## 🔧 Technical Priorities (Research-Validated)
 
-### High Priority
-1. **Message System**: Complete the core messaging functionality
-2. **Peer Discovery**: Robust peer discovery and connection management
-3. **Security Hardening**: Comprehensive security testing and hardening
-4. **Performance**: Optimize for high-performance networking
-5. **Testing**: Comprehensive test coverage and CI/CD pipeline
+### High Priority (MVP for Red Bull Basement)
+1. **libp2p Resource Manager Optimization**: Configure memory scopes for 512MB constraint devices
+2. **BLE Mesh Migration**: Switch from classic Bluetooth to BLE mesh (better power/range)
+3. **RSSI-based Sybil Detection**: Implement AI immune system using signal strength analysis (near-100% detection rate)
+4. **Store-and-Forward Routing**: Implement Meshtastic-style router nodes with message caching
+5. **Application-Layer E2EE**: Ensure encryption works even on LoRa hardware with radio-layer restrictions
 
-### Medium Priority
-1. **User Interface**: Modern, intuitive user interfaces
-2. **Documentation**: Comprehensive documentation and guides
-3. **Deployment**: Easy deployment and configuration
-4. **Monitoring**: Health monitoring and alerting
-5. **Integration**: Third-party service integration
+### Medium Priority (Post-Competition)
+1. **ONNX Runtime Micro Integration**: Deploy INT8 quantized MobileNetV3 for anomaly detection (0.1-2mW power)
+2. **Kiwix Knowledge Ark**: Integrate offline Wikipedia (40-50GB nopics edition) with chunking strategy
+3. **State Channels for $GHOST**: Implement offline payment IOUs for DePIN incentive layer
+4. **Gateway Node Bridge**: Seamless mesh ↔ internet routing when connectivity returns
+5. **Hardware Tiers**: Define and test Tier 0-3 node specifications (Lifeboat → Concierge)
 
-### Low Priority
-1. **Advanced Features**: Cutting-edge research features
-2. **Ecosystem**: Developer tools and community features
-3. **Enterprise**: Business and enterprise features
-4. **Mobile**: Native mobile applications
-5. **Hardware**: Hardware integration and IoT support
+### Low Priority (Future Vision)
+1. **LoRa Backbone**: Add long-range transport (1-2km) with proper antenna design
+2. **Noise Protocol Optimization**: Advanced forward secrecy for mesh P2P
+3. **Zero-Knowledge Identities**: Privacy-preserving authentication for DHT handles
+4. **Enterprise Deployment Tools**: NGO mass-configuration for 10,000+ node deployments
+5. **Post-Quantum Cryptography**: Future-proof encryption algorithms
 
 ## 🎯 Success Metrics
 
@@ -241,12 +241,19 @@ GhostWire aims to become the most secure, private, and reliable decentralized co
 - **Ecosystem**: Rich ecosystem of applications and services
 - **Impact**: Positive impact on digital privacy and security
 
-### Research Areas
-- **Post-Quantum Cryptography**: Quantum-resistant encryption
-- **Advanced Privacy**: Advanced privacy-preserving technologies
-- **AI Security**: AI-powered security and threat detection
-- **Blockchain Integration**: Decentralized identity and reputation
-- **Hardware Security**: Hardware security module integration
+### Research Areas (Validated by Perplexity Findings)
+- **Post-Quantum Cryptography**: Quantum-resistant encryption for long-term message security
+- **On-Device AI (ONNX Runtime Micro)**: MobileNetV3 threat detection at 50fps on Cortex-M MCUs
+- **DePIN Tokenomics**: Proof-of-Service incentives (study: Helium Mobile, Pollen)
+- **Heterogeneous Mesh Optimization**: BLE + WiFi Direct + LoRa opportunistic routing
+- **Hardware Ruggedization**: IP67 waterproof nodes, -20°C to +60°C operating range
+- **Regulatory Compliance**: Kenya CA, FCC Part 15, EU RED certification for mesh hardware
+
+### Hardware Tier Definitions
+- **Tier 0 (Lifeboat)**: ESP32 + LoRa, coin cell, <$20 BOM - Minimal packet routing
+- **Tier 1 (Router)**: Pi Zero 2W or old smartphone, 512MB RAM, WiFi+BLE, $50 BOM
+- **Tier 2 (Gateway)**: Pi 4 or desktop, 2GB+ RAM, Ethernet, mesh↔internet bridge, $100 BOM
+- **Tier 3 (Concierge/Ark)**: Server-class, 8GB RAM, SSD for 50GB Wikipedia, DHT indexing
 
 ## 📞 Community Involvement
 

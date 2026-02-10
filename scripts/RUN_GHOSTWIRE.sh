@@ -9,7 +9,7 @@ echo "║   Secure Mesh Communication App     ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Check if backend is already running
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then

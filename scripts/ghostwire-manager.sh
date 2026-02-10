@@ -19,6 +19,9 @@ log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
+# Define script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Find installation directory
 find_install_dir() {
     if [ -n "$GHOSTWIRE_INSTALL_DIR" ]; then
@@ -152,19 +155,19 @@ cmd_logs() {
 
 # Update GhostWire
 cmd_update() {
-    if [ -f "./update.sh" ]; then
-        bash ./update.sh
+    if [ -f "$SCRIPT_DIR/update.sh" ]; then
+        bash "$SCRIPT_DIR/update.sh"
     else
         log_error "Update script not found"
-        log_info "Run from GhostWire repository directory"
+        log_info "Check scripts/ directory"
         exit 1
     fi
 }
 
 # Check for updates
 cmd_check_updates() {
-    if [ -f "./scripts/auto-update-checker.sh" ]; then
-        bash ./scripts/auto-update-checker.sh
+    if [ -f "$SCRIPT_DIR/auto-update-checker.sh" ]; then
+        bash "$SCRIPT_DIR/auto-update-checker.sh"
     else
         log_error "Update checker script not found"
         exit 1
@@ -259,8 +262,8 @@ cmd_enable_auto_update() {
     fi
     
     # Start auto-update checker in background
-    if [ -f "./scripts/auto-update-checker.sh" ]; then
-        nohup bash ./scripts/auto-update-checker.sh --daemon > "$INSTALL_DIR/logs/auto-update-daemon.log" 2>&1 &
+    if [ -f "$SCRIPT_DIR/auto-update-checker.sh" ]; then
+        nohup bash "$SCRIPT_DIR/auto-update-checker.sh" --daemon > "$INSTALL_DIR/logs/auto-update-daemon.log" 2>&1 &
         log_success "Auto-update daemon started"
         log_info "Updates will be checked every 24 hours"
         log_info "Automatic backups will be created before each update"
@@ -358,8 +361,8 @@ cmd_restore() {
 
 # Uninstall GhostWire
 cmd_uninstall() {
-    if [ -f "./uninstall.sh" ]; then
-        bash ./uninstall.sh
+    if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+        bash "$SCRIPT_DIR/uninstall.sh"
     else
         log_error "Uninstall script not found"
         exit 1
