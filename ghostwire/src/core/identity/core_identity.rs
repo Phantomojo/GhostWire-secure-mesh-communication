@@ -29,7 +29,7 @@ impl EphemeralIdentity {
     }
 
     pub fn verify(&self, message: &[u8], signature: &[u8], public_key_bytes: &[u8]) -> Result<()> {
-        let public_key = PublicKey::from_protobuf_encoding(public_key_bytes)
+        let public_key = PublicKey::try_decode_protobuf(public_key_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to decode public key: {:?}", e))?;
         if public_key.verify(message, signature) {
             Ok(())
@@ -195,8 +195,13 @@ impl Identity {
     fn get_storage_path(
         profile: Option<String>,
     ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-        let home = dirs::home_dir().ok_or("Could not find home directory")?;
-        let ghost_dir = home.join(".ghostwire");
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            std::path::PathBuf::from(ghost_home)
+        } else {
+            let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            home.join(".ghostwire")
+        };
+
         if !ghost_dir.exists() {
             std::fs::create_dir_all(&ghost_dir)?;
         }
@@ -388,9 +393,35 @@ mod tests {
         identity.lock().unwrap();
         assert!(identity.is_locked());
 
-        // Unlock it
+        // Unlock it with WRONG password should fail
+        assert!(identity.unlock("wrong_password").is_err());
+        assert!(identity.is_locked());
+
+        // Unlock it with CORRECT password
         identity.unlock("password").unwrap();
         assert!(!identity.is_locked());
+    }
+
+    #[test]
+    fn test_lock_without_save_fails() {
+        let identity = Identity::create_new(None).unwrap();
+        // Trying to lock without saving (no encrypted copy) should fail
+        let res = identity.lock();
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("No encrypted copy available"));
+    }
+
+    #[test]
+    fn test_identity_from_seed() {
+        let seed = [0u8; 32];
+        let id1 = Identity::from_seed(&seed).unwrap();
+        let id2 = Identity::from_seed(&seed).unwrap();
+
+        assert_eq!(id1.public_key().unwrap(), id2.public_key().unwrap());
+        assert_ne!(id1.id, id2.id); // Internal UUIDs should still be unique
     }
 
     #[test]
@@ -400,10 +431,35 @@ mod tests {
         let original_name = identity.get_metadata().nickname.clone();
 
         // Update nickname
-        identity.update_metadata(Some("Alice".to_string()), None, None, None);
+        identity.update_metadata(Some("Alice".to_string()), None, None, Some(true));
 
-        let updated_name = identity.get_metadata().nickname;
-        assert_eq!(updated_name, "Alice");
-        assert_ne!(updated_name, original_name);
+        let meta = identity.get_metadata();
+        assert_eq!(meta.nickname, "Alice");
+        assert!(meta.setup_complete);
+        assert_ne!(meta.nickname, original_name);
+    }
+
+    #[test]
+    fn test_storage_roundtrip() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+
+        let profile = Some("test_profile".to_string());
+        let identity = Identity::create_new(profile.clone()).unwrap();
+        let original_id = identity.id.clone();
+
+        identity.save_to_disk("secret").unwrap();
+
+        // Load it back
+        let loaded = Identity::load_or_create(profile).unwrap();
+        assert_eq!(loaded.id, original_id);
+        assert!(loaded.is_locked());
+
+        loaded.unlock("secret").unwrap();
+        assert_eq!(
+            loaded.keypair().unwrap().public(),
+            identity.keypair().unwrap().public()
+        );
     }
 }

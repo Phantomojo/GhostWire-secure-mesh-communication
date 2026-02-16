@@ -10,7 +10,7 @@
 
 These improvements offer maximum impact with minimal effort:
 
-### 1. ✅ Add AGPL-3.0 License
+### 1. ✅ Add AGPL-3.0 License [DONE]
 
 **Current:** Empty LICENSE file (0 bytes)  
 **Impact:** Cannot legally use, modify, or distribute the software  
@@ -26,7 +26,7 @@ wget https://www.gnu.org/licenses/agpl-3.0.txt -O LICENSE
 
 ---
 
-### 2. 🔒 Fix Frontend Vulnerabilities
+### 2. 🔒 Fix Frontend Vulnerabilities [DONE]
 
 **Current:** 2 npm vulnerabilities (1 high, 1 moderate)  
 **Impact:** Security risks in development and production  
@@ -43,7 +43,7 @@ git commit -m "fix: update dependencies to patch security vulnerabilities"
 
 ---
 
-### 3. 🗑️ Remove Secrets from Repository
+### 3. 🗑️ Remove Secrets from Repository [DONE]
 
 **Current:** `ghostwire_token.txt` contains a token  
 **Impact:** Potential credential compromise  
@@ -349,11 +349,11 @@ meshtastic = ["serialport"]  # Only needed for serial devices
 
 All security issues are tracked and disclosed transparently:
 
-| Date | Severity | Issue | Status |
-|------|----------|-------|--------|
-| 2026-01-04 | High | Matrix SDK DoS | ✅ Fixed (v0.16.0) |
-| 2026-01-04 | Medium | Ring AES panic | ✅ Fixed (v0.17.12) |
-| 2026-01-04 | Medium | Frontend vulnerabilities | ✅ Fixed (npm audit) |
+| Date       | Severity | Issue                    | Status              |
+| ---------- | -------- | ------------------------ | ------------------- |
+| 2026-01-04 | High     | Matrix SDK DoS           | ✅ Fixed (v0.16.0)   |
+| 2026-01-04 | Medium   | Ring AES panic           | ✅ Fixed (v0.17.12)  |
+| 2026-01-04 | Medium   | Frontend vulnerabilities | ✅ Fixed (npm audit) |
 
 ### 📈 Security Improvements
 - Implemented automated dependency scanning

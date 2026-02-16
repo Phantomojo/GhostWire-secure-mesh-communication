@@ -41,7 +41,10 @@ struct Args {
     cli: bool,
 
     #[arg(long)]
-    help: bool,
+    mesh: bool,
+
+    #[arg(long)]
+    config: Option<String>,
 
     #[arg(long)]
     sim_addr: Option<String>,
@@ -103,18 +106,6 @@ async fn main() -> Result<()> {
     info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
     info!("🔒 Security features: End-to-end encryption, threat detection, anonymity");
 
-    // Load configuration for startup features
-    if let Ok(config) = Config::load() {
-        if config.server.auto_update {
-            if updater::is_update_available() {
-                info!("✨ Applying automatic update...");
-                if let Err(e) = updater::apply_update() {
-                    error!("❌ Automatic update failed: {}", e);
-                }
-            }
-        }
-    }
-
     #[cfg(feature = "cli")]
     let args = Args::parse();
     #[cfg(not(feature = "cli"))]
@@ -126,9 +117,34 @@ async fn main() -> Result<()> {
         bootstrap: Vec::new(),
         web: false,
         cli: false,
+        mesh: false,
+        config: None,
         sim_addr: None,
         profile: None,
     };
+
+    // Load configuration
+    let config = if let Some(config_path) = &args.config {
+        match Config::load_from_path(config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("❌ Failed to load config from {}: {}", config_path, e);
+                return Err(anyhow::anyhow!("Configuration load failed"));
+            }
+        }
+    } else {
+        Config::load().unwrap_or_else(|_| Config::default())
+    };
+
+    // Auto-update check
+    if config.server.auto_update {
+        if updater::is_update_available() {
+            info!("✨ Applying automatic update...");
+            if let Err(e) = updater::apply_update() {
+                error!("❌ Automatic update failed: {}", e);
+            }
+        }
+    }
 
     // Parse bootstrap nodes
     let mut bootstrap_multiaddrs = Vec::new();
@@ -143,6 +159,7 @@ async fn main() -> Result<()> {
     // Initialize core components
     // Initialize core components
     let core = Core::new(
+        config.clone(),
         bootstrap_multiaddrs.clone(),
         args.sim_addr.clone(),
         args.profile,
@@ -240,6 +257,7 @@ async fn main() -> Result<()> {
                 bootstrap_multiaddrs.clone(),
                 args.sim_addr.clone(),
                 args.mesh_host.clone(),
+                config.clone(),
             )
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -261,19 +279,24 @@ async fn main() -> Result<()> {
         None => {
             // Default behavior
             // Activate Mesh on configured host
-            core_arc
-                .clone()
-                .start_nervous_system(args.mesh_host.clone())
-                .await;
-
-            #[cfg(feature = "cli")]
-            if args.cli {
+            if args.mesh {
+                info!("Running in minimal mode - mesh only");
+                core_arc
+                    .clone()
+                    .start_nervous_system(args.mesh_host.clone())
+                    .await;
+                tokio::signal::ctrl_c().await?;
+            } else if args.cli {
                 println!("CLI mode is currently disabled.");
             } else if args.web {
                 info!(
                     "Starting web server mode on {}:{}",
                     args.api_host, args.port
                 );
+                core_arc
+                    .clone()
+                    .start_nervous_system(args.mesh_host.clone())
+                    .await;
                 ghostwire::web::start_web_server(
                     Some(core_arc),
                     args.api_host,
@@ -281,6 +304,7 @@ async fn main() -> Result<()> {
                     bootstrap_multiaddrs.clone(),
                     args.sim_addr.clone(),
                     args.mesh_host.clone(),
+                    config.clone(),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -290,6 +314,10 @@ async fn main() -> Result<()> {
                     "Starting web server mode on {}:{}",
                     args.api_host, args.port
                 );
+                core_arc
+                    .clone()
+                    .start_nervous_system(args.mesh_host.clone())
+                    .await;
                 ghostwire::web::start_web_server(
                     Some(core_arc),
                     args.api_host,
@@ -297,6 +325,7 @@ async fn main() -> Result<()> {
                     bootstrap_multiaddrs.clone(),
                     args.sim_addr.clone(),
                     args.mesh_host.clone(),
+                    config.clone(),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;

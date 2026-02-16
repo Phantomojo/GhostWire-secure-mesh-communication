@@ -185,8 +185,13 @@ impl EncryptionManager {
     }
 
     fn get_storage_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-        let home = dirs::home_dir().ok_or("Could not find home directory")?;
-        let ghost_dir = home.join(".ghostwire");
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            std::path::PathBuf::from(ghost_home)
+        } else {
+            let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            home.join(".ghostwire")
+        };
+
         if !ghost_dir.exists() {
             std::fs::create_dir_all(&ghost_dir)?;
         }
@@ -211,8 +216,13 @@ impl EncryptionManager {
     }
 
     fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let home = dirs::home_dir().ok_or("No home dir")?;
-        let ghost_dir = home.join(".ghostwire");
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            std::path::PathBuf::from(ghost_home)
+        } else {
+            let home = dirs::home_dir().ok_or("No home dir")?;
+            home.join(".ghostwire")
+        };
+
         if !ghost_dir.exists() {
             std::fs::create_dir_all(&ghost_dir)?;
         }
@@ -319,15 +329,17 @@ impl EncryptionManager {
         let x25519_private_bytes = *x25519_secret.as_bytes();
 
         // Generate ML-KEM (Kyber768) key pair for post-quantum hardening
+        /* Temporarily disabled due to Illegal Instruction on Android
         use pqcrypto_mlkem::mlkem768;
         use pqcrypto_traits::kem::{PublicKey as _, SecretKey as _};
         let (pq_pk, pq_sk) = mlkem768::keypair();
+        */
 
         // Combine keys into a serialized binary format
         // Public part: [Ed25519 (32)] [X25519 (32)] [Kyber PK (1184 for 768)]
         let mut public_key = ed25519_key_pair.public_key().as_ref().to_vec();
         public_key.extend_from_slice(&x25519_public_bytes);
-        public_key.extend_from_slice(pq_pk.as_bytes());
+        // public_key.extend_from_slice(pq_pk.as_bytes()); // Disabled
 
         // Private part: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 (32)] [Kyber SK (2400 for 768)]
         let ed_pkcs8 = ed25519_pkcs8_key_pair.as_ref();
@@ -335,7 +347,7 @@ impl EncryptionManager {
         let mut private_key = ed_len.to_le_bytes().to_vec();
         private_key.extend_from_slice(ed_pkcs8);
         private_key.extend_from_slice(&x25519_private_bytes);
-        private_key.extend_from_slice(pq_sk.as_bytes());
+        // private_key.extend_from_slice(pq_sk.as_bytes()); // Disabled
 
         let key_pair = GhostKeyPair {
             public_key,

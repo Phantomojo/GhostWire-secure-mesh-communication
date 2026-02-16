@@ -28,7 +28,11 @@ impl CryptoProcessor {
         let machine = Self::load_state(&storage_path).unwrap_or_else(|_| {
             GhostCryptoMachine::new(
                 identity.id.clone(),
-                identity.keypair().public().encode_protobuf(),
+                identity
+                    .keypair()
+                    .expect("Identity must be unlocked")
+                    .public()
+                    .encode_protobuf(),
             )
         });
 

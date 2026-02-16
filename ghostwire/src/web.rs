@@ -218,6 +218,7 @@ pub struct StartupConfig {
 pub struct AppState {
     pub core: Arc<RwLock<Arc<Core>>>,
     pub config: StartupConfig,
+    pub full_config: crate::config::Config,
 }
 
 pub async fn start_web_server(
@@ -227,12 +228,19 @@ pub async fn start_web_server(
     bootstrap_nodes: Vec<libp2p::Multiaddr>,
     sim_addr: Option<String>,
     mesh_host: String,
+    config: crate::config::Config,
 ) -> anyhow::Result<()> {
     let initial_core = if let Some(c) = core {
         c
     } else {
         tracing::info!(target: "web", "👤 No profile selected. Initializing Guest Core...");
-        let guest_core = Core::new(bootstrap_nodes.clone(), sim_addr.clone(), None).await?;
+        let guest_core = Core::new(
+            config.clone(),
+            bootstrap_nodes.clone(),
+            sim_addr.clone(),
+            None,
+        )
+        .await?;
         Arc::new(guest_core)
     };
 
@@ -243,6 +251,7 @@ pub async fn start_web_server(
             sim_addr,
             mesh_host,
         },
+        full_config: config,
     });
 
     let _ = &*AUTH_TOKEN;

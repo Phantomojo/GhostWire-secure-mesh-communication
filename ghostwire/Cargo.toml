@@ -25,9 +25,9 @@ toml = { version = "0.8" }
 jsonwebtoken = { version = "9.0" }
 
 # Networking
-libp2p = { version = "0.53", features = ["tokio", "macros", "tcp", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping"] }
-reqwest = { version = "0.11", features = ["json"] }
-libp2p-tcp = { version = "0.41" }
+libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor"] }
+libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 
 # Cryptography
 ring = { version = "0.17.12" }
@@ -65,8 +65,8 @@ mime_guess = "2.0"
 clap = { version = "4.0", features = ["derive"] }
 
 # Logging
-tracing = { version = "0.1.44" }
-tracing-subscriber = { version = "0.3.19" }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
 tower_governor = { version = "0.4" }
 governor = { version = "0.6" }
 
@@ -80,7 +80,6 @@ btleplug = "0.11"
 qrcode-generator = "5.0"
 
 # Optional features
-neli = { version = "0.6" }
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
@@ -110,6 +109,12 @@ qr = []
 
 # Minimal build for embedded systems
 minimal = []
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.13"
+tempfile = "3.10"
+axum-test = "14.1"
 
 [profile.release]
 opt-level = 3

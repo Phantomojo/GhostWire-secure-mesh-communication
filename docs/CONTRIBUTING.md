@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Contributing](https://img.shields.io/badge/Contributing-Welcome%20🤝-brightgreen?style=for-the-badge)
-![All Buttons](https://img.shields.io/badge/All%20Buttons-Working%20✅-brightgreen?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Hardening-orange?style=for-the-badge)
 ![Community](https://img.shields.io/badge/Community-Awesome%20🌟-blue?style=for-the-badge)
 
 **🎯 Help us make GhostWire even better! Every contribution matters!**
@@ -14,16 +14,15 @@
 
 ## 🌟 **Why Contribute to GhostWire?**
 
-**GhostWire is the world's first truly dynamic peer-to-peer communication system where EVERY SINGLE BUTTON works!** 
+**GhostWire is an ambitious peer-to-peer communication system currently in an intensive security hardening phase.** 
 
-We've accomplished something amazing - making all 46 buttons functional across all panels. Now we want to make it even better with your help!
+We've built a feature-rich prototype, but the Jan 2026 security audit revealed critical areas for improvement. Every contribution to security, testing, and documentation is now high priority!
 
-### **🎯 What We've Achieved**
-- ✅ **46 Total Buttons** - ALL functional across all panels
-- ✅ **Smart Error Handling** - Graceful 404 handling with simulated responses
-- ✅ **Real Backend Integration** - Actual API calls for working endpoints
-- ✅ **Cross-PC Communication** - Real peer-to-peer networking
-- ✅ **Production Ready** - No more display-only buttons!
+### **🎯 Current Focus**
+- ✅ **Core Components Built** - Functional prototype across all panels
+- 🔄 **Security Hardening** - Patching vulnerabilities and removing mock data
+- 🔄 **Test Coverage** - Increasing from <10% to 50%+
+- ✅ **Open Source Governance** - Transitioned to AGPL-3.0 License
 
 ### **🚀 What We're Building Next**
 - 🔥 **Enhanced Security Features** - More advanced threat detection

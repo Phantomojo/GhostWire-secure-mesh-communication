@@ -1,13 +1,13 @@
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use anyhow::Result;
-use async_trait::async_trait;
+// use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Reticulum-inspired secure mesh networking stack
@@ -103,7 +103,11 @@ impl ReticulumManager {
     /// Derive encryption key from identity (AES-256)
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
         // Use BLAKE2b to derive a 32-byte key from the identity's public key
-        let public_key = identity.keypair().public().encode_protobuf();
+        let public_key = identity
+            .keypair()
+            .expect("Identity must be unlocked")
+            .public()
+            .encode_protobuf();
         let mut key = [0u8; 32];
 
         // Simple key derivation - in production, use proper KDF

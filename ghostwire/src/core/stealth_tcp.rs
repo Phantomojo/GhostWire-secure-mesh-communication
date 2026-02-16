@@ -22,16 +22,21 @@ const STEALTH_VERSION: u8 = 0x01;
 const MAX_HANDSHAKE_ATTEMPTS: usize = 3;
 // unused constant removed
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 /// Enhanced StealthTCP provider with advanced security features
 #[derive(Clone)]
 pub struct StealthTCPProvider {
     rate_limiter: Arc<DashMap<SocketAddr, (usize, Instant)>>,
     allowlist: Option<Vec<std::net::IpAddr>>,
     security_manager: Arc<SecurityManager>,
-    handshake_secret: Vec<u8>,
+    handshake_secret: Arc<HandshakeSecret>,
     enable_stealth_mode: bool,
     connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
 }
+
+#[derive(Zeroize, ZeroizeOnDrop)]
+struct HandshakeSecret(Vec<u8>);
 
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
@@ -51,8 +56,9 @@ impl StealthTCPProvider {
         handshake_secret: Option<Vec<u8>>,
         enable_stealth_mode: bool,
     ) -> Self {
-        let secret = handshake_secret.unwrap_or_else(|| {
+        let secret_bytes = handshake_secret.unwrap_or_else(|| {
             // Generate a cryptographically secure random secret
+            // If none provided, the system falls back to a random one (local only)
             use ring::rand::{SecureRandom, SystemRandom};
             let rng = SystemRandom::new();
             let mut secret = vec![0u8; 32];
@@ -60,11 +66,19 @@ impl StealthTCPProvider {
             secret
         });
 
+        // Entropy validation: Ensure the secret is at least 16 bytes
+        if secret_bytes.len() < 16 {
+            tracing::warn!(
+                "Stealth handshake secret is too short ({} bytes). Minimum 16 bytes recommended.",
+                secret_bytes.len()
+            );
+        }
+
         Self {
             rate_limiter: Arc::new(DashMap::new()),
             allowlist,
             security_manager,
-            handshake_secret: secret,
+            handshake_secret: Arc::new(HandshakeSecret(secret_bytes)),
             enable_stealth_mode,
             connection_history: Arc::new(DashMap::new()),
         }
@@ -208,12 +222,24 @@ impl StealthTCPProvider {
 
         // Verify response (HMAC of challenge with secret)
         let expected_response = self.calculate_challenge_response(&challenge[..]);
-        Ok(response == expected_response)
+
+        Ok(self.constant_time_eq(&response, &expected_response))
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut res = 0;
+        for (x, y) in a.iter().zip(b.iter()) {
+            res |= x ^ y;
+        }
+        res == 0
     }
 
     fn calculate_challenge_response(&self, challenge: &[u8]) -> [u8; 32] {
         use ring::hmac::{Key, HMAC_SHA256};
-        let key = Key::new(HMAC_SHA256, &self.handshake_secret);
+        let key = Key::new(HMAC_SHA256, &self.handshake_secret.0);
         let signature = ring::hmac::sign(&key, challenge);
         let mut response = [0u8; 32];
         response.copy_from_slice(signature.as_ref());
