@@ -1,0 +1,504 @@
+{
+    "info": {
+        "name": "GhostWire API",
+        "description": "GhostWire Secure Mesh Communication - Full API Collection\n\nBase URL: http://localhost:3001/api\n\nAuthentication: Most endpoints require X-Ghost-Token header.\nGet a dev token from GET /api/dev/token first.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "ghostwire"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:3001/api",
+            "type": "string"
+        },
+        {
+            "key": "auth_token",
+            "value": "",
+            "type": "string"
+        }
+    ],
+    "auth": {
+        "type": "apikey",
+        "apikey": [
+            {
+                "key": "key",
+                "value": "X-Ghost-Token",
+                "type": "string"
+            },
+            {
+                "key": "value",
+                "value": "{{auth_token}}",
+                "type": "string"
+            },
+            {
+                "key": "in",
+                "value": "header",
+                "type": "string"
+            }
+        ]
+    },
+    "item": [
+        {
+            "name": "🔓 Auth & Bootstrap",
+            "item": [
+                {
+                    "name": "API Root",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Get Dev Token",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if (jsonData.data) {",
+                                    "    pm.collectionVariables.set('auth_token', jsonData.data);",
+                                    "    console.log('Token saved: ' + jsonData.data);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/dev/token",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Login",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/auth/login",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"password\"\n}"
+                        },
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Verify Token",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/auth/verify",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"token\": \"{{auth_token}}\"\n}"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "👤 Profile Management",
+            "description": "Auth-exempt profile CRUD operations",
+            "item": [
+                {
+                    "name": "List Profiles",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/profile/list",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Create Profile",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/profile/create",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"my_new_profile\"\n}"
+                        },
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Select Profile",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/profile/select",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"profile_name\": \"default\"\n}"
+                        },
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Delete Profile",
+                    "request": {
+                        "method": "DELETE",
+                        "url": "{{base_url}}/profile/delete/profile_name_here",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🆔 Identity",
+            "description": "Auth-exempt identity management",
+            "item": [
+                {
+                    "name": "Get Identity Status",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/identity/status",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Get Identity",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/identity/",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Setup Identity",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/identity/setup",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"nickname\": \"GhostNode\",\n    \"password\": \"supersecretpassphrase\"\n}"
+                        },
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                },
+                {
+                    "name": "Get Public Key",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/identity/public-key",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🔒 V2 Profile (Authenticated)",
+            "item": [
+                {
+                    "name": "V2 Get Profile",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/v2/profile"
+                    }
+                },
+                {
+                    "name": "V2 Update Username",
+                    "request": {
+                        "method": "PUT",
+                        "url": "{{base_url}}/v2/profile/username",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"username\": \"phantom_node\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "V2 Update Metadata",
+                    "request": {
+                        "method": "PUT",
+                        "url": "{{base_url}}/v2/profile/metadata",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"nickname\": \"Phantom\",\n    \"bio\": \"Sovereign mesh node operator\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "V2 Get Public Key",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/v2/profile/public-key"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "💬 Messaging",
+            "item": [
+                {
+                    "name": "Get Messages",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/messages"
+                    }
+                },
+                {
+                    "name": "V2 Get Messages",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/v2/messages"
+                    }
+                },
+                {
+                    "name": "Broadcast Message",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/broadcast",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"content\": \"Hello mesh network!\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Send Direct Message",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/send_message",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"recipient\": \"peer_id_here\",\n    \"content\": \"Direct encrypted message\"\n}"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🌐 Peers",
+            "item": [
+                {
+                    "name": "List Peers",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/peers"
+                    }
+                },
+                {
+                    "name": "V2 List Peers",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/v2/peers"
+                    }
+                },
+                {
+                    "name": "Connect Peer",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/connect_peer",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"address\": \"192.168.1.100:3001\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Disconnect Peer",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/disconnect_peer",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"peer_id\": \"peer_id_here\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Ping Peer",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/ping_peer",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"peer_id\": \"peer_id_here\"\n}"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🛡️ System & Security",
+            "item": [
+                {
+                    "name": "System Stats",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/system/stats"
+                    }
+                },
+                {
+                    "name": "Security Audit",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/system/audit"
+                    }
+                },
+                {
+                    "name": "V2 Security Dashboard",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/v2/security/dashboard"
+                    }
+                },
+                {
+                    "name": "Get Settings",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/settings"
+                    }
+                },
+                {
+                    "name": "Update Settings",
+                    "request": {
+                        "method": "PUT",
+                        "url": "{{base_url}}/settings",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"stealth_mode\": true\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "⚠️ Emergency Wipe",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/system/wipe",
+                        "description": "⚠️ DANGER: This will DESTROY all data and shut down the node!"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "📚 Help",
+            "item": [
+                {
+                    "name": "Tutorial Steps",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/help/tutorial"
+                    }
+                },
+                {
+                    "name": "Report Error",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{base_url}}/report_error",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"error\": \"Test error report from Postman\"\n}"
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}

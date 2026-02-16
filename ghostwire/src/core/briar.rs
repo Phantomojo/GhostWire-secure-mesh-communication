@@ -1,6 +1,7 @@
 use anyhow::Result;
 // use crate::core::message::Message;
 // use async_trait::async_trait;
+use crate::core::Identity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

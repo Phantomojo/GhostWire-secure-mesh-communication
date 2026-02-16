@@ -1,7 +1,9 @@
 use crate::core::identity::core_identity::Identity;
-use aes_gcm::aead::{Aead, AeadCore, KeyInit};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{anyhow, Result};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    XChaCha20Poly1305, XNonce,
+};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -73,15 +75,18 @@ impl RecoveryManager {
 
             // Derive key from recovery_password + salt
             let key_bytes =
-                crate::core::identity::encryption::derive_key(recovery_password, &salt[..]);
-            let key = Key::<Aes256Gcm>::from_slice(&key_bytes[..]);
-            let cipher = Aes256Gcm::new(key);
-            let nonce = Aes256Gcm::generate_nonce(&mut rand::thread_rng());
+                crate::core::identity::encryption::derive_key(recovery_password, &salt[..])?;
+            let cipher = XChaCha20Poly1305::new(&key_bytes.into());
+
+            // Generate random nonce (24 bytes)
+            let mut nonce_bytes = [0u8; 24];
+            rand::thread_rng().fill(&mut nonce_bytes);
+            let nonce = XNonce::from_slice(&nonce_bytes);
 
             // Encrypt the share string
             let payload = share_str.as_bytes();
             let encrypted_data = cipher
-                .encrypt(&nonce, payload)
+                .encrypt(nonce, payload)
                 .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
             // Generate DHT key: Hash(username + "recovery" + index)
@@ -115,10 +120,9 @@ impl RecoveryManager {
         // Decrypt each share
         for share in encrypted_shares {
             let key_bytes =
-                crate::core::identity::encryption::derive_key(recovery_password, &share.salt);
-            let key = Key::<Aes256Gcm>::from_slice(&key_bytes[..]);
-            let cipher = Aes256Gcm::new(key);
-            let nonce = Nonce::from_slice(&share.nonce);
+                crate::core::identity::encryption::derive_key(recovery_password, &share.salt)?;
+            let cipher = XChaCha20Poly1305::new(&key_bytes.into());
+            let nonce = XNonce::from_slice(&share.nonce);
 
             let decrypted_bytes = cipher
                 .decrypt(nonce, share.encrypted_data.as_ref())

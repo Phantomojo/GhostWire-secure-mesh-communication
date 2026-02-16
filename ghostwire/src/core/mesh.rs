@@ -63,6 +63,14 @@ pub enum MeshCommand {
         message: Message,
         reply: oneshot::Sender<Result<()>>,
     },
+    GetListeners {
+        reply: oneshot::Sender<Vec<Multiaddr>>,
+    },
+    AddAddress {
+        peer_id: PeerId,
+        address: Multiaddr,
+        reply: oneshot::Sender<Result<()>>,
+    },
     Shutdown,
 }
 
@@ -421,12 +429,33 @@ impl MeshTransport {
         rx.await?
     }
 
-    pub fn get_listeners(&self) -> Vec<Multiaddr> {
-        vec![]
+    pub async fn get_listeners(&self) -> Vec<Multiaddr> {
+        let (tx, rx) = oneshot::channel();
+        if let Err(e) = self
+            .command_tx
+            .send(MeshCommand::GetListeners { reply: tx })
+            .await
+        {
+            tracing::error!("Failed to send GetListeners command: {}", e);
+            return vec![];
+        }
+        rx.await.unwrap_or_default()
     }
 
     pub async fn get_security_stats(&self) -> crate::core::security::SecurityStats {
         self.security_manager.get_security_stats().await
+    }
+
+    pub async fn add_address(&self, peer_id: PeerId, address: Multiaddr) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::AddAddress {
+                peer_id,
+                address,
+                reply: tx,
+            })
+            .await?;
+        rx.await?
     }
 
     pub fn get_connection_stats(&self) -> ConnectionStats {
@@ -621,6 +650,21 @@ impl MeshDriver {
                     Ok(())
                 })();
                 let _ = reply.send(res);
+            }
+            MeshCommand::GetListeners { reply } => {
+                let listeners = self.swarm.listeners().cloned().collect();
+                let _ = reply.send(listeners);
+            }
+            MeshCommand::AddAddress {
+                peer_id,
+                address,
+                reply,
+            } => {
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&peer_id, address);
+                let _ = reply.send(Ok(()));
             }
             MeshCommand::Shutdown => {
                 tracing::info!("Mesh driver received shutdown command.");
@@ -847,8 +891,12 @@ impl MeshManager {
         }
     }
 
-    pub fn get_listeners(&self) -> Vec<Multiaddr> {
-        self.transport.get_listeners()
+    pub async fn get_listeners(&self) -> Vec<Multiaddr> {
+        self.transport.get_listeners().await
+    }
+
+    pub async fn add_address(&self, peer_id: PeerId, address: Multiaddr) -> Result<()> {
+        self.transport.add_address(peer_id, address).await
     }
 
     pub fn get_topology(&self) -> MeshTopology {

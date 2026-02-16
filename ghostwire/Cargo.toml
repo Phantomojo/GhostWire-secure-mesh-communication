@@ -34,7 +34,7 @@ ring = { version = "0.17.12" }
 ed25519-dalek = { version = "2.0" }
 x25519-dalek = { version = "2.0" }
 aes-gcm = { version = "0.10" }
-chacha20poly1305 = { version = "0.10" }
+chacha20poly1305 = { version = "0.10", features = ["std"] }
 pqcrypto-mlkem = { version = "0.1.1" }
 pqcrypto-traits = { version = "0.3" }
 blake2b_simd = "1.0"
@@ -85,14 +85,12 @@ futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
 matrix-sdk = { version = "0.16", optional = true }
 serialport = { version = "4.3", optional = true }
-
-# TUI dependencies
-ratatui = { version = "0.26" }
-crossterm = { version = "0.27" }
 dirs = "6.0.0"
+cryptify = "3.2.1"
+argon2 = "0.5.3"
 
 [features]
-default = ["web", "cli", "mesh", "security", "tui", "stealth", "bluetooth", "qr"]
+default = ["web", "cli", "mesh", "security", "stealth", "bluetooth", "qr"]
 web = []
 cli = []
 mesh = []
@@ -103,7 +101,6 @@ meshtastic = ["serialport"]
 reticulum = []
 briar = []
 stealth = []
-tui = []
 bluetooth = []
 qr = []
 

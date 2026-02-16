@@ -2,7 +2,6 @@
 //! Next: integrate with key manager and web API.
 
 use crate::core::armor::TrafficArmor;
-use ring::aead::{self, UnboundKey, AES_256_GCM};
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -216,17 +215,18 @@ impl EncryptionManager {
     }
 
     fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
-            std::path::PathBuf::from(ghost_home)
-        } else {
-            let home = dirs::home_dir().ok_or("No home dir")?;
-            home.join(".ghostwire")
-        };
+        let ghost_dir =
+            if let Ok(ghost_home) = std::env::var(cryptify::encrypt_string!("GHOSTWIRE_HOME")) {
+                std::path::PathBuf::from(ghost_home)
+            } else {
+                let home = dirs::home_dir().ok_or("No home dir")?;
+                home.join(cryptify::encrypt_string!(".ghostwire"))
+            };
 
         if !ghost_dir.exists() {
             std::fs::create_dir_all(&ghost_dir)?;
         }
-        let key_path = ghost_dir.join("master.key");
+        let key_path = ghost_dir.join(cryptify::encrypt_string!("master.key"));
 
         if key_path.exists() {
             let key = std::fs::read(&key_path)?;
@@ -259,8 +259,8 @@ impl EncryptionManager {
         let json_bytes = serde_json::to_vec(data)?;
         let master_key = Self::get_master_key()?;
 
-        // Encrypt with AES-GCM
-        let result = Self::encrypt_with_aes_gcm(&json_bytes, &master_key)?;
+        // Encrypt with XChaCha20-Poly1305
+        let result = Self::encrypt_with_xchacha20(&json_bytes, &master_key)?;
 
         let mut file = std::fs::File::create(path)?;
         // Simple container format: [Nonce (12)] [Ciphertext]
@@ -273,23 +273,23 @@ impl EncryptionManager {
         path: &std::path::Path,
     ) -> Result<T, Box<dyn std::error::Error>> {
         let data = std::fs::read(path)?;
-        if data.len() < 12 {
+        if data.len() < 24 {
             return Err("File too short".into());
         }
 
         let master_key = Self::get_master_key()?;
-        let nonce = &data[..12];
-        let ciphertext = &data[12..];
+        let nonce = &data[..24];
+        let ciphertext = &data[24..];
 
-        let plaintext_bytes = Self::decrypt_with_aes_gcm(ciphertext, nonce, &master_key)?;
+        let plaintext_bytes = Self::decrypt_with_xchacha20(ciphertext, nonce, &master_key)?;
         let object: T = serde_json::from_slice(&plaintext_bytes)?;
         Ok(object)
     }
 
     /// Public helper for byte-level encryption using Master Key
-    pub fn encrypt_bytes(data: &[u8]) -> Result<AesGcmResult, Box<dyn std::error::Error>> {
+    pub fn encrypt_bytes(data: &[u8]) -> Result<EncryptionResult, Box<dyn std::error::Error>> {
         let master_key = Self::get_master_key()?;
-        Self::encrypt_with_aes_gcm(data, &master_key)
+        Self::encrypt_with_xchacha20(data, &master_key)
     }
 
     /// Public helper for byte-level decryption using Master Key
@@ -298,7 +298,7 @@ impl EncryptionManager {
         nonce: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let master_key = Self::get_master_key()?;
-        Self::decrypt_with_aes_gcm(ciphertext, nonce, &master_key)
+        Self::decrypt_with_xchacha20(ciphertext, nonce, &master_key)
     }
 
     pub fn save_to_disk(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -444,8 +444,8 @@ impl EncryptionManager {
             final_key = mixed.to_vec();
         }
 
-        // Encrypt the message using AES-256-GCM with the hardened key
-        let encrypted_data = Self::encrypt_with_aes_gcm(message.as_bytes(), &final_key)?;
+        // Encrypt the message using XChaCha20-Poly1305 with the hardened key
+        let encrypted_data = Self::encrypt_with_xchacha20(message.as_bytes(), &final_key)?;
 
         // Sign the encrypted message
         let signature = self.sign_message(&encrypted_data.ciphertext)?;
@@ -464,7 +464,7 @@ impl EncryptionManager {
                 .as_secs(),
             key_id: self.key_pair.key_id.clone(),
             message_type,
-            version: 0x02, // Standard encryption
+            version: 0x03, // XChaCha20-Poly1305 encryption
             pq_key: pq_key_out,
         })
     }
@@ -488,8 +488,8 @@ impl EncryptionManager {
             &peer_public_key,
         )?;
 
-        if encrypted_msg.version != 0x02 {
-            return Err("Unsupported message version".into());
+        if encrypted_msg.version != 0x03 {
+            return Err("Unsupported message version (expected v3 XChaCha20)".into());
         }
 
         // Derive base session key for decryption
@@ -525,8 +525,8 @@ impl EncryptionManager {
             }
         }
 
-        // Decrypt using AES-256-GCM
-        let decrypted_data = Self::decrypt_with_aes_gcm(
+        // Decrypt using XChaCha20-Poly1305
+        let decrypted_data = Self::decrypt_with_xchacha20(
             &encrypted_msg.ciphertext,
             &encrypted_msg.nonce,
             &final_key,
@@ -535,78 +535,66 @@ impl EncryptionManager {
         String::from_utf8(decrypted_data).map_err(|e| e.into())
     }
 
-    fn encrypt_with_aes_gcm(
+    pub fn encrypt_with_xchacha20(
         data: &[u8],
         key: &[u8],
-    ) -> Result<AesGcmResult, Box<dyn std::error::Error>> {
-        // Ensure key is exactly 32 bytes for AES-256
+    ) -> Result<EncryptionResult, Box<dyn std::error::Error>> {
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit},
+            XChaCha20Poly1305, XNonce,
+        };
+
+        // Ensure key is exactly 32 bytes
         if key.len() != 32 {
-            return Err("Key must be exactly 32 bytes for AES-256-GCM".into());
+            return Err("Key must be exactly 32 bytes for XChaCha20".into());
         }
 
-        // Create unbound key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, key)
-            .map_err(|e| format!("Failed to create AES-256-GCM key: {:?}", e))?;
+        let cipher = XChaCha20Poly1305::new(key.into());
 
-        // Generate random nonce (96 bits = 12 bytes for GCM)
+        // Generate random nonce (192 bits = 24 bytes for XChaCha20)
         let nonce_bytes = Self::generate_nonce();
-        let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+        let nonce = XNonce::from_slice(&nonce_bytes);
 
-        // Create LessSafeKey for encryption
-        let key = aead::LessSafeKey::new(unbound_key);
+        // Encrypt
+        let ciphertext = cipher
+            .encrypt(nonce, data)
+            .map_err(|e| format!("XChaCha20 encryption failed: {}", e))?;
 
-        // Prepare data for in-place encryption
-        let mut in_out = data.to_vec();
-
-        // Encrypt in place (appends authentication tag)
-        key.seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut in_out)
-            .map_err(|e| format!("AES-GCM encryption failed: {:?}", e))?;
-
-        Ok(AesGcmResult {
-            ciphertext: in_out,
+        Ok(EncryptionResult {
+            ciphertext,
             nonce: nonce_bytes.to_vec(),
         })
     }
 
-    fn decrypt_with_aes_gcm(
+    pub fn decrypt_with_xchacha20(
         ciphertext: &[u8],
         nonce: &[u8],
         key: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Ensure key is exactly 32 bytes for AES-256
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit},
+            XChaCha20Poly1305, XNonce,
+        };
+
+        // Ensure key is exactly 32 bytes
         if key.len() != 32 {
-            return Err("Key must be exactly 32 bytes for AES-256-GCM".into());
+            return Err("Key must be exactly 32 bytes for XChaCha20".into());
         }
 
-        // Ensure nonce is exactly 12 bytes
-        if nonce.len() != 12 {
-            return Err("Nonce must be exactly 12 bytes for GCM".into());
+        // Ensure nonce is exactly 24 bytes
+        if nonce.len() != 24 {
+            return Err("Nonce must be exactly 24 bytes for XChaCha20".into());
         }
 
-        // Create unbound key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, key)
-            .map_err(|e| format!("Failed to create AES-256-GCM key: {:?}", e))?;
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let nonce = XNonce::from_slice(nonce);
 
-        // Convert nonce bytes to Nonce
-        let mut nonce_array = [0u8; 12];
-        nonce_array.copy_from_slice(nonce);
-        let nonce = aead::Nonce::assume_unique_for_key(nonce_array);
+        // Decrypt
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| format!("XChaCha20 decryption failed: {}", e))?;
 
-        // Create Opening key
-        let opening_key = aead::LessSafeKey::new(unbound_key);
-
-        // Decrypt in place (verifies and removes authentication tag)
-        let mut in_out = ciphertext.to_vec();
-        let plaintext = opening_key
-            .open_in_place(nonce, aead::Aad::empty(), &mut in_out)
-            .map_err(|e| {
-                format!(
-                    "AES-GCM decryption failed (possibly tampered data): {:?}",
-                    e
-                )
-            })?;
-
-        Ok(plaintext.to_vec())
+        Ok(plaintext)
     }
 
     fn derive_session_key(
@@ -649,7 +637,8 @@ impl EncryptionManager {
         // Derive session key using HKDF-SHA256 (Robust way)
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"GhostWire-Salt-v1");
         let prk = salt.extract(shared_secret.as_bytes());
-        let info = [b"GhostWire-Session-Key-v2".as_slice()];
+        let info_str = cryptify::encrypt_string!("GhostWire-Session-Key-v2");
+        let info = [info_str.as_bytes()];
         let okm = prk
             .expand(&info, hkdf::HKDF_SHA256)
             .map_err(|_| "HKDF expand failed")?;
@@ -680,7 +669,7 @@ impl EncryptionManager {
         // Derive a strong 32-byte key from our key pair
         let key = self.derive_cli_key();
 
-        match Self::encrypt_with_aes_gcm(data, &key) {
+        match Self::encrypt_with_xchacha20(data, &key) {
             Ok(result) => {
                 // Combine nonce and ciphertext
                 let mut combined = result.nonce;
@@ -703,7 +692,8 @@ impl EncryptionManager {
 
         // Use SHA-256 to derive a 32-byte key from our keypair
         let mut ctx = digest::Context::new(&digest::SHA256);
-        ctx.update(&b"GhostWire-CLI-v1"[..]); // Domain separation
+        let domain = cryptify::encrypt_string!("GhostWire-CLI-v1");
+        ctx.update(domain.as_bytes()); // Domain separation
         ctx.update(&self.key_pair.private_key[..]);
         ctx.update(&self.key_pair.public_key[..]);
 
@@ -712,8 +702,8 @@ impl EncryptionManager {
 
     // Enhanced decryption method for CLI compatibility
     pub fn decrypt(&self, data: &[u8]) -> Vec<u8> {
-        if data.len() < 12 {
-            tracing::error!("Encrypted data too short (need at least 12 bytes for nonce)");
+        if data.len() < 24 {
+            tracing::error!("Encrypted data too short (need at least 24 bytes for nonce)");
             panic!("Corrupted or invalid encrypted data");
         }
 
@@ -721,10 +711,10 @@ impl EncryptionManager {
         let key = self.derive_cli_key();
 
         // Extract nonce and ciphertext
-        let nonce = &data[..12];
-        let ciphertext = &data[12..];
+        let nonce = &data[..24];
+        let ciphertext = &data[24..];
 
-        match Self::decrypt_with_aes_gcm(ciphertext, nonce, &key) {
+        match Self::decrypt_with_xchacha20(ciphertext, nonce, &key) {
             Ok(decrypted) => decrypted,
             Err(e) => {
                 tracing::error!(inner_error = %e, "CLI decryption failed");
@@ -779,8 +769,8 @@ impl EncryptionManager {
             .map_err(|e| format!("Signature verification failed: {:?}", e).into())
     }
 
-    fn generate_nonce() -> [u8; 12] {
-        let mut nonce = [0u8; 12];
+    fn generate_nonce() -> [u8; 24] {
+        let mut nonce = [0u8; 24];
         SystemRandom::new().fill(&mut nonce[..]).unwrap();
         nonce
     }
@@ -827,7 +817,7 @@ impl EncryptionManager {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AesGcmResult {
+pub struct EncryptionResult {
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
 }

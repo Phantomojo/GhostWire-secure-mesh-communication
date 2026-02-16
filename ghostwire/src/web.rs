@@ -260,11 +260,15 @@ pub async fn start_web_server(
         .allow_origin([
             "http://localhost:5173".parse::<HeaderValue>().unwrap(),
             "http://127.0.0.1:5173".parse::<HeaderValue>().unwrap(),
+            "tauri://localhost".parse::<HeaderValue>().unwrap(),
+            "http://tauri.localhost".parse::<HeaderValue>().unwrap(),
         ])
         .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
+            header::ACCEPT,
+            header::ORIGIN,
             HeaderName::from_static("x-ghost-token"),
         ]);
 

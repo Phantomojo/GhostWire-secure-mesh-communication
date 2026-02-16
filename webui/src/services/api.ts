@@ -633,7 +633,7 @@ export const api = {
   async unlockIdentity(password: string): Promise<boolean> {
     try {
       const response = await this.post('/identity/unlock', { password });
-      return response.success;
+      return !!response.data && !response.error;
     } catch (e) {
       console.error('Unlock failed', e);
       return false;
@@ -650,8 +650,13 @@ export const api = {
   },
 
   async lockIdentity(): Promise<boolean> {
-    const response = await this.post('/identity/lock');
-    return response.success;
+    try {
+      const response = await this.post('/identity/lock');
+      return !!response.data && !response.error;
+    } catch (e) {
+      console.error('Lock failed', e);
+      return false;
+    }
   },
 
   // Profile Management
@@ -663,7 +668,7 @@ export const api = {
   async selectProfile(profileName: string): Promise<boolean> {
     try {
       const response = await this.post('/profile/select', { profile_name: profileName });
-      return response.success;
+      return !!response.data && !response.error;
     } catch (e) {
       console.error('Select profile failed', e);
       return false;
@@ -673,7 +678,7 @@ export const api = {
   async createProfile(name: string): Promise<boolean> {
     try {
       const response = await this.post('/profile/create', { name });
-      return response.success;
+      return !!response.data && !response.error;
     } catch (e) {
       console.error('Create profile failed', e);
       return false;
@@ -683,7 +688,7 @@ export const api = {
   async deleteProfile(name: string): Promise<boolean> {
     try {
       const response = await this.delete(`/profile/delete/${name}`);
-      return response.success;
+      return !!response.data && !response.error;
     } catch (e) {
       console.error('Delete profile failed', e);
       return false;
@@ -693,7 +698,7 @@ export const api = {
   async wipeSystem(): Promise<boolean> {
     try {
       const response = await this.post('/system/wipe');
-      return response.success;
+      return !!response.data && !response.error;
     } catch (e) {
       console.error('Emergency wipe failed', e);
       return false;
