@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { HiPaperAirplane, HiHashtag, HiUsers, HiSignal, HiGlobeAlt, HiLockClosed } from 'react-icons/hi2';
+import { HiPaperAirplane, HiHashtag, HiUsers, HiSignal, HiGlobeAlt, HiLockClosed, HiChevronLeft } from 'react-icons/hi2';
 
 // GhostWire Data Structure
 const STREAMS_DATA = {
@@ -36,10 +36,28 @@ interface CommunicationPanelProps {
 
 const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers, activeRecipient, onRecipientSelect }: CommunicationPanelProps) => {
   const [inputText, setInputText] = useState('');
-  const [showNodeSidebar, setShowNodeSidebar] = useState(true);
-  const [showStreamSidebar, setShowStreamSidebar] = useState(true);
+  const [showNodeSidebar, setShowNodeSidebar] = useState(window.innerWidth >= 1024);
+  const [showStreamSidebar, setShowStreamSidebar] = useState(window.innerWidth >= 1024);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [activeZone, setActiveZone] = useState('1');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      if (mobile) {
+        setShowNodeSidebar(false);
+        setShowStreamSidebar(false);
+      } else {
+        setShowNodeSidebar(true);
+        setShowStreamSidebar(true);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,10 +81,14 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
   const currentStreams = STREAMS_DATA[activeZone as keyof typeof STREAMS_DATA] || STREAMS_DATA['1'];
 
   return (
-    <div className="flex h-full w-full bg-slate-900/50 backdrop-blur-sm text-gray-100 font-sans overflow-hidden">
+    <div className="flex h-full w-full bg-slate-900/50 backdrop-blur-sm text-gray-100 font-sans overflow-hidden relative">
 
-      {/* 1. Zone/Frequency Selector (Far Left) */}
-      <div className="w-[72px] bg-slate-950/40 border-r border-white/5 flex flex-col items-center py-4 gap-4 shrink-0 backdrop-blur-md z-30">
+      {/* 1. Zone/Frequency Selector (Far Left) - Drawer on Mobile */}
+      <div className={`
+        ${isMobile ? 'absolute left-0 top-0 bottom-0 z-50 bg-slate-950/90' : 'relative bg-slate-950/40'} 
+        w-[72px] border-r border-white/5 flex flex-col items-center py-4 gap-4 shrink-0 backdrop-blur-md transition-transform duration-300
+        ${isMobile && !showStreamSidebar ? '-translate-x-full' : 'translate-x-0'}
+      `}>
         {ZONES.map(zone => (
           <div
             key={zone.id}
@@ -88,25 +110,33 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
             </div>
 
             {/* Tooltip */}
-            <div className="absolute left-14 px-2 py-1 bg-black/90 border border-white/10 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-              {zone.name}
-            </div>
+            {!isMobile && (
+              <div className="absolute left-14 px-2 py-1 bg-black/90 border border-white/10 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                {zone.name}
+              </div>
+            )}
           </div>
         ))}
 
-        <div className="mt-auto mb-4">
-          <button
-            onClick={() => setShowStreamSidebar(!showStreamSidebar)}
-            className={`p-2 rounded-lg transition-colors ${showStreamSidebar ? 'text-cyan-400 bg-cyan-900/20' : 'text-slate-500 hover:text-white'}`}
-            title="Toggle Streams"
-          >
-            <HiHashtag className="w-5 h-5" />
-          </button>
-        </div>
+        {/* Mobile toggle close */}
+        {isMobile && (
+          <div className="mt-auto mb-4">
+            <button
+              onClick={() => setShowStreamSidebar(false)}
+              className="p-2 text-slate-500 hover:text-white"
+            >
+              <HiChevronLeft className="w-6 h-6" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 2. Streams Sidebar (Collapsible) */}
-      <div className={`${showStreamSidebar ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'} bg-slate-900/30 border-r border-white/5 flex flex-col shrink-0 transition-all duration-300`}>
+      {/* 2. Streams Sidebar (Collapsible) - Drawer on Mobile */}
+      <div className={`
+          ${isMobile ? 'absolute left-[72px] top-0 bottom-0 z-40 shadow-2xl' : 'relative'}
+          ${showStreamSidebar ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'} 
+          bg-slate-900/90 border-r border-white/5 flex flex-col shrink-0 transition-all duration-300 backdrop-blur-xl
+        `}>
         {/* Header */}
         <div className="h-16 border-b border-white/5 flex items-center px-6 font-bold tracking-wider text-sm text-cyan-500 shadow-sm bg-slate-900/20 whitespace-nowrap overflow-hidden">
           SECURE_MESH
@@ -120,7 +150,10 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
           {currentStreams.map(stream => (
             <div
               key={stream.id}
-              onClick={() => onRecipientSelect(stream.name === 'CORE_UPLINK' ? 'broadcast' : stream.name)}
+              onClick={() => {
+                onRecipientSelect(stream.name === 'CORE_UPLINK' ? 'broadcast' : stream.name);
+                if (isMobile) setShowStreamSidebar(false);
+              }}
               className={`flex items-center px-3 py-2 rounded-lg cursor-pointer group transition-all duration-200 border border-transparent
                 ${(activeRecipient === 'broadcast' && stream.name === 'CORE_UPLINK') || activeRecipient === stream.name
                   ? 'bg-cyan-900/20 border-cyan-500/20 text-cyan-100 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
@@ -149,20 +182,28 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
       </div>
 
       {/* 3. Terminal/Chat Area */}
-      <div className="flex-1 flex flex-col bg-transparent min-w-0 relative">
+      <div className="flex-1 flex flex-col bg-transparent min-w-0 relative h-full">
         {/* Background Grid Effect */}
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 pointer-events-none" />
 
         {/* Header */}
-        <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-slate-900/20 backdrop-blur-sm z-10">
-          <div className="flex items-center space-x-3">
-            <HiHashtag className="w-5 h-5 text-cyan-500" />
-            <div className="flex flex-col">
-              <span className="text-white font-bold text-sm tracking-wide">{activeRecipient === 'broadcast' ? 'CORE_UPLINK' : `TARGET: ${activeRecipient}`}</span>
-              <span className="text-[10px] text-slate-400 font-mono">E2EE • <span className="text-emerald-400">VERIFIED</span></span>
+        <div className="h-16 border-b border-white/5 flex items-center justify-between px-4 md:px-6 bg-slate-900/20 backdrop-blur-sm z-10 shrink-0">
+          <div className="flex items-center space-x-3 overflow-hidden">
+            {/* Mobile: Toggle Streams */}
+            <button
+              onClick={() => setShowStreamSidebar(!showStreamSidebar)}
+              className={`md:hidden p-2 -ml-2 rounded-lg text-slate-400 hover:text-white ${showStreamSidebar ? 'text-cyan-400' : ''}`}
+            >
+              <HiHashtag className="w-5 h-5" />
+            </button>
+
+            <HiHashtag className="hidden md:block w-5 h-5 text-cyan-500" />
+            <div className="flex flex-col overflow-hidden">
+              <span className="text-white font-bold text-sm tracking-wide truncate">{activeRecipient === 'broadcast' ? 'CORE_UPLINK' : `TARGET: ${activeRecipient}`}</span>
+              <span className="text-[10px] text-slate-400 font-mono truncate">E2EE • <span className="text-emerald-400">VERIFIED</span></span>
             </div>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
             <button
               onClick={() => setShowNodeSidebar(!showNodeSidebar)}
               className={`p-2 rounded-lg transition-colors ${showNodeSidebar ? 'text-cyan-400 bg-cyan-900/20' : 'text-slate-400 hover:text-white'}`}
@@ -174,7 +215,7 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
         </div>
 
         {/* Messages */}
-        <div id="chat-interface" className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar relative z-0">
+        <div id="chat-interface" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar relative z-0">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
               <div className="w-20 h-20 rounded-full border border-dashed border-slate-700 flex items-center justify-center mb-4">
@@ -193,13 +234,13 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
 
                   {!isSequence && (
                     <div className={`w-8 h-8 rounded shrink-0 flex items-center justify-center text-sm border font-mono shadow-lg
-                        ${isMe ? 'bg-cyan-900/20 border-cyan-500/30 text-cyan-400 ml-4' : 'bg-slate-800 border-white/10 text-slate-300 mr-4'}`}>
+                        ${isMe ? 'bg-cyan-900/20 border-cyan-500/30 text-cyan-400 ml-2 md:ml-4' : 'bg-slate-800 border-white/10 text-slate-300 mr-2 md:mr-4'}`}>
                       {isMe ? 'ME' : 'ID'}
                     </div>
                   )}
-                  {isSequence && <div className="w-12 ml-4 mr-4" />} {/* Spacer for sequence */}
+                  {isSequence && <div className="w-10 md:w-12 ml-2 md:ml-4 mr-2 md:mr-4" />} {/* Spacer for sequence */}
 
-                  <div className={`flex flex-col max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex flex-col max-w-[75%] md:max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
                     {!isSequence && (
                       <div className="flex items-baseline mb-1 space-x-2">
                         <span className={`text-xs font-bold tracking-wide ${isMe ? 'text-cyan-400' : 'text-slate-200'}`}>
@@ -209,7 +250,7 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
                       </div>
                     )}
 
-                    <div className={`relative px-4 py-2 rounded-sm text-sm leading-relaxed border shadow-sm
+                    <div className={`relative px-3 py-2 md:px-4 md:py-2 rounded-sm text-sm leading-relaxed border shadow-sm break-words
                         ${isMe
                         ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-50 rounded-tr-none'
                         : 'bg-slate-800/50 border-white/5 text-slate-200 rounded-tl-none'}`}>
@@ -228,18 +269,18 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
         </div>
 
         {/* Input Area */}
-        <div className="p-4 shrink-0 bg-slate-900/40 backdrop-blur-md border-t border-white/5">
+        <div className="p-3 md:p-4 shrink-0 bg-slate-900/40 backdrop-blur-md border-t border-white/5 z-20 pb-safe">
           <div className="relative flex items-center bg-black/30 border border-white/10 rounded-sm focus-within:border-cyan-500/50 focus-within:ring-1 focus-within:ring-cyan-500/20 transition-all">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={`Transmit to ${activeRecipient}...`}
-              className="flex-1 bg-transparent border-none text-white px-4 py-3 text-sm focus:outline-none placeholder-slate-600 font-mono"
+              placeholder={`Transmit...`}
+              className="flex-1 bg-transparent border-none text-white px-3 py-3 md:px-4 text-sm focus:outline-none placeholder-slate-600 font-mono min-w-0"
             />
 
-            <div className="flex items-center px-2 space-x-1 border-l border-white/5 bg-white/5 h-full">
+            <div className="flex items-center px-1 md:px-2 space-x-1 border-l border-white/5 bg-white/5 h-full">
               {/* SOS Button Inside */}
               <button
                 onClick={onEmergency}
@@ -254,18 +295,32 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
               </button>
             </div>
           </div>
-          <div className="mt-2 flex justify-between text-[9px] text-slate-500 font-mono">
+          <div className="mt-2 flex justify-between text-[9px] text-slate-500 font-mono hidden md:flex">
             <span>ENCRYPTION: AES-256-GCM [ACTIVE]</span>
             <span>LATENCY: 12ms</span>
           </div>
         </div>
       </div>
 
-      {/* 4. Connected Nodes (Right Sidebar) */}
-      <div className={`${showNodeSidebar ? 'w-60 opacity-100 border-l' : 'w-0 opacity-0 overflow-hidden border-none'} bg-slate-900/30 border-white/5 flex flex-col shrink-0 transition-all duration-300`}>
+      {/* 4. Connected Nodes (Right Sidebar) - Drawer on Mobile */}
+      {/* Overlay backdrop for mobile */}
+      {isMobile && showNodeSidebar && (
+        <div className="absolute inset-0 bg-black/50 z-40 backdrop-blur-sm" onClick={() => setShowNodeSidebar(false)} />
+      )}
+
+      <div className={`
+          ${isMobile ? 'absolute right-0 top-0 bottom-0 z-50 shadow-2xl h-full' : 'relative'}
+          ${showNodeSidebar ? 'w-64 opacity-100 border-l' : 'w-0 opacity-0 overflow-hidden border-none'} 
+          bg-slate-900/95 border-white/5 flex flex-col shrink-0 transition-all duration-300 backdrop-blur-xl
+        `}>
         <div className="h-16 flex items-center px-4 font-bold text-xs text-slate-400 uppercase tracking-widest border-b border-white/5 bg-slate-900/20 whitespace-nowrap">
           <span className="truncate">Network Nodes</span>
           <span className="ml-auto bg-slate-800 px-1.5 py-0.5 rounded text-white font-mono shrink-0">{(peers?.length || 0) + 1}</span>
+          {isMobile && (
+            <button onClick={() => setShowNodeSidebar(false)} className="ml-2 text-slate-500">
+              <HiChevronLeft className="w-5 h-5 rotate-180" />
+            </button>
+          )}
         </div>
         <div className="p-3 space-y-2 overflow-y-auto flex-1">
           {/* Me */}
@@ -285,7 +340,10 @@ const CommunicationPanel = ({ messages, onSendMessage, onEmergency, user, peers,
           {peers?.map((peer: any) => (
             <div
               key={peer.node_id || peer.id}
-              onClick={() => onRecipientSelect(peer.node_id)}
+              onClick={() => {
+                onRecipientSelect(peer.node_id);
+                if (isMobile) setShowNodeSidebar(false);
+              }}
               className={`flex items-center p-2 rounded-lg border transition-all cursor-pointer
                 ${activeRecipient === peer.node_id
                   ? 'bg-cyan-900/30 border-cyan-500/40 shadow-md'

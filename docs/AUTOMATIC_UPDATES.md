@@ -167,7 +167,7 @@ If an update fails, it automatically rolls back. Manual rollback:
 ls -la ~/.local/ghostwire.auto-backup.*
 
 # Restore from backup
-./ghostwire-manager.sh restore ~/.local/ghostwire.auto-backup.20251222_200000.tar.gz
+./ghostwire-manager.sh restore ~/.local/ghostwire.auto-backup.20260216_120000.tar.gz
 ```
 
 ## Multi-PC Deployment
@@ -222,7 +222,7 @@ The system now:
 Updates automatically rollback on failure:
 ```
 [INFO] Auto-updating GhostWire...
-[✓] Automatic backup created: /home/alice/.local/ghostwire.auto-backup.20251222_200000
+[✓] Automatic backup created: /home/alice/.local/ghostwire.auto-backup.20260216_120000
 [✗] Build failed
 [INFO] Rolling back to backup...
 [✓] Rollback complete

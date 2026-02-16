@@ -50,6 +50,7 @@ use anyhow::Result;
 use libp2p::Multiaddr;
 use std::collections::HashMap;
 use std::sync::Arc;
+// use std::time::Duration; // redundant
 use tokio::sync::RwLock;
 // using explicit paths for tracing macros
 use tokio::sync::broadcast;
@@ -175,8 +176,9 @@ impl MatrixAdapter {
         #[cfg(feature = "matrix-bridge")]
         {
             // Real sync logic would go here
-            return Ok(None);
+            Ok(None)
         }
+        #[cfg(not(feature = "matrix-bridge"))]
         Ok(None)
     }
 
@@ -246,14 +248,15 @@ impl MeshtasticAdapter {
         #[cfg(feature = "meshtastic")]
         {
             let mut port = serialport::new(&self.device_path, 115_200)
-                .timeout(Duration::from_millis(100))
+                .timeout(std::time::Duration::from_millis(100))
                 .open()?;
 
             for shard in shards {
+                use std::io::Write;
                 port.write_all(&shard)?;
             }
-            return Ok(());
         }
+        #[cfg(not(feature = "meshtastic"))]
         println!(
             "[MOCK] Meshtastic: Would send {} shards to device {}: {}",
             shards.len(),
@@ -285,6 +288,7 @@ impl MeshtasticAdapter {
 /// Core application state and management
 #[derive(Clone)]
 pub struct Core {
+    pub config: crate::config::Config,
     pub identity: Arc<RwLock<Arc<Identity>>>,
     pub encryption: Arc<Encryption>,
     #[cfg(feature = "mesh")]
@@ -306,10 +310,12 @@ pub struct Core {
     pub message_store: Arc<store::SecureMessageStore>,
     pub bootstrap_nodes: Vec<Multiaddr>,
     pub event_bus: broadcast::Sender<CoreEvent>,
+    pub handshake_secret: Option<Vec<u8>>,
 }
 
 impl Core {
     pub async fn new(
+        config: crate::config::Config,
         bootstrap_nodes: Vec<Multiaddr>,
         sim_addr: Option<String>,
         profile: Option<String>,
@@ -350,8 +356,6 @@ impl Core {
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
-        // Load configuration
-        let config = crate::config::Config::load().unwrap_or_default();
 
         // Use default bootstraps if none provided
         let mut bootstrap_nodes = bootstrap_nodes;
@@ -403,6 +407,22 @@ impl Core {
         let message_store = Arc::new(store::SecureMessageStore::new(persistence.clone()));
         let (event_bus, _) = broadcast::channel(1024); // Large buffer for high traffic
 
+        // Parse handshake secret from config if available
+        let handshake_secret = config
+            .network
+            .stealth_handshake_secret
+            .as_ref()
+            .and_then(|s| {
+                if let Ok(bytes) = hex::decode(s) {
+                    Some(bytes)
+                } else {
+                    tracing::warn!(
+                        "Failed to decode stealth_handshake_secret from config (expected hex)"
+                    );
+                    None
+                }
+            });
+
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
             if let Some(kp) = identity.keypair() {
@@ -422,6 +442,7 @@ impl Core {
                         bootstrap_nodes.clone(),
                         username_discovery,
                         Some(event_bus.clone()),
+                        handshake_secret.clone(),
                     )
                     .await?,
                 )))
@@ -441,6 +462,7 @@ impl Core {
         ));
 
         Ok(Self {
+            config,
             identity: Arc::new(RwLock::new(identity)),
             encryption,
             security_manager,
@@ -460,6 +482,7 @@ impl Core {
             message_store,
             bootstrap_nodes,
             event_bus,
+            handshake_secret,
         })
     }
 
@@ -589,6 +612,48 @@ impl Core {
             tracing::info!("Message sent locally (no transport): {}", message.content);
             Ok(())
         }
+    }
+
+    pub async fn send_direct_message(&self, recipient: String, message: &Message) -> Result<()> {
+        // Enforce Lockdown
+        if self.security_manager.is_lockdown().await {
+            tracing::warn!(
+                "BLOCKED: Attempted to send direct message during LOCKDOWN: {}",
+                message.content
+            );
+            return Err(anyhow::anyhow!(
+                "SYSTEM LOCKDOWN ACTIVE - OUTGOING TRAFFIC BLOCKED"
+            ));
+        }
+
+        // Persist message to encrypted storage
+        if let Err(e) = self.message_store.save_message(message) {
+            tracing::error!("⚠️ Persistence failure: {}", e);
+        }
+
+        // Add to in-memory history
+        {
+            let mut messages = self.messages.write().await;
+            messages.push(message.clone());
+        }
+
+        // Record message for security stats
+        self.security_manager.record_message(&message.sender).await;
+
+        // We do NOT broadcast direct messages to the event bus indiscriminately
+        // But we might want to emit a "MessageSent" event for UI updates
+
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let mut mgr = mesh_manager.write().await;
+            if let Ok(peer_id) = recipient.parse::<libp2p::PeerId>() {
+                return mgr.send_direct_message(peer_id, message.clone()).await;
+            } else {
+                return Err(anyhow::anyhow!("Invalid P2P Recipient ID: {}", recipient));
+            }
+        }
+
+        Err(anyhow::anyhow!("Mesh network not available"))
     }
 
     /// Initialize a default transport for basic functionality
@@ -803,6 +868,7 @@ impl Core {
                     self.bootstrap_nodes.clone(),
                     username_discovery,
                     Some(self.event_bus.clone()),
+                    self.handshake_secret.clone(),
                 )
                 .await?;
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
@@ -904,7 +970,7 @@ impl Core {
                 Some(ReticulumStats {
                     total_nodes: 0,
                     online_nodes: 0,
-                    local_node_id: self.get_identity_id().to_string(),
+                    local_node_id: self.get_identity_id().await.to_string(),
                     routes_count: 0,
                     onion_routes_count: 0,
                     messages_relayed: 0,

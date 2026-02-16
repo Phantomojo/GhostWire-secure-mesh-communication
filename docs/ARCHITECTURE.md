@@ -32,7 +32,7 @@ graph TD;
     BT["Bluetooth LE"]
   end
 
-  subgraph "Protocol Bridges"
+  subgraph "Protocol Bridges (Experimental/Planned)"
     Briar["Briar Adapter"]
     Meshtastic["Meshtastic Adapter"]
     Matrix["Matrix Bridge"]
@@ -80,13 +80,14 @@ Handles user identities using Elliptic Curve Cryptography:
 - **X25519** for key exchange.
 - **Ed25519** for digital signatures.
 - **AES-256-GCM** for local identity persistence.
-- **Shamir's Secret Sharing (SSS)** for decentralized account restoration.
+- **Shamir's Secret Sharing (SSS)** - Experimental support for decentralized account restoration.
 
 ### 3. **Swarm Controller & DHT (`src/core/mesh.rs`)**
-Built on `libp2p`, this module manages:
+Built on `libp2p` (v0.56.0), this module manages:
 - **Kademlia DHT**: For decentralized username lookups and peer discovery.
 - **Gossipsub**: For efficient message broadcasting.
 - **Noise Protocol**: For end-to-end encrypted transport links.
+- **CBOR Serialization**: Optimized binary serialization for cross-platform message exchange via `request-response`.
 
 ### 4. **Adaptive Transport System**
 Allows GhostWire to communicate over various mediums:

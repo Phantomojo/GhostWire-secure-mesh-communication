@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Behaviour as Kad;
-use libp2p::tcp::Transport as TcpTransport;
+// NoTcpTransport needed
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
@@ -20,15 +20,17 @@ use libp2p::{
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig},
-    swarm::{Config as SwarmConfig, NetworkBehaviour, Swarm, SwarmEvent},
+    request_response::{self, Config as RequestResponseConfig, ProtocolSupport},
+    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     Multiaddr, PeerId,
 };
-use serde::Serialize;
+use libp2p_webrtc as webrtc;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, info, warn};
+use tracing::debug;
 use uuid::Uuid;
 
 pub enum MeshCommand {
@@ -56,8 +58,19 @@ pub enum MeshCommand {
         message: Message,
         reply: oneshot::Sender<Result<()>>,
     },
+    SendMessage {
+        recipient: PeerId,
+        message: Message,
+        reply: oneshot::Sender<Result<()>>,
+    },
     Shutdown,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatRequest(pub Message);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatResponse(pub String);
 
 /// Mesh network node information
 #[derive(Debug, Clone, Serialize)]
@@ -75,7 +88,7 @@ pub struct MeshNode {
     pub threat_level: ThreatLevel,
 }
 
-pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
+pub const DEFAULT_BOOTSTRAPS: &[&str; 4] = &[
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooP36J7RSRM8uXCc8p6Y74G56EPV45UFSy9Pr7T79F",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCUuY6vS7705XT5ZqUhc4G3n9PqEqH5D3S8Y8xYFSy9Pr",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMo6pXhvG2SFTkS5rTfyS28y2XbY3R7wF1pG4z5W",
@@ -99,21 +112,20 @@ pub struct MeshBehaviour {
     pub autonat: libp2p::autonat::Behaviour,
     pub relay: libp2p::relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
+    pub request_response: libp2p::request_response::cbor::Behaviour<ChatRequest, ChatResponse>,
 }
 
 /// A libp2p transport that wraps TCP in a Stealth Handshake
 pub struct StealthTransport {
     _provider: Arc<StealthTCPProvider>,
-    inner: TcpTransport<libp2p_tcp::tokio::Tcp>,
+    inner: libp2p::tcp::tokio::Transport,
 }
 
 impl StealthTransport {
     pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
         Self {
             _provider: provider,
-            inner: TcpTransport::<libp2p_tcp::tokio::Tcp>::new(
-                libp2p_tcp::Config::default().nodelay(true).port_reuse(true),
-            ),
+            inner: libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true)),
         }
     }
 }
@@ -147,6 +159,7 @@ impl MeshTransport {
         bootstrap_nodes: Vec<Multiaddr>,
         username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+        handshake_secret: Option<Vec<u8>>,
     ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair().ok_or_else(|| {
@@ -158,7 +171,7 @@ impl MeshTransport {
         let stealth_provider = StealthTCPProvider::new(
             None, // Allowlist - can be configured
             security_manager.clone(),
-            None, // Auto-generate handshake secret
+            handshake_secret,
             true, // Enable stealth mode
         );
 
@@ -167,12 +180,26 @@ impl MeshTransport {
 
         let (relay_transport, relay_client) = libp2p::relay::client::new(local_peer_id);
 
+        let webrtc_transport = webrtc::tokio::Transport::new(
+            local_key.clone(),
+            webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?,
+        );
+
         let transport = stealth_transport
             .inner
             .or_transport(relay_transport)
             .upgrade(Version::V1)
             .authenticate(libp2p::noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
+            .or_transport(webrtc_transport)
+            .map(|either, _| match either {
+                libp2p::futures::future::Either::Left((peer_id, muxer)) => {
+                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                }
+                libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                }
+            })
             .boxed();
 
         // Create network behavior with enhanced security
@@ -190,13 +217,9 @@ impl MeshTransport {
 
         // Recursive DHT: Regional Sharding logic
         // Nodes join a global shard AND a regional shard for high-velocity lookups
-        let mut kad_config = libp2p::kad::Config::default();
         let shard_id = "global"; // TODO: Dynamically determine region
-        kad_config.set_protocol_names(vec![
-            libp2p::StreamProtocol::new("/ghostwire/kad/shard/global"),
-            libp2p::StreamProtocol::try_from_owned(format!("/ghostwire/kad/shard/{}", shard_id))
-                .unwrap(),
-        ]);
+        let kad_config =
+            libp2p::kad::Config::new(libp2p::StreamProtocol::new("/ghostwire/kad/shard/global"));
 
         let mut kad = Kad::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_config);
 
@@ -210,6 +233,15 @@ impl MeshTransport {
 
         let dcutr = libp2p::dcutr::Behaviour::new(local_peer_id);
 
+        let request_response =
+            libp2p::request_response::cbor::Behaviour::<ChatRequest, ChatResponse>::new(
+                [(
+                    libp2p::StreamProtocol::new("/ghostwire/chat/1.0.0"),
+                    ProtocolSupport::Full,
+                )],
+                RequestResponseConfig::default(),
+            );
+
         let behaviour = MeshBehaviour {
             gossipsub,
             identify,
@@ -218,14 +250,17 @@ impl MeshTransport {
             autonat,
             relay: relay_client,
             dcutr,
+            request_response,
         };
 
-        let swarm = Swarm::new(
-            transport,
-            behaviour,
-            local_peer_id,
-            SwarmConfig::with_tokio_executor(),
-        );
+        let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
+            .with_tokio()
+            .with_other_transport(|_| transport)?
+            .with_behaviour(|_| behaviour)?
+            .with_swarm_config(|c| {
+                c.with_idle_connection_timeout(std::time::Duration::from_secs(60))
+            })
+            .build();
 
         let (command_tx, command_rx) = mpsc::channel(100);
 
@@ -322,6 +357,8 @@ impl MeshTransport {
             _username_discovery: self.username_discovery.clone(),
             event_bus: self.event_bus.clone(),
             pending_get_queries: HashMap::new(),
+            message_store: self._message_store.clone(),
+            core_messages: self._core_messages.clone(),
         };
 
         tokio::spawn(driver.run());
@@ -366,6 +403,19 @@ impl MeshTransport {
         let (tx, rx) = oneshot::channel();
         self.command_tx
             .send(MeshCommand::ConnectPeer { peer_id, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn send_direct_message(&self, recipient: PeerId, message: Message) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::SendMessage {
+                recipient,
+                message,
+                reply: tx,
+            })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
         rx.await?
@@ -450,6 +500,8 @@ struct MeshDriver {
     _username_discovery: Arc<UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
     pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
+    message_store: Arc<crate::core::store::SecureMessageStore>,
+    core_messages: Arc<RwLock<Vec<Message>>>,
 }
 
 impl MeshDriver {
@@ -555,6 +607,21 @@ impl MeshDriver {
                 // In a real system, this would change the DHT prefix or topic
                 let _ = reply.send(Ok(()));
             }
+            MeshCommand::SendMessage {
+                recipient,
+                message,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_request(&recipient, ChatRequest(message));
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
             MeshCommand::Shutdown => {
                 tracing::info!("Mesh driver received shutdown command.");
             }
@@ -599,6 +666,28 @@ impl MeshDriver {
                 .await;
             return;
         }
+
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::RequestResponse(
+            request_response::Event::Message { peer, message, .. },
+        )) = event
+        {
+            match message {
+                request_response::Message::Request {
+                    request, channel, ..
+                } => {
+                    let _ = self.handle_incoming_message(peer, request.0).await;
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_response(channel, ChatResponse("ACK".to_string()));
+                }
+                request_response::Message::Response { response, .. } => {
+                    debug!("Received chat response from {}: {}", peer, response.0);
+                }
+            }
+            return;
+        }
     }
 
     async fn handle_gossipsub_message(
@@ -625,9 +714,7 @@ impl MeshDriver {
             tracing::info!("Processed message from {}: {:?}", peer_id, msg);
 
             if msg.message_type != "handshake" {
-                if let Some(bus) = &self.event_bus {
-                    let _ = bus.send(crate::core::CoreEvent::NewMessage(msg.clone()));
-                }
+                let _ = self.handle_incoming_message(peer_id, msg.clone()).await;
             }
 
             if msg.message_type == "handshake" {
@@ -655,6 +742,26 @@ impl MeshDriver {
     fn get_peer_ip(&self, _peer_id: &PeerId) -> Option<std::net::IpAddr> {
         None
     }
+
+    async fn handle_incoming_message(&mut self, _peer_id: PeerId, msg: Message) -> Result<()> {
+        // Persist to store
+        if let Err(e) = self.message_store.save_message(&msg) {
+            tracing::error!("Failed to save incoming message: {}", e);
+        }
+
+        // Add to in-memory
+        {
+            let mut messages = self.core_messages.write().await;
+            messages.push(msg.clone());
+        }
+
+        // Send to event bus
+        if let Some(bus) = &self.event_bus {
+            let _ = bus.send(crate::core::CoreEvent::NewMessage(msg));
+        }
+
+        Ok(())
+    }
 }
 
 pub struct MeshManager {
@@ -674,6 +781,7 @@ impl MeshManager {
         bootstrap_nodes: Vec<Multiaddr>,
         username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+        handshake_secret: Option<Vec<u8>>,
     ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
@@ -687,6 +795,7 @@ impl MeshManager {
             bootstrap_nodes,
             username_discovery,
             event_bus,
+            handshake_secret,
         )
         .await?;
 
@@ -705,6 +814,10 @@ impl MeshManager {
 
     pub async fn send_message(&mut self, message: &Message) -> Result<()> {
         self.transport.broadcast_message(message).await
+    }
+
+    pub async fn send_direct_message(&mut self, recipient: PeerId, message: Message) -> Result<()> {
+        self.transport.send_direct_message(recipient, message).await
     }
 
     pub async fn put_dht_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {

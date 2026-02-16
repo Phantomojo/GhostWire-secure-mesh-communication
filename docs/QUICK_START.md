@@ -4,7 +4,7 @@
 
 **Just double-click or run:**
 ```bash
-./RUN_GHOSTWIRE.sh
+./scripts/RUN_GHOSTWIRE.sh
 ```
 
 That's it! GhostWire will:
@@ -52,4 +52,4 @@ GhostWire runs as a web app in your browser, giving you:
 
 ---
 
-**Ready to go?** Just run: `./RUN_GHOSTWIRE.sh`
+**Ready to go?** Just run: `./scripts/RUN_GHOSTWIRE.sh`

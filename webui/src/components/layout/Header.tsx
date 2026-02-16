@@ -56,7 +56,7 @@ const Header: React.FC<HeaderProps> = ({ systemStatus, backendConnected, onConfi
                             <div className="absolute inset-0 bg-indigo-500/40 blur-md rounded-full scale-150 animate-pulse" />
                         )}
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col hidden md:flex">
                         <span className="text-[10px] font-black text-white uppercase tracking-[0.15em] leading-none">
                             {backendConnected ? 'NODE_ACTIVE' : 'NODE_OFFLINE'}
                         </span>

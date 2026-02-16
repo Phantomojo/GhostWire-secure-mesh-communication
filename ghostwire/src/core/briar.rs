@@ -1,13 +1,12 @@
-use crate::core::identity::Identity;
-use crate::core::message::Message;
 use anyhow::Result;
-use async_trait::async_trait;
+// use crate::core::message::Message;
+// use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Briar-inspired secure messaging system
@@ -113,7 +112,11 @@ impl BriarManager {
 
     /// Derive encryption key from identity
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
-        let public_key = identity.keypair().public().encode_protobuf();
+        let public_key = identity
+            .keypair()
+            .expect("Identity must be unlocked")
+            .public()
+            .encode_protobuf();
         let mut key = [0u8; 32];
 
         let mut hasher = blake2b_simd::State::new();
@@ -250,8 +253,15 @@ impl BriarManager {
             Aes256Gcm,
         };
 
-        let cipher = Aes256Gcm::new_from_slice(&self.identity.keypair().public().encode_protobuf())
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
+        let cipher = Aes256Gcm::new_from_slice(
+            &self
+                .identity
+                .keypair()
+                .expect("Identity must be unlocked")
+                .public()
+                .encode_protobuf(),
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
         use rand::Rng;
         let mut nonce = [0u8; 12];
@@ -279,8 +289,15 @@ impl BriarManager {
             return Err(anyhow::anyhow!("Invalid encrypted content length"));
         }
 
-        let cipher = Aes256Gcm::new_from_slice(&self.identity.keypair().public().encode_protobuf())
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
+        let cipher = Aes256Gcm::new_from_slice(
+            &self
+                .identity
+                .keypair()
+                .expect("Identity must be unlocked")
+                .public()
+                .encode_protobuf(),
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
         let nonce = &encrypted_content[..12];
         let ciphertext = &encrypted_content[12..];

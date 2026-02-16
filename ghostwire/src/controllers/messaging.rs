@@ -73,11 +73,51 @@ impl MessagingController {
     }
 
     pub async fn send_message(
-        State(_state): State<Arc<AppState>>,
-        Json(_req): Json<serde_json::Value>,
+        State(state): State<Arc<AppState>>,
+        Json(payload): Json<SendMessageRequest>,
     ) -> impl IntoResponse {
-        Json(ApiV2Response::success("Message sent successfully"))
+        let sender_id = state.core.read().await.get_identity_id().await;
+
+        let mut message = crate::core::message::Message::new(
+            sender_id,
+            "placeholder_recipient".to_string(),
+            payload.content.clone(),
+        );
+
+        // If recipient is "broadcast" or empty, use broadcast flavor
+        if payload.recipient == "broadcast" || payload.recipient.is_empty() {
+            message.recipient = "broadcast".to_string();
+            match state.core.read().await.send_message(&message).await {
+                Ok(_) => Json(ApiV2Response::success("Broadcast sent successfully")),
+                Err(e) => Json(ApiV2Response::error(
+                    StandardErrorCode::InternalError.as_str(),
+                    &format!("Broadcast failed: {}", e),
+                )),
+            }
+        } else {
+            message.recipient = payload.recipient.clone();
+            match state
+                .core
+                .read()
+                .await
+                .send_direct_message(payload.recipient, &message)
+                .await
+            {
+                Ok(_) => Json(ApiV2Response::success("Direct message sent successfully")),
+                Err(e) => Json(ApiV2Response::error(
+                    StandardErrorCode::InternalError.as_str(),
+                    &format!("Transmission failed: {}", e),
+                )),
+            }
+        }
     }
+}
+
+#[derive(Deserialize)]
+pub struct SendMessageRequest {
+    pub recipient: String,
+    pub content: String,
+    pub msg_type: Option<String>,
 }
 
 #[derive(Deserialize)]

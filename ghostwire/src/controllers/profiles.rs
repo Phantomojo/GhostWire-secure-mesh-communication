@@ -240,6 +240,7 @@ impl ProfilesController {
 
         // 2. Initialize new Core
         let new_core_res = Core::new(
+            state.full_config.clone(),
             state.config.bootstrap_nodes.clone(),
             state.config.sim_addr.clone(),
             profile_name,

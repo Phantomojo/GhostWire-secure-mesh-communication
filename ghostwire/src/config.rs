@@ -32,7 +32,7 @@ pub struct SecurityConfig {
     pub key_rotation_interval_days: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub mesh_enabled: bool,
     pub reticulum_enabled: bool,
@@ -40,6 +40,25 @@ pub struct NetworkConfig {
     pub stealth_tcp_enabled: bool,
     pub max_peers: usize,
     pub connection_timeout_secs: u64,
+    #[serde(skip)]
+    pub stealth_handshake_secret: Option<String>,
+}
+
+impl std::fmt::Debug for NetworkConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NetworkConfig")
+            .field("mesh_enabled", &self.mesh_enabled)
+            .field("reticulum_enabled", &self.reticulum_enabled)
+            .field("briar_enabled", &self.briar_enabled)
+            .field("stealth_tcp_enabled", &self.stealth_tcp_enabled)
+            .field("max_peers", &self.max_peers)
+            .field("connection_timeout_secs", &self.connection_timeout_secs)
+            .field(
+                "stealth_handshake_secret",
+                &self.stealth_handshake_secret.as_ref().map(|_| "********"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +103,7 @@ impl Default for Config {
                 stealth_tcp_enabled: false,
                 max_peers: 50,
                 connection_timeout_secs: 30,
+                stealth_handshake_secret: None,
             },
             encryption: EncryptionConfig {
                 algorithm: "AES-256-GCM".to_string(),
@@ -118,6 +138,10 @@ impl Config {
 
         // Fall back to environment variables
         Ok(Self::from_env())
+    }
+
+    pub fn load_from_path(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_from_file(path)
     }
 
     fn load_from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -164,6 +188,11 @@ impl Config {
         // Auto-update from environment
         if let Ok(val) = env::var("GHOSTWIRE_AUTO_UPDATE") {
             config.server.auto_update = val.to_lowercase() == "true" || val == "1";
+        }
+
+        // Stealth handshake secret from environment
+        if let Ok(secret) = env::var("GHOSTWIRE_STEALTH_SECRET") {
+            config.network.stealth_handshake_secret = Some(secret);
         }
 
         config

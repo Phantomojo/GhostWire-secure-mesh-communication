@@ -2,10 +2,9 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-2.1.0-blue?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge)
-![All Buttons](https://img.shields.io/badge/All%20Buttons-Working%20✅-brightgreen?style=for-the-badge)
-![Deployment](https://img.shields.io/badge/Deployment-Small%20Scale%20Ready-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-2.1.0--Alpha-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Hardening%20Phase-orange?style=for-the-badge)
+![Security](https://img.shields.io/badge/Security-Audit%20Fixes%20v2026-brightgreen?style=for-the-badge)
 
 **🎯 The complete journey from display-only buttons to fully functional system with production deployment!**
 
@@ -13,10 +12,10 @@
 
 ---
 
-## 🚀 **[2.1.0] - SMALL-SCALE PRODUCTION DEPLOYMENT READY!**
+## 🚀 **[2.1.0] - SECURITY HARDENING & DOCUMENTATION**
 
-**Release Date:** July 31, 2025  
-**Status:** 🎉 **PRODUCTION READY**
+**Release Date:** February 16, 2026  
+**Status:** 🛡️ **ACTIVE HARDENING**
 
 ### **🎯 What's New - Production Deployment Infrastructure!**
 
@@ -95,15 +94,15 @@
 
 ### **📊 Deployment Comparison**
 
-| Feature | Development | Production |
-|---------|-------------|------------|
-| **Setup** | Quick launch script | Automated deployment |
-| **Containerization** | No | Docker containerized |
-| **Monitoring** | Basic | Health checks & alerts |
-| **Security** | Development | Production hardened |
-| **Logging** | Console | Structured with rotation |
-| **Backup** | Manual | Automated |
-| **Scaling** | Single instance | Easy horizontal scaling |
+| Feature              | Development         | Production               |
+| -------------------- | ------------------- | ------------------------ |
+| **Setup**            | Quick launch script | Automated deployment     |
+| **Containerization** | No                  | Docker containerized     |
+| **Monitoring**       | Basic               | Health checks & alerts   |
+| **Security**         | Development         | Production hardened      |
+| **Logging**          | Console             | Structured with rotation |
+| **Backup**           | Manual              | Automated                |
+| **Scaling**          | Single instance     | Easy horizontal scaling  |
 
 ### **🚀 Deployment Options**
 
@@ -158,7 +157,7 @@ sudo ./systemd/install-service.sh
 #### **Production Metrics**
 - ✅ **Uptime**: >99.5% with auto-restart
 - ✅ **Response Time**: <100ms for API calls
-- ✅ **Security**: End-to-end encryption
+- 🔄 **Security**: Patched P0/P1 vulnerabilities (Feb 2026)
 - ✅ **Monitoring**: Health checks and alerts
 - ✅ **Scalability**: Easy horizontal scaling
 
@@ -328,11 +327,11 @@ sudo ./systemd/install-service.sh
 
 ## 📊 **Version History Summary**
 
-| Version | Date | Status | Key Features |
-|---------|------|--------|--------------|
-| **2.1.0** | Jul 31, 2025 | 🎉 Production Ready | Small-scale production deployment |
-| **2.0.0** | Jul 30, 2025 | 🎉 Production Ready | All 46 buttons functional |
-| **1.0.0** | Jul 29, 2025 | 🚧 Development | Initial release |
+| Version   | Date         | Status        | Key Features                       |
+| --------- | ------------ | ------------- | ---------------------------------- |
+| **2.1.0** | Feb 16, 2026 | 🛡️ Hardening   | Security audit fixes & doc updates |
+| **2.0.0** | Jan 30, 2026 | 🚧 Alpha       | Initial feature-complete release   |
+| **1.0.0** | Jul 29, 2025 | 🚧 Development | Initial release                    |
 
 ---
 

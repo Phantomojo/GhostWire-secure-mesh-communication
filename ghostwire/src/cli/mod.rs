@@ -76,8 +76,10 @@ pub async fn run_cli() -> Result<()> {
         command: Commands::Init { username: None },
     };
 
+    let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
+
     // Initialize core components with no bootstraps for CLI mode
-    let core = Core::new(Vec::new(), None).await?;
+    let core = Core::new(config.clone(), Vec::new(), None, None).await?;
     let core_arc = Arc::new(core);
 
     match cli.command {
@@ -146,9 +148,17 @@ async fn start_web_server(core: &Arc<Core>, host: String, port: u16) -> Result<(
     // Import the web module function
     use crate::web::start_web_server;
 
-    start_web_server(core.clone(), host, port)
-        .await
-        .map_err(|e| anyhow::anyhow!("Web server error: {}", e))?;
+    start_web_server(
+        core.clone(),
+        host,
+        port,
+        Vec::new(),
+        None,
+        String::new(),
+        core.config.clone(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Web server error: {}", e))?;
 
     Ok(())
 }

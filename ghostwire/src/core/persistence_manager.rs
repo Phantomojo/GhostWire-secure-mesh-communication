@@ -2,7 +2,6 @@ use crate::core::encryption::EncryptionManager;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sled::{Db, Tree};
-use tracing;
 
 /// Persistent database manager for GhostWire.
 /// Manages encrypted storage for messages, peer keys, and profile metadata.
@@ -13,9 +12,13 @@ pub struct PersistenceManager {
 
 impl PersistenceManager {
     pub fn new(profile_name: Option<String>) -> Result<Self> {
-        let home =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-        let base_dir = home.join(".ghostwire").join("vault");
+        let base_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            std::path::PathBuf::from(ghost_home).join("vault")
+        } else {
+            let home =
+                dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+            home.join(".ghostwire").join("vault")
+        };
 
         if !base_dir.exists() {
             std::fs::create_dir_all(&base_dir)?;
@@ -137,5 +140,82 @@ impl PersistenceManager {
     pub fn flush(&self) -> Result<()> {
         self.db.flush()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_persistence_roundtrip() {
+        let dir = tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+
+        let manager = PersistenceManager::new(None).expect("Failed to create PersistenceManager");
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct TestData {
+            name: String,
+            value: u32,
+        }
+
+        let original = TestData {
+            name: "test_item".to_string(),
+            value: 42,
+        };
+
+        // Store
+        manager
+            .store_secure("test_tree", "test_key", &original)
+            .expect("Failed to store");
+        manager.flush().unwrap();
+
+        // Load
+        let loaded: TestData = manager
+            .load_secure("test_tree", "test_key")
+            .expect("Failed to load")
+            .expect("Item not found");
+
+        assert_eq!(original, loaded);
+    }
+
+    #[test]
+    fn test_list_keys() {
+        let dir = tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+
+        let manager = PersistenceManager::new(Some("profile1".to_string())).unwrap();
+
+        manager.store_secure("tree_a", "key1", &"val1").unwrap();
+        manager.store_secure("tree_a", "key2", &"val2").unwrap();
+        manager.store_secure("tree_b", "key3", &"val3").unwrap();
+
+        let keys_a = manager.list_keys("tree_a").unwrap();
+        assert_eq!(keys_a.len(), 2);
+        assert!(keys_a.contains(&"key1".to_string()));
+        assert!(keys_a.contains(&"key2".to_string()));
+
+        let keys_b = manager.list_keys("tree_b").unwrap();
+        assert_eq!(keys_b.len(), 1);
+        assert!(keys_b.contains(&"key3".to_string()));
+    }
+
+    #[test]
+    fn test_load_all() {
+        let dir = tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+        let manager = PersistenceManager::new(None).unwrap();
+
+        manager.store_secure("items", "1", &10).unwrap();
+        manager.store_secure("items", "2", &20).unwrap();
+        manager.store_secure("items", "3", &30).unwrap();
+
+        let all: Vec<i32> = manager.load_all_secure("items").unwrap();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&10));
+        assert!(all.contains(&20));
+        assert!(all.contains(&30));
     }
 }

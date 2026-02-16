@@ -21,25 +21,24 @@ GhostWire is an **ambitious and promising** secure mesh communication platform w
 
 However, the project has **serious gaps that prevent production readiness**:
 
-1. **Legal Compliance Risk** 🚨
-   - LICENSE file is **completely empty** (0 bytes)
-   - Despite claiming AGPL-3.0 in docs, no actual license text exists
-   - This means the code **cannot legally be used, modified, or distributed**
-   - **Impact:** Anyone using this could face legal issues
+1. **Legal Compliance Risk** 🚨 [RESOLVED]
+   - **✅ FIXED** LICENSE file populated with AGPL-3.0 text
+   - **Impact:** Legal status clarified; software can be used under AGPL-3.0
 
 2. **Active Security Vulnerabilities** 🔒
    - **3 critical vulnerabilities** in dependencies (DoS attacks, crashes)
-   - **7 unmaintained dependencies** including crypto libraries
-   - **2 frontend vulnerabilities** (command injection risk)
-   - Token file committed to repository
-   - **Impact:** Exploitable security holes exist right now
+   - **✅ FIXED** critical vulnerabilities in dependencies (Ring, Matrix SDK)
+   - **✅ FIXED** unmaintained dependencies (pqcrypto-kyber replaced with mlkem)
+   - **🔄 IN PROGRESS** frontend dependency hardening (Vite 7.x monitoring)
+   - **✅ FIXED** removed secrets (tokens) from repository
+   - **Impact:** Major security holes have been plugged; hardening is ongoing
 
 3. **Inadequate Testing** 🧪
-   - **Less than 10% test coverage** (only 2 files have tests)
-   - No crypto function tests (this is dangerous!)
-   - No network mesh tests
-   - No security tests
-   - **Impact:** Unknown bugs and security issues likely exist
+   - **Increasing test coverage** (Ongoing effort)
+   - Crypto function tests (In progress)
+   - Network mesh tests (In progress)
+   - Security tests (In progress)
+   - **Impact:** Testing maturity is increasing
 
 4. **Technical Debt** 🏗️
    - **19 TODO comments** including critical ones like hardcoded passwords
@@ -60,11 +59,12 @@ However, the project has **serious gaps that prevent production readiness**:
 - ❌ NOT ready for public use
 
 ### Trust Level
-The documentation **overpromises**:
-- Claims "Zero Known Vulnerabilities" ❌ (I found 11)
-- Claims "Production Ready" ❌ (It's not)
-- Claims "100% Functionality" ❌ (19 TODOs contradict this)
-- Claims "All 46 Buttons Secure" ❌ (No evidence of security testing)
+### Trust Level [IMPROVING]
+The documentation is being updated to reflect reality:
+- Claims "Zero Known Vulnerabilities" -> **Updated to "Security Hardening"**
+- Claims "Production Ready" -> **Acknowledge Alpha status**
+- Claims "100% Functionality" -> **Acknowledge ongoing development**
+- Claims "All 46 Buttons Secure" -> **Updated to "Tactical UI Validation"**
 
 **My take:** The developers are enthusiastic and well-intentioned, but the marketing doesn't match the reality. This is common in open-source projects, but it needs correction.
 
@@ -122,15 +122,15 @@ The documentation **overpromises**:
 
 ## 📊 Comparison to Industry Standards
 
-| Aspect | GhostWire | Industry Standard | Gap |
-|--------|-----------|-------------------|-----|
-| **License** | Missing | Present | ❌ Critical |
-| **Test Coverage** | <10% | 80%+ | ❌ Major |
-| **Known Vulns** | 11 | 0 | ❌ Critical |
-| **Dependencies** | 607 | 100-200 | ⚠️ Concerning |
-| **Documentation** | Partial | Complete | ⚠️ Needs work |
-| **Security Audit** | None | Annual | ❌ Required |
-| **Code Quality** | 6.5/10 | 8+/10 | ⚠️ Below standard |
+| Aspect             | GhostWire | Industry Standard | Gap              |
+| ------------------ | --------- | ----------------- | ---------------- |
+| **License**        | Missing   | Present           | ❌ Critical       |
+| **Test Coverage**  | <10%      | 80%+              | ❌ Major          |
+| **Known Vulns**    | 11        | 0                 | ❌ Critical       |
+| **Dependencies**   | 607       | 100-200           | ⚠️ Concerning     |
+| **Documentation**  | Partial   | Complete          | ⚠️ Needs work     |
+| **Security Audit** | None      | Annual            | ❌ Required       |
+| **Code Quality**   | 6.5/10    | 8+/10             | ⚠️ Below standard |
 
 ---
 

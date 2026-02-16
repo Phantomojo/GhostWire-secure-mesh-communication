@@ -11,7 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation suite
 - Security policy and code of conduct
 - Development roadmap and changelog
-- MIT License
+- AGPL-3.0 License (Fixed empty file issue)
+- **Security Hardening**:
+  - Removed plaintext `ghostwire_token.txt` from repository
+  - Updated `SECURITY.md` and `AUDIT_SUMMARY.md` to reflect current security posture
+  - Patched critical vulnerabilities (Matrix SDK, Ring, pqcrypto replacement)
 - **Decentralized Profile Management**: Secure first-time setup with password enforcement
   - New `/api/identity/setup` endpoint for secure profile initialization
   - `setup_complete` flag to trigger the "Sovereign Identity Phase" wizard

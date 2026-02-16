@@ -90,16 +90,16 @@ sudo ./install.sh --system --service
 
 #### Installation Options
 
-| Option | Description |
-|--------|-------------|
-| `--user` | Install for current user (default, recommended for privacy) |
-| `--system` | Install system-wide in `/opt/ghostwire` |
-| `--dir DIR` | Custom installation directory |
-| `--service` | Install as system service (auto-start) |
-| `--no-service` | Don't install system service (default) |
-| `--silent` | Silent mode, no prompts |
-| `--username NAME` | Set username for node identity |
-| `--help` | Show help message |
+| Option            | Description                                                 |
+| ----------------- | ----------------------------------------------------------- |
+| `--user`          | Install for current user (default, recommended for privacy) |
+| `--system`        | Install system-wide in `/opt/ghostwire`                     |
+| `--dir DIR`       | Custom installation directory                               |
+| `--service`       | Install as system service (auto-start)                      |
+| `--no-service`    | Don't install system service (default)                      |
+| `--silent`        | Silent mode, no prompts                                     |
+| `--username NAME` | Set username for node identity                              |
+| `--help`          | Show help message                                           |
 
 ---
 
@@ -135,16 +135,16 @@ sudo ./install.sh --system --service
 
 #### Installation Options
 
-| Option | Description |
-|--------|-------------|
-| `-User` | Install for current user (default) |
-| `-System` | Install system-wide (requires Administrator) |
-| `-InstallDir DIR` | Custom installation directory |
-| `-Service` | Install as Windows Service |
-| `-NoService` | Don't install service (default) |
-| `-Silent` | Silent mode, no prompts |
-| `-Username NAME` | Set username for node identity |
-| `-Help` | Show help message |
+| Option            | Description                                  |
+| ----------------- | -------------------------------------------- |
+| `-User`           | Install for current user (default)           |
+| `-System`         | Install system-wide (requires Administrator) |
+| `-InstallDir DIR` | Custom installation directory                |
+| `-Service`        | Install as Windows Service                   |
+| `-NoService`      | Don't install service (default)              |
+| `-Silent`         | Silent mode, no prompts                      |
+| `-Username NAME`  | Set username for node identity               |
+| `-Help`           | Show help message                            |
 
 ---
 
@@ -157,11 +157,10 @@ After installation, GhostWire creates configuration files in:
 ### Key Configuration Files
 
 #### `identity.toml`
-Your node identity and username:
+Your node identity and nickname:
 ```toml
 [identity]
-username = "alice"
-display_name = "Alice's Node"
+nickname = "ghost"  # Set your display name
 # Keypair auto-generated on first run
 ```
 
@@ -447,7 +446,7 @@ relay_servers = [
 
 ## License
 
-GhostWire is licensed under the MIT License. See [LICENSE](../LICENSE) for details.
+GhostWire is licensed under the AGPL-3.0 License. See [LICENSE](../LICENSE) for details.
 
 ---
 

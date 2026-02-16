@@ -424,19 +424,29 @@ export const api = {
   // Send a message
   async sendMessage(recipient: string, message: string): Promise<void> {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/send_message`, {
+      const response = await fetch(`${getApiBaseUrl()}/v2/messages/send`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ recipient, message }),
+        body: JSON.stringify({ recipient, content: message }),
       });
       if (!response.ok) {
-        await reportFrontendError(`sendMessage failed: ${response.statusText}`);
-        throw new Error(`Failed to send message: ${response.statusText}`);
+        // Try to read error as JSON first
+        let errorMsg = response.statusText;
+        try {
+          const errData = await response.json();
+          errorMsg = errData.error?.message || errData.error || response.statusText;
+        } catch { }
+
+        await reportFrontendError(`sendMessage failed: ${errorMsg}`);
+        throw new Error(`Failed to send message: ${errorMsg}`);
       }
       const data = await response.json();
-      if (!data.success) {
-        await reportFrontendError(`sendMessage failed: ${data.error}`);
-        throw new Error(data.error || 'Failed to send message');
+      // V2 API returns data inside a 'data' field usually, but we just check if it was successful (200 OK)
+      // The wrapper might still have 'success' or 'data'.
+      // Our V2 envelope has 'data', 'error'.
+      if (data.error) {
+        await reportFrontendError(`sendMessage failed: ${data.error.message}`);
+        throw new Error(data.error.message || 'Failed to send message');
       }
     } catch (e: any) {
       await reportFrontendError(`sendMessage exception: ${e}`);

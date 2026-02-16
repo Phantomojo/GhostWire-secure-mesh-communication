@@ -1,5 +1,5 @@
 # Rust build artifacts
-target/
+**/target/
 **/*.rs.bk
 Cargo.lock
 
@@ -12,6 +12,7 @@ yarn-error.log*
 # Build outputs
 dist/
 build/
+webui/dist/
 
 # IDE files
 .vscode/
@@ -25,6 +26,7 @@ Thumbs.db
 
 # Logs
 *.log
+ghostwire/*.txt
 
 # Environment variables
 .env
@@ -37,17 +39,13 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Vite build
-webui/dist/
-
-# TypeScript
-*.tsbuildinfo astro-site/
-
 # Secrets and tokens
 ghostwire_token.txt
 *.token
 *.key
 *.pem
-
-# Encrypted credential files
 *.enc
+
+# GhostWire specific
+ghostwire.toml
+build-tools/
