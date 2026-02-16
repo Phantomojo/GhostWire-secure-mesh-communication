@@ -1,7 +1,6 @@
+pub mod cli;
 pub mod config;
 pub mod core;
-#[cfg(feature = "tui")]
-pub mod tui;
 #[cfg(feature = "web")]
 pub mod web;
 

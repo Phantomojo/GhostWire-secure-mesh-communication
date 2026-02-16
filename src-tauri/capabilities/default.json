@@ -7,6 +7,14 @@
   ],
   "permissions": [
     "core:default",
-    "shell:allow-execute"
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/ghostwire",
+          "sidecar": true
+        }
+      ]
+    }
   ]
 }

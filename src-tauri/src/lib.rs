@@ -1,3 +1,4 @@
+use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 
@@ -13,8 +14,14 @@ pub fn run() {
       
       // Start GhostWire Sidecar with comprehensive error handling
       match app.shell().sidecar("ghostwire") {
-        Ok(sidecar_command) => {
+        Ok(mut sidecar_command) => {
           log::info!("✅ Sidecar command created successfully");
+
+          // Ensure the sidecar has a writable home directory on Android
+          if let Ok(app_data) = app.path().app_data_dir() {
+            log::info!("📂 Setting GHOSTWIRE_HOME to: {:?}", app_data);
+            sidecar_command = sidecar_command.env("GHOSTWIRE_HOME", app_data.to_string_lossy().to_string());
+          }
           
           match sidecar_command.spawn() {
             Ok((mut rx, _child)) => {

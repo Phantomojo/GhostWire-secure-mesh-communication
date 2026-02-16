@@ -1,16 +1,12 @@
-// CLI temporarily disabled for backend build
-// All code in this file is commented out to disable CLI for now.
 pub mod commands;
 
 use crate::core::Core;
 use anyhow::Result;
-#[cfg(feature = "clap")]
-use clap::{ArgEnum, Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing::{error, info};
 
 #[derive(Parser)]
-#[cfg(feature = "clap")]
 #[command(name = "ghostwire")]
 #[command(about = "GhostWire - Secure Mesh Networking and Messaging")]
 #[command(version = "0.1.0")]
@@ -65,13 +61,48 @@ pub enum Commands {
         #[arg(short = 'u', long)]
         username: String,
     },
+    /// Manage GhostWire (start/stop/restart/status/logs/backup/restore)
+    Manage {
+        #[command(subcommand)]
+        subcommand: ManageCommand,
+    },
+    /// Deploy GhostWire payloads
+    Deploy {
+        #[arg(short = 't', long)]
+        target: String,
+        #[arg(short = 'p', long)]
+        platform: String,
+    },
+    /// Monitor network and security
+    Monitor {
+        #[arg(short = 'f', long)]
+        follow: bool,
+    },
+    /// Setup dependencies and environment
+    Setup,
+}
+
+#[derive(Subcommand)]
+pub enum ManageCommand {
+    Start,
+    Stop,
+    Restart,
+    Status,
+    Logs {
+        #[arg(short = 'f', long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+    },
+    Backup,
+    Restore {
+        #[arg(short = 'i', long)]
+        input: String,
+    },
 }
 
 /// Run the CLI application
 pub async fn run_cli() -> Result<()> {
-    #[cfg(feature = "clap")]
-    let cli = Cli::parse();
-    #[cfg(not(feature = "clap"))]
     let cli = Cli {
         command: Commands::Init { username: None },
     };
@@ -117,6 +148,18 @@ pub async fn run_cli() -> Result<()> {
         Commands::Connect { username } => {
             connect_by_username(&core_arc, &username).await?;
         }
+        Commands::Manage { subcommand } => {
+            handle_manage(&core_arc, subcommand).await?;
+        }
+        Commands::Deploy { target, platform } => {
+            handle_deploy(&core_arc, target, platform).await?;
+        }
+        Commands::Monitor { follow } => {
+            handle_monitor(&core_arc, follow).await?;
+        }
+        Commands::Setup => {
+            handle_setup().await?;
+        }
     }
 
     Ok(())
@@ -125,7 +168,7 @@ pub async fn run_cli() -> Result<()> {
 async fn init_identity(core: &Arc<Core>, username: Option<String>) -> Result<()> {
     info!("Initializing GhostWire identity...");
 
-    let identity_id = core.get_identity_id();
+    let identity_id = core.get_identity_id().await;
     let public_key = core.get_public_key();
 
     println!("✅ Identity initialized successfully!");
@@ -149,7 +192,7 @@ async fn start_web_server(core: &Arc<Core>, host: String, port: u16) -> Result<(
     use crate::web::start_web_server;
 
     start_web_server(
-        core.clone(),
+        Some(core.clone()),
         host,
         port,
         Vec::new(),
@@ -167,14 +210,15 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16) -> Result<()> {
     info!("Starting GhostWire node on {}:{}", host, port);
 
     // Initialize mesh networking
+
     let core_clone = core.clone();
+    let host_clone = host.clone();
     tokio::spawn(async move {
-        // TODO: Implement proper mesh initialization
-        println!("[CLI] Mesh initialization requested");
+        core_clone.start_nervous_system(host_clone).await;
     });
 
     // Initialize reticulum networking
-    let core_clone = core.clone();
+
     tokio::spawn(async move {
         // TODO: Implement proper reticulum initialization
         println!("[CLI] Reticulum initialization requested");
@@ -219,7 +263,7 @@ async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Resul
 
     let msg = Message {
         id: uuid::Uuid::new_v4(),
-        sender: core.get_identity_id(),
+        sender: core.get_identity_id().await,
         recipient: final_recipient,
         content: message.to_string(),
         timestamp: SystemTime::now()
@@ -257,15 +301,16 @@ async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
         let mut mgr = mesh_manager.write().await;
         match mgr.lookup_username(name).await {
             Ok(Some(record)) => {
-                println!(
-                    "✅ Found peer {} at {:?}",
-                    record.peer_id, record.last_seen_addresses
-                );
+                println!("✅ Found peer {}", record.peer_id);
                 // Dial the peer
-                if let Err(e) = mgr.connect_peer(record.peer_id).await {
-                    println!("❌ Failed to dial peer: {}", e);
+                if let Ok(peer_id) = record.peer_id.parse::<libp2p::PeerId>() {
+                    if let Err(e) = mgr.connect_peer(peer_id).await {
+                        println!("❌ Failed to dial peer: {}", e);
+                    } else {
+                        println!("🚀 Dialing initiated via DHT discovery.");
+                    }
                 } else {
-                    println!("🚀 Dialing initiated via DHT discovery.");
+                    println!("❌ Invalid PeerId: {}", record.peer_id);
                 }
             }
             Ok(None) => {
@@ -294,9 +339,9 @@ async fn list_peers(core: &Arc<Core>) -> Result<()> {
 
     if let Some(reticulum_stats) = core.get_reticulum_stats().await {
         println!("\n🕸️  Reticulum Network:");
-        println!("Node count: {}", reticulum_stats.node_count);
-        println!("Message count: {}", reticulum_stats.message_count);
-        println!("Uptime: {}s", reticulum_stats.uptime_seconds);
+        println!("Total nodes: {}", reticulum_stats.total_nodes);
+        println!("Online nodes: {}", reticulum_stats.online_nodes);
+        println!("Routes count: {}", reticulum_stats.routes_count);
     } else {
         println!("❌ Reticulum network not initialized");
     }
@@ -317,9 +362,9 @@ async fn show_stats(core: &Arc<Core>) -> Result<()> {
 
     if let Some(reticulum_stats) = core.get_reticulum_stats().await {
         println!("\nReticulum Network:");
-        println!("  Node count: {}", reticulum_stats.node_count);
-        println!("  Message count: {}", reticulum_stats.message_count);
-        println!("  Uptime: {}s", reticulum_stats.uptime_seconds);
+        println!("  Total nodes: {}", reticulum_stats.total_nodes);
+        println!("  Online nodes: {}", reticulum_stats.online_nodes);
+        println!("  Routes count: {}", reticulum_stats.routes_count);
     }
 
     // Display security statistics
@@ -341,7 +386,7 @@ async fn show_security_info(core: &Arc<Core>) -> Result<()> {
     println!("🔒 GhostWire Security Information");
     println!("==================================");
 
-    let identity_id = core.get_identity_id();
+    let identity_id = core.get_identity_id().await;
     let public_key = core.get_public_key();
     let key_id = core.get_key_id();
 
@@ -405,5 +450,210 @@ async fn decrypt_message(core: &Arc<Core>, encrypted: &str) -> Result<()> {
     println!("🔓 Decrypted message:");
     println!("{}", message);
 
+    Ok(())
+}
+async fn handle_manage(core: &Arc<Core>, subcommand: ManageCommand) -> Result<()> {
+    match subcommand {
+        ManageCommand::Start => {
+            info!("🚀 Starting GhostWire node...");
+            start_node(core, "0.0.0.0".to_string(), 8080).await?;
+        }
+        ManageCommand::Stop => {
+            info!("🛑 Stopping GhostWire processes...");
+            #[cfg(unix)]
+            {
+                let output = std::process::Command::new("pkill")
+                    .arg("-f")
+                    .arg("ghostwire")
+                    .output()?;
+                if output.status.success() {
+                    println!("✅ GhostWire processes terminated.");
+                } else {
+                    println!("⚠️ No running GhostWire processes found.");
+                }
+            }
+            #[cfg(not(unix))]
+            println!("Stop command not yet implemented for this platform.");
+        }
+        ManageCommand::Restart => {
+            info!("🔄 Restarting GhostWire node...");
+            // Simple stop then start
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg("ghostwire")
+                .output();
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            start_node(core, "0.0.0.0".to_string(), 8080).await?;
+        }
+        ManageCommand::Status => {
+            show_stats(core).await?;
+        }
+        ManageCommand::Logs { follow, lines } => {
+            info!("📋 Viewing logs (last {} lines)...", lines);
+            let log_file = "/tmp/ghostwire.log"; // Default for now
+            if std::path::Path::new(log_file).exists() {
+                let tail_cmd = if follow { "tail -f" } else { "tail -n" };
+                let mut child = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("{} {} {}", tail_cmd, lines, log_file))
+                    .spawn()?;
+                child.wait()?;
+            } else {
+                println!("⚠️ Log file not found at {}", log_file);
+            }
+        }
+        ManageCommand::Backup => {
+            info!("💾 Creating backup of GhostWire data...");
+            let home = dirs::home_dir().unwrap();
+            let backup_path = home.join(format!(
+                "ghostwire_backup_{}.tar.gz",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs()
+            ));
+            let output = std::process::Command::new("tar")
+                .arg("-czf")
+                .arg(&backup_path)
+                .arg("-C")
+                .arg(home.join(".ghostwire"))
+                .arg(".")
+                .output()?;
+            if output.status.success() {
+                println!("✅ Backup created at: {:?}", backup_path);
+            } else {
+                println!(
+                    "❌ Backup failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+        ManageCommand::Restore { input } => {
+            info!("📂 Restoring from backup: {}...", input);
+            let home = dirs::home_dir().unwrap();
+            let output = std::process::Command::new("tar")
+                .arg("-xzf")
+                .arg(&input)
+                .arg("-C")
+                .arg(home.join(".ghostwire"))
+                .output()?;
+            if output.status.success() {
+                println!("✅ Restore complete.");
+            } else {
+                println!(
+                    "❌ Restore failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_deploy(_core: &Arc<Core>, target: String, platform: String) -> Result<()> {
+    info!(
+        "🚀 Deploying GhostWire payload to {} ({})",
+        target, platform
+    );
+
+    if platform.to_lowercase() == "android" {
+        println!("📲 Pushing payload to Android device via ADB...");
+        let binaries = [
+            "ghostwire-aarch64-linux-android",
+            "ghostwire-armv7-linux-androideabi",
+        ];
+        let mut found = false;
+        for bin in &binaries {
+            let path = format!("src-tauri/binaries/{}", bin);
+            if std::path::Path::new(&path).exists() {
+                std::process::Command::new("adb")
+                    .arg("push")
+                    .arg(&path)
+                    .arg("/data/local/tmp/ghostwire")
+                    .status()?;
+                std::process::Command::new("adb")
+                    .arg("shell")
+                    .arg("chmod +x /data/local/tmp/ghostwire")
+                    .status()?;
+                println!(
+                    "✅ Successfully pushed {} to /data/local/tmp/ghostwire",
+                    bin
+                );
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            println!("❌ No Android sidecar binaries found in src-tauri/binaries/");
+        }
+    } else {
+        println!(
+            "⚠️ Deployment to platform '{}' not yet implemented in CLI.",
+            platform
+        );
+    }
+
+    Ok(())
+}
+
+async fn handle_monitor(core: &Arc<Core>, follow: bool) -> Result<()> {
+    info!("🛡️ Monitoring GhostWire security events...");
+
+    // Attempt to access security stats first
+    let stats = core.get_security_stats().await;
+    println!("Current Security Status:");
+    println!("  Threat Level: {:?}", stats.threat_level);
+    println!("  Active Threats: {}", stats.active_threats);
+    println!("  Total Security Events: {}", stats.total_events);
+
+    if follow {
+        println!("\n📡 Streaming real-time events (Press Ctrl+C to stop)...");
+        let mut rx = core.event_bus.subscribe();
+        while let Ok(event) = rx.recv().await {
+            match event {
+                crate::core::CoreEvent::SystemAlert(msg) => {
+                    println!("🚨 [ALERT] {}", msg);
+                }
+                crate::core::CoreEvent::SecurityLockdown(active) => {
+                    println!(
+                        "🔒 [SECURITY] Lockdown mode: {}",
+                        if active { "ENABLED" } else { "DISABLED" }
+                    );
+                }
+                _ => {} // Ignore other events for monitor mode
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_setup() -> Result<()> {
+    info!("🛠️ Setting up GhostWire environment...");
+
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let gw_dir = home.join(".ghostwire");
+    let vault_dir = gw_dir.join("vault");
+    let logs_dir = gw_dir.join("logs");
+
+    for dir in &[&gw_dir, &vault_dir, &logs_dir] {
+        if !dir.exists() {
+            println!("📁 Creating directory: {:?}", dir);
+            std::fs::create_dir_all(dir)?;
+        }
+    }
+
+    println!("✅ GhostWire directories initialized.");
+
+    // Check for common dependencies
+    println!("🔍 Checking dependencies...");
+    let deps = ["git", "curl", "npm"];
+    for dep in &deps {
+        match std::process::Command::new(dep).arg("--version").output() {
+            Ok(_) => println!("  ✅ {} is installed", dep),
+            Err(_) => println!("  ⚠️  {} is missing", dep),
+        }
+    }
+
+    println!("\n✨ Setup complete. Run 'ghostwire manage start' to begin.");
     Ok(())
 }

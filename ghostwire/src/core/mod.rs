@@ -1054,7 +1054,7 @@ impl Core {
     pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = &self.mesh_manager {
-            return mesh_manager.read().await.get_listeners();
+            return mesh_manager.read().await.get_listeners().await;
         }
         Vec::new()
     }
@@ -1149,9 +1149,9 @@ impl MeshManager {
 #[cfg(not(feature = "reticulum"))]
 #[derive(Serialize)]
 pub struct ReticulumStats {
-    pub node_count: usize,
-    pub message_count: usize,
-    pub uptime_seconds: u64,
+    pub total_nodes: usize,
+    pub online_nodes: usize,
+    pub routes_count: usize,
 }
 
 #[cfg(not(feature = "reticulum"))]

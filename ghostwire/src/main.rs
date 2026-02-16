@@ -2,15 +2,13 @@ use anyhow::Result;
 #[cfg(feature = "cli")]
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+
 use tracing::{error, info};
 
 // Use modules from the library crate
 use ghostwire::config::Config;
 use ghostwire::core::updater;
 use ghostwire::core::Core;
-#[cfg(feature = "tui")]
-use ghostwire::tui;
 #[cfg(feature = "web")]
 #[derive(Parser)]
 #[cfg(feature = "cli")]
@@ -81,21 +79,20 @@ enum Commands {
         #[arg(long)]
         bootstrap: Vec<String>,
     },
-    /// Run TUI mode
-    Tui,
-    /// Get node status
     Status,
     /// List known peers
     Peers,
     /// Send a message: send <recipient_id> <content>
-    Send { recipient: String, content: String },
+    Send {
+        recipient: String,
+        content: String,
+    },
 }
 
 #[cfg(not(feature = "cli"))]
 enum Commands {
     Cli,
     Web { host: String, port: u16 },
-    Tui,
 }
 
 #[tokio::main]
@@ -157,7 +154,6 @@ async fn main() -> Result<()> {
     }
 
     // Initialize core components
-    // Initialize core components
     let core = Core::new(
         config.clone(),
         bootstrap_multiaddrs.clone(),
@@ -167,136 +163,29 @@ async fn main() -> Result<()> {
     .await?;
     let core_arc = Arc::new(core);
 
-    // Activate the autonomic nervous system (DNA 10/10)
-    // core_arc.clone().start_nervous_system().await; // Moved to inside match arms to use configured mesh_host
-
     match args.command {
         #[cfg(feature = "cli")]
-        Some(Commands::Status) => {
-            let status = core_arc.get_security_stats().await;
-            let peers = core_arc.get_peer_count();
-            let listeners = core_arc.get_mesh_listeners().await;
-
-            println!("--- GhostWire Node Status ---");
-            println!("Identity: {}", core_arc.get_identity_id().await);
-            println!("Peers:    {}", peers);
-            if !listeners.is_empty() {
-                println!("Mesh Addresses:");
-                for addr in listeners {
-                    println!("  {}", addr);
-                }
-            }
-            println!("Threat:   {:?}", status.threat_level);
-            println!("Blocked:  {}", status.blocked_connections);
+        Some(_) => {
+            // Let the unified CLI module handle the command
+            ghostwire::cli::run_cli().await?;
         }
-
-        #[cfg(feature = "cli")]
-        Some(Commands::Peers) => {
-            println!("--- Known Mesh Peers ---");
-            #[cfg(feature = "mesh")]
-            if let Some(mesh) = &core_arc.mesh_manager {
-                let topology = mesh.read().await.get_topology();
-                for (id, node) in topology.nodes {
-                    println!(
-                        "ID: {} | Name: {} | Status: {}",
-                        id,
-                        node.username,
-                        if node.is_online { "Online" } else { "Offline" }
-                    );
-                }
-            } else {
-                println!("Mesh networking not active.");
-            }
+        #[cfg(not(feature = "cli"))]
+        Some(_) => {
+            println!("CLI feature not enabled.");
         }
-        #[cfg(feature = "cli")]
-        Some(Commands::Send { recipient, content }) => {
-            println!("📤 Sending message to {}...", recipient);
-            let msg =
-                ghostwire::core::Message::new(core_arc.get_identity_id().await, recipient, content);
-            match core_arc.send_message(&msg).await {
-                Ok(_) => println!("✅ Message dispatched to transport."),
-                Err(e) => println!("❌ Failed to send: {}", e),
-            }
-        }
-        #[cfg(feature = "cli")]
-        Some(Commands::Cli) => {
-            info!("Starting interactive CLI mode");
-            println!("GhostWire Interactive Shell (Type 'exit' to quit)");
-            // Simple interactive loop could go here, but for now we prioritize subcommands
-            // which are better for simulation scripts.
-        }
-        #[cfg(feature = "web")]
-        Some(Commands::Web {
-            api_host,
-            mesh_host,
-            port,
-            bootstrap,
-        }) => {
-            // Parse local bootstraps for this command
-            let mut local_bootstraps = Vec::new();
-            for b in bootstrap {
-                if let Ok(ma) = b.parse::<libp2p::Multiaddr>() {
-                    local_bootstraps.push(ma);
-                }
-            }
-
-            // If we have local bootstraps, we might want to update the core's mesh manager
-            // but for now, Core::new already took the global ones if they were provided.
-            if !local_bootstraps.is_empty() {
-                core_arc.add_bootstrap_nodes(local_bootstraps).await;
-            }
-
-            // Let's just ensure we start the nervous system.
-            core_arc.clone().start_nervous_system(mesh_host).await;
-
-            info!("Starting web server mode on {}:{}", api_host, port);
-            ghostwire::web::start_web_server(
-                Some(core_arc),
-                api_host,
-                port,
-                bootstrap_multiaddrs.clone(),
-                args.sim_addr.clone(),
-                args.mesh_host.clone(),
-                config.clone(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        }
-        #[cfg(feature = "tui")]
-        Some(Commands::Tui) => {
-            // Start nervous system for mesh networking
+        None => {
+            // Default behavior: start the services
+            // Activate the autonomic nervous system
             core_arc
                 .clone()
                 .start_nervous_system(args.mesh_host.clone())
                 .await;
 
-            info!("Starting TUI mode");
-            let core_mutex = Arc::new(Mutex::new(core_arc.as_ref().clone()));
-            tui::start_tui(core_mutex)
-                .await
-                .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
-        }
-        None => {
-            // Default behavior
-            // Activate Mesh on configured host
-            if args.mesh {
-                info!("Running in minimal mode - mesh only");
-                core_arc
-                    .clone()
-                    .start_nervous_system(args.mesh_host.clone())
-                    .await;
-                tokio::signal::ctrl_c().await?;
-            } else if args.cli {
-                println!("CLI mode is currently disabled.");
-            } else if args.web {
+            if args.web || config.server.web_enabled {
                 info!(
                     "Starting web server mode on {}:{}",
                     args.api_host, args.port
                 );
-                core_arc
-                    .clone()
-                    .start_nervous_system(args.mesh_host.clone())
-                    .await;
                 ghostwire::web::start_web_server(
                     Some(core_arc),
                     args.api_host,
@@ -309,32 +198,8 @@ async fn main() -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
             } else {
-                // Default to web server
-                info!(
-                    "Starting web server mode on {}:{}",
-                    args.api_host, args.port
-                );
-                core_arc
-                    .clone()
-                    .start_nervous_system(args.mesh_host.clone())
-                    .await;
-                ghostwire::web::start_web_server(
-                    Some(core_arc),
-                    args.api_host,
-                    args.port,
-                    bootstrap_multiaddrs.clone(),
-                    args.sim_addr.clone(),
-                    args.mesh_host.clone(),
-                    config.clone(),
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-
-                #[cfg(not(feature = "web"))]
-                {
-                    info!("Running in minimal mode - core only");
-                    tokio::signal::ctrl_c().await?;
-                }
+                info!("Running in minimal mode - core only");
+                tokio::signal::ctrl_c().await?;
             }
         }
     }
