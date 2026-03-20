@@ -1,3 +1,37 @@
+# 📜 GhostWire - Dual Licensing Model
+
+**GhostWire is dual-licensed under:**
+
+1. **GNU Affero General Public License Version 3 (AGPL-3.0-or-later)** - See below for full text
+2. **Commercial License** - For proprietary, closed-source, and SaaS deployments
+
+---
+
+## Quick License Guide
+
+### ✅ AGPL-3.0 Use (No Commercial License Needed)
+- Personal, research, educational use
+- Open source projects (released under AGPL-3.0)
+- Internal deployments with source disclosure
+- Community projects with full compliance
+
+### 🏢 Commercial License Required For:
+- Proprietary, closed-source products
+- SaaS deployments without source disclosure
+- Commercial hosting services
+- OEM integration in commercial products
+- Custom licensing terms
+
+**📧 For commercial licensing:** licensing@ghostwire.com  
+**📄 Full commercial terms:** See [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)  
+**📖 Licensing explanation:** See [LICENSE_EXPLANATION.md](LICENSE_EXPLANATION.md)
+
+---
+
+**Copyright (C) 2024-2026 Michael Irungu and GhostWire Contributors**
+
+---
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

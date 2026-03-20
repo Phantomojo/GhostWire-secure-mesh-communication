@@ -61,9 +61,20 @@ We take security vulnerabilities very seriously. If you discover a security issu
 
 ### **📧 Private Reporting**
 For sensitive security issues, please email us directly:
-- **Email**: security@ghostwire.com (if available)
+
+**Primary Channels:**
+- **Email**: mirungu015@proton.me
 - **GitHub Security Advisories**: [Create a security advisory](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories)
-- **Private Issue**: Create a private issue with the "security" label
+- **Encrypted Email**: [PGP Key coming soon]
+
+**⚠️ IMPORTANT**: DO NOT create public GitHub issues for security vulnerabilities. This exposes users to potential attacks before patches are available.
+
+### **🏢 Commercial License Holders**
+If you hold a commercial license and discover a security issue:
+
+- **Priority Support**: mirungu015@proton.me (24h response SLA)
+- **Emergency Contact**: mirungu015@proton.me (for critical issues)
+- **Direct Channel**: Your dedicated support channel (Enterprise tier)
 
 ### **📋 Security Report Template**
 ```markdown
