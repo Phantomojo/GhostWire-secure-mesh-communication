@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial License -->
 # 🚀 **GhostWire** - Secure Mesh Networking & Communication
 
 ![GhostWire - Afrofuturistic Secure Mesh](webui/public/brand-header.png)
@@ -7,8 +7,33 @@
 [![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
 ![Status](https://img.shields.io/badge/Status-Active%20Development-blue?style=for-the-badge)
 ![Tech Stack](https://img.shields.io/badge/Tech-Rust%20|%20libp2p%20|%20React-orange?style=for-the-badge)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
 
 **GhostWire** is a high-performance, decentralized communication platform built for resilience in adverse environments. It combines high-speed peer-to-peer mesh networking with a tactical interface designed for coordination and secure information sharing when traditional infrastructure fails.
+
+---
+
+## 📜 Licensing
+
+**GhostWire is dual-licensed:**
+
+- **🆓 AGPL-3.0-or-later** - For open source, community, and personal use
+- **🏢 Commercial License** - For proprietary, closed-source, and SaaS deployments
+
+**Which license do I need?**
+
+| Use Case | License |
+|----------|---------|
+| Personal/Research/Education | ✅ AGPL-3.0 (free) |
+| Open Source Projects | ✅ AGPL-3.0 (free) |
+| Internal Tools (with source disclosure) | ✅ AGPL-3.0 (free) |
+| Proprietary Products | 🏢 Commercial |
+| SaaS without source disclosure | 🏢 Commercial |
+| Commercial Hosting | 🏢 Commercial |
+
+📧 **Commercial inquiries**: mirungu015@proton.me  
+📄 **Full terms**: See [LICENSE](LICENSE), [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md), [LICENSE_EXPLANATION.md](LICENSE_EXPLANATION.md)
 
 ---
 
@@ -82,6 +107,8 @@ Comprehensive guides are located in the [docs/](docs/) directory:
 - [🛠️ INSTALL.md](docs/INSTALL.md) - Detailed setup for various platforms.
 - [🔒 SECURITY.md](docs/SECURITY.md) - Disclosure policy and security model overview.
 - [🧪 TESTING_GUIDE.md](docs/TESTING_GUIDE.md) - How to run network and security simulations.
+- [🌐 LIBP2P_NETWORK_CONNECTIVITY.md](docs/LIBP2P_NETWORK_CONNECTIVITY.md) - Connecting to other libp2p networks and bootstrap nodes.
+- [👤 PROFILE_IDENTITY_LIFECYCLE.md](docs/PROFILE_IDENTITY_LIFECYCLE.md) - Profile/identity from creation to deletion (API and storage).
 
 ---
 
@@ -96,12 +123,44 @@ Comprehensive guides are located in the [docs/](docs/) directory:
 
 ## 📞 **Community & Contribution**
 
-- **Issues**: [Bug reports and feature requests](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
-- **License**: Licensed under the [AGPL-3.0-or-later](LICENSE).
+We welcome contributions from everyone! Whether you're fixing bugs, adding features, or just asking questions, you're part of our community.
+
+### **Get Started**
+- **🐛 Bug Reports**: [Create an issue](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
+- **💬 Discussions**: [Join the conversation](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
+- **📖 Documentation**: [Read the docs](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs)
+- **🤝 Contributing**: [See our guidelines](docs/CONTRIBUTING.md)
+- **📋 Code of Conduct**: [Community standards](CODE_OF_CONDUCT.md)
+- **📞 Support**: [Get help](SUPPORT.md)
+
+### **Licensing & Legal**
+- **📜 License**: AGPL-3.0-or-later + Commercial License
+- **📄 LICENSE**: [Full license text](LICENSE)
+- **💼 Commercial Use**: [Commercial licensing](COMMERCIAL_LICENSE.md)
+- **📖 Explanation**: [Licensing guide](LICENSE_EXPLANATION.md)
+- **✍️ CLA**: [Contributor License Agreement](docs/CLA.md) (coming soon)
+
+### **Security**
+- **🔒 Security Policy**: [SECURITY.md](docs/SECURITY.md)
+- **🚨 Report Vulnerability**: [mirungu015@proton.me](mailto:mirungu015@proton.me)
+- **🛡️ Security Audit**: [Audit report](docs/SECURITY_AUDIT.md)
+
+---
+
+## 👤 **Author**
+
+**Author:** Michael Irungu  
+**Contact:** mirungu015@proton.me  
+**Location:** Nairobi, Kenya  
+**License:** AGPL-3.0-or-later with commercial licensing available
 
 ---
 
 <div align="center">
-    <b>Built for connection. Designed for resilience.</b><br>
-    <i>Connecting the disconnected, regardless of the odds.</i>
+
+**🏆 Licensed under [AGPL-3.0-or-later](LICENSE) or [Commercial License](COMMERCIAL_LICENSE.md)**
+
+*Built for connection. Designed for resilience.*  
+*Connecting the disconnected, regardless of the odds.*
+
 </div>

@@ -1,0 +1,13 @@
+GhostWire
+Copyright (C) 2025-2026 Michael Irungu
+
+This software contains cryptographic protocol constants (FRAME_MAGIC,
+FRAME_VERSION, CHANNEL_INVITE_PREFIX, and associated KDF domain labels)
+derived from a two-party commitment ceremony conducted in 2025. These
+constants are irreproducible and form part of the GhostWire network
+identity. Nodes compiled without these constants cannot participate in
+a GhostWire mesh network.
+
+Built on: libp2p, vodozemac, ml-kem, axum, and other open source
+components. See Cargo.toml for the full dependency tree and their
+respective licenses.

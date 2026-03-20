@@ -14,7 +14,7 @@
 
 ## 🌟 **Why Contribute to GhostWire?**
 
-**GhostWire is an ambitious peer-to-peer communication system currently in an intensive security hardening phase.** 
+**GhostWire is an ambitious peer-to-peer communication system currently in an intensive security hardening phase.**
 
 We've built a feature-rich prototype, but the Jan 2026 security audit revealed critical areas for improvement. Every contribution to security, testing, and documentation is now high priority!
 
@@ -22,7 +22,7 @@ We've built a feature-rich prototype, but the Jan 2026 security audit revealed c
 - ✅ **Core Components Built** - Functional prototype across all panels
 - 🔄 **Security Hardening** - Patching vulnerabilities and removing mock data
 - 🔄 **Test Coverage** - Increasing from <10% to 50%+
-- ✅ **Open Source Governance** - Transitioned to AGPL-3.0 License
+- ✅ **Dual Licensing** - AGPL-3.0 + Commercial License for sustainable development
 
 ### **🚀 What We're Building Next**
 - 🔥 **Enhanced Security Features** - More advanced threat detection
@@ -33,6 +33,43 @@ We've built a feature-rich prototype, but the Jan 2026 security audit revealed c
 - 🔗 **Protocol Adapters** - Bridge to other mesh networks
 
 ---
+
+## 📜 **Licensing & Legal**
+
+### **Dual Licensing Model**
+
+GhostWire is dual-licensed under:
+- **AGPL-3.0-or-later** - For open source and community use
+- **Commercial License** - For proprietary deployments
+
+**Your Contributions:**
+- By contributing, you agree that your contributions will be dual-licensed under the same terms
+- This allows the project to offer both AGPL and commercial licenses
+- See [LICENSE_EXPLANATION.md](../LICENSE_EXPLANATION.md) for details
+
+### **Contributor License Agreement (CLA)**
+
+**Coming Soon**: We're implementing a Contributor License Agreement (CLA) to:
+- Clarify licensing of your contributions
+- Ensure we can dual-license the project
+- Protect your rights as a contributor
+- Maintain legal clarity for all users
+
+**Until CLA is ready:**
+- By submitting a PR, you agree to dual-license your contributions
+- You represent that you have the right to license your work
+- You agree to the terms in this CONTRIBUTING.md
+
+### **License Compatibility**
+
+When contributing third-party code:
+- ✅ Must be compatible with AGPL-3.0
+- ✅ Must allow dual licensing
+- ❌ Cannot include Commons Clause or similar restrictions
+- ❌ Cannot be GPL-2.0 only (must be GPL-3.0 compatible or better)
+- ✅ Apache 2.0, MIT, BSD-3-Clause are generally compatible
+
+**Always check with maintainers before adding dependencies!**
 
 ## 🚀 **Quick Start - Get Contributing in 5 Minutes**
 

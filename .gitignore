@@ -45,6 +45,12 @@ ghostwire_token.txt
 *.key
 *.pem
 *.enc
+.env
+.env.*
+token
+
+# GhostWire node data
+~/.local/share/ghostwire/
 
 # GhostWire specific
 ghostwire.toml

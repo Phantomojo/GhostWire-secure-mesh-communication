@@ -1,3 +1,6 @@
+// Copyright (C) 2025-2026 Michael Irungu
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 use anyhow::Result;
 #[cfg(feature = "cli")]
 use clap::{Parser, Subcommand};
@@ -26,7 +29,7 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0")]
     mesh_host: String,
 
-    #[arg(long, default_value_t = 5050)]
+    #[arg(long, default_value_t = 8080)]
     port: u16,
 
     #[arg(long)]
