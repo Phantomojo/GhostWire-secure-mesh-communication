@@ -3,6 +3,7 @@ use btleplug::api::{Central, Manager as _, ScanFilter};
 use btleplug::platform::Manager;
 use tracing::{debug, info};
 
+#[derive(Debug)]
 pub struct BluetoothTransport {
     manager: Manager,
 }

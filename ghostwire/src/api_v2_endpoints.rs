@@ -38,21 +38,20 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
         .calculate_security_score()
         .await;
 
-    let username = match std::fs::read_to_string("username.txt") {
-        Ok(name) => name.trim().to_string(),
-        Err(_) => "GhostUser".to_string(),
-    };
+    let created_at = chrono::DateTime::from_timestamp(metadata.last_updated as i64, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
     let profile = ProfileResponse {
         id: state.core.read().await.get_identity_id().await,
         did: state.core.read().await.get_did().await,
-        username: username,
-        nickname: metadata.nickname,
+        username: metadata.nickname.clone(),
+        nickname: metadata.nickname.clone(),
         bio: metadata.bio,
         public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
         key_id: state.core.read().await.get_key_id(),
-        created_at: chrono::Utc::now().to_rfc3339(), // TODO: Get from identity last_updated
-        dht_published: false,                        // TODO: Get from DHT status
+        created_at,
+        dht_published: false, // Set when mesh exposes DHT publish status
         security_score,
     };
 
@@ -251,7 +250,7 @@ pub async fn get_security_dashboard_v2(State(state): State<Arc<AppState>>) -> im
         },
         blacklist: BlacklistStatus {
             entries: stats.blacklisted_peers,
-            recent_additions: 0, // TODO: Track this
+            recent_additions: 0, // Reserved for future peer-churn metrics
         },
         last_scan: chrono::Utc::now().to_rfc3339(),
     };
@@ -292,7 +291,7 @@ pub async fn get_peers_v2(
                 last_seen: chrono::DateTime::from_timestamp(node.last_seen as i64, 0)
                     .map(|dt| dt.to_rfc3339())
                     .unwrap_or_default(),
-                trust_score: 100, // TODO: Get from reputation manager
+                trust_score: 100, // Default until reputation manager provides per-peer score
                 public_key: general_purpose::STANDARD.encode(node.public_key),
             });
         }

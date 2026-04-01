@@ -1,0 +1,159 @@
+# GhostWire Task Automation
+# https://github.com/sagiegurari/cargo-make
+
+[config]
+min_version = "0.37.1"
+
+[tasks.dev]
+description = "Auto-rebuild on file changes"
+category = "Development"
+command = "cargo"
+args = ["watch", "-x", "check"]
+
+[tasks.test]
+description = "Run all tests with nextest"
+category = "Testing"
+command = "cargo"
+args = ["nextest", "run"]
+
+[tasks.test-all]
+description = "Run all tests including integration tests"
+category = "Testing"
+command = "cargo"
+args = ["nextest", "run", "--all-features", "--all-targets"]
+
+[tasks.test-coverage]
+description = "Generate HTML coverage report"
+category = "Testing"
+command = "cargo"
+args = ["llvm-cov", "--html", "--open"]
+
+[tasks.test-coverage-ci]
+description = "Generate LCOV coverage for CI"
+category = "Testing"
+command = "cargo"
+args = ["llvm-cov", "--lcov", "--output-path", "lcov.info"]
+
+[tasks.security-audit]
+description = "Run security audit with cargo-audit"
+category = "Security"
+command = "cargo"
+args = ["audit"]
+
+[tasks.deny-check]
+description = "Check dependencies with cargo-deny"
+category = "Security"
+command = "cargo"
+args = ["deny", "check"]
+
+[tasks.geiger]
+description = "Check for unsafe code with cargo-geiger"
+category = "Security"
+command = "cargo"
+args = ["geiger", "--fail-on-warn"]
+
+[tasks.docs]
+description = "Build and open documentation"
+category = "Documentation"
+command = "cargo"
+args = ["doc", "--open"]
+
+[tasks.docs-no-deps]
+description = "Build documentation without dependencies"
+category = "Documentation"
+command = "cargo"
+args = ["doc", "--no-deps", "--open"]
+
+[tasks.build-release]
+description = "Build optimized release binary"
+category = "Build"
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.build-check]
+description = "Quick build check"
+category = "Build"
+command = "cargo"
+args = ["check"]
+
+[tasks.clippy]
+description = "Run clippy linter"
+category = "Linting"
+command = "cargo"
+args = ["clippy", "--", "-D", "warnings"]
+
+[tasks.format]
+description = "Format code with rustfmt"
+category = "Linting"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.format-check]
+description = "Check code formatting"
+category = "Linting"
+command = "cargo"
+args = ["fmt", "--check"]
+
+[tasks.clean]
+description = "Clean build artifacts"
+category = "Build"
+command = "cargo"
+args = ["clean"]
+
+[tasks.check-all]
+description = "Run all security and quality checks"
+category = "CI"
+dependencies = [
+    "security-audit",
+    "deny-check",
+    "geiger",
+    "clippy",
+    "format-check",
+    "test"
+]
+
+[tasks.ci]
+description = "Full CI pipeline"
+category = "CI"
+dependencies = [
+    "build-check",
+    "security-audit",
+    "deny-check",
+    "test-all",
+    "test-coverage-ci"
+]
+
+[tasks.help]
+description = "Show available tasks"
+category = "Help"
+script = '''
+#!/bin/bash
+echo "GhostWire Development Tasks"
+echo "============================"
+echo ""
+echo "Development:"
+echo "  cargo make dev              - Auto-rebuild on changes"
+echo "  cargo make build-check      - Quick build check"
+echo ""
+echo "Testing:"
+echo "  cargo make test             - Run all tests"
+echo "  cargo make test-all         - Run all tests with all features"
+echo "  cargo make test-coverage    - Generate coverage report"
+echo ""
+echo "Security:"
+echo "  cargo make security-audit   - Run cargo-audit"
+echo "  cargo make deny-check       - Run cargo-deny"
+echo "  cargo make geiger           - Run cargo-geiger"
+echo ""
+echo "Documentation:"
+echo "  cargo make docs             - Build and open docs"
+echo ""
+echo "Build:"
+echo "  cargo make build-release    - Build release binary"
+echo "  cargo make clean            - Clean build artifacts"
+echo ""
+echo "CI/CD:"
+echo "  cargo make check-all        - Run all checks"
+echo "  cargo make ci               - Full CI pipeline"
+echo ""
+'''

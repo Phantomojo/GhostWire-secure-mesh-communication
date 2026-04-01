@@ -25,7 +25,7 @@ const MAX_HANDSHAKE_ATTEMPTS: usize = 3;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Enhanced StealthTCP provider with advanced security features
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StealthTCPProvider {
     rate_limiter: Arc<DashMap<SocketAddr, (usize, Instant)>>,
     allowlist: Option<Vec<std::net::IpAddr>>,
@@ -35,7 +35,7 @@ pub struct StealthTCPProvider {
     connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 struct HandshakeSecret(Vec<u8>);
 
 #[derive(Debug, Clone)]

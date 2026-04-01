@@ -1,6 +1,7 @@
 use crate::core::identity::encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
 use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
+use libp2p::PeerId;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
@@ -88,6 +89,14 @@ impl Identity {
     pub fn load_or_create(profile: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
         let storage_path = Self::get_storage_path(profile.clone())?;
 
+        tracing::info!(
+            target: "identity",
+            msg = "📂 Loading or creating identity",
+            profile = ?profile,
+            storage_path = ?storage_path,
+            exists = storage_path.exists(),
+        );
+
         if storage_path.exists() {
             match Self::load_from_disk(&storage_path) {
                 Ok(mut identity) => {
@@ -101,7 +110,7 @@ impl Identity {
                         "⚠️ Failed to load identity (corrupt or old format): {}. Creating new one.",
                         e
                     );
-                    // TODO: Handle migration or backup
+                    // On load failure we create fresh identity; migration/backup can be added later
                 }
             }
         }
@@ -192,24 +201,66 @@ impl Identity {
         Ok(Self::from_keypair(keypair))
     }
 
+    /// Create a new identity with nickname and password in one step (for profile creation with setup).
+    pub fn create_with_setup(
+        profile: Option<String>,
+        nickname: String,
+        password: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let identity = Self::create_new(profile)?;
+        identity.update_metadata(Some(nickname), None, None, Some(true));
+        identity.save_to_disk(password)?;
+        Ok(identity)
+    }
+
     fn get_storage_path(
         profile: Option<String>,
     ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
         let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            tracing::info!(
+                target: "identity",
+                msg = "🏠 Using GHOSTWIRE_HOME environment variable",
+                ghost_home = %ghost_home
+            );
             std::path::PathBuf::from(ghost_home)
         } else {
             let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            tracing::info!(
+                target: "identity",
+                msg = "🏠 Using default home directory",
+                home = ?home
+            );
             home.join(".ghostwire")
         };
 
+        tracing::info!(
+            target: "identity",
+            msg = "📂 Checking ghostwire directory",
+            directory = ?ghost_dir,
+            exists = ghost_dir.exists(),
+            is_dir = ghost_dir.is_dir(),
+        );
+
         if !ghost_dir.exists() {
+            tracing::info!(
+                target: "identity",
+                msg = "🔨 Creating ghostwire directory",
+                directory = ?ghost_dir
+            );
             std::fs::create_dir_all(&ghost_dir)?;
         }
         let filename = match profile {
             Some(p) => format!("identity_{}.json", p),
             None => "identity.json".to_string(),
         };
-        Ok(ghost_dir.join(filename))
+        let full_path = ghost_dir.join(&filename);
+        tracing::info!(
+            target: "identity",
+            msg = "📁 Identity file path determined",
+            filename = %filename,
+            full_path = ?full_path,
+        );
+        Ok(full_path)
     }
 
     fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
@@ -234,18 +285,38 @@ impl Identity {
 
     pub fn save_to_disk(&self, password: &str) -> Result<(), Box<dyn std::error::Error>> {
         let path = Self::get_storage_path(self.profile.clone())?;
+
+        tracing::info!(
+            target: "identity",
+            msg = "💾 Saving identity to disk",
+            path = ?path,
+            password_len = password.len(),
+        );
+
         let mut state_guard = self.state.write().unwrap();
 
         let keypair_bytes = match &*state_guard {
             IdentityState::Unlocked(kp, _) => {
+                tracing::debug!(
+                    target: "identity",
+                    msg = "🔑 Extracting keypair from unlocked state"
+                );
                 kp.to_protobuf_encoding().map_err(|e| anyhow::anyhow!(e))?
             }
             IdentityState::Locked(_) => {
-                return Err("Cannot save locked identity (need keypair)".into())
+                tracing::error!(
+                    target: "identity",
+                    msg = "❌ Cannot save locked identity"
+                );
+                return Err("Cannot save locked identity (need keypair)".into());
             }
         };
 
         // Encrypt the keypair bytes
+        tracing::debug!(
+            target: "identity",
+            msg = "🔐 Encrypting identity with password"
+        );
         let encrypted_keypair = encrypt_identity(&keypair_bytes, password)?;
 
         // Important: Update the cached encrypted identity so we can lock later!
@@ -261,7 +332,18 @@ impl Identity {
         };
 
         let json = serde_json::to_string_pretty(&persisted)?;
-        std::fs::write(path, json)?;
+        tracing::debug!(
+            target: "identity",
+            msg = "📝 Writing identity file",
+            json_len = json.len(),
+        );
+        std::fs::write(&path, json)?;
+        
+        tracing::info!(
+            target: "identity",
+            msg = "✅ Identity saved successfully",
+            path = ?path,
+        );
         Ok(())
     }
 
@@ -345,11 +427,8 @@ impl Identity {
             .unwrap()
             .as_secs();
 
-        // Auto-save on update (using default/cached password?)
-        // TODO: Need password to save!
-        // For now, we warn.
-        tracing::warn!("Metadata updated but not saved to disk (password required)");
-        // In real impl, checking if we have cached password or if we can save metadata separately.
+        // Caller should use save_to_disk(password) to persist (e.g. via POST /api/v2/profile/save).
+        tracing::debug!("Metadata updated in memory; call save_to_disk to persist");
     }
 
     pub fn keypair(&self) -> Option<Keypair> {
@@ -364,6 +443,24 @@ impl Identity {
             IdentityState::Unlocked(kp, _) => Some(kp.public()),
             IdentityState::Locked(_) => None,
         }
+    }
+
+    /// Stub for Wave 7 integration — returns empty vec until identity is unlocked
+    pub fn get_public_key(&self) -> Vec<u8> {
+        // libp2p 0.56 PublicKey - encode to protobuf bytes
+        use libp2p::identity::PublicKey;
+        match self.public_key() {
+            Some(pk) => match pk.try_into_ed25519() {
+                Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
+                Err(_) => vec![],
+            },
+            None => vec![],
+        }
+    }
+
+    /// Stub for Wave 7 integration — returns Ed25519 public key bytes
+    pub fn public_key_bytes(&self) -> Vec<u8> {
+        self.get_public_key()
     }
 }
 

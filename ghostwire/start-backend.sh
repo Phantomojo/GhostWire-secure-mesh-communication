@@ -21,19 +21,19 @@ BACKEND_PORT=${BACKEND_PORT:-3001}
 if [ -f "target/release/ghostwire" ]; then
     echo -e "${GREEN}✓ Found pre-built binary${NC}"
     echo -e "${YELLOW}Starting backend on ${BACKEND_HOST}:${BACKEND_PORT}${NC}"
-    ./target/release/ghostwire web --host $BACKEND_HOST --port $BACKEND_PORT
+    ./target/release/ghostwire web --api-host $BACKEND_HOST --mesh-host $BACKEND_HOST --port $BACKEND_PORT
 elif [ -f "target/debug/ghostwire" ]; then
     echo -e "${GREEN}✓ Found debug binary${NC}"
     echo -e "${YELLOW}Starting backend on ${BACKEND_HOST}:${BACKEND_PORT}${NC}"
-    ./target/debug/ghostwire web --host $BACKEND_HOST --port $BACKEND_PORT
+    ./target/debug/ghostwire web --api-host $BACKEND_HOST --mesh-host $BACKEND_HOST --port $BACKEND_PORT
 else
     echo -e "${RED}❌ No binary found. Attempting to build...${NC}"
-    
+
     # Try to fix rustup issue
     export RUSTUP_TOOLCHAIN="stable"
     unset CARGO_PROXY
     unset RUSTUP_PROXY
-    
+
     # Try building with system rustc
     if command -v rustc >/dev/null 2>&1; then
         echo -e "${YELLOW}Using system rustc...${NC}"
@@ -43,11 +43,11 @@ else
         echo -e "${YELLOW}Please install Rust: https://rustup.rs/${NC}"
         exit 1
     fi
-    
+
     if [ -f "target/release/ghostwire" ]; then
         echo -e "${GREEN}✓ Build successful${NC}"
         echo -e "${YELLOW}Starting backend on ${BACKEND_HOST}:${BACKEND_PORT}${NC}"
-        ./target/release/ghostwire web --host $BACKEND_HOST --port $BACKEND_PORT
+        ./target/release/ghostwire web --api-host $BACKEND_HOST --mesh-host $BACKEND_HOST --port $BACKEND_PORT
     else
         echo -e "${RED}❌ Build failed${NC}"
         echo -e "${YELLOW}Starting mock backend server...${NC}"

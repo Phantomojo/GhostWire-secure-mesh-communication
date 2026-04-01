@@ -1,15 +1,17 @@
+use crate::api_v2_types::*;
+use crate::web::{
+    get_client_ip, AppState, Claims, LoginRequest, LoginResponse, AUTH_TOKEN, JWT_SECRET,
+};
+use axum::body::Body;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
-use axum::body::Body;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api_v2_types::*;
-use crate::web::{get_client_ip, AppState, AUTH_TOKEN, JWT_SECRET, Claims, LoginRequest, LoginResponse};
 
 pub struct AuthController;
 
@@ -23,7 +25,8 @@ impl AuthController {
             let expiration = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
-                .as_secs() + 60 * 60 * 24; // 24 hours
+                .as_secs()
+                + 60 * 60 * 24; // 24 hours
 
             let claims = Claims {
                 sub: "admin".to_owned(),
@@ -38,23 +41,26 @@ impl AuthController {
                 Ok(token) => (
                     StatusCode::OK,
                     Json(ApiV2Response::success(LoginResponse { token })),
-                ).into_response(),
+                )
+                    .into_response(),
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiV2Response::<()>::error(
                         StandardErrorCode::InternalError.as_str(),
-                        format!("Failed to generate token: {}", e)
+                        format!("Failed to generate token: {}", e),
                     )),
-                ).into_response(),
+                )
+                    .into_response(),
             }
         } else {
             (
                 StatusCode::UNAUTHORIZED,
                 Json(ApiV2Response::<()>::error(
                     StandardErrorCode::InvalidCredentials.as_str(),
-                    "Invalid authentication token"
+                    "Invalid authentication token",
                 )),
-            ).into_response()
+            )
+                .into_response()
         }
     }
 
@@ -63,19 +69,18 @@ impl AuthController {
         Json(ApiV2Response::success("Token is valid".to_string()))
     }
 
-    /// Get Dev Token - Restricted to local access
+    /// Get Dev Token - Restricted to local access + DEBUG builds only
+    #[cfg(debug_assertions)]
     pub async fn get_dev_token(
         State(_state): State<Arc<AppState>>,
         ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        req: Request<Body>
+        req: Request<Body>,
     ) -> impl IntoResponse {
         let ip = get_client_ip(&req, addr);
-        
-        // Loosened check: local loopback OR bridge IPs commonly used by containers
-        let is_local = ip.is_loopback() || 
+
+        // Strict check: local loopback OR Docker bridge IPs only
+        let is_local = ip.is_loopback() ||
                        ip.to_string().starts_with("172.") || // Docker/Podman
-                       ip.to_string().starts_with("10.") ||  // Internal private
-                       ip.to_string().starts_with("192.168.") ||
                        ip.to_string() == "::1";
 
         if !is_local {
@@ -84,11 +89,29 @@ impl AuthController {
                 StatusCode::FORBIDDEN,
                 Json(ApiV2Response::<()>::error(
                     StandardErrorCode::Unauthorized.as_str(),
-                    "Access restricted to localhost"
+                    "Access restricted to localhost",
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
 
         Json(ApiV2Response::success(AUTH_TOKEN.clone())).into_response()
+    }
+
+    /// Stub for release builds (dev token disabled)
+    #[cfg(not(debug_assertions))]
+    pub async fn get_dev_token(
+        _: State<Arc<AppState>>,
+        _: ConnectInfo<SocketAddr>,
+        _: Request<Body>,
+    ) -> impl IntoResponse {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiV2Response::<()>::error(
+                StandardErrorCode::NotFound.as_str(),
+                "Dev token endpoint disabled in release builds",
+            )),
+        )
+            .into_response()
     }
 }

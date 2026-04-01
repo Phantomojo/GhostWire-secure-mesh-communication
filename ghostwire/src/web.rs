@@ -1,13 +1,12 @@
 use crate::api_v2_types::*;
 use crate::controllers::{
-    AuthController, IdentityController, MessagingController, PeerController, ProfilesController,
-    SystemController,
+    AuthController, HealthController, IdentityController, MessagingController, PeerController,
+    ProfilesController, SystemController,
 };
 use crate::core::Core;
 use axum::body::Body;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum::http::Method;
-use axum::http::{header, HeaderName, HeaderValue, Request, StatusCode, Uri};
+use axum::http::{header, HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::{
     extract::ConnectInfo,
     extract::State,
@@ -25,10 +24,11 @@ use serde_json;
 use std::net::SocketAddr;
 use std::sync::Arc;
 // Rate limiter removed due to frontend init burst interference
-// use tower_governor::governor::GovernorConfigBuilder;
-// use tower_governor::key_extractor::SmartIpKeyExtractor;
-// use tower_governor::GovernorLayer;
-use tower_http::cors::CorsLayer;
+// Rate limiter for API endpoints
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tower_governor::GovernorLayer;
+use tower_http::cors::{Any, CorsLayer};
 
 use lazy_static::lazy_static;
 use local_ip_address;
@@ -162,12 +162,15 @@ pub async fn auth_middleware(
 
     tracing::debug!("Checking auth path: {}", path);
 
-    if path == "/api/dev/token" || path == "/api/auth/login" || path == "/api/status" {
-        return Ok(next.run(req).await);
-    }
-
-    // Allow profile creation/listing without auth (bootstrapping)
-    if path.starts_with("/api/profile") || path.starts_with("/api/identity") {
+    // Public endpoints (no auth required)
+    if path == "/api/dev/token"
+        || path == "/api/auth/login"
+        || path == "/api/status"
+        || path.starts_with("/api/profile")
+        || path.starts_with("/api/identity")
+        || path.starts_with("/api/v2/profile")
+    // Allow v2 profile endpoints
+    {
         return Ok(next.run(req).await);
     }
 
@@ -257,13 +260,31 @@ pub async fn start_web_server(
     let _ = &*AUTH_TOKEN;
 
     let cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-            "http://127.0.0.1:5173".parse::<HeaderValue>().unwrap(),
-            "tauri://localhost".parse::<HeaderValue>().unwrap(),
-            "http://tauri.localhost".parse::<HeaderValue>().unwrap(),
+        // Restrict origins to localhost, 192.168.x.x, and Docker bridge
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(
+            |origin: &HeaderValue, _request_parts: &axum::http::request::Parts| {
+                if let Ok(origin_str) = origin.to_str() {
+                    let host = origin_str
+                        .trim_start_matches("http://")
+                        .trim_start_matches("https://");
+                    let host_no_port = host.split(':').next().unwrap_or("");
+                    host_no_port == "localhost"
+                        || host_no_port == "127.0.0.1"
+                        || host_no_port.starts_with("192.168.")
+                        || host_no_port.starts_with("172.")
+                } else {
+                    false
+                }
+            },
+        ))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
         ])
-        .allow_methods([Method::GET, Method::POST, Method::PUT])
+        // Note: allow_credentials disabled with wildcard origin (CORS spec requirement)
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
@@ -272,17 +293,29 @@ pub async fn start_web_server(
             HeaderName::from_static("x-ghost-token"),
         ]);
 
-    /*
+    // Configure Governor rate limiter for API protection
     let default_governor_conf = GovernorConfigBuilder::default()
-        .per_second(200) // Increased from 60 to handle frontend init burst
-        .burst_size(100) // Increased from 60 to handle parallel requests
-        .key_extractor(SmartIpKeyExtractor)
+        .per_second(60) // 60 requests per second per IP
+        .burst_size(30) // Allow burst of 30 requests
+        .key_extractor(SmartIpKeyExtractor) // Rate limit by IP address
         .finish()
         .unwrap();
+
     let default_rate_limiter = GovernorLayer {
         config: std::sync::Arc::new(default_governor_conf),
     };
-    */
+
+    // Stricter rate limiter for auth endpoints (brute force protection)
+    let auth_governor_conf = GovernorConfigBuilder::default()
+        .per_second(5) // 5 requests per second per IP
+        .burst_size(10) // Allow burst of 10 requests
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .unwrap();
+
+    let auth_rate_limiter = GovernorLayer {
+        config: std::sync::Arc::new(auth_governor_conf),
+    };
 
     let auth_routes: Router<Arc<AppState>> = Router::new()
         .route("/login", post(AuthController::login))
@@ -310,10 +343,21 @@ pub async fn start_web_server(
             "/",
             get(|| async { Json(ApiV2Response::success("GhostWire API v2")) }),
         )
-        .nest("/auth", auth_routes)
+        // Auth routes with strict rate limiting (brute force protection)
+        .nest("/auth", auth_routes.layer(auth_rate_limiter))
         .nest("/profile", profile_routes)
         .nest("/system", system_routes)
         .nest("/identity", identity_routes)
+        // V2 endpoints
+        .route(
+            "/v2/system/mesh-health",
+            get(crate::v2_routes::get_mesh_health),
+        )
+        // Health check endpoints
+        .route("/v2/health", get(HealthController::health))
+        .route("/v2/ready", get(HealthController::ready))
+        .route("/v2/live", get(HealthController::live))
+        // Note: /v2/security/dashboard already defined below with SystemController
         // .route("/identity", get(IdentityController::get_profile)) // Handled by nested route
         // .route("/identity/status", get(IdentityController::get_profile)) // Handled by nested route
         // .route("/public-key", get(IdentityController::get_public_key)) // Handled by nested route
@@ -322,7 +366,7 @@ pub async fn start_web_server(
         .route("/send", post(MessagingController::send_message))
         .route("/send_message", post(MessagingController::send_message))
         .route("/peers", get(PeerController::list))
-        .route("/connect_peer", post(PeerController::connect))
+        .route("/connect_peer", post(PeerController::request_connect))
         .route("/disconnect_peer", post(PeerController::disconnect))
         .route("/ping_peer", post(PeerController::ping))
         .route("/settings", get(SystemController::get_settings))
@@ -336,6 +380,13 @@ pub async fn start_web_server(
             "/v2/profile/metadata",
             put(IdentityController::update_metadata),
         )
+        .route("/v2/profile/status", get(IdentityController::get_profile))
+        .route("/v2/profile/lock", post(IdentityController::lock_profile))
+        .route(
+            "/v2/profile/unlock",
+            post(IdentityController::unlock_profile),
+        )
+        .route("/v2/profile/save", put(IdentityController::update_metadata))
         .route(
             "/v2/profile/public-key",
             get(IdentityController::get_public_key),
@@ -347,12 +398,178 @@ pub async fn start_web_server(
         .route("/v2/peers", get(PeerController::list))
         .route("/v2/messages", get(MessagingController::get_messages))
         .route("/report_error", post(report_error))
-        .route("/help/tutorial", get(get_tutorial));
-    // .layer(default_rate_limiter);
+        .route("/help/tutorial", get(get_tutorial))
+        // ── Wave 2-6 routes ──────────────────────────────────────────────
+        // Peers (real controller)
+        .route(
+            "/v2/peers/nearby",
+            get(crate::controllers::PeerController::nearby),
+        )
+        .route(
+            "/v2/peers/connect",
+            post(crate::controllers::PeerController::request_connect),
+        )
+        .route(
+            "/v2/peers/requests",
+            get(crate::controllers::PeerController::list_requests),
+        )
+        .route(
+            "/v2/peers/requests/respond",
+            post(crate::controllers::PeerController::respond_to_request),
+        )
+        .route(
+            "/v2/peers/:id",
+            axum::routing::delete(crate::controllers::PeerController::disconnect),
+        )
+        .route(
+            "/v2/peers/:id/block",
+            post(crate::controllers::PeerController::block),
+        )
+        .route(
+            "/v2/peers/ping",
+            post(crate::controllers::PeerController::ping),
+        )
+        // Trust
+        .route(
+            "/v2/trust",
+            get(crate::controllers::TrustController::list_peers),
+        )
+        .route(
+            "/v2/trust/:peer_id",
+            get(crate::controllers::TrustController::get_trust),
+        )
+        .route(
+            "/v2/trust/:peer_id/verify",
+            post(crate::controllers::TrustController::mark_verified),
+        )
+        .route(
+            "/v2/trust/:peer_id/block",
+            post(crate::controllers::TrustController::block_peer),
+        )
+        // Knowledge Ark
+        .route(
+            "/v2/ark/collections",
+            get(crate::controllers::ArkController::list_collections),
+        )
+        .route(
+            "/v2/ark/collections",
+            post(crate::controllers::ArkController::create_collection),
+        )
+        .route(
+            "/v2/ark/entries",
+            post(crate::controllers::ArkController::create_entry),
+        )
+        .route(
+            "/v2/ark/entries/:cid",
+            get(crate::controllers::ArkController::get_entry),
+        )
+        .route(
+            "/v2/ark/entries/:cid",
+            axum::routing::delete(crate::controllers::ArkController::delete_entry),
+        )
+        .route(
+            "/v2/ark/search",
+            get(crate::controllers::ArkController::search),
+        )
+        .route(
+            "/v2/ark/tags/:tag",
+            get(crate::controllers::ArkController::search_by_tag),
+        )
+        .route(
+            "/v2/ark/stats",
+            get(crate::controllers::ArkController::stats),
+        )
+        // Ghost Channels
+        .route(
+            "/v2/channels",
+            get(crate::controllers::ChannelController::list),
+        )
+        .route(
+            "/v2/channels",
+            post(crate::controllers::ChannelController::create),
+        )
+        .route(
+            "/v2/channels/:id/join",
+            post(crate::controllers::ChannelController::join),
+        )
+        .route(
+            "/v2/channels/:id/leave",
+            post(crate::controllers::ChannelController::leave),
+        )
+        .route(
+            "/v2/channels/:id/publish",
+            post(crate::controllers::ChannelController::publish),
+        )
+        .route(
+            "/v2/channels/:id/messages",
+            get(crate::controllers::ChannelController::get_messages),
+        )
+        // Recovery (Shamir)
+        .route(
+            "/v2/recovery/setup",
+            post(crate::controllers::RecoveryController::setup_shares),
+        )
+        .route(
+            "/v2/recovery/my-shares",
+            get(crate::controllers::RecoveryController::list_my_shares),
+        )
+        .route(
+            "/v2/recovery/reconstruct",
+            post(crate::controllers::RecoveryController::reconstruct_key),
+        )
+        // Network / mesh health
+        .route(
+            "/v2/network/status",
+            get(crate::controllers::NetworkController::status),
+        )
+        .route(
+            "/v2/network/qr-contact",
+            get(crate::controllers::NetworkController::generate_contact_qr),
+        )
+        .route(
+            "/v2/network/scan-qr",
+            post(crate::controllers::NetworkController::scan_contact_qr),
+        )
+        // Note: /v2/system/mesh-health already defined above with v2_routes
+        // Pairing
+        .route(
+            "/v2/pair/generate",
+            post(crate::controllers::PairingController::generate_code),
+        )
+        .route(
+            "/v2/pair/contact-card",
+            get(crate::controllers::PairingController::get_contact_card),
+        )
+        .route(
+            "/v2/pair/rendezvous",
+            get(crate::controllers::PairingController::get_rendezvous_address),
+        );
 
     let app: Router = Router::new()
-        .nest("/api", api_routes)
+        // All API routes with default rate limiting (auth already has stricter limits)
+        .nest("/api", api_routes.layer(default_rate_limiter))
         .route("/ws", get(ws_handler))
+        // Security headers middleware (HSTS, X-Frame-Options, CSP, etc.)
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        ))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-xss-protection"),
+            HeaderValue::from_static("1; mode=block"),
+        ))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
         .layer(middleware::from_fn(auth_middleware))
         .layer(cors.clone())
         .fallback(static_handler)
@@ -374,12 +591,42 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-async fn handle_socket(mut socket: WebSocket, _state: Arc<AppState>) {
-    use axum::extract::ws::Message;
-    while let Some(Ok(msg)) = socket.recv().await {
-        if let Message::Text(text) = msg {
-            let _ = socket.send(Message::Text(format!("Echo: {}", text))).await;
+async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    use axum::extract::ws::{Message, WebSocket};
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::sync::broadcast;
+
+    // Split socket into send/recv halves
+    let (mut sender, mut receiver) = socket.split();
+
+    // Subscribe to core event bus
+    let mut event_rx = state.core.read().await.event_bus.subscribe();
+
+    // Task 1: Forward CoreEvents to WebSocket
+    let send_task = tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv().await {
+            // Serialize CoreEvent to JSON
+            let json = serde_json::to_string(&event).unwrap_or_default();
+            if sender.send(Message::Text(json)).await.is_err() {
+                break; // Client disconnected
+            }
         }
+    });
+
+    // Task 2: Handle incoming messages (echo for now, can be extended)
+    let recv_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = receiver.next().await {
+            if let Message::Text(text) = msg {
+                // Could handle incoming commands here
+                tracing::debug!("WebSocket received: {}", text);
+            }
+        }
+    });
+
+    // Wait for either task to complete
+    tokio::select! {
+        _ = send_task => {},
+        _ = recv_task => {},
     }
 }
 

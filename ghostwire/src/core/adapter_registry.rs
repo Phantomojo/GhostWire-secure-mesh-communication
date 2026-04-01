@@ -30,7 +30,7 @@ impl AdapterRegistry {
     pub fn new() -> Self {
         let mut adapters: Vec<Box<dyn ProtocolAdapter>> = Vec::new();
         adapters.push(Box::new(DummyAdapter));
-        // TODO: Register real adapters in next phase
+        // Adapters (Matrix, Meshtastic, etc.) are registered by Core at startup
         Self { adapters }
     }
     pub fn get(&self, name: &str) -> Option<&Box<dyn ProtocolAdapter>> {

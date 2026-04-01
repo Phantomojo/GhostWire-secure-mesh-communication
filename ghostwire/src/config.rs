@@ -42,6 +42,10 @@ pub struct NetworkConfig {
     pub connection_timeout_secs: u64,
     #[serde(skip)]
     pub stealth_handshake_secret: Option<String>,
+    /// Obfs4 obfuscation settings for DPI evasion
+    pub obfs4_enabled: bool,
+    /// Obfs4 secret key (hex-encoded, if not provided a random key is generated)
+    pub obfs4_secret_key: Option<String>,
 }
 
 impl std::fmt::Debug for NetworkConfig {
@@ -56,6 +60,11 @@ impl std::fmt::Debug for NetworkConfig {
             .field(
                 "stealth_handshake_secret",
                 &self.stealth_handshake_secret.as_ref().map(|_| "********"),
+            )
+            .field("obfs4_enabled", &self.obfs4_enabled)
+            .field(
+                "obfs4_secret_key",
+                &self.obfs4_secret_key.as_ref().map(|_| "********"),
             )
             .finish()
     }
@@ -104,6 +113,8 @@ impl Default for Config {
                 max_peers: 50,
                 connection_timeout_secs: 30,
                 stealth_handshake_secret: None,
+                obfs4_enabled: true,  // Always-on obfuscation by default
+                obfs4_secret_key: None,  // Generated randomly if not provided
             },
             encryption: EncryptionConfig {
                 algorithm: "AES-256-GCM".to_string(),
@@ -193,6 +204,14 @@ impl Config {
         // Stealth handshake secret from environment
         if let Ok(secret) = env::var("GHOSTWIRE_STEALTH_SECRET") {
             config.network.stealth_handshake_secret = Some(secret);
+        }
+
+        // Obfs4 configuration from environment
+        if let Ok(val) = env::var("GHOSTWIRE_OBFS4_ENABLED") {
+            config.network.obfs4_enabled = val.to_lowercase() == "true" || val == "1";
+        }
+        if let Ok(secret) = env::var("GHOSTWIRE_OBFS4_SECRET") {
+            config.network.obfs4_secret_key = Some(secret);
         }
 
         config

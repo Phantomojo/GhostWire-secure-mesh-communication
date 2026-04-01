@@ -7,12 +7,40 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 use tracing::{error, info};
+use tracing_subscriber::{fmt, prelude::*};
 
 // Use modules from the library crate
 use ghostwire::config::Config;
 use ghostwire::core::updater;
 use ghostwire::core::Core;
-#[cfg(feature = "web")]
+
+/// Initialize logging with structured JSON output for production
+fn init_logging() {
+    // Production: JSON format for log aggregation
+    #[cfg(not(debug_assertions))]
+    {
+        tracing_subscriber::fmt()
+            .json()
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .init();
+        info!(target: "ghostwire", "Structured JSON logging initialized");
+    }
+
+    // Development: Pretty format for readability
+    #[cfg(debug_assertions)]
+    {
+        tracing_subscriber::fmt()
+            .pretty()
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .init();
+        info!(target: "ghostwire", "Pretty logging initialized");
+    }
+}
+#[cfg(any(feature = "web", feature = "cli"))]
 #[derive(Parser)]
 #[cfg(feature = "cli")]
 #[command(name = "ghostwire")]
@@ -23,11 +51,14 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, alias = "host", default_value = "127.0.0.1")]
     api_host: String,
 
     #[arg(long, default_value = "0.0.0.0")]
     mesh_host: String,
+
+    #[arg(long, default_value_t = 0)]
+    mesh_port: u16,
 
     #[arg(long, default_value_t = 8080)]
     port: u16,
@@ -59,10 +90,12 @@ struct Args {
     command: Option<Commands>,
     api_host: String,
     mesh_host: String,
+    mesh_port: u16,
     port: u16,
     bootstrap: Vec<String>,
     web: bool,
     cli: bool,
+    mesh: bool,
     profile: Option<String>,
 }
 
@@ -100,8 +133,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize structured logging
+    init_logging();
 
     info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
     info!("🔒 Security features: End-to-end encryption, threat detection, anonymity");
@@ -113,13 +146,12 @@ async fn main() -> Result<()> {
         command: None,
         api_host: "127.0.0.1".to_string(),
         mesh_host: "0.0.0.0".to_string(),
+        mesh_port: 0,
         port: 8080,
         bootstrap: Vec::new(),
         web: false,
         cli: false,
         mesh: false,
-        config: None,
-        sim_addr: None,
         profile: None,
     };
 
@@ -181,7 +213,7 @@ async fn main() -> Result<()> {
             // Activate the autonomic nervous system
             core_arc
                 .clone()
-                .start_nervous_system(args.mesh_host.clone())
+                .start_nervous_system(args.mesh_host.clone(), args.mesh_port)
                 .await;
 
             if args.web || config.server.web_enabled {

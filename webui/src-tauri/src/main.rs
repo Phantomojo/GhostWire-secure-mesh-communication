@@ -78,17 +78,21 @@ async fn report_startup_error(error_msg: &str) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
-    
+    // Initialize tracing with enhanced logging for profile creation debugging
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(true)
+        .init();
+
     info!("🌐 Starting GhostWire Secure Messaging Network");
-    
+    info!("📝 Enhanced logging enabled for profile creation debugging");
+
     // Initialize core system
     let core = Arc::new(Core::new()?);
     info!("✅ Core system initialized");
     info!("🔑 Key ID: {}", core.get_key_id());
     info!("🔐 Public key: {} bytes", core.get_public_key().len());
-    
+
     // Start backend server in background
     let core_clone = core.clone();
     tokio::spawn(async move {

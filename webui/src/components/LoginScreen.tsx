@@ -103,15 +103,22 @@ const LoginScreen = ({ onUnlock, onProfileChange, status }: LoginScreenProps) =>
         if (!newProfileName.trim()) return;
 
         setIsLoading(true);
+        setError(''); // Clear any previous errors
         try {
+            console.log('📝 Creating profile:', newProfileName);
             const success = await api.createProfile(newProfileName);
             if (success) {
+                console.log('✅ Profile created successfully');
                 await handleSelectProfile(newProfileName);
             } else {
-                setError('Profile creation failed');
+                const errorMsg = 'Profile creation failed. Check backend logs for details.';
+                console.error('❌ Profile creation failed:', errorMsg);
+                setError(errorMsg);
             }
         } catch (err: any) {
-            setError(err.message || 'Creation error');
+            const errorMsg = err?.message || 'Creation error: Unable to connect to backend';
+            console.error('❌ Profile creation exception:', err);
+            setError(errorMsg);
         } finally {
             setIsLoading(false);
         }

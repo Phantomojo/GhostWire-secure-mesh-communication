@@ -1,0 +1,36 @@
+[server]
+host = "127.0.0.1"
+port = 9002
+web_enabled = false
+cli_enabled = true
+auto_update = false
+
+[security]
+max_connections_per_ip = 100
+max_messages_per_minute = 1000
+blacklist_enabled = false
+threat_detection_enabled = false
+allowed_ips = ["127.0.0.1"]
+blocked_ips = []
+key_rotation_interval_days = 30
+
+[network]
+mesh_enabled = true
+reticulum_enabled = false
+briar_enabled = false
+stealth_tcp_enabled = false
+max_peers = 10
+connection_timeout_secs = 30
+obfs4_enabled = false
+
+[encryption]
+algorithm = "AES-GCM"
+key_size = 256
+session_timeout_hours = 24
+
+[features]
+matrix_bridge = false
+meshtastic_bridge = false
+web_ui = false
+cli = true
+api = false

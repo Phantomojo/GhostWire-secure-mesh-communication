@@ -34,15 +34,18 @@ At the moment of creation, GhostWire was already a functional CLI tool written i
 - **Original Goal**: "A secure, decentralized platform for threat intelligence sharing and private messaging."
 - **Planned Modules**: `ioc/` (Indicators of Compromise), `trust/` (Reputation), and `tor_integration/`.
 
-## 🛠️ Comparison: Then vs. Now
+## 🛠️ Comparison: Then vs. Now (February 2026)
 
-| Layer          | Big Bang (April)        | Node Cluster V2 (December)        |
-| :------------- | :---------------------- | :-------------------------------- |
-| **Encryption** | Sodiumoxide (Secretbox) | AES-256-GCM + X25519 Hybrid       |
-| **Networking** | Basic mDNS Discovery    | Kademlia DHT + Mesh Topology      |
-| **UI**         | CLI Only (`Whisper`)    | Tactical HUD (React + WebUI)      |
-| **Security**   | Signing/Encryption      | PoW Sybil Defense + Rate Limiting |
-| **License**    | MIT                     | AGPL-3.0                          |
+| Layer          | Big Bang (April 2025)        | Node Cluster V2 (Dec 2025)        | Mobile & Modernization (Feb 2026)     |
+| :------------- | :---------------------- | :-------------------------------- | :------------------------------------ |
+| **Encryption** | Sodiumoxide (Secretbox) | AES-256-GCM + X25519 Hybrid       | + HKDF-SHA256 + ML-KEM (PQC)          |
+| **Networking** | Basic mDNS Discovery    | Kademlia DHT + Mesh Topology      | libp2p v0.56 + WebRTC + AutoNAT       |
+| **UI**         | CLI Only (`Whisper`)    | Tactical HUD (React + WebUI)      | + Tauri Mobile App (Android)          |
+| **TUI**        | ❌ None                | Full TUI (1,400+ lines)           | ❌ Deprecated (removed)                |
+| **Security**   | Signing/Encryption      | PoW Sybil Defense + Rate Limiting | Key Rotation + Revocation Lists       |
+| **License**    | MIT                     | AGPL-3.0                          | AGPL-3.0 (unchanged)                  |
+| **Testing**    | ❌ None                | Basic unit tests                  | Integration tests + Hurl API suite    |
+| **Codebase**   | ~5K lines              | ~175K lines (with archives)       | ~10K lines (85% reduction)            |
 
 ## 🛰️ Key Takeaway
 The "Big Bang" was remarkably mature. GhostWire didn't start as a "Hello World"; it started with **libp2p** and **NaCl** (Networking and Cryptography) fully integrated. The layers added since have been about scaling, visualization, and hardening that core "Big Bang" energy.

@@ -194,11 +194,14 @@ impl SystemController {
                 "Firewall rules applied and persisted".to_string(),
             ))
             .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<String>::error("SAVE_FAILED", e.to_string())),
-            )
-                .into_response(),
+            Err(e) => {
+                let msg: String = format!("{}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiV2Response::<()>::error("SAVE_FAILED", &msg)),
+                )
+                    .into_response()
+            }
         }
     }
 
@@ -282,14 +285,14 @@ impl SystemController {
                 filename
             )))
             .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<String>::error(
-                    "BACKUP_FAILED",
-                    e.to_string(),
-                )),
-            )
-                .into_response(),
+            Err(e) => {
+                let msg: String = format!("Backup failed: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiV2Response::<()>::error("BACKUP_FAILED", &msg)),
+                )
+                    .into_response()
+            }
         }
     }
 
