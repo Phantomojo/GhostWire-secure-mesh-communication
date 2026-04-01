@@ -1,0 +1,24 @@
+FROM debian:bookworm-slim
+
+# Install ONLY runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    libdbus-1-3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create working directory
+WORKDIR /app
+
+# Copy the pre-built binary and the custom config
+# Note: Paths are relative to the build context (project root)
+COPY ghostwire/target/release/ghostwire /usr/local/bin/ghostwire
+COPY ghostwire.mesh_test.toml /app/ghostwire.toml
+
+# Expose mesh port
+EXPOSE 4001
+
+# Start the application with mesh settings
+ENTRYPOINT ["ghostwire"]
+CMD ["--config", "/app/ghostwire.toml", "--mesh"]

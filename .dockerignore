@@ -20,7 +20,6 @@ LICENSE
 # Build artifacts
 target/
 node_modules/
-dist/
 build/
 
 # Logs

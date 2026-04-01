@@ -1,0 +1,99 @@
+# cargo-deny configuration for GhostWire
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Resolve dependencies for these targets
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[advisories]
+# Path to the advisory database
+db-path = "~/.cargo/advisory-db"
+# URL of the advisory database
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Vulnerability severity threshold
+severity-threshold = "low"
+
+# Ignore specific advisories (use sparingly)
+# ignore = [
+#     "RUSTSEC-YYYY-NNN",  # Reason for ignoring
+# ]
+
+[bans]
+# Deny multiple versions of crates
+multiple-versions = "warn"
+
+# Deny specific crates
+deny = [
+    # Example: { name = "insecure-crate", version = "*" },
+]
+
+# Allow specific crates even if they have multiple versions
+allow = [
+    # Example: { name = "necessary-crate", version = "=1.0.0" },
+]
+
+# Skip crates (use for false positives)
+skip = [
+    # Example: { name = "problematic-dep", version = "=0.1.0" },
+]
+
+[licenses]
+# Deny unlicensed crates
+unlicensed = "deny"
+
+# Allow these licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CC0-1.0",
+    "0BSD",
+    "AGPL-3.0-or-later",
+    "GPL-3.0-or-later",
+    "LGPL-3.0-or-later",
+    "Unlicense",
+    "Zlib",
+]
+
+# Deny these licenses
+deny = [
+    # "GPL-2.0",  # Incompatible with AGPL-3.0
+    # "Commons Clause",  # Not open source
+]
+
+# Copyleft license handling
+copyleft = "warn"
+
+# Require explicit approval for unknown licenses
+default = "deny"
+
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+# Allow specific crates with non-standard licenses
+exceptions = [
+    # Example: { name = "special-crate", version = "=1.0.0", allow = ["Special-License"] },
+]
+
+[sources]
+# Allow crates from these sources
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+# Deny crates from unknown sources
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# Require crates to have a specific source
+required-sources = []
