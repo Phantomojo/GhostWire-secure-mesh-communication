@@ -1,0 +1,34 @@
+services:
+  node-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.mesh_test
+    container_name: ghostwire-node-a
+    hostname: node-a
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+      - GHOSTWIRE_MESH_PORT=4001
+    ports:
+      - "4001:4001"
+    command: [ "--config", "/app/ghostwire.toml", "--mesh", "--mesh-port", "4001" ]
+
+  node-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.mesh_test
+    container_name: ghostwire-node-b
+    hostname: node-b
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+      - GHOSTWIRE_MESH_PORT=4002
+    depends_on:
+      - node-a
+    command: [ "--config", "/app/ghostwire.toml", "--mesh", "--mesh-port", "4002", "--bootstrap", "/dns4/node-a/tcp/4001/p2p/QmNnooP36J7RSRM8uXCc8p6Y74G56EPV45UFSy9Pr7T79F" ]
+    # Note: The PeerId above is a placeholder; in a real test we'd need the actual PeerId of node-a
+    # Or rely on mDNS if we put them in the same network.
+    networks:
+      - mesh-net
+
+networks:
+  mesh-net:
+    driver: bridge

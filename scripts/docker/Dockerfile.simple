@@ -1,0 +1,53 @@
+# GhostWire Dockerfile - Simple Working Version
+# Build: docker build -t ghostwire-node:latest .
+
+FROM rust:latest as builder
+
+WORKDIR /app
+
+# Install dependencies (including dbus for libp2p-bluetooth)
+RUN apt-get update && apt-get install -y pkg-config libssl-dev libdbus-1-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo files
+COPY ghostwire/Cargo.toml ghostwire/Cargo.lock ./
+
+# Build dependencies first (better caching)
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs && \
+    cargo build --release && \
+    rm -rf src
+
+# Copy source
+COPY ghostwire/src ./src
+COPY ghostwire/Cargo.toml ./
+COPY ghostwire/build.rs ./
+
+# Build application (without web feature to avoid rust-embed issues)
+RUN cargo build --release --no-default-features --features "cli,mesh,security,stealth"
+
+# Runtime stage - use same base as builder for GLIBC compatibility
+FROM rust:latest
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary
+COPY --from=builder /app/target/release/ghostwire /usr/local/bin/ghostwire
+
+# Create config
+RUN echo '[server]' > /app/config.toml && \
+    echo 'host = "0.0.0.0"' >> /app/config.toml && \
+    echo 'port = 9000' >> /app/config.toml
+
+EXPOSE 9000 4001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -sf http://localhost:9000/api/v2/health || exit 1
+
+ENV RUST_LOG=ghostwire=info,libp2p=warn
+
+CMD ["ghostwire", "--web", "--host", "0.0.0.0", "--port", "9000"]

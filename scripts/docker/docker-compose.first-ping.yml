@@ -1,0 +1,85 @@
+# Docker Compose for GhostWire First Ping Test
+# File: docker-compose.first-ping.yml
+#
+# Usage:
+#   docker-compose -f docker-compose.first-ping.yml up
+#
+# This creates a minimal test topology with:
+# - 1 bootstrap node
+# - 2 client nodes that should discover each other
+
+version: '3.8'
+
+services:
+  # Bootstrap node - helps clients discover each other
+  bootstrap:
+    image: ghostwire-node:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["ghostwire", "--web", "--host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001"]
+    ports:
+      - "4001:4001"
+      - "9000:9000"
+    networks:
+      ghostwire-test:
+        ipv4_address: 172.28.0.10
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/api/v2/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: "no"
+
+  # Node A - First client
+  node-a:
+    image: ghostwire-node:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["ghostwire", "--web", "--host", "0.0.0.0", "--port", "9001", "--mesh-port", "4002"]
+    depends_on:
+      bootstrap:
+        condition: service_healthy
+    networks:
+      ghostwire-test:
+        ipv4_address: 172.28.0.11
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+    volumes:
+      - node-a-logs:/var/log/ghostwire
+    restart: "no"
+
+  # Node B - Second client
+  node-b:
+    image: ghostwire-node:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["ghostwire", "--web", "--host", "0.0.0.0", "--port", "9002", "--mesh-port", "4003"]
+    depends_on:
+      bootstrap:
+        condition: service_healthy
+    networks:
+      ghostwire-test:
+        ipv4_address: 172.28.0.12
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+    volumes:
+      - node-b-logs:/var/log/ghostwire
+    restart: "no"
+
+networks:
+  ghostwire-test:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  node-a-logs:
+    name: ghostwire-node-a-logs
+  node-b-logs:
+    name: ghostwire-node-b-logs

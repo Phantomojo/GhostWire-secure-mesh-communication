@@ -1,0 +1,55 @@
+# Docker Compose for Protocol Integration Testing
+# Runs protocol tests in isolated containers
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Protocol Test Runner
+  # =============================================================================
+  protocol-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.protocol-test
+    container_name: ghostwire-protocol-test
+    volumes:
+      # Mount test results directory
+      - ./test-results:/app/test-results
+      # Mount source for live reload (optional)
+      - ./ghostwire/src:/app/src:ro
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - TEST_OUTPUT_FORMAT=json
+    networks:
+      - protocol-test-net
+    restart: "no"
+
+  # =============================================================================
+  # Test Database (for persistence tests)
+  # =============================================================================
+  test-db:
+    image: redis:7-alpine
+    container_name: ghostwire-test-db
+    ports:
+      - "6379:6379"
+    volumes:
+      - test-db-data:/data
+    networks:
+      - protocol-test-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  protocol-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  test-db-data:
