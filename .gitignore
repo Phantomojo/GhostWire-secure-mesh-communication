@@ -55,3 +55,56 @@ token
 # GhostWire specific
 ghostwire.toml
 build-tools/
+
+# Archives - old versions and backups
+archives/
+*.zip
+
+# Reports - temporary status documents
+reports/
+
+# AI agent files - temporary
+.qwen/
+*_AGENT_*.md
+*_AGENT_*.zip
+
+# Status/Summary files - temporary
+*_STATUS.md
+*_SUMMARY.md
+*_BRIEF.md
+*_COMPLETE.md
+*_PROGRESS.md
+*_AUDIT_STATUS.md
+
+# Temporary documentation
+LIVE_*.md
+QUICK_*.md
+IMPLEMENTATION_*.md
+PROFILE_*.md
+OMARCHY_*.md
+GW_CLI_*.md
+SECURITY_FIXES_*.md
+SECURITY_HARD*.md
+SECURITY_LEARNING.md
+SETUP_COMPLETE.md
+SKILLS_*.md
+SKILL_*.md
+SYSTEMS_*.md
+SYSTEM_*.md
+TESTING_*.md
+VERIFICATION_*.md
+V2_*.md
+HONEST_*.md
+KIMI_*.md
+GOVERNOR_*.md
+
+# Database files
+.ghostwire_db/
+
+# Well-known (auto-generated)
+.well-known/
+
+# Large binary files
+*.zip
+*.tar.gz
+*.gz
