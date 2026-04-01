@@ -11,7 +11,7 @@
 6. Sybil Defense & Trust
 7. Quotas, Blacklists, and Abuse Prevention
 8. Traffic Obfuscation & Anti-Analysis
-9. Disaster & Censorship Scenarios
+9. Disaster & Infrastructure Failure Scenarios
 10. Best Practices & Anti-Patterns
 11. Actionable Security Checklists
 12. Visuals: Security Layers & Flows
@@ -33,7 +33,7 @@ GhostWire is built with security and privacy as core principles. This chapter ex
 ---
 
 ## 3. Threat Models & Real-World Risks
-- **Censorship:** Governments or ISPs blocking or monitoring traffic.
+- **Connectivity Loss:** Governments, ISPs, or natural disasters causing communication blackouts.
 - **Surveillance:** Adversaries trying to read or analyze messages.
 - **Sybil Attacks:** Fake nodes trying to disrupt or spy on the mesh.
 - **Denial of Service:** Flooding the network to disrupt communication.
@@ -81,9 +81,9 @@ GhostWire is built with security and privacy as core principles. This chapter ex
 
 ---
 
-## 9. Disaster & Censorship Scenarios
+## 9. Disaster & Infrastructure Failure Scenarios
 - **Disaster mode:** Store-and-forward, minimal metadata, offline queuing.
-- **Censorship resistance:** Stealth transports, traffic obfuscation, rapid key rotation.
+- **Connectivity resilience:** Privacy-enhanced transports, traffic obfuscation, rapid key rotation.
 
 ---
 

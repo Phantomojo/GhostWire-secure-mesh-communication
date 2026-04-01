@@ -29,9 +29,9 @@
 | Bluetooth   | Planned   | Short-range, mobile-to-mobile, disaster recovery  |
 | WiFi        | Planned   | Local mesh, high bandwidth, urban/rural           |
 | LoRa        | Planned   | Long-range, low-power, rural, disaster, off-grid  |
-| WebRTC      | Planned   | Browser-to-browser, NAT traversal, stealth        |
+| WebRTC      | Planned   | Browser-to-browser, NAT traversal, privacy-enhanced |
 | TCP/IP      | Supported | Standard internet, fallback, federation           |
-| Stealth TCP | Planned   | Censorship resistance, obfuscation                |
+| Privacy-Enhanced TCP | Planned   | Metadata minimization, protocol obfuscation |
 
 ---
 
@@ -70,9 +70,9 @@
 - **Scenario:** Villages with no internet need to share news.
 - **Solution:** LoRa radios connect homes and farms over long distances.
 
-### Stealth/Censorship Resistance
-- **Scenario:** Authorities block internet and monitor traffic.
-- **Solution:** Stealth TCP and WebRTC provide obfuscated, hard-to-block channels.
+### Connectivity in Constrained Environments
+- **Scenario:** Authorities restrict internet access or monitor traffic.
+- **Solution:** Privacy-enhanced TCP and WebRTC provide obfuscated, hard-to-block channels.
 
 ---
 
@@ -124,7 +124,7 @@ graph TD;
 - Enable multiple transports for best coverage.
 - Test transport availability before deployment.
 - Use LoRa for long-range, low-power needs.
-- Use WebRTC/Stealth TCP for censorship resistance.
+- Use WebRTC/Privacy-Enhanced TCP for connectivity in constrained environments.
 - Monitor transport health in the UI.
 
 ### Anti-Patterns

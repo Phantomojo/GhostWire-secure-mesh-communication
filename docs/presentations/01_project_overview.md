@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-**GhostWire** is a modular, privacy-focused mesh networking and messaging platform designed for everyone—from activists and disaster responders to rural communities and tech enthusiasts. It enables secure, decentralized communication even when the internet is down or censored.
+**GhostWire** is a modular, privacy-focused mesh networking and messaging platform designed for everyone—from disaster responders and journalists to rural communities and tech enthusiasts. It enables secure, decentralized communication even when the internet is down or unavailable.
 
 ---
 
@@ -32,17 +32,17 @@ GhostWire lets people connect and communicate directly, forming a mesh network u
 
 ## 2. Why Mesh Networking?
 
-- **Resilience:** Mesh networks don’t rely on a single server or internet connection. If one device goes down, others keep the network alive.
-- **Privacy:** No central authority means less risk of surveillance or censorship.
+- **Resilience:** Mesh networks don't rely on a single server or internet connection. If one device goes down, others keep the network alive.
+- **Privacy:** No central authority means enhanced data protection and user autonomy.
 - **Flexibility:** Works with many technologies—Bluetooth, WiFi, LoRa, and more.
 
 ---
 
 ## 3. Real-World Scenarios
 
-### Activists in Censored Regions
-- **Problem:** Internet blackouts and surveillance.
-- **Solution:** GhostWire forms a local mesh, letting activists communicate securely and privately.
+### Communities with Limited Connectivity
+- **Problem:** Internet blackouts and connectivity constraints.
+- **Solution:** GhostWire forms a local mesh, letting communities communicate securely and privately.
 
 ### Disaster Response
 - **Problem:** Infrastructure is down after a natural disaster.

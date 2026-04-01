@@ -21,10 +21,10 @@ This chapter presents real-world deployments of GhostWire, showing how it solves
 
 ---
 
-## 2. Activist Network in a Censored City
+## 2. Community Network During Communication Blackout
 - **Scenario:** Protesters in a city with internet blackouts use GhostWire over Bluetooth and WiFi to coordinate.
 - **Deployment:** Dozens of phones and laptops form a mesh, relaying messages across city blocks.
-- **Outcome:** Secure, censorship-resistant communication; authorities unable to block or monitor traffic.
+- **Outcome:** Secure, resilient communication; community maintains coordination during connectivity loss.
 - **Visual:**
 ```mermaid
 graph TD;

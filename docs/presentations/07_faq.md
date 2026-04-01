@@ -74,8 +74,8 @@ A: Not recommended; only for advanced users in test environments.
 **Q: How does GhostWire help in a disaster?**
 A: Enables communication when infrastructure is down, using LoRa, WiFi, and Bluetooth.
 
-**Q: Can GhostWire bypass censorship?**
-A: Yes! Stealth transports and traffic obfuscation help evade blocks.
+**Q: Can GhostWire work without internet connectivity?**
+A: Yes! It uses Bluetooth, WiFi, and LoRa to maintain communication during infrastructure failures.
 
 **Q: Has GhostWire been used in real-world events?**
 A: See the Case Studies chapter for detailed stories.
