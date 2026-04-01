@@ -18,6 +18,7 @@ pub struct SimPacket {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct SimTransport {
     socket: UdpSocket,
     node_id: String,

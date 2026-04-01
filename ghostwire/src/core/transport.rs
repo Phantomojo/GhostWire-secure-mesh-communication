@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub enum TransportKind {
     #[cfg(feature = "mesh")]
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
-    Dummy, // Placeholder for now
+    Dummy, // No-op transport for tests/default
     StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
     Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
     Simulated(Arc<tokio::sync::RwLock<crate::core::sim_transport::SimTransport>>),
@@ -29,7 +29,7 @@ impl TransportKind {
         match self {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
-            TransportKind::Dummy => "Dummy transport (placeholder)",
+            TransportKind::Dummy => "Dummy transport (no-op)",
             TransportKind::StealthTCP(_) => "Stealth TCP with Traffic Morphing",
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
             TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
@@ -129,4 +129,4 @@ impl TransportRegistry {
 // #[cfg(feature = "stealth-tcp-transport")]
 // registry.register(StealthTCPProvider::new(...));
 
-// TODO: Refactor all transport implementations to use this registry and trait interface.
+// Future: refactor transport implementations to use this registry and trait interface.

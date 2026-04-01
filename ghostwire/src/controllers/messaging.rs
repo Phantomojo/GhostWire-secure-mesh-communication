@@ -10,6 +10,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// ✅ SECURITY: Message size limit (10KB)
+/// Prevents memory exhaustion attacks
+const MAX_MESSAGE_SIZE: usize = 10 * 1024; // 10KB
+
+/// ✅ SECURITY: Rate limit for messages (100 per minute per user)
+const MESSAGE_RATE_LIMIT: u32 = 100;
+
 pub struct MessagingController;
 
 impl MessagingController {
@@ -27,6 +34,9 @@ impl MessagingController {
             .and_then(|l| l.parse().ok())
             .unwrap_or(50);
 
+        // ✅ SECURITY: Cap limit to prevent DoS
+        let limit = limit.min(1000);
+
         let messages = state
             .core
             .read()
@@ -43,6 +53,14 @@ impl MessagingController {
         State(state): State<Arc<AppState>>,
         Json(_req): Json<BroadcastRequest>,
     ) -> impl IntoResponse {
+        // ✅ SECURITY: Validate broadcast message size
+        if _req.message.len() > MAX_MESSAGE_SIZE {
+            return Json(ApiV2Response::error(
+                StandardErrorCode::InvalidParams.as_str(),
+                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+            ));
+        }
+
         let message_id = uuid::Uuid::new_v4();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -76,17 +94,46 @@ impl MessagingController {
         State(state): State<Arc<AppState>>,
         Json(payload): Json<SendMessageRequest>,
     ) -> impl IntoResponse {
+        // ✅ SECURITY: Validate message size
+        if payload.content.len() > MAX_MESSAGE_SIZE {
+            return Json(ApiV2Response::error(
+                StandardErrorCode::InvalidParams.as_str(),
+                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+            ));
+        }
+
+        // ✅ SECURITY: Validate content is not empty
+        if payload.content.trim().is_empty() {
+            return Json(ApiV2Response::error(
+                StandardErrorCode::InvalidParams.as_str(),
+                "Message content cannot be empty",
+            ));
+        }
+
+        // ✅ SECURITY: Validate recipient format
+        if payload.recipient.len() > 256 {
+            return Json(ApiV2Response::error(
+                StandardErrorCode::InvalidParams.as_str(),
+                "Recipient ID too long",
+            ));
+        }
+
         let sender_id = state.core.read().await.get_identity_id().await;
 
-        let mut message = crate::core::message::Message::new(
+        let recipient = if payload.recipient == "broadcast" || payload.recipient.is_empty() {
+            "broadcast".to_string()
+        } else {
+            payload.recipient.clone()
+        };
+
+        let message = crate::core::message::Message::new(
             sender_id,
-            "placeholder_recipient".to_string(),
+            recipient.clone(),
             payload.content.clone(),
         );
 
         // If recipient is "broadcast" or empty, use broadcast flavor
         if payload.recipient == "broadcast" || payload.recipient.is_empty() {
-            message.recipient = "broadcast".to_string();
             match state.core.read().await.send_message(&message).await {
                 Ok(_) => Json(ApiV2Response::success("Broadcast sent successfully")),
                 Err(e) => Json(ApiV2Response::error(
@@ -95,7 +142,6 @@ impl MessagingController {
                 )),
             }
         } else {
-            message.recipient = payload.recipient.clone();
             match state
                 .core
                 .read()

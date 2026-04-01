@@ -720,7 +720,7 @@ result = response.json()
 ghostwire init --username alice
 
 # Start web server
-ghostwire web --host 0.0.0.0 --port 9000
+ghostwire web --host 0.0.0.0 --port 3001
 
 # Send message
 ghostwire send --recipient peer-id --message "Hello, world!"
@@ -731,6 +731,71 @@ ghostwire peers --verbose
 # Security scan
 ghostwire security scan --target peer-id
 ```
+
+---
+
+## 🧪 API Test Suite (Hurl)
+
+**Location**: `tests/api/`
+
+GhostWire includes a comprehensive API test suite using [Hurl](https://hurl.dev/) for automated endpoint testing.
+
+### Test Files
+
+| File | Purpose | Endpoints Tested |
+|------|---------|------------------|
+| `01_health.hurl` | System health checks | `/api/status`, `/api/health` |
+| `02_profiles.hurl` | Profile management | `/api/profile/*` |
+| `03_identity.hurl` | Identity operations | `/api/identity/*` |
+| `04_authenticated.hurl` | Authenticated requests | Protected endpoints with tokens |
+| `05_messaging.hurl` | Message operations | `/api/send`, `/api/messages` |
+| `06_auth_guard.hurl` | Authentication guards | Auth enforcement verification |
+
+### Running API Tests
+
+```bash
+cd tests/api
+./run_tests.sh
+```
+
+### Example: Auth Guard Test
+
+```hurl
+# Protected endpoint WITHOUT token → should be rejected
+GET http://localhost:3001/api/peers
+HTTP 401
+
+# Protected endpoint with INVALID token → should be rejected
+GET http://localhost:3001/api/peers
+X-Ghost-Token: fake_invalid_token_12345
+HTTP 401
+
+# Auth-exempt endpoint WITHOUT token → should work
+GET http://localhost:3001/api/profile/list
+HTTP 200
+[Asserts]
+jsonpath "$.data" exists
+```
+
+### Authentication Flow
+
+1. **Login**: `POST /api/auth/login` → Receive JWT token
+2. **Use Token**: Include `X-Ghost-Token: <jwt_token>` header
+3. **Protected Endpoints**: `/api/peers`, `/api/mesh/*`, `/api/security/*`
+4. **Exempt Endpoints**: `/api/profile/list`, `/api/identity/status`, `/api/`
+
+### Exempt vs Protected Endpoints
+
+**✅ Auth-Exempt** (No token required):
+- `GET /api/` - API root
+- `GET /api/profile/list` - List profiles
+- `GET /api/identity/status` - Identity status
+
+**🔒 Protected** (Token required):
+- `GET /api/peers` - Peer list
+- `POST /api/send` - Send message
+- `GET /api/mesh/topology` - Mesh topology
+- `POST /api/security/scan` - Security scan
 
 ## Best Practices
 

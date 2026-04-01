@@ -148,6 +148,7 @@ pub enum StandardErrorCode {
     InternalError,
     InvalidInput,
     IdentityLocked,
+    RateLimited,
 }
 
 impl StandardErrorCode {
@@ -161,6 +162,7 @@ impl StandardErrorCode {
             Self::InternalError => "INTERNAL_ERROR",
             Self::InvalidInput => "INVALID_INPUT",
             Self::IdentityLocked => "IDENTITY_LOCKED",
+            Self::RateLimited => "RATE_LIMITED",
         }
     }
 }

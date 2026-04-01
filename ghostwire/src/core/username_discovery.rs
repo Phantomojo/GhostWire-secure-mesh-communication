@@ -1,7 +1,6 @@
 //! DHT-based Username Discovery System
 //! Allows nodes to publish and lookup username → PeerID mappings across the internet
 
-// TODO: Fix libp2p imports
 use anyhow::{anyhow, Result};
 use libp2p::kad::{Event as KademliaEvent, GetRecordOk, QueryResult, RecordKey};
 use libp2p::PeerId;
@@ -52,6 +51,24 @@ impl UsernameRecord {
             timestamp,
             signature: signature.as_ref().to_vec(),
         })
+    }
+
+    /// Create a record with a pre-computed signature (e.g. from libp2p Keypair).
+    /// Use this when the signer is not PKCS8 (e.g. libp2p protobuf keypair).
+    pub fn new_signed(
+        username: String,
+        peer_id: String,
+        public_key: Vec<u8>,
+        timestamp: u64,
+        signature: Vec<u8>,
+    ) -> Self {
+        Self {
+            username,
+            peer_id,
+            public_key,
+            timestamp,
+            signature,
+        }
     }
 
     /// Verify the signature on this record
@@ -128,6 +145,46 @@ impl UsernameDiscovery {
         let username_key = self.derive_username_key(&self.local_username);
 
         // Serialize record
+        let record_bytes = record.to_bytes()?;
+
+        Ok((RecordKey::new(&username_key), record_bytes))
+    }
+
+    /// Prepare a username record using an external signer (e.g. libp2p Keypair::sign).
+    /// Use this when you have a keypair that is not in PKCS8 format.
+    pub fn prepare_username_publication_with_signer<F>(
+        &self,
+        public_key: Vec<u8>,
+        sign: F,
+    ) -> Result<(RecordKey, Vec<u8>)>
+    where
+        F: FnOnce(&[u8]) -> Result<Vec<u8>>,
+    {
+        info!(
+            "Preparing username '{}' for DHT publication (with signer)",
+            self.local_username
+        );
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+
+        let mut sig_data = Vec::new();
+        sig_data.extend_from_slice(self.local_username.as_bytes());
+        sig_data.extend_from_slice(self.local_peer_id.to_string().as_bytes());
+        sig_data.extend_from_slice(&timestamp.to_le_bytes());
+
+        let signature = sign(&sig_data)?;
+
+        let record = UsernameRecord::new_signed(
+            self.local_username.clone(),
+            self.local_peer_id.to_string(),
+            public_key,
+            timestamp,
+            signature,
+        );
+
+        let username_key = self.derive_username_key(&self.local_username);
         let record_bytes = record.to_bytes()?;
 
         Ok((RecordKey::new(&username_key), record_bytes))

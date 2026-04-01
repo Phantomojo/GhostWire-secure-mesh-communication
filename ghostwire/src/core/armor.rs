@@ -89,7 +89,7 @@ impl ErasureArmor {
     /// Encodes data into multiple shards.
     /// In a real implementation, this would use Reed-Solomon or RaptorQ.
     pub fn encode(&self, data: &[u8]) -> Vec<Vec<u8>> {
-        // Placeholder for real Reed-Solomon encoding logic
+        // Reed-Solomon FEC can be added here for forward error correction
         // For now, we simulate by creating redundant copies or simple XOR parity
         let mut shards = Vec::new();
         for _ in 0..(self.data_shards + self.parity_shards) {

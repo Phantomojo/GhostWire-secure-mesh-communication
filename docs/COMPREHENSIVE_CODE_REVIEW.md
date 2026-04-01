@@ -931,7 +931,7 @@ unsafe impl Send for MeshTransport {}
 **Documentation Issues:**
 1. **SECURITY.md Line 15:** Claims "Zero Known Vulnerabilities" (FALSE - 11 found)
 2. **README.md:** Claims "Production Ready" (premature - alpha stage)
-3. **Contact Email:** `security@ghostwire.com` doesn't exist
+3. **Contact Email:** `mirungu015@proton.me` doesn't exist
 
 **Fixes:**
 ```bash

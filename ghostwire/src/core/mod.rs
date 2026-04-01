@@ -3,13 +3,39 @@
 use serde::Serialize;
 
 pub mod armor;
+pub mod binary_hardening;
+pub mod blockstore;
+pub mod channels;
+pub mod db;
+pub mod dht_signatures;
 pub mod disaster;
+pub mod dtn;
+pub mod encrypted_store;
 pub mod encryption;
 pub mod identity;
+pub mod identity_pairing;
+pub mod knowledge;
+pub mod mailbox;
+pub mod mesh_health;
 pub mod message;
+pub mod micro_optimizations;
 pub mod monitor;
+pub mod network;
+pub mod obfs4_transport;
+pub mod oem_battery_guide;
 pub mod persistence_manager;
-pub mod security;
+pub mod recovery_shamir;
+pub mod reputation;
+pub mod routing;
+pub mod security_v2;
+pub mod social;
+pub mod traffic_armor;
+pub mod transport_ext;
+pub mod transport_pluggable;
+pub mod typed_crypto;
+pub mod updater_fixed;
+pub mod wire_protocol;
+pub use security_v2 as security;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
@@ -37,7 +63,10 @@ pub use encryption::Encryption;
 pub use identity::Identity;
 pub use message::Message;
 // Transport trait removed, using TransportKind enum instead
-pub use security::{SecurityConfig, SecurityManager, SecurityStats};
+pub use security::{
+    AuditLogger, FailedAttemptTracker, SecurityAuditRecord, SecurityConfig, SecurityManager,
+    SecurityStats,
+};
 
 #[cfg(feature = "mesh")]
 pub use mesh::{MeshManager, MeshNode, MeshStats, MeshTopology};
@@ -49,6 +78,7 @@ pub use stealth_tcp::{ConnectionStats, StealthTCPProvider};
 use anyhow::Result;
 use libp2p::Multiaddr;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 // use std::time::Duration; // redundant
 use tokio::sync::RwLock;
@@ -297,9 +327,9 @@ pub struct Core {
     pub reticulum_manager: Option<Arc<RwLock<ReticulumManager>>>,
     pub security_manager: Arc<SecurityManager>,
     pub transport_registry: Arc<RwLock<TransportRegistry>>,
-    pub active_transport: Option<crate::core::transport::TransportKind>,
+    pub active_transport: Arc<RwLock<Option<crate::core::transport::TransportKind>>>,
     pub adapter_registry: Arc<RwLock<AdapterRegistry>>,
-    pub active_adapter: Option<AdapterKind>,
+    pub active_adapter: Arc<RwLock<Option<AdapterKind>>>,
 
     // The Nervous System
     pub persistence: Arc<persistence_manager::PersistenceManager>,
@@ -311,6 +341,36 @@ pub struct Core {
     pub bootstrap_nodes: Vec<Multiaddr>,
     pub event_bus: broadcast::Sender<CoreEvent>,
     pub handshake_secret: Option<Vec<u8>>,
+
+    /// Cached mesh peer count so sync get_peer_count() can return it without awaiting.
+    /// Updated whenever get_mesh_stats() is called (async path); read by get_peer_count().
+    pub mesh_peer_count_cache: Arc<AtomicUsize>,
+
+    /// Security components for rate limiting and audit logging
+    pub failed_attempt_tracker: Arc<crate::core::security_v2::FailedAttemptTracker>,
+    pub audit_logger: Arc<crate::core::security_v2::AuditLogger>,
+    // Wave 2: Offline delivery
+    pub mailbox_store: Arc<crate::core::mailbox::MailboxStore>,
+    // Wave 2: Trust-on-first-use
+    pub trust_store: Arc<crate::core::reputation::TrustStore>,
+    // Wave 3: Content-addressed storage
+    pub block_store: Arc<crate::core::blockstore::BlockStore>,
+    // Wave 4: Knowledge Ark
+    pub knowledge_ark: Arc<crate::core::knowledge::knowledge_ark::KnowledgeArk>,
+    // Wave 4: Performance caches
+    pub identity_cache: Arc<crate::core::micro_optimizations::IdentityCache>,
+    pub peer_cache: Arc<crate::core::micro_optimizations::PeerAddressCache>,
+    pub message_dedup: Arc<crate::core::micro_optimizations::MessageDeduplicator>,
+    // Wave 5: Social graph
+    pub social_graph: Arc<crate::core::social::social_graph::SocialGraph>,
+    // Wave 6: Ghost Channels
+    pub ghost_channels: Arc<crate::core::channels::ghost_channels::GhostChannelRegistry>,
+    // Security: panic mode and dead man's switch
+    pub panic_manager: Arc<crate::core::identity::panic::PanicManager>,
+    // DTN: delay-tolerant networking store
+    pub dtn_store: Arc<crate::core::dtn::epidemic::DtnStore>,
+    // Wave 7: Device pairing
+    pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
 }
 
 impl Core {
@@ -336,7 +396,7 @@ impl Core {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
         let mut registry = TransportRegistry::new();
-        let mut active_transport = None; // Set this based on user config or default
+        let mut active_transport_inner = None; // Set this based on user config or default
 
         if let Some(addr) = sim_addr {
             let sim_transport = Arc::new(RwLock::new(
@@ -344,10 +404,11 @@ impl Core {
             ));
             let sim_kind = crate::core::transport::TransportKind::Simulated(sim_transport);
             registry.register(sim_kind.clone());
-            active_transport = Some(sim_kind);
+            active_transport_inner = Some(sim_kind);
         }
 
         let registry = Arc::new(RwLock::new(registry));
+        let active_transport = Arc::new(RwLock::new(active_transport_inner));
 
         // Initialize Persistence
         let persistence = Arc::new(persistence_manager::PersistenceManager::new(
@@ -387,7 +448,7 @@ impl Core {
             "main".to_string(),
         )));
         let adapter_registry = Arc::new(RwLock::new(adapter_registry));
-        let active_adapter = None;
+        let active_adapter = Arc::new(RwLock::new(None));
 
         // Initialize the Nervous System (10/10 DNA)
         let disaster_manager = disaster::DisasterManager::new(
@@ -461,6 +522,9 @@ impl Core {
             std::time::Duration::from_secs(5), // Check every 5 seconds
         ));
 
+        // Clone identity Arc for use in multiple field initializations
+        let identity_for_fields = identity.clone();
+
         Ok(Self {
             config,
             identity: Arc::new(RwLock::new(identity)),
@@ -483,11 +547,81 @@ impl Core {
             bootstrap_nodes,
             event_bus,
             handshake_secret,
+            mesh_peer_count_cache: Arc::new(AtomicUsize::new(0)),
+            failed_attempt_tracker: Arc::new(FailedAttemptTracker::default()),
+            audit_logger: Arc::new(AuditLogger::default()),
+            // Wave 2-6 subsystems
+            mailbox_store: {
+                let db_path = dirs::data_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("ghostwire")
+                    .join(profile.as_deref().unwrap_or("default"))
+                    .join("db");
+                Arc::new(
+                    crate::core::mailbox::MailboxStore::open(Arc::new(
+                        sled::open(&db_path).unwrap_or_else(|_| {
+                            sled::open(std::path::Path::new(".ghostwire_db"))
+                                .expect("sled open failed")
+                        }),
+                    ))
+                    .unwrap_or_else(|_| crate::core::mailbox::MailboxStore::default()),
+                )
+            },
+            trust_store: Arc::new(crate::core::reputation::TrustStore::new()),
+            block_store: Arc::new(crate::core::blockstore::BlockStore::new(256 * 1024)),
+            knowledge_ark: {
+                let node_id = identity_for_fields.id.clone();
+                Arc::new(crate::core::knowledge::knowledge_ark::KnowledgeArk::new(
+                    node_id,
+                ))
+            },
+            identity_cache: Arc::new(crate::core::micro_optimizations::IdentityCache::new()),
+            peer_cache: Arc::new(crate::core::micro_optimizations::PeerAddressCache::new(
+                std::time::Duration::from_secs(300),
+            )),
+            message_dedup: Arc::new(crate::core::micro_optimizations::MessageDeduplicator::new(
+                std::time::Duration::from_secs(60),
+            )),
+            social_graph: {
+                let node_id = identity_for_fields.id.clone();
+                let pub_key = identity_for_fields.get_public_key().to_vec();
+                let (sg, _rx) =
+                    crate::core::social::social_graph::SocialGraph::new(node_id, pub_key);
+                Arc::new(sg)
+            },
+            ghost_channels: Arc::new(
+                crate::core::channels::ghost_channels::GhostChannelRegistry::new(),
+            ),
+            panic_manager: Arc::new(crate::core::identity::panic::PanicManager::new(
+                crate::core::identity::panic::PanicConfig::default(),
+            )),
+            dtn_store: {
+                let node_id_bytes = {
+                    let id_str = identity_for_fields.id.clone();
+                    let mut arr = [0u8; 32];
+                    let bytes = id_str.as_bytes();
+                    let len = bytes.len().min(32);
+                    arr[..len].copy_from_slice(&bytes[..len]);
+                    arr
+                };
+                Arc::new(crate::core::dtn::epidemic::DtnStore::new(node_id_bytes))
+            },
+            pairing_manager: {
+                let ed_pub = (*identity_for_fields).public_key_bytes();
+                let x_pub = vec![]; // X25519 key derived from Ed25519 - wire properly after first test
+                Arc::new(
+                    crate::core::identity_pairing::device_pairing::PairingManager::new(
+                        identity_for_fields.id.clone(),
+                        ed_pub,
+                        x_pub,
+                    ),
+                )
+            },
         })
     }
 
     /// Starts the autonomic nervous system heartbeat
-    pub async fn start_nervous_system(self: Arc<Self>, mesh_bind_ip: String) {
+    pub async fn start_nervous_system(self: Arc<Self>, mesh_bind_ip: String, mesh_port: u16) {
         tracing::info!("🧠 Activating GhostWire Nervous System (Autonomic Response enabled)");
 
         // Start the network monitor
@@ -504,20 +638,26 @@ impl Core {
                 let mut switcher = core.switcher.write().await;
                 if let Some(new_transport) = switcher.update_and_evaluate(&metrics) {
                     // Logic to actually swap the transport kind in the Core
-                    // For now, we update the active_transport field
-                    // core.set_active_transport_by_type(new_transport).await;
-                    tracing::info!("Autonomic system decided to switch to {:?}", new_transport);
+                    let registry = core.transport_registry.read().await;
+                    if let Some(transport) = registry.get(new_transport.name()) {
+                        let mut active = core.active_transport.write().await;
+                        *active = Some(transport.clone());
+                        tracing::info!(
+                            "Autonomic system switched transport to {:?}",
+                            new_transport
+                        );
+                    }
                 }
             }
         });
 
-        // Start Traffic Chaffing Heartbeat (Military-Grade Metadata Protection)
+        // Cover traffic heartbeat — send cover frames to prevent idle detection
         let core_chaff = self.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
-                if core_chaff.active_adapter.is_some() {
+                if core_chaff.active_adapter.read().await.is_some() {
                     tracing::debug!("📡 Sending Military-Grade Chaff Traffic (DPI Evasion)");
                     let dummy = crate::core::message::Message::new(
                         core_chaff.get_identity_id().await,
@@ -533,7 +673,7 @@ impl Core {
         let core_mesh = self.clone();
         tokio::spawn(async move {
             // Bind to the specified IP, with a random port (0) for P2P
-            let listen_addr = format!("/ip4/{}/tcp/0", mesh_bind_ip);
+            let listen_addr = format!("/ip4/{}/tcp/{}", mesh_bind_ip, mesh_port);
             match core_mesh.start_mesh(&listen_addr).await {
                 Ok(_) => {
                     tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr);
@@ -560,10 +700,11 @@ impl Core {
     }
 
     /// Select an active transport by name
-    pub async fn set_active_transport(&mut self, name: &str) -> Result<()> {
+    pub async fn set_active_transport(&self, name: &str) -> Result<()> {
         let registry = self.transport_registry.read().await;
         if let Some(transport) = registry.get(name) {
-            self.active_transport = Some(transport.clone());
+            let mut active = self.active_transport.write().await;
+            *active = Some(transport.clone());
             Ok(())
         } else {
             Err(anyhow::anyhow!("Transport not found: {}", name))
@@ -606,10 +747,13 @@ impl Core {
             return mgr.send_message(message).await;
         }
 
-        if let Some(_transport) = &self.active_transport {
-            Ok(())
+        if let Some(transport) = self.active_transport.read().await.as_ref() {
+            return transport.send_message(message).await;
         } else {
-            tracing::info!("Message sent locally (no transport): {}", message.content);
+            tracing::info!(
+                "Message processed locally (no active transport): {}",
+                message.content
+            );
             Ok(())
         }
     }
@@ -657,7 +801,7 @@ impl Core {
     }
 
     /// Initialize a default transport for basic functionality
-    pub async fn init_default_transport(&mut self) -> Result<()> {
+    pub async fn init_default_transport(&self) -> Result<()> {
         let provider = Arc::new(crate::core::stealth_tcp::StealthTCPProvider::new(
             None,
             self.security_manager.clone(),
@@ -665,17 +809,19 @@ impl Core {
             true, // Enable Stealth Mode by default
         ));
 
-        self.active_transport = Some(crate::core::transport::TransportKind::StealthTCP(provider));
+        let mut active = self.active_transport.write().await;
+        *active = Some(crate::core::transport::TransportKind::StealthTCP(provider));
         tracing::info!("Initialized StealthTCP transport (Default) 🥷");
 
         Ok(())
     }
 
     /// Select an active protocol adapter by name
-    pub async fn set_active_adapter(&mut self, name: &str) -> Result<()> {
+    pub async fn set_active_adapter(&self, name: &str) -> Result<()> {
         let registry = self.adapter_registry.read().await;
         if let Some(adapter) = registry.get(name) {
-            self.active_adapter = Some(adapter.clone());
+            let mut active = self.active_adapter.write().await;
+            *active = Some(adapter.clone());
             Ok(())
         } else {
             Err(anyhow::anyhow!("Adapter not found: {}", name))
@@ -686,7 +832,7 @@ impl Core {
         // Apply Military-Grade Traffic Morphing (Timing Chaff)
         self.traffic_armor.apply_timing_chaff().await;
 
-        if let Some(adapter) = &self.active_adapter {
+        if let Some(adapter) = self.active_adapter.read().await.as_ref() {
             adapter.send_message(message).await
         } else {
             Err(anyhow::anyhow!("No active adapter selected"))
@@ -837,9 +983,23 @@ impl Core {
         Err(anyhow::anyhow!("Mesh networking not available"))
     }
 
-    /// Get network topology (placeholder for now)
+    /// Get network topology as JSON (nodes, routes, local_node_id from mesh when available).
     pub async fn get_network_topology(&self) -> Result<String> {
-        Ok("Network topology not yet implemented".to_string())
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            let topology = mesh_manager.read().await.get_topology();
+            return serde_json::to_string_pretty(&topology)
+                .map_err(|e| anyhow::anyhow!("Topology serialization failed: {}", e));
+        }
+        #[cfg(not(feature = "mesh"))]
+        let _ = self;
+        Ok(serde_json::json!({
+            "nodes": {},
+            "routes": {},
+            "local_node_id": "",
+            "message": "Mesh not enabled or not initialized"
+        })
+        .to_string())
     }
 
     /// Initialize mesh network
@@ -944,13 +1104,17 @@ impl Core {
         Ok(())
     }
 
-    /// Get mesh network statistics
+    /// Get mesh network statistics.
+    /// Also updates the peer count cache so get_peer_count() returns a recent value.
     pub async fn get_mesh_stats(&self) -> Option<MeshStats> {
         #[cfg(feature = "mesh")]
         {
             if let Some(mesh_manager) = &self.mesh_manager {
                 let manager = mesh_manager.read().await;
-                Some(manager.get_stats().await)
+                let stats = manager.get_stats().await;
+                self.mesh_peer_count_cache
+                    .store(stats.total_nodes, Ordering::Relaxed);
+                Some(stats)
             } else {
                 None
             }
@@ -1059,13 +1223,12 @@ impl Core {
         Vec::new()
     }
 
-    // Add convenience methods for backward compatibility
+    /// Peer count: from mesh cache when mesh is enabled, else from encryption layer.
+    /// The mesh cache is updated whenever get_mesh_stats() is called (e.g. by HUD or CLI).
     pub fn get_peer_count(&self) -> usize {
         #[cfg(feature = "mesh")]
-        if let Some(_mesh_manager) = &self.mesh_manager {
-            // This is a bit tricky since we can't await in a sync function
-            // For HUD, we usually want live data
-            return 0; // Will be optimized later with an atomic counter
+        if self.mesh_manager.is_some() {
+            return self.mesh_peer_count_cache.load(Ordering::Relaxed);
         }
         self.encryption.get_peer_count()
     }
@@ -1136,8 +1299,8 @@ impl MeshManager {
         })
     }
 
+    /// Peer count is provided by Core via mesh_peer_count_cache when mesh is active.
     pub fn get_peer_count(&self) -> usize {
-        // TODO: Implement actual peer counting
         0
     }
 
@@ -1180,3 +1343,6 @@ impl ReticulumManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod core_test;

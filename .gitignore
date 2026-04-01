@@ -108,3 +108,15 @@ GOVERNOR_*.md
 *.zip
 *.tar.gz
 *.gz
+
+# Internal documentation (temporary status files)
+docs/internal/
+
+# Log files
+*.log
+install.log
+launch.log
+pc_build.log
+
+# Random build artifacts
+*.rs

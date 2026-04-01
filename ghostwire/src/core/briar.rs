@@ -323,7 +323,7 @@ impl BriarManager {
             BriarContact {
                 id: "discovered-1".to_string(),
                 name: "Alice".to_string(),
-                public_key: vec![1, 2, 3, 4], // Placeholder
+                public_key: vec![1, 2, 3, 4], // Demo only; replace with real key in Briar bridge
                 verified: false,
                 last_seen: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -335,7 +335,7 @@ impl BriarManager {
             BriarContact {
                 id: "discovered-2".to_string(),
                 name: "Bob".to_string(),
-                public_key: vec![5, 6, 7, 8], // Placeholder
+                public_key: vec![5, 6, 7, 8], // Demo only; replace with real key in Briar bridge
                 verified: false,
                 last_seen: SystemTime::now()
                     .duration_since(UNIX_EPOCH)

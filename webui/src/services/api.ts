@@ -1,131 +1,30 @@
-// API service for connecting to GhostWire backend
+// api.ts — Ghostwire backend client
+// SECURITY FIXES:
+//   1. Auth via httpOnly cookies (server sets Set-Cookie) — not localStorage
+//   2. /dev/token auto-auth removed — only in debug builds
+//   3. API base URL read once at init, not from localStorage on every call
+//   4. No polling — callers use WebSocket for real-time updates
 
-import type { User, Chat, Message, Contact, Group } from '../types';
-
-// Dynamic API base URL - supports cross-PC communication
-const getApiBaseUrl = () => {
-  // Check for localStorage configuration (highest priority for manual overrides)
-  const savedBackendUrl = localStorage.getItem('ghostwire_backend_url');
-  if (savedBackendUrl) {
-    if (savedBackendUrl.startsWith('http')) return savedBackendUrl;
-    return `http://${savedBackendUrl}/api`;
-  }
-
-  // Check for environment variable
-  if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
-  }
-
-  // Default to localhost, but use window.location.hostname for cross-PC
-  const hostname = window.location.hostname;
-  const port = '8080'; // Default backend port for GhostWire
-
-  // If we're not on localhost, assume we're accessing from another PC
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    return `http://${hostname}:${port}/api`;
-  }
-
-  // Default local development
+const resolveBaseUrl = (): string => {
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+  const h = window.location.hostname;
+  const port = '8080';
+  if (h !== 'localhost' && h !== '127.0.0.1') return `http://${h}:${port}/api`;
   return 'http://localhost:8080/api';
 };
 
-const API_BASE_URL = getApiBaseUrl();
+// Read once at module init — never from localStorage
+export const API_BASE = resolveBaseUrl();
+export const WS_URL = API_BASE.replace(/^http/, 'ws').replace('/api', '') + '/api/ws';
 
-// Auth token for X-Ghost-Token header
-const getAuthToken = (): string | null => {
-  // Check multiple possible keys used by different versions
-  return localStorage.getItem('ghostwire_auth_token') ||
-    localStorage.getItem('ghostwire_token') ||
-    localStorage.getItem('token');
-};
+// ── Types ────────────────────────────────────────────────────────────────────
 
-// Get auth headers for API requests
-const getAuthHeaders = (): Record<string, string> => {
-  const token = getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['X-Ghost-Token'] = token;
-  }
-  return headers;
-};
-
-export interface Peer {
-  id: string;
-  name: string;
-  status: 'online' | 'offline';
-  lastSeen: string;
-}
-
-export interface Settings {
-  stealth_mode: boolean;
-}
-
-export interface SendMessageRequest {
-  recipient: string;
-  message: string;
-}
-
-export interface DiscoveredPeer {
-  ip: string;
-  port: number;
-  username: string;
-  node_id: string;
-  public_key: string;
-  last_seen: string;
-  status: string;
-}
-
-export interface NetworkScanResult {
-  discovered_peers: DiscoveredPeer[];
-  scan_time: string;
-}
-
-export interface NetworkInfo {
-  local_ip: string;
-  timestamp: string;
-}
-
-// --- API V2 Interfaces ---
-
-export interface V2Response<T> {
+export interface ApiEnvelope<T> {
   version: string;
   timestamp: string;
   request_id: string;
   data?: T;
-  error?: V2Error;
-  pagination?: PaginationMeta;
-  links?: HateoasLinks;
-  rate_limit?: RateLimitInfo;
-}
-
-export interface V2Error {
-  code: string;
-  message: string;
-  details?: any;
-  help_url?: string;
-  trace_id?: string;
-}
-
-export interface PaginationMeta {
-  total: number;
-  page: number;
-  per_page: number;
-  pages: number;
-}
-
-export interface HateoasLinks {
-  self: string;
-  next?: string;
-  prev?: string;
-  related?: Record<string, string>;
-}
-
-export interface RateLimitInfo {
-  limit: number;
-  remaining: number;
-  reset: string;
+  error?: { code: string; message: string; details?: unknown };
 }
 
 export interface IdentityStatus {
@@ -133,13 +32,8 @@ export interface IdentityStatus {
   has_identity: boolean;
   did?: string;
   username?: string;
+  nickname?: string;
   setup_complete?: boolean;
-}
-
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data: T;
-  error?: string;
 }
 
 export interface ProfileV2 {
@@ -149,785 +43,350 @@ export interface ProfileV2 {
   nickname: string;
   bio: string;
   public_key: string;
-  key_id: string;
   created_at: string;
-  dht_published: boolean;
   security_score: number;
-}
-
-export interface SecurityDashboardV2 {
-  score: number;
-  encryption: {
-    method: string;
-    active: boolean;
-    pqc_armor: boolean;
-  };
-  stats: {
-    messages_encrypted: number;
-    peers_verified: number;
-    rate_limit_violations: number;
-    blacklisted_peers: number;
-  };
-  threat_level: string;
 }
 
 export interface PeerV2 {
   id: string;
+  node_id: string;
   username: string;
-  status: string;
+  nickname?: string;
+  status: 'online' | 'offline' | 'connecting';
   last_seen: string;
+  trust_level: string;
   trust_score: number;
   public_key: string;
+  discovery_method: string;
+  latency_ms?: number;
 }
 
 export interface MessageV2 {
-  id: string; // Now a string thanks to our backend update
+  id: string;
   sender: string;
   recipient: string;
   content: string;
   timestamp: number;
   encrypted: boolean;
   message_type: string;
-  encryption_status: string;
 }
 
-// Configuration management
-export const config = {
-  setBackendUrl: (url: string) => {
-    localStorage.setItem('ghostwire_backend_url', url);
-    window.location.reload(); // Reload to use new URL
-  },
+export interface SecurityDashboardV2 {
+  score: number;
+  encryption: { method: string; active: boolean; pqc_armor: boolean };
+  stats: {
+    messages_encrypted: number;
+    peers_verified: number;
+    rate_limit_violations: number;
+    blocked_peers: number;
+  };
+  threat_level: 'none' | 'low' | 'medium' | 'high' | 'critical';
+}
 
-  getBackendUrl: () => {
-    return localStorage.getItem('ghostwire_backend_url') || 'http://localhost:3001/api';
-  },
+export interface MeshHealthV2 {
+  timestamp: number;
+  network_state: {
+    state: string;
+    internet_reachable: boolean;
+    active_transport: string;
+    latency_ms: number;
+    packet_loss_pct: number;
+  };
+  peers: Array<{
+    node_id: string;
+    nickname?: string;
+    is_online: boolean;
+    latency_ms?: number;
+    trust_level: string;
+    signal_strength: number;
+  }>;
+  routing: { routing_table_size: number; sphinx_sessions: number; mixing_queue_depth: number };
+  storage: { message_count: number; ark_entry_count: number; mailbox_pending: number };
+  security: { identity_locked: boolean; blocked_peers: number; failed_unlock_attempts_24h: number };
+  performance: { dedup_cache_size: number; ws_subscriber_count: number };
+}
 
-  resetBackendUrl: () => {
-    localStorage.removeItem('ghostwire_backend_url');
-    window.location.reload();
-  },
+export interface GhostChannel {
+  topic_id: string;
+  local_name?: string;
+  description?: string;
+  created_at: number;
+  invite_string: string;
+}
 
-  // Auth token management
-  setAuthToken: (token: string) => {
-    localStorage.setItem('ghostwire_auth_token', token);
-    console.log('🔐 Auth token set. API requests will now include X-Ghost-Token header.');
-  },
+export interface ArkEntry {
+  cid: string;
+  title: string;
+  body: string;
+  collection: string;
+  tags: string[];
+  kind: string;
+  access: string;
+  author: string;
+  created_at: number;
+}
 
-  getAuthToken: (): string | null => {
-    return getAuthToken();
-  },
+export interface ArkStats {
+  total_entries: number;
+  total_collections: number;
+  total_tags: number;
+}
 
-  clearAuthToken: () => {
-    localStorage.removeItem('ghostwire_auth_token');
-    console.log('🔓 Auth token cleared.');
-  },
+export interface TransportStatus {
+  tier: 'stealth' | 'webrtc' | 'covert' | 'fronted' | 'offline';
+  display_name: string;
+  latency_ms: number;
+  internet_reachable: boolean;
+}
 
-  isAuthenticated: (): boolean => {
-    return !!getAuthToken();
-  },
+// ── Core fetch wrapper ───────────────────────────────────────────────────────
 
-  API_BASE_URL: API_BASE_URL
-};
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
+    method,
+    credentials: 'include',              // httpOnly cookie auth — no localStorage
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 
-async function reportFrontendError(errorMsg: string) {
-  try {
-    const hostname = window.location.hostname;
-    const userAgent = navigator.userAgent;
-    const fullMsg = `Frontend error on ${hostname} [${userAgent}]: ${errorMsg}`;
-
-    // Try to report to the current backend
-    const backendUrl = getApiBaseUrl().replace('/api', '');
-    await fetch(`${backendUrl}/api/report_error`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: fullMsg })
-    });
-  } catch {
-    // Silently fail if error reporting fails
+  const ct = res.headers.get('content-type') ?? '';
+  if (!ct.includes('application/json')) {
+    throw new Error(`Non-JSON response from ${path}: ${res.status}`);
   }
+
+  const envelope: ApiEnvelope<T> = await res.json();
+
+  if (!res.ok || envelope.error) {
+    const e = envelope.error ?? { code: 'HTTP_ERROR', message: res.statusText };
+    throw Object.assign(new Error(e.message), { code: e.code, status: res.status });
+  }
+
+  return envelope.data as T;
 }
 
-// REST API functions
-export const api = {
-  // Generic HTTP methods
-  async get(endpoint: string): Promise<any> {
-    const url = `${getApiBaseUrl()}${endpoint}`;
-    console.log(`API GET: ${url}`);
+const get  = <T>(path: string)              => request<T>('GET',    path);
+const post = <T>(path: string, b?: unknown) => request<T>('POST',   path, b);
+const put  = <T>(path: string, b?: unknown) => request<T>('PUT',    path, b);
+const del  = <T>(path: string)              => request<T>('DELETE', path);
 
-    let response = await fetch(url, {
-      headers: getAuthHeaders(),
-    });
+// ── Auth ─────────────────────────────────────────────────────────────────────
 
-    if (response.status === 401) {
-      console.warn('🔒 Unauthorized, attempting auto-discovery...');
-      if (await this.autoAuthenticate()) {
-        response = await fetch(url, {
-          headers: getAuthHeaders(),
-        });
-      }
-    }
+export const auth = {
+  unlock: (password: string) =>
+    post<void>('/identity/unlock', { password }),
 
-    const contentType = response.headers.get('content-type');
-    if (!response.ok) {
-      const errorText = contentType && contentType.includes('application/json')
-        ? (await response.json()).error || response.statusText
-        : await response.text();
-      throw new Error(`GET ${endpoint} failed (${response.status}): ${errorText}`);
-    }
+  lock: () => post<void>('/identity/lock'),
 
-    if (contentType && contentType.includes('application/json')) {
-      return response.json();
-    }
-    return response.text();
-  },
+  setup: (data: { nickname: string; password: string }) =>
+    post<string>('/identity/setup', data),
 
-  async post(endpoint: string, data?: any): Promise<any> {
-    const url = `${getApiBaseUrl()}${endpoint}`;
-    console.log(`API POST: ${url}`, data);
+  status: () => get<IdentityStatus>('/identity/status'),
 
-    let response = await fetch(url, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    if (response.status === 401) {
-      console.warn('🔒 Unauthorized, attempting auto-discovery...');
-      if (await this.autoAuthenticate()) {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: data ? JSON.stringify(data) : undefined,
-        });
-      }
-    }
-
-    const contentType = response.headers.get('content-type');
-    if (!response.ok) {
-      const errorText = contentType && contentType.includes('application/json')
-        ? (await response.json()).error || response.statusText
-        : await response.text();
-      throw new Error(`POST ${endpoint} failed (${response.status}): ${errorText}`);
-    }
-
-    if (contentType && contentType.includes('application/json')) {
-      return response.json();
-    }
-    return response.text();
-  },
-
-  async put(endpoint: string, data?: any): Promise<any> {
-    const url = `${getApiBaseUrl()}${endpoint}`;
-    console.log(`API PUT: ${url}`, data);
-
-    let response = await fetch(url, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    if (response.status === 401) {
-      console.warn('🔒 Unauthorized, attempting auto-discovery...');
-      if (await this.autoAuthenticate()) {
-        response = await fetch(url, {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: data ? JSON.stringify(data) : undefined,
-        });
-      }
-    }
-
-    const contentType = response.headers.get('content-type');
-    if (!response.ok) {
-      const errorText = contentType && contentType.includes('application/json')
-        ? (await response.json()).error || response.statusText
-        : await response.text();
-      throw new Error(`PUT ${endpoint} failed (${response.status}): ${errorText}`);
-    }
-
-    if (contentType && contentType.includes('application/json')) {
-      return response.json();
-    }
-    return response.text();
-  },
-
-  async delete(endpoint: string): Promise<any> {
-    const url = `${getApiBaseUrl()}${endpoint}`;
-    console.log(`API DELETE: ${url}`);
-
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`DELETE ${endpoint} failed: ${response.statusText}`);
-    }
-    return response.json();
-  },
-
-  // --- API V2 Methods ---
-
-  async v2Get<T>(endpoint: string): Promise<T> {
-    const url = `${getApiBaseUrl()}/v2${endpoint}`;
-    console.log(`🚀 API V2 GET: ${url}`);
-
-    const response = await fetch(url, {
-      headers: getAuthHeaders(),
-    });
-
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      console.error(`❌ API V2 Non-JSON Response: ${text.substring(0, 100)}`);
-      throw new Error(`Expected JSON but got ${contentType || 'plain text'}`);
-    }
-
-    const envelope: V2Response<T> = await response.json();
-
-    if (!response.ok || envelope.error) {
-      const error = envelope.error || { code: 'UNKNOWN', message: response.statusText };
-      console.error(`❌ API V2 Error (${error.code}): ${error.message}`);
-      throw new Error(error.message);
-    }
-
-    return envelope.data!;
-  },
-
-  async v2Post<T>(endpoint: string, data?: any): Promise<T> {
-    const url = `${getApiBaseUrl()}/v2${endpoint}`;
-    console.log(`🚀 API V2 POST: ${url}`, data);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      console.error(`❌ API V2 Non-JSON Response: ${text.substring(0, 100)}`);
-      throw new Error(`Expected JSON but got ${contentType || 'plain text'}`);
-    }
-
-    const envelope: V2Response<T> = await response.json();
-
-    if (!response.ok || envelope.error) {
-      const error = envelope.error || { code: 'UNKNOWN', message: response.statusText };
-      console.error(`❌ API V2 Error (${error.code}): ${error.message}`);
-      throw new Error(error.message);
-    }
-
-    return envelope.data!;
-  },
-
-  // Send a message
-  async sendMessage(recipient: string, message: string): Promise<void> {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/v2/messages/send`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ recipient, content: message }),
-      });
-      if (!response.ok) {
-        // Try to read error as JSON first
-        let errorMsg = response.statusText;
-        try {
-          const errData = await response.json();
-          errorMsg = errData.error?.message || errData.error || response.statusText;
-        } catch { }
-
-        await reportFrontendError(`sendMessage failed: ${errorMsg}`);
-        throw new Error(`Failed to send message: ${errorMsg}`);
-      }
-      const data = await response.json();
-      // V2 API returns data inside a 'data' field usually, but we just check if it was successful (200 OK)
-      // The wrapper might still have 'success' or 'data'.
-      // Our V2 envelope has 'data', 'error'.
-      if (data.error) {
-        await reportFrontendError(`sendMessage failed: ${data.error.message}`);
-        throw new Error(data.error.message || 'Failed to send message');
-      }
-    } catch (e: any) {
-      await reportFrontendError(`sendMessage exception: ${e}`);
-      throw e;
-    }
-  },
-
-  // Get list of peers
-  async getPeers(page = 1, perPage = 20): Promise<PeerV2[]> {
-    try {
-      return await this.v2Get<PeerV2[]>(`/peers?page=${page}&per_page=${perPage}`);
-    } catch (e) {
-      console.warn('Falling back to V1 peers...');
-      const response = await fetch(`${getApiBaseUrl()}/peers`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await response.json();
-      return (data.data?.peers || []).map((p: any) => ({
-        id: p.id,
-        username: p.name,
-        status: p.status,
-        last_seen: p.lastSeen,
-        trust_score: 100,
-        public_key: '',
-      }));
-    }
-  },
-
-  // Get Profile V2
-  async getProfile(): Promise<ProfileV2> {
-    return this.v2Get<ProfileV2>('/profile');
-  },
-
-  // Get Security Dashboard V2
-  async getSecurityDashboard(): Promise<SecurityDashboardV2> {
-    return this.v2Get<SecurityDashboardV2>('/security/dashboard');
-  },
-
-  // Get historical messages from the Sovereign Persistence layer
-  async getHistoricalMessages(peerId: string = 'all'): Promise<any[]> {
-    try {
-      const messages = await this.v2Get<MessageV2[]>(`/messages?peer_id=${peerId}`);
-      return messages.map(m => ({
-        id: m.id,
-        content: m.content,
-        sender: m.sender,
-        recipient: m.recipient,
-        timestamp: new Date(m.timestamp * 1000),
-        status: 'sent',
-        encrypted: m.encrypted
-      }));
-    } catch (e) {
-      console.warn('🚀 Persistence Fetch Failed, falling back to empty stream.', e);
-      return [];
-    }
-  },
-
-  // Get settings
-  async getSettings(): Promise<Settings> {
-    const response = await fetch(`${getApiBaseUrl()}/settings`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get settings: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to get settings');
-    }
-
-    return data.data || { stealth_mode: false };
-  },
-
-  // Update settings
-  async updateSettings(settings: Partial<Settings>): Promise<Settings> {
-    const response = await fetch(`${getApiBaseUrl()}/settings`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(settings),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to update settings: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to update settings');
-    }
-
-    return data.data || settings;
-  },
-
-  // Register this peer with another node for discovery
-  async registerWithPeer(peerAddress: string, peerId: string, peerName: string, publicKey: string): Promise<void> {
-    // Get our own network info to provide the correct IP
-    const networkInfo = await this.getNetworkInfo();
-    const myAddress = `${networkInfo.local_ip}:3001`;
-
-    const response = await fetch(`http://${peerAddress}/api/register_peer`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        peer_id: peerId,
-        peer_name: peerName,
-        public_key: publicKey,
-        address: myAddress
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to register with peer: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to register with peer');
-    }
-  },
-
-  // Scan network for other GhostWire nodes
-  async scanNetwork(): Promise<NetworkScanResult> {
-    console.log('Scanning network for GhostWire nodes...');
-    const response = await fetch(`${getApiBaseUrl()}/scan_network`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to scan network: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to scan network');
-    }
-
-    console.log('Network scan completed:', data.data);
-    return data.data;
-  },
-
-  // Set username
-  async setUsername(username: string): Promise<string> {
-    const response = await fetch(`${getApiBaseUrl()}/set_username`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ username }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to set username: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to set username');
-    }
-
-    return data.data;
-  },
-
-  // Get current username
-  async getUsername(): Promise<string> {
-    const response = await fetch(`${getApiBaseUrl()}/get_username`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get username: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to get username');
-    }
-
-    return data.data;
-  },
-
-  // Identity management
-  async unlockIdentity(password: string): Promise<boolean> {
-    try {
-      const response = await this.post('/identity/unlock', { password });
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Unlock failed', e);
-      return false;
-    }
-  },
-
-  async getIdentityStatus(): Promise<IdentityStatus> {
-    const response = await this.get('/identity/status');
-    return response.data;
-  },
-
-  async setupIdentity(data: { nickname: string; password: string }): Promise<ApiResponse<string>> {
-    return this.post('/identity/setup', data);
-  },
-
-  async lockIdentity(): Promise<boolean> {
-    try {
-      const response = await this.post('/identity/lock');
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Lock failed', e);
-      return false;
-    }
-  },
-
-  // Profile Management
-  async listProfiles(): Promise<{ profiles: string[]; current: string | null }> {
-    const response = await this.get('/profile/list');
-    return response.data;
-  },
-
-  async selectProfile(profileName: string): Promise<boolean> {
-    try {
-      const response = await this.post('/profile/select', { profile_name: profileName });
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Select profile failed', e);
-      return false;
-    }
-  },
-
-  async createProfile(name: string): Promise<boolean> {
-    try {
-      const response = await this.post('/profile/create', { name });
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Create profile failed', e);
-      return false;
-    }
-  },
-
-  async deleteProfile(name: string): Promise<boolean> {
-    try {
-      const response = await this.delete(`/profile/delete/${name}`);
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Delete profile failed', e);
-      return false;
-    }
-  },
-
-  async wipeSystem(): Promise<boolean> {
-    try {
-      const response = await this.post('/system/wipe');
-      return !!response.data && !response.error;
-    } catch (e) {
-      console.error('Emergency wipe failed', e);
-      return false;
-    }
-  },
-
-  // Get network information (local IP)
-  async getNetworkInfo(): Promise<NetworkInfo> {
-    const response = await fetch(`${getApiBaseUrl()}/get_network_info`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get network info: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to get network info');
-    }
-
-    return data.data;
-  },
-
-  // --- Auto-Authentication ---
-  async autoAuthenticate(): Promise<boolean> {
-    const existingToken = getAuthToken();
-    if (existingToken && existingToken.trim() !== '') return true;
-
-    try {
-      // Direct fetch to the discovery endpoint on the backend
-      const response = await fetch(`${getApiBaseUrl()}/dev/token`);
-      const data = await response.json();
-      if (data.success && data.data) {
-        console.log('✅ Auto-authenticated with local dev token');
-        config.setAuthToken(data.data);
-        return true;
-      }
-    } catch (e) {
-      // Quietly fail discovery
-    }
-    return false;
-  },
-
-  // Test backend connectivity
-  async testConnection(): Promise<boolean> {
-    try {
-      // Try to auto-authenticate first if needed
-      if (!getAuthToken()) {
-        await this.autoAuthenticate();
-      }
-
-      const response = await fetch(`${getApiBaseUrl()}/status`, {
-        headers: getAuthHeaders(),
-      });
-
-      // If unauthorized, try discovery once more (case where token was expired/invalid)
-      if (response.status === 401) {
-        if (await this.autoAuthenticate()) {
-          // Retry the status check
-          const retryResponse = await fetch(`${getApiBaseUrl()}/status`, {
-            headers: getAuthHeaders(),
-          });
-          return retryResponse.ok;
-        }
-      }
-
-      return response.ok;
-    } catch {
-      return false;
-    }
-  },
-  // --- Project Checklist ---
-  // - [x] Implement Interactive Tutorial System <!-- id: 34 -->
-  //     - [x] Backend: Add tutorial steps API <!-- id: 34a -->
-  //     - [x] Frontend: Add TutorialOverlay component <!-- id: 34b -->
-  //     - [x] Frontend: Integrate tutorial into main App <!-- id: 34c -->
-  // - [/] Final Verification & Polish <!-- id: 35 -->
-  //     - [ ] Robust Tutorial Walkthrough <!-- id: 35a -->
-  //     - [x] User Documentation Review <!-- id: 35b -->
+  // NOTE: /dev/token endpoint removed from production builds.
+  // Dev auto-auth was a security hole. In Rust: #[cfg(debug_assertions)] only.
 };
 
-// WebSocket connection for real-time updates
-export class WebSocketService {
+// ── Profile ───────────────────────────────────────────────────────────────────
+
+export const profile = {
+  get:    () => get<ProfileV2>('/v2/profile'),
+  update: (data: Partial<Pick<ProfileV2, 'nickname' | 'bio'>>) =>
+    put<ProfileV2>('/v2/profile/save', data),
+  list:   () => get<{ profiles: string[]; current: string | null }>('/profile/list'),
+  select: (name: string) => post<void>('/profile/select', { profile_name: name }),
+  create: (name: string) => post<void>('/profile/create', { name }),
+  delete: (name: string) => del<void>(`/profile/delete/${name}`),
+};
+
+// ── Peers ─────────────────────────────────────────────────────────────────────
+
+export const peers = {
+  list:      (page = 1) => get<PeerV2[]>(`/v2/peers?page=${page}`),
+  nearby:    ()         => get<PeerV2[]>('/v2/peers/nearby'),
+  connect:   (node_id: string, message?: string) =>
+    post<void>('/v2/peers/connect', { node_id, message }),
+  block:     (id: string) => post<void>(`/v2/peers/${id}/block`),
+  ping:      (node_id: string) => post<{ latency_ms: number }>('/v2/peers/ping', { node_id }),
+};
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+
+export const messages = {
+  list:   (peer_id = 'all') => get<MessageV2[]>(`/v2/messages?peer_id=${peer_id}`),
+  send:   (recipient: string, content: string) =>
+    post<void>('/v2/messages/send', { recipient, content }),
+  broadcast: (content: string) =>
+    post<void>('/broadcast', { message: content }),
+};
+
+// ── Security ──────────────────────────────────────────────────────────────────
+
+export const security = {
+  dashboard: () => get<SecurityDashboardV2>('/v2/security/dashboard'),
+  audit:     () => get<unknown[]>('/v2/security/audit'),
+  lockdown:  (enabled: boolean) => post<void>('/security/lockdown', { enabled }),
+  rotateKeys: () => post<void>('/security/rotate-keys'),
+};
+
+// ── Network / mesh health ─────────────────────────────────────────────────────
+
+export const network = {
+  status:     () => get<MeshHealthV2['network_state']>('/v2/network/status'),
+  meshHealth: () => get<MeshHealthV2>('/v2/system/mesh-health'),
+  systemStatus: () => get<{
+    cpu_usage: number;
+    memory_used_kb: number;
+    memory_total_kb: number;
+    uptime_seconds: number;
+    peer_count: number;
+  }>('/status'),
+  transport: (): Promise<TransportStatus> =>
+    network.meshHealth().then(h => ({
+      tier: mapTransportTier(h.network_state.active_transport),
+      display_name: h.network_state.active_transport,
+      latency_ms: h.network_state.latency_ms,
+      internet_reachable: h.network_state.internet_reachable,
+    })).catch(() => ({
+      tier: 'offline' as const,
+      display_name: 'offline',
+      latency_ms: 0,
+      internet_reachable: false,
+    })),
+};
+
+function mapTransportTier(s: string): TransportStatus['tier'] {
+  if (s.includes('webrtc') && s.includes('stego')) return 'covert';
+  if (s.includes('webrtc')) return 'webrtc';
+  if (s.includes('front')) return 'fronted';
+  if (s.includes('stealth') || s.includes('tcp')) return 'stealth';
+  return 'offline';
+}
+
+// ── Ghost Channels ────────────────────────────────────────────────────────────
+
+export const channels = {
+  list:     () => get<GhostChannel[]>('/v2/channels'),
+  create:   (name?: string) => post<GhostChannel>('/v2/channels', { name }),
+  join:     (invite: string) => post<GhostChannel>('/v2/channels', { invite }),
+  leave:    (id: string) => post<void>(`/v2/channels/${id}/leave`),
+  publish:  (id: string, text: string) => post<void>(`/v2/channels/${id}/publish`, { text }),
+  messages: (id: string) => get<string[]>(`/v2/channels/${id}/messages`),
+};
+
+// ── Knowledge Ark ─────────────────────────────────────────────────────────────
+
+export const ark = {
+  stats:       () => get<ArkStats>('/v2/ark/stats'),
+  collections: () => get<string[]>('/v2/ark/collections'),
+  search:      (q: string) => get<Array<{ entry: ArkEntry; score: number }>>(`/v2/ark/search?q=${encodeURIComponent(q)}`),
+  byTag:       (tag: string) => get<ArkEntry[]>(`/v2/ark/tags/${encodeURIComponent(tag)}`),
+  get:         (cid: string) => get<ArkEntry>(`/v2/ark/entries/${cid}`),
+  create:      (data: Partial<ArkEntry>) => post<{ cid: string }>('/v2/ark/entries', data),
+  delete:      (cid: string) => del<void>(`/v2/ark/entries/${cid}`),
+};
+
+// ── Trust ─────────────────────────────────────────────────────────────────────
+
+export const trust = {
+  get:    (peer_id: string) => get<unknown>(`/v2/trust/${peer_id}`),
+  verify: (peer_id: string, public_key: string) =>
+    post<void>(`/v2/trust/${peer_id}/verify`, { public_key }),
+  block:  (peer_id: string) => post<void>(`/v2/trust/${peer_id}/block`),
+  list:   () => get<unknown[]>('/v2/trust'),
+};
+
+// ── Recovery ──────────────────────────────────────────────────────────────────
+
+export const recovery = {
+  setup: (data: {
+    threshold: number;
+    total: number;
+    guardians: Array<{ peer_id: string; name: string; x25519_pub_hex: string }>;
+  }) => post<unknown>('/v2/recovery/setup', data),
+  myShares: () => get<unknown[]>('/v2/recovery/my-shares'),
+};
+
+// ── WebSocket client ──────────────────────────────────────────────────────────
+
+export type WsEvent =
+  | { type: 'message'; payload: MessageV2 }
+  | { type: 'peer_connected'; payload: { peer_id: string } }
+  | { type: 'peer_disconnected'; payload: { peer_id: string } }
+  | { type: 'network_update'; payload: { active_peers: number; latency_ms: number } }
+  | { type: 'security_event'; payload: { level: string; message: string } }
+  | { type: 'dtn_bundle'; payload: { cid: string; from: string } }
+  | { type: 'channel_message'; payload: { channel_id: string; text: string } };
+
+export class GhostWireSocket {
   private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
-  private wsUrl: string | null = null;
+  private attempts = 0;
+  private dead = false;
+  private handlers = new Set<(e: WsEvent) => void>();
 
-  constructor(
-    private onMessage: (message: Message) => void,
-    private onPeerUpdate: (peers: Peer[]) => void,
-    private onStatusUpdate: (status: any) => void,
-    private onError: (error: string) => void
-  ) { }
-
-  async connect() {
+  connect() {
+    if (this.dead) return;
     try {
-      if (!this.wsUrl) {
-        // Dynamically fetch backend IP and port
-        const info = await api.getNetworkInfo();
-        // Use window.location.hostname for frontend IP, but backend IP for LAN
-        const wsHost = info.local_ip || window.location.hostname;
-        // Try to get the port from the API base URL
-        let port = 3001;
+      this.ws = new WebSocket(WS_URL);
+      this.ws.onopen    = () => { this.attempts = 0; };
+      this.ws.onmessage = (e) => {
         try {
-          const url = new URL(getApiBaseUrl());
-          port = parseInt(url.port) || 3001;
-        } catch { }
-        this.wsUrl = `ws://${wsHost}:${port}/ws`;
-      }
-
-      console.log(`Connecting to WebSocket: ${this.wsUrl}`);
-      this.ws = new WebSocket(this.wsUrl);
-
-      this.ws.onopen = () => {
-        console.log('WebSocket connected');
-        this.reconnectAttempts = 0;
+          const parsed = JSON.parse(e.data);
+          const evt = normaliseWsEvent(parsed);
+          if (evt) this.handlers.forEach(h => h(evt));
+        } catch {}
       };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.handleMessage(data);
-        } catch (error) {
-          reportFrontendError(`WebSocket message parse error: ${error}`);
-          console.error('Failed to parse WebSocket message:', error);
-        }
-      };
-
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.attemptReconnect();
-      };
-
-      this.ws.onerror = (error) => {
-        reportFrontendError(`WebSocket error: ${error}`);
-        console.error('WebSocket error:', error);
-        this.onError('WebSocket connection error');
-      };
-    } catch (error) {
-      reportFrontendError(`WebSocket connect exception: ${error}`);
-      console.error('Failed to create WebSocket:', error);
-      this.onError('Failed to connect to server');
-    }
+      this.ws.onclose = () => { if (!this.dead) this.scheduleReconnect(); };
+      this.ws.onerror = () => {};
+    } catch {}
   }
 
-  private handleMessage(data: any) {
-    switch (data.type) {
-      case 'message':
-        this.onMessage(data.message);
-        break;
-      case 'peers_update':
-        this.onPeerUpdate(data.peers);
-        break;
-      case 'status_update':
-        this.onStatusUpdate(data.status);
-        break;
-      default:
-        console.log('Unknown message type:', data.type);
-    }
+  on(handler: (e: WsEvent) => void) {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
   }
 
-  private attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-
-      setTimeout(() => {
-        this.connect();
-      }, this.reconnectDelay * this.reconnectAttempts);
-    } else {
-      this.onError('Failed to reconnect to server');
+  send(data: unknown) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
     }
   }
 
   disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
+    this.dead = true;
+    this.ws?.close();
   }
 
-  send(data: any) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
-    } else {
-      console.error('WebSocket is not connected');
-    }
+  private scheduleReconnect() {
+    if (this.attempts >= 8) return;
+    const delay = Math.min(1000 * 2 ** this.attempts, 30_000);
+    this.attempts++;
+    setTimeout(() => this.connect(), delay);
   }
 }
 
-export async function getUser(): Promise<User> {
-  const res = await fetch(`${API_BASE_URL}/user`);
-  if (!res.ok) throw new Error('Failed to fetch user');
-  return res.json();
+function normaliseWsEvent(raw: unknown): WsEvent | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+
+  // Backend sends: { type: "core_event", payload: { "NewMessage": {...} } }
+  // or:            { type: "message", message: {...} }
+  if (r.type === 'core_event' && r.payload && typeof r.payload === 'object') {
+    const p = r.payload as Record<string, unknown>;
+    if (p.NewMessage)       return { type: 'message',            payload: p.NewMessage as MessageV2 };
+    if (p.PeerConnected)    return { type: 'peer_connected',     payload: { peer_id: p.PeerConnected as string } };
+    if (p.PeerDisconnected) return { type: 'peer_disconnected',  payload: { peer_id: p.PeerDisconnected as string } };
+    if (p.NetworkUpdate)    return { type: 'network_update',     payload: p.NetworkUpdate as { active_peers: number; latency_ms: number } };
+  }
+  if (r.type === 'message' && r.message) {
+    return { type: 'message', payload: r.message as MessageV2 };
+  }
+  return null;
 }
 
-export async function getChats(): Promise<Chat[]> {
-  const res = await fetch(`${API_BASE_URL}/chats`);
-  if (!res.ok) throw new Error('Failed to fetch chats');
-  return res.json();
-}
-
-export async function getMessages(chatId: string): Promise<Message[]> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages`);
-  if (!res.ok) throw new Error('Failed to fetch messages');
-  return res.json();
-}
-
-export async function getContacts(): Promise<Contact[]> {
-  const res = await fetch(`${API_BASE_URL}/contacts`);
-  if (!res.ok) throw new Error('Failed to fetch contacts');
-  return res.json();
-}
-
-export async function getGroups(): Promise<Group[]> {
-  const res = await fetch(`${API_BASE_URL}/groups`);
-  if (!res.ok) throw new Error('Failed to fetch groups');
-  return res.json();
-}
-
-export async function sendMessage(chatId: string, text: string): Promise<Message> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error('Failed to send message');
-  return res.json();
-} 
+// Singleton socket instance
+export const socket = new GhostWireSocket();

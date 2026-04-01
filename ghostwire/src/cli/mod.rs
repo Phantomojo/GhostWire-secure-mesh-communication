@@ -103,9 +103,7 @@ pub enum ManageCommand {
 
 /// Run the CLI application
 pub async fn run_cli() -> Result<()> {
-    let cli = Cli {
-        command: Commands::Init { username: None },
-    };
+    let cli = Cli::parse();
 
     let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
 
