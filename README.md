@@ -1,6 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial License -->
 # 🚀 **GhostWire** - Secure Mesh Networking & Communication
 
+<div align="center">
+
+![GhostWire Logo](webui/public/ghostwire-logo.png)
+
+**Resilient Mesh Communication for Connectivity-Constrained Communities**
+
+</div>
+
 ![GhostWire - Afrofuturistic Secure Mesh](webui/public/brand-header.png)
 
 [![GitHub license](https://img.shields.io/github/license/Phantomojo/GhostWire-secure-mesh-communication)](LICENSE)
@@ -160,7 +168,12 @@ We welcome contributions from everyone! Whether you're fixing bugs, adding featu
 
 **🏆 Licensed under [AGPL-3.0-or-later](LICENSE) or [Commercial License](COMMERCIAL_LICENSE.md)**
 
-*Built for connection. Designed for resilience.*  
+![GhostWire Logo](webui/public/ghostwire-logo.png)
+
+*Built for connection. Designed for resilience.*
+
 *Connecting the disconnected, regardless of the odds.*
+
+**GCD4F 2026 Submission — AI for Society**
 
 </div>
