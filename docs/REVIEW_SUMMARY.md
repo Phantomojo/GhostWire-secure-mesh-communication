@@ -142,9 +142,9 @@
 GhostWire can learn from Briar (secure messaging app):
 
 ### 1. Tor Transport Layer ⭐
-**What Briar Does:** All connections via Tor by default  
-**What GhostWire Needs:** Add Arti (Tor client in Rust)  
-**Benefit:** IP anonymization, censorship resistance  
+**What Briar Does:** All connections via Tor by default
+**What GhostWire Needs:** Add Arti (Tor client in Rust)
+**Benefit:** IP anonymization, connectivity resilience
 **Implementation:** See COMPREHENSIVE_CODE_REVIEW.md §9.1
 
 ### 2. Bluetooth Mesh Networking ⭐
@@ -172,9 +172,9 @@ GhostWire can learn from Briar (secure messaging app):
 **Implementation:** See COMPREHENSIVE_CODE_REVIEW.md §9.5
 
 ### 6. RSS Feed Mirroring
-**What Briar Does:** Mirror news feeds P2P for censorship resistance  
-**What GhostWire Needs:** Add feed_rs parser + mesh broadcast  
-**Benefit:** Access blocked websites via peers  
+**What Briar Does:** Mirror news feeds P2P for connectivity resilience
+**What GhostWire Needs:** Add feed_rs parser + mesh broadcast
+**Benefit:** Access blocked websites via peers
 **Implementation:** See COMPREHENSIVE_CODE_REVIEW.md §9.6
 
 ---

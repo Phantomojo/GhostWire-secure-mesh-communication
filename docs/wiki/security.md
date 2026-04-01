@@ -31,7 +31,7 @@ GhostWire is built with security and privacy as core principles. This page detai
 ---
 
 ## Threat Model
-- **Adversaries:** Censors, eavesdroppers, Sybil attackers, spammers, malicious insiders.
+- **Adversaries:** Connectivity constraints, eavesdroppers, Sybil attackers, spammers, malicious insiders.
 - **Goals:** Confidentiality, integrity, availability, plausible deniability.
 - **Mitigations:** Strong crypto, modular trust, rapid response to threats.
 

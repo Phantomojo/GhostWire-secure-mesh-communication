@@ -10,7 +10,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
 
-**GhostWire** is a high-performance, decentralized communication platform built for resilience in adverse environments. It combines high-speed peer-to-peer mesh networking with a tactical interface designed for coordination and secure information sharing when traditional infrastructure fails.
+**GhostWire** is a high-performance, decentralized communication platform built for resilience in adverse environments. It combines high-speed peer-to-peer mesh networking with a real-time monitoring dashboard designed for coordination and secure information sharing when traditional infrastructure fails.
 
 ---
 
@@ -40,17 +40,17 @@
 ## ⚡ **Key Pillars**
 
 ### **🛡️ Security-First Architecture**
-- **Stealth Transport**: Custom TCP handshake layer that appears as generic traffic to unauthorized scanners.
+- **Privacy-Enhancing Transport**: Custom TCP handshake layer that minimizes metadata exposure.
 - **End-to-End Encryption**: All messages are encrypted by default; metadata is minimized.
-- **Disposable Identities**: Support for multiple ephemeral profiles with cryptographic key separation.
+- **Multi-Profile Support**: Support for multiple ephemeral profiles with cryptographic key separation.
 
 ### **🔍 Decentralized Resilience**
 - **Heterogeneous Mesh**: Support for WiFi Direct, BLE, and LoRa (via Tiered Hardware adapters).
 - **libp2p P2P Stack**: Utilizing Gossipsub for efficient message propagation and Kademlia DHT for peer discovery.
 - **One-Click Scaling**: Spin up node swarms for testing or deployment using optimized shell controllers.
 
-### **🛰️ Tactical HUD Interface**
-- **Real-time Monitoring**: Glowing status indicators for CPU, RAM, and Security posture.
+### **📊 Real-time Monitoring Dashboard**
+- **System Health Monitoring**: Live indicators for CPU, RAM, and network status.
 - **Network Radar**: Dynamic, interactive mesh topology visualization.
 - **Modern Messaging**: Split-view, high-density communication interface optimized for coordination.
 
@@ -69,7 +69,7 @@ graph TD
 
 ### **Core Components**
 - **Backend (Rust)**: High-performance core handling encryption, state management, and the p2p stack.
-- **Frontend (TypeScript)**: Responsive, tactical interface using modern React patterns and real-time WebSocket updates.
+- **Frontend (TypeScript)**: Responsive, real-time monitoring interface using modern React patterns and WebSocket updates.
 - **Mesh Layer**: Pluggable transport architecture supporting a variety of hardware interfaces.
 
 ---
@@ -93,7 +93,7 @@ git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git 
 Maintain separate identities for different operational contexts. Launch with a specific profile:
 
 ```bash
-./scripts/ghostwire-manager.sh start --profile delta_force
+./scripts/ghostwire-manager.sh start --profile community_coordinator
 ```
 Each profile manages its own identity keypair and peer database in `~/.ghostwire/`.
 
@@ -115,7 +115,7 @@ Comprehensive guides are located in the [docs/](docs/) directory:
 ## 🏆 **Mission Roadmap**
 
 - [x] **Phase 1: Foundation** - Rust core + libp2p basic integration.
-- [x] **Phase 2: Tactical HUD** - Real-time UI overhaul (Node Cluster V2).
+- [x] **Phase 2: Monitoring Dashboard** - Real-time UI overhaul (Node Cluster V2).
 - [/] **Phase 3: Deep Resilience** - LoRa integration and Micro-Raiden state channels.
 - [ ] **Phase 4: Knowledge Ark** - Offline content serving and ZK-privacy layers.
 

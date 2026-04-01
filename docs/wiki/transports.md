@@ -13,7 +13,7 @@ GhostWire supports a modular, pluggable transport layer, enabling communication 
 | LoRa        | Planned   | Long-range, low-power, off-grid, rural/disaster   |
 | WebRTC      | Planned   | Browser-to-browser, NAT traversal, P2P            |
 | TCP/IP      | Supported | Standard internet, fallback, bridges to servers   |
-| Stealth TCP | Supported | Obfuscated, censorship-resistant, stealth comms   |
+| Privacy-Enhanced TCP | Supported | Obfuscated, connectivity-resilient communication |
 
 ---
 
@@ -37,4 +37,4 @@ GhostWire supports a modular, pluggable transport layer, enabling communication 
 - **Bluetooth:** Ad-hoc mesh in disaster zones, no infrastructure needed.
 - **LoRa:** Rural/off-grid communication, long-range, low-power.
 - **WebRTC:** Browser-based chat, NAT/firewall traversal.
-- **Stealth TCP:** Circumvent censorship, operate in hostile environments. 
+- **Privacy-Enhanced TCP:** Maintain communication in connectivity-constrained environments. 
