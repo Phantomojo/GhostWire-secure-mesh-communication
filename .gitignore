@@ -134,3 +134,15 @@ coverage/
 # Tauri build artifacts
 src-tauri/target/
 ghostwire/data/advisory-db/
+
+# GhostWire runtime files
+ghostwire_token.txt
+username.txt
+ghostwire_settings.json
+config.toml
+litellm-config.yaml
+build_errors.txt
+*.sh
+*.rs.bak
+probe_sss.rs
+test_dalek.rs
