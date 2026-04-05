@@ -2,6 +2,9 @@
 /target/
 *.rs.bk
 
+# Vendored dependencies (downloaded by cargo, not committed)
+ghostwire/vendor/
+
 # Node.js dependencies
 node_modules/
 npm-debug.log*
@@ -104,6 +107,14 @@ GOVERNOR_*.md
 
 # Team distribution packages (not code)
 team_packages/
+
+# Internal directories (not for public)
+knowledge-base/
+social-media/
+website-content-pack/
+webui-new/
+webui/
+release/
 
 # Python cache
 __pycache__/

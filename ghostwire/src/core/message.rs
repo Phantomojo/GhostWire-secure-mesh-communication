@@ -355,7 +355,7 @@ impl Message {
     /// **Returns:** `true` if message age exceeds TTL
     /// **Usage:** Auto-delete old messages
     pub fn is_expired(&self, ttl: u64) -> bool {
-        self.age() > ttl
+        self.age() >= ttl
     }
 }
 

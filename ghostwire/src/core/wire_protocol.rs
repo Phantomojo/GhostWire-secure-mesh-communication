@@ -333,11 +333,13 @@ mod tests {
     #[test]
     fn replay_window_rejects_duplicate() {
         let mut w = ReplayWindow::new();
-        assert!(w.check_and_advance(10));
-        assert!(!w.check_and_advance(10)); // duplicate
-        assert!(w.check_and_advance(11));
-        assert!(!w.check_and_advance(9)); // old but in window
-        assert!(!w.check_and_advance(9)); // duplicate old
+        assert!(w.check_and_advance(10));     // new, accept
+        assert!(!w.check_and_advance(10));    // duplicate, reject
+        assert!(w.check_and_advance(11));     // new, accept
+        // seq 9 is old but hasn't been seen yet — replay window accepts it (reordering)
+        assert!(w.check_and_advance(9));      // not seen before, accept
+        assert!(!w.check_and_advance(9));     // now it's a duplicate, reject
+        assert!(!w.check_and_advance(10));    // still a duplicate, reject
     }
 
     #[test]

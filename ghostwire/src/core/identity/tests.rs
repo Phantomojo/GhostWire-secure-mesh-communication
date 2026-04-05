@@ -13,10 +13,10 @@ mod tests {
         let encrypted = encrypt_identity(&data[..], password).unwrap();
 
         // Verify encrypted format
-        assert_eq!(encrypted.version, 2);
+        assert_eq!(encrypted.version, 4);
         assert!(!encrypted.encrypted_data.is_empty());
         assert_eq!(encrypted.salt.len(), 32);
-        assert_eq!(encrypted.nonce.len(), 12);
+        assert_eq!(encrypted.nonce.len(), 24); // XChaCha20 uses 24-byte nonce
 
         // Decrypt
         let decrypted = decrypt_identity(&encrypted, password).unwrap();

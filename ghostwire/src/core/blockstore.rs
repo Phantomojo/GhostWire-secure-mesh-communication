@@ -498,15 +498,23 @@ mod tests {
     #[tokio::test]
     async fn wantlist_tracks_missing() {
         let store = BlockStore::new(1024);
-        let data = vec![0u8; 3000];
+        // Use unique data: each byte is different based on position
+        let data: Vec<u8> = (0..3000).map(|i| ((i * 31 + i / 256 * 17 + 7) % 256) as u8).collect();
         let manifest = store.store_file(&data, None).await.unwrap();
 
-        // Now simulate having cleared a block
+        // Verify we have 3 unique blocks
+        assert_eq!(manifest.block_cids.len(), 3, "Should have 3 blocks for 3000 bytes");
+
+        // Verify all CIDs are unique
+        let unique_cids: std::collections::HashSet<_> = manifest.block_cids.iter().collect();
+        assert_eq!(unique_cids.len(), 3, "All block CIDs should be unique");
+
+        // Now simulate having cleared one block
         let cid = manifest.block_cids[0];
         store.blocks.write().await.remove(&hex::encode(cid));
 
         let missing = store.missing_blocks(&manifest).await;
-        assert_eq!(missing.len(), 1);
+        assert_eq!(missing.len(), 1, "Should have exactly 1 missing block");
         assert_eq!(missing[0], cid);
     }
 
