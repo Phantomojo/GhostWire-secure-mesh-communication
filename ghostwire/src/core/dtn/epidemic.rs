@@ -18,7 +18,6 @@
 //! The buffer is bounded at MAX_BUFFER_BYTES. When full, evict lowest-probability
 //! bundles first (oldest with lowest delivery_probability).
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
