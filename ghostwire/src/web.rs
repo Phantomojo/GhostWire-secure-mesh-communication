@@ -215,6 +215,7 @@ pub struct StartupConfig {
     pub bootstrap_nodes: Vec<libp2p::Multiaddr>,
     pub sim_addr: Option<String>,
     pub mesh_host: String,
+    pub mesh_port: u16,
 }
 
 #[derive(Clone)]
@@ -231,6 +232,7 @@ pub async fn start_web_server(
     bootstrap_nodes: Vec<libp2p::Multiaddr>,
     sim_addr: Option<String>,
     mesh_host: String,
+    mesh_port: u16,
     config: crate::config::Config,
 ) -> anyhow::Result<()> {
     let initial_core = if let Some(c) = core {
@@ -253,6 +255,7 @@ pub async fn start_web_server(
             bootstrap_nodes,
             sim_addr,
             mesh_host,
+            mesh_port,
         },
         full_config: config,
     });

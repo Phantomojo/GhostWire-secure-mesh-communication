@@ -43,6 +43,9 @@ pub mod tutorial;
 pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
 
+// AI/ML Module
+pub mod ai;
+
 pub mod bluetooth;
 #[cfg(feature = "briar")]
 pub mod briar;
@@ -80,6 +83,7 @@ use libp2p::Multiaddr;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::OnceLock;
 // use std::time::Duration; // redundant
 use tokio::sync::RwLock;
 // using explicit paths for tracing macros
@@ -371,6 +375,12 @@ pub struct Core {
     pub dtn_store: Arc<crate::core::dtn::epidemic::DtnStore>,
     // Wave 7: Device pairing
     pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
+
+    // AI/ML Components (Gemma 4 + ONNX)
+    pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
+    pub anomaly_detector: Option<Arc<ai::IsolationForestModel>>,
+    pub onnx_router: Option<Arc<ai::RoutingClassifier>>,
+    // Trust/reputation uses the existing TrustStore (reputation.rs) — not a duplicate
 }
 
 impl Core {
@@ -465,7 +475,10 @@ impl Core {
         let traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
 
         let messages = Arc::new(RwLock::new(Vec::new()));
-        let message_store = Arc::new(store::SecureMessageStore::new(persistence.clone()));
+        let message_store = Arc::new(store::SecureMessageStore::new(
+            persistence.clone(),
+            encryption.clone(),
+        ));
         let (event_bus, _) = broadcast::channel(1024); // Large buffer for high traffic
 
         // Parse handshake secret from config if available
@@ -617,6 +630,39 @@ impl Core {
                     ),
                 )
             },
+            // AI/ML Components - Initialize Gemma client via OnceLock
+            gemma_client: Arc::new(OnceLock::new()),
+            // Load trained Isolation Forest model (graceful if file missing)
+            anomaly_detector: match ai::IsolationForestModel::from_file(
+                "models/anomaly_detector.json",
+            ) {
+                Ok(model) => {
+                    tracing::info!(
+                        "✅ Anomaly detector loaded: {} trees, {} features",
+                        model.n_estimators,
+                        model.n_features
+                    );
+                    Some(Arc::new(model))
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ Anomaly detector model not loaded: {}", e);
+                    None
+                }
+            },
+            // Load ONNX routing model (Layer 1 fast path)
+            onnx_router: match ai::RoutingClassifier::new("models/ghostwire_routing.onnx") {
+                Ok(router) => {
+                    tracing::info!("✅ AI routing system loaded (LightGBM + Fallback chain)");
+                    Some(Arc::new(router))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "⚠️ AI routing system not loaded (will use PRoPHET fallback): {}",
+                        e
+                    );
+                    None
+                }
+            },
         })
     }
 
@@ -626,6 +672,71 @@ impl Core {
 
         // Start the network monitor
         self.monitor.clone().start().await;
+
+        // Start AI health check loop
+        let core_ai = self.clone();
+        tokio::spawn(async move {
+            // Try to initialize Gemma client after a short delay
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+            if let Err(e) = core_ai.initialize_gemma_client().await {
+                tracing::warn!("⚠️ Gemma 4 AI unavailable (will retry): {}", e);
+            }
+        });
+
+        // Start periodic mesh topology analysis with Gemma 4 AI
+        let core_mesh_ai = self.clone();
+        tokio::spawn(async move {
+            // Wait for initial AI initialization
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                // Check if Gemma client is initialized
+                if let Some(gemma_client) = core_mesh_ai.get_gemma_client() {
+                    // Get mesh stats if available
+                    #[cfg(feature = "mesh")]
+                    if let Some(stats) = core_mesh_ai.get_mesh_stats().await {
+                        // Build telemetry from available mesh stats
+                        let nodes = vec![ai::NodeTelemetry {
+                            node_id: stats.local_node_id.clone(),
+                            rssi: -50.0, // Default — RSSI not yet tracked in mesh stats
+                            latency_ms: stats.connection_stats.avg_connection_time as f32,
+                            packet_loss: if stats.connection_stats.total_connections > 0 {
+                                stats.connection_stats.failed_connections as f32
+                                    / stats.connection_stats.total_connections as f32
+                            } else {
+                                0.0
+                            },
+                            battery_level: 1.0, // Unknown for now
+                            hop_count: stats.routes_count as u32,
+                        }];
+
+                        match gemma_client
+                            .analyze_mesh(nodes, "Optimize relay selection")
+                            .await
+                        {
+                            Ok(analysis) => {
+                                tracing::info!(
+                                    "🤖 AI Mesh Analysis — Health: {:.1}%, Relays: {}, Anomalies: {}",
+                                    analysis.network_health * 100.0,
+                                    analysis.optimal_relays.len(),
+                                    analysis.anomalies.len()
+                                );
+                                for recommendation in &analysis.recommendations {
+                                    tracing::info!("  → {}", recommendation);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("⚠️ AI mesh analysis failed: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         // Start the autonomic switcher loop
         let core = self.clone();
@@ -1258,6 +1369,53 @@ impl Core {
 
         tracing::info!("Core shutdown complete.");
         Ok(())
+    }
+
+    /// Initialize Gemma 4 AI client if Ollama is available
+    async fn initialize_gemma_client(&self) -> Result<(), String> {
+        // Try different model variants based on available hardware
+        let model = if self.config.features.gemma_4b {
+            "gemma4:e4b"
+        } else if self.config.features.gemma_26b {
+            "gemma4:26b"
+        } else {
+            "gemma4:e2b" // Default: lightweight edge model
+        };
+
+        let client = ai::GemmaClient::new("http://localhost:11434", model);
+
+        if client.health_check().await {
+            tracing::info!("✅ Gemma 4 AI initialized with model: {}", model);
+            // Store in OnceLock — this is thread-safe and can only succeed once
+            self.gemma_client
+                .set(Arc::new(client))
+                .map_err(|_| "Gemma client already initialized".to_string())?;
+            Ok(())
+        } else {
+            Err("Ollama server not reachable at localhost:11434".to_string())
+        }
+    }
+
+    /// Get the Gemma client if initialized
+    pub fn get_gemma_client(&self) -> Option<Arc<ai::GemmaClient>> {
+        self.gemma_client.get().cloned()
+    }
+
+    /// Check mesh state for anomalies using the ONNX LightGBM model (Layer 1)
+    ///
+    /// Takes a 2,387-dimensional feature vector from mesh monitoring.
+    /// Returns anomaly probability in [0.0, 1.0] — higher means more likely anomaly.
+    /// Falls back to None if model unavailable.
+    pub fn check_mesh_anomaly(&self, features: &[f32]) -> Option<f32> {
+        self.onnx_router.as_ref()?.check_anomaly(features)
+    }
+
+    /// Score a link for anomalies using the Isolation Forest model
+    ///
+    /// Returns anomaly result with score, classification, and probability.
+    /// Returns None if model unavailable.
+    pub fn score_anomaly(&self, features: &[f32]) -> Option<ai::AnomalyResult> {
+        self.anomaly_detector.as_ref().map(|m| m.score(features))
     }
 }
 

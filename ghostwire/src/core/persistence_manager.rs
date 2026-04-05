@@ -106,7 +106,10 @@ impl PersistenceManager {
                         results.push(data);
                     }
                 }
-                Err(e) => tracing::error!("Failed to decrypt entry in {}: {}", tree_name, e),
+                Err(e) => {
+                    let msg = format!("Failed to decrypt entry in {}: {}", tree_name, e);
+                    tracing::error!("{}", msg);
+                }
             }
         }
         Ok(results)

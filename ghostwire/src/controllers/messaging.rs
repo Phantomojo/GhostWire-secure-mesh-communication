@@ -56,7 +56,7 @@ impl MessagingController {
         // ✅ SECURITY: Validate broadcast message size
         if _req.message.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
-                StandardErrorCode::InvalidParams.as_str(),
+                StandardErrorCode::InvalidInput.as_str(),
                 &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
@@ -97,7 +97,7 @@ impl MessagingController {
         // ✅ SECURITY: Validate message size
         if payload.content.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
-                StandardErrorCode::InvalidParams.as_str(),
+                StandardErrorCode::InvalidInput.as_str(),
                 &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
@@ -105,7 +105,7 @@ impl MessagingController {
         // ✅ SECURITY: Validate content is not empty
         if payload.content.trim().is_empty() {
             return Json(ApiV2Response::error(
-                StandardErrorCode::InvalidParams.as_str(),
+                StandardErrorCode::InvalidInput.as_str(),
                 "Message content cannot be empty",
             ));
         }
@@ -113,7 +113,7 @@ impl MessagingController {
         // ✅ SECURITY: Validate recipient format
         if payload.recipient.len() > 256 {
             return Json(ApiV2Response::error(
-                StandardErrorCode::InvalidParams.as_str(),
+                StandardErrorCode::InvalidInput.as_str(),
                 "Recipient ID too long",
             ));
         }

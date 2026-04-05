@@ -120,3 +120,6 @@ pc_build.log
 
 # Random build artifacts
 *.rs
+
+# Team distribution packages (not code)
+team_packages/

@@ -23,6 +23,7 @@ async fn test_node_to_node_connectivity() {
     );
     let store_a = Arc::new(ghostwire::core::store::SecureMessageStore::new(
         persistence_a.clone(),
+        encryption_a.clone(),
     ));
     let discovery_a = Arc::new(UsernameDiscovery::new(peer_id_a, "NodeA".to_string()));
 
@@ -50,6 +51,7 @@ async fn test_node_to_node_connectivity() {
     );
     let store_b = Arc::new(ghostwire::core::store::SecureMessageStore::new(
         persistence_b.clone(),
+        encryption_b.clone(),
     ));
     let discovery_b = Arc::new(UsernameDiscovery::new(peer_id_b, "NodeB".to_string()));
 

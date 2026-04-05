@@ -28,6 +28,8 @@ pub enum Commands {
         host: String,
         #[arg(short = 'P', long, default_value_t = 8080)]
         port: u16,
+        #[arg(long, default_value_t = 0)]
+        mesh_port: u16,
         #[arg(long)]
         web: bool,
     },
@@ -115,11 +117,11 @@ pub async fn run_cli() -> Result<()> {
         Commands::Init { username } => {
             init_identity(&core_arc, username).await?;
         }
-        Commands::Start { host, port, web } => {
+        Commands::Start { host, port, mesh_port, web } => {
             if web {
-                start_web_server(&core_arc, host, port).await?;
+                start_web_server(&core_arc, host, port, mesh_port).await?;
             } else {
-                start_node(&core_arc, host, port).await?;
+                start_node(&core_arc, host, port, mesh_port).await?;
             }
         }
         Commands::Send { recipient, message } => {
@@ -183,7 +185,7 @@ async fn init_identity(core: &Arc<Core>, username: Option<String>) -> Result<()>
     Ok(())
 }
 
-async fn start_web_server(core: &Arc<Core>, host: String, port: u16) -> Result<()> {
+async fn start_web_server(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -> Result<()> {
     info!("Starting GhostWire web server on {}:{}", host, port);
 
     // Import the web module function
@@ -196,6 +198,7 @@ async fn start_web_server(core: &Arc<Core>, host: String, port: u16) -> Result<(
         Vec::new(),
         None,
         String::new(),
+        mesh_port,
         core.config.clone(),
     )
     .await
@@ -204,7 +207,7 @@ async fn start_web_server(core: &Arc<Core>, host: String, port: u16) -> Result<(
     Ok(())
 }
 
-async fn start_node(core: &Arc<Core>, host: String, port: u16) -> Result<()> {
+async fn start_node(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -> Result<()> {
     info!("Starting GhostWire node on {}:{}", host, port);
 
     // Initialize mesh networking
@@ -212,7 +215,7 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16) -> Result<()> {
     let core_clone = core.clone();
     let host_clone = host.clone();
     tokio::spawn(async move {
-        core_clone.start_nervous_system(host_clone).await;
+        core_clone.start_nervous_system(host_clone, mesh_port).await;
     });
 
     // Initialize reticulum networking
@@ -441,7 +444,8 @@ async fn decrypt_message(core: &Arc<Core>, encrypted: &str) -> Result<()> {
     let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encrypted)
         .map_err(|e| anyhow::anyhow!("Invalid base64: {}", e))?;
 
-    let decrypted = core.encryption.decrypt(&decoded);
+    let decrypted = core.encryption.decrypt(&decoded)
+        .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
     let message =
         String::from_utf8(decrypted).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))?;
 
@@ -454,7 +458,7 @@ async fn handle_manage(core: &Arc<Core>, subcommand: ManageCommand) -> Result<()
     match subcommand {
         ManageCommand::Start => {
             info!("🚀 Starting GhostWire node...");
-            start_node(core, "0.0.0.0".to_string(), 8080).await?;
+            start_node(core, "0.0.0.0".to_string(), 8080, 0).await?;
         }
         ManageCommand::Stop => {
             info!("🛑 Stopping GhostWire processes...");
@@ -481,7 +485,7 @@ async fn handle_manage(core: &Arc<Core>, subcommand: ManageCommand) -> Result<()
                 .arg("ghostwire")
                 .output();
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            start_node(core, "0.0.0.0".to_string(), 8080).await?;
+            start_node(core, "0.0.0.0".to_string(), 8080, 0).await?;
         }
         ManageCommand::Status => {
             show_stats(core).await?;
