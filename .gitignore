@@ -1,7 +1,6 @@
 # Rust build artifacts
-**/target/
-**/*.rs.bk
-Cargo.lock
+/target/
+*.rs.bk
 
 # Node.js dependencies
 node_modules/
@@ -26,7 +25,6 @@ Thumbs.db
 
 # Logs
 *.log
-ghostwire/*.txt
 
 # Environment variables
 .env
@@ -45,20 +43,17 @@ ghostwire_token.txt
 *.key
 *.pem
 *.enc
-.env
-.env.*
 token
 
-# GhostWire node data
-~/.local/share/ghostwire/
+# GhostWire node data (user data, not repo)
+# Note: ~/.local/share/ghostwire/ is outside repo, handled by app
 
-# GhostWire specific
+# GhostWire config
 ghostwire.toml
 build-tools/
 
 # Archives - old versions and backups
 archives/
-*.zip
 
 # Reports - temporary status documents
 reports/
@@ -104,22 +99,27 @@ GOVERNOR_*.md
 # Well-known (auto-generated)
 .well-known/
 
-# Large binary files
-*.zip
+# Large binary archives (downloaded datasets, models)
 *.tar.gz
-*.gz
-
-# Internal documentation (temporary status files)
-docs/internal/
-
-# Log files
-*.log
-install.log
-launch.log
-pc_build.log
-
-# Random build artifacts
-*.rs
 
 # Team distribution packages (not code)
 team_packages/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Rust profiling
+*.profraw
+*.profdata
+flamegraph.svg
+coverage/
+*.lcov
+
+# Tauri build artifacts
+src-tauri/target/
+ghostwire/data/advisory-db/

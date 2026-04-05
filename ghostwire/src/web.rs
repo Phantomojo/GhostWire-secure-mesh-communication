@@ -106,9 +106,10 @@ lazy_static! {
             .collect();
 
         let _ = fs::write(&token_file, &token);
-        println!("\n\n🔒 GHOSTWIRE SECURITY 🔒");
-        println!("Generated new persistent token in: {:?}", token_file);
-        println!("X-Ghost-Token: {}\n", token);
+        tracing::info!(
+            token_file = %token_file.display(),
+            "Auth token generated — set X-Ghost-Token header for API access"
+        );
         token
     };
 }

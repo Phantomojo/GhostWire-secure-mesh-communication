@@ -229,7 +229,7 @@ impl MatrixAdapter {
                 .login_username(
                     &self.user,
                     &std::env::var("GHOSTWIRE_MATRIX_PASSWORD")
-                        .unwrap_or_else(|_| "password".to_string()),
+                        .expect("GHOSTWIRE_MATRIX_PASSWORD env var must be set for Matrix bridge"),
                 ) // Use env var
                 .send()
                 .await?;
@@ -380,6 +380,7 @@ pub struct Core {
     pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
     pub anomaly_detector: Option<Arc<ai::IsolationForestModel>>,
     pub onnx_router: Option<Arc<ai::RoutingClassifier>>,
+    pub feature_extractor: Arc<RwLock<ai::FeatureExtractor>>,
     // Trust/reputation uses the existing TrustStore (reputation.rs) — not a duplicate
 }
 
@@ -632,22 +633,33 @@ impl Core {
             },
             // AI/ML Components - Initialize Gemma client via OnceLock
             gemma_client: Arc::new(OnceLock::new()),
-            // Load trained Isolation Forest model (graceful if file missing)
+            // Load trained Isolation Forest model — try mesh-domain first, fall back to legacy
             anomaly_detector: match ai::IsolationForestModel::from_file(
-                "models/anomaly_detector.json",
+                "models/mesh_anomaly_detector.json",
             ) {
                 Ok(model) => {
                     tracing::info!(
-                        "✅ Anomaly detector loaded: {} trees, {} features",
+                        "✅ Mesh anomaly detector loaded: {} trees, {} features (Guifi.net)",
                         model.n_estimators,
                         model.n_features
                     );
                     Some(Arc::new(model))
                 }
-                Err(e) => {
-                    tracing::warn!("⚠️ Anomaly detector model not loaded: {}", e);
-                    None
-                }
+                Err(_) => match ai::IsolationForestModel::from_file(
+                    "models/anomaly_detector.json",
+                ) {
+                    Ok(model) => {
+                        tracing::warn!(
+                            "⚠️ Using legacy NSL-KDD anomaly detector ({} features) — retrain on mesh data",
+                            model.n_features
+                        );
+                        Some(Arc::new(model))
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️ No anomaly detector model loaded: {}", e);
+                        None
+                    }
+                },
             },
             // Load ONNX routing model (Layer 1 fast path)
             onnx_router: match ai::RoutingClassifier::new("models/ghostwire_routing.onnx") {
@@ -663,6 +675,8 @@ impl Core {
                     None
                 }
             },
+            // Feature extractor for L1 anomaly detection
+            feature_extractor: Arc::new(RwLock::new(ai::FeatureExtractor::new())),
         })
     }
 
@@ -672,6 +686,73 @@ impl Core {
 
         // Start the network monitor
         self.monitor.clone().start().await;
+
+        // Start L1 periodic anomaly detection loop
+        let core_anomaly = self.clone();
+        tokio::spawn(async move {
+            // Wait for system to stabilize
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+
+            // Load scaler if available
+            let scaler_path = "models/guifisants_scaler.json";
+            if let Ok(()) = core_anomaly
+                .feature_extractor
+                .write()
+                .await
+                .load_scaler(scaler_path)
+                .await
+            {
+                tracing::info!("✅ L1 feature scaler loaded from {}", scaler_path);
+            } else {
+                tracing::warn!(
+                    "⚠️ L1 feature scaler not loaded (using raw features): {}",
+                    scaler_path
+                );
+            }
+
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+
+                // Collect local system metrics
+                match ai::FeatureExtractor::collect_local_system_metrics() {
+                    Ok(local_metrics) => {
+                        // Build feature vector — for now, only local node metrics
+                        // Future: collect from all mesh peers
+                        let mut node_map = std::collections::HashMap::new();
+
+                        // Map local node to node_id 23 (the first Guifisants node)
+                        // In production, this would map actual mesh node IDs
+                        node_map.insert(23u16, local_metrics);
+
+                        let features = core_anomaly
+                            .feature_extractor
+                            .read()
+                            .await
+                            .build_feature_vector(&node_map);
+
+                        // Run anomaly detection
+                        if let Some(prob) = core_anomaly.check_mesh_anomaly(&features) {
+                            if prob > 0.283 {
+                                // Optimal threshold from training
+                                tracing::warn!(
+                                    "🚨 MESH ANOMALY DETECTED — probability: {:.4} (threshold: 0.283)",
+                                    prob
+                                );
+                            } else {
+                                tracing::debug!(
+                                    "L1 mesh check — anomaly probability: {:.4} (normal)",
+                                    prob
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️ Failed to collect system metrics: {}", e);
+                    }
+                }
+            }
+        });
 
         // Start AI health check loop
         let core_ai = self.clone();
