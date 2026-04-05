@@ -963,8 +963,8 @@ pub struct MeshManager {
     transport: MeshTransport,
     _local_identity: Arc<Identity>,
     _security_manager: Arc<SecurityManager>,
-    _core_messages: Arc<RwLock<Vec<Message>>>,
-    _message_store: Arc<crate::core::store::SecureMessageStore>,
+    core_messages: Arc<RwLock<Vec<Message>>>,
+    message_store: Arc<crate::core::store::SecureMessageStore>,
 }
 
 impl MeshManager {
@@ -998,8 +998,8 @@ impl MeshManager {
             transport,
             _local_identity: identity,
             _security_manager: security_manager,
-            _core_messages: core_messages,
-            _message_store: message_store,
+            core_messages,
+            message_store,
         })
     }
 
@@ -1079,6 +1079,11 @@ impl MeshManager {
     /// Subscribe to a gossipsub topic (e.g., a peer's DM topic)
     pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         self.transport.subscribe_topic(topic).await
+    }
+
+    /// Get all messages received by this node (in-memory history)
+    pub async fn get_received_messages(&self) -> Vec<Message> {
+        self.core_messages.read().await.clone()
     }
 
     pub async fn stop(&self) -> Result<()> {
