@@ -20,7 +20,7 @@ const MESSAGE_RATE_LIMIT: u32 = 100;
 pub struct MessagingController;
 
 impl MessagingController {
-    /// GET /api/v2/messages - Historical message list from sovereign storage
+    /// GET /api/v2/messages - Message list from in-memory + sovereign storage
     pub async fn get_messages(
         State(state): State<Arc<AppState>>,
         Query(params): Query<HashMap<String, String>>,
@@ -37,13 +37,13 @@ impl MessagingController {
         // ✅ SECURITY: Cap limit to prevent DoS
         let limit = limit.min(1000);
 
+        // Read from both in-memory buffer (incoming mesh messages) and encrypted store
         let messages = state
             .core
             .read()
             .await
-            .message_store
-            .clone()
-            .get_history(&peer_id, limit);
+            .get_messages(&peer_id, limit)
+            .await;
 
         Json(ApiV2Response::success(messages).with_links("/api/v2/messages".to_string()))
     }
@@ -51,10 +51,10 @@ impl MessagingController {
     /// POST /api/v2/messages/broadcast - Send message to all connected peers
     pub async fn broadcast(
         State(state): State<Arc<AppState>>,
-        Json(_req): Json<BroadcastRequest>,
+        Json(req): Json<BroadcastRequest>,
     ) -> impl IntoResponse {
         // ✅ SECURITY: Validate broadcast message size
-        if _req.message.len() > MAX_MESSAGE_SIZE {
+        if req.message.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
                 StandardErrorCode::InvalidInput.as_str(),
                 &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
@@ -67,8 +67,22 @@ impl MessagingController {
             .expect("Time went backwards")
             .as_secs();
 
-        // Get actual connected peers from the core
+        let sender_id = state.core.read().await.get_identity_id().await;
+        let message = crate::core::message::Message::new(
+            sender_id,
+            "broadcast".to_string(),
+            req.message.clone(),
+        );
+
+        // Actually send via mesh
+        let send_result = state.core.read().await.send_message(&message).await;
+
         let peer_count = state.core.read().await.get_peer_count();
+        let status = if send_result.is_ok() {
+            "BROADCAST_SENT"
+        } else {
+            "BROADCAST_QUEUED"
+        };
 
         #[derive(Serialize)]
         struct BroadcastResult {
@@ -82,10 +96,10 @@ impl MessagingController {
             message_id: message_id.to_string(),
             recipients: peer_count,
             timestamp,
-            status: "BROADCAST_QUEUED".to_string(),
+            status: status.to_string(),
         };
 
-        tracing::info!("Broadcast message sent");
+        tracing::info!("Broadcast message sent to {} peers", peer_count);
 
         Json(ApiV2Response::success(result))
     }
