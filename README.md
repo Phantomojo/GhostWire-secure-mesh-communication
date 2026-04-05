@@ -155,11 +155,6 @@ GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F)
 | **Theme** | AI for Society |
 | **SDG Alignment** | SDG 9 (Infrastructure), SDG 11 (Communities), SDG 17 (Partnerships) |
 
-**Competition Assets:**
-- [Visual Assets Guide](/home/ph/Beijing/GCD4F/GCD4F_VISUAL_ASSETS_GUIDE.md)
-- [Presentation Template](/home/ph/Beijing/GCD4F/presentation_title_slide.html)
-- [Exhibition Poster](/home/ph/Beijing/GCD4F/exhibition_poster_A1.html)
-
 ---
 
 ## 📚 Documentation

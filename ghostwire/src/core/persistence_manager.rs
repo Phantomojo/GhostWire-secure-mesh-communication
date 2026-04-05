@@ -120,19 +120,19 @@ impl PersistenceManager {
         let result = EncryptionManager::encrypt_bytes(data)
             .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
 
-        // We store as [Nonce (12)] [Ciphertext] to match EncryptionManager's file format
+        // Store as [Nonce (24 bytes for XChaCha20)] [Ciphertext]
         let mut combined = result.nonce;
         combined.extend_from_slice(&result.ciphertext);
         Ok(combined)
     }
 
     fn decrypt_payload(&self, data: &[u8]) -> Result<Vec<u8>> {
-        if data.len() < 12 {
+        if data.len() < 24 {
             return Err(anyhow::anyhow!("Data too short for decryption"));
         }
 
-        let nonce = &data[0..12];
-        let ciphertext = &data[12..];
+        let nonce = &data[0..24];
+        let ciphertext = &data[24..];
 
         let decrypted = EncryptionManager::decrypt_bytes(ciphertext, nonce)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;

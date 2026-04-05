@@ -96,7 +96,7 @@ This document defines the visual identity and brand guidelines for GhostWire. Us
 All visual assets are stored in:
 - `webui/public/` - Web and UI assets
 - `docs/assets/` - Documentation assets
-- `/home/ph/Beijing/GCD4F/` - GCD4F competition assets
+- `./` - GCD4F competition assets
 
 ### **Available Assets**
 
@@ -104,10 +104,10 @@ All visual assets are stored in:
 |-------|------|-------|
 | Logo (PNG) | `webui/public/ghostwire-logo.png` | General use |
 | Logo (SVG) | `docs/assets/ghostwire_logo_wordmark.svg` | Scalable graphics |
-| Presentation Template | `/home/ph/Beijing/GCD4F/presentation_title_slide.html` | GCD4F presentations |
-| Video Intro | `/home/ph/Beijing/GCD4F/video_intro_frame.html` | Video submissions |
-| Social Media | `/home/ph/Beijing/GCD4F/social_media_template.html` | Social posts |
-| Exhibition Poster | `/home/ph/Beijing/GCD4F/exhibition_poster_A1.html` | Print posters |
+| Presentation Template | `./presentation_title_slide.html` | GCD4F presentations |
+| Video Intro | `./video_intro_frame.html` | Video submissions |
+| Social Media | `./social_media_template.html` | Social posts |
+| Exhibition Poster | `./exhibition_poster_A1.html` | Print posters |
 
 ---
 
@@ -224,7 +224,7 @@ Use `webui/public/ghostwire-logo.png` as favicon.
 └────────────────────────────────────────┘
 ```
 
-**Template File:** `/home/ph/Beijing/GCD4F/presentation_title_slide.html`
+**Template File:** `./presentation_title_slide.html`
 
 ---
 
@@ -248,7 +248,7 @@ Use `video_intro_frame.html` for video submissions.
 **Resolution:** 300 DPI minimum  
 **Format:** PDF (print-ready)
 
-**Template:** `/home/ph/Beijing/GCD4F/exhibition_poster_A1.html`
+**Template:** `./exhibition_poster_A1.html`
 
 ---
 
@@ -271,7 +271,7 @@ Before publishing any materials:
 
 Refer to:
 - `VISUAL_ASSETS_COMPLETE.md` - Complete asset guide
-- `/home/ph/Beijing/GCD4F/` - All competition assets
+- `./` - All competition assets
 
 ---
 

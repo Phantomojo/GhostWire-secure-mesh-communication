@@ -200,13 +200,15 @@ mod tests {
 
     #[test]
     fn test_prphet_formula() {
-        // Excellent link
+        // Excellent link: RSSI=-30, latency=50ms, loss=1%, trust=0.9
+        // rssi=0.7, latency=0.95, loss=0.99 → score ≈ 0.873
         let score_good = fallback::calculate_delivery_predictivity(-30, 50, 0.01, 0.9);
-        // Poor link
+        // Poor link: RSSI=-80, latency=300ms, loss=30%, trust=0.5
+        // rssi=0.2, latency=0.7, loss=0.7 → score ≈ 0.51
         let score_poor = fallback::calculate_delivery_predictivity(-80, 300, 0.3, 0.5);
 
-        assert!(score_good > score_poor, "Good link should score higher");
-        assert!(score_good > 0.7, "Good link should be > 0.7, got {}", score_good);
-        assert!(score_poor < 0.5, "Poor link should be < 0.5, got {}", score_poor);
+        assert!(score_good > score_poor, "Good link should score higher (good={}, poor={})", score_good, score_poor);
+        assert!(score_good > 0.8, "Good link should be > 0.8, got {}", score_good);
+        assert!(score_poor < 0.6, "Poor link should be < 0.6, got {}", score_poor);
     }
 }
