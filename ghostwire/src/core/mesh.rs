@@ -47,6 +47,10 @@ pub enum MeshCommand {
         peer_id: PeerId,
         reply: oneshot::Sender<Result<()>>,
     },
+    SubscribeTopic {
+        topic: String,
+        reply: oneshot::Sender<Result<()>>,
+    },
     PublishUsername {
         reply: oneshot::Sender<Result<()>>,
     },
@@ -349,6 +353,9 @@ impl MeshTransport {
         let topic = IdentTopic::new("ghostwire-messages");
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
+        // Get local peer ID before moving swarm into driver
+        let local_peer_id = *swarm.local_peer_id();
+
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
             if let Some(peer_id) = addr.iter().find_map(|p| {
@@ -372,6 +379,7 @@ impl MeshTransport {
             swarm,
             command_rx,
             _node_id: self.node_id.clone(),
+            local_peer_id,
             _identity: self.identity.clone(),
             security_manager: self.security_manager.clone(),
             encryption_manager: self.encryption_manager.clone(),
@@ -424,6 +432,18 @@ impl MeshTransport {
         let (tx, rx) = oneshot::channel();
         self.command_tx
             .send(MeshCommand::ConnectPeer { peer_id, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::SubscribeTopic {
+                topic: topic.to_string(),
+                reply: tx,
+            })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
         rx.await?
@@ -542,6 +562,7 @@ struct MeshDriver {
     swarm: Swarm<MeshBehaviour>,
     command_rx: mpsc::Receiver<MeshCommand>,
     _node_id: String,
+    local_peer_id: PeerId,
     _identity: Arc<Identity>,
     security_manager: Arc<SecurityManager>,
     encryption_manager: Arc<EncryptionManager>,
@@ -622,10 +643,25 @@ impl MeshDriver {
                 let _ = reply.send(res);
             }
             MeshCommand::ConnectPeer { peer_id, reply } => {
+                // Subscribe to the peer's DM topic so we can receive their replies
+                let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
+
                 let res = self
                     .swarm
                     .dial(peer_id)
                     .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
+                let _ = reply.send(res);
+            }
+            MeshCommand::SubscribeTopic { topic, reply } => {
+                let gossipsub_topic = IdentTopic::new(&topic);
+                let res = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .subscribe(&gossipsub_topic)
+                    .map(|_| ())
+                    .map_err(|e| anyhow::anyhow!("Subscribe error: {}", e));
                 let _ = reply.send(res);
             }
             MeshCommand::PublishUsername { reply } => {
@@ -673,11 +709,17 @@ impl MeshDriver {
                 reply,
             } => {
                 let res = (|| -> Result<()> {
-                    let _ = self
-                        .swarm
+                    // Send direct message via gossipsub on a per-peer topic
+                    // Topic format: ghostwire-dm-{recipient_peer_id}
+                    let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
+                    use crate::core::wire_protocol::{Frame, FrameKind};
+                    let frame = Frame::encode(FrameKind::Message, &message)?;
+                    let data = frame.to_bytes();
+                    self.swarm
                         .behaviour_mut()
-                        .request_response
-                        .send_request(&recipient, ChatRequest(message));
+                        .gossipsub
+                        .publish(topic.clone(), data)?;
+                    tracing::info!("Sent direct message to peer {} on topic {}", recipient, topic);
                     Ok(())
                 })();
                 let _ = reply.send(res);
@@ -704,6 +746,56 @@ impl MeshDriver {
     }
 
     async fn handle_swarm_event(&mut self, event: SwarmEvent<MeshBehaviourEvent>) {
+        // Handle mDNS discovery — auto-connect to discovered peers
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
+            libp2p::mdns::Event::Discovered(peers),
+        )) = &event
+        {
+            for (peer_id, addr) in peers {
+                tracing::info!("mDNS discovered peer {} at {}", peer_id, addr);
+                // Add to Kademlia routing table
+                self.swarm.behaviour_mut().kad.add_address(peer_id, addr.clone());
+                // Attempt to connect
+                let _ = self.swarm.dial(addr.clone());
+            }
+            return;
+        }
+
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
+            libp2p::mdns::Event::Expired(peers),
+        )) = &event
+        {
+            for (peer_id, _addr) in peers {
+                tracing::info!("mDNS peer expired: {}", peer_id);
+            }
+            return;
+        }
+
+        // Log connection events for debugging
+        if let SwarmEvent::ConnectionEstablished {
+            peer_id,
+            num_established,
+            ..
+        } = &event
+        {
+            tracing::info!(
+                "Connection established with {} ({} total)",
+                peer_id, num_established
+            );
+            // Subscribe to this peer's DM topic
+            let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+            let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
+        }
+
+        if let SwarmEvent::ConnectionClosed {
+            peer_id,
+            cause: Some(ref e),
+            ..
+        } = &event
+        {
+            tracing::warn!("Connection closed with {}: {}", peer_id, e);
+        }
+
         if let SwarmEvent::Behaviour(MeshBehaviourEvent::Kad(
             libp2p::kad::Event::OutboundQueryProgressed { id, result, .. },
         )) = event
@@ -771,9 +863,20 @@ impl MeshDriver {
         message_id: MessageId,
         message: GossipsubMessage,
     ) -> Result<()> {
+        let topic_str = message.topic.as_str();
+
+        // Determine if this is a direct message for us or a broadcast
+        let is_dm_for_us = topic_str.starts_with("ghostwire-dm-")
+            && topic_str.ends_with(&self.local_peer_id.to_string());
+
+        if !is_dm_for_us && topic_str != "ghostwire-messages" {
+            // Not our DM topic and not the broadcast topic — ignore
+            return Ok(());
+        }
+
         debug!(
-            "Received gossipsub message from {}: {:?}",
-            peer_id, message_id
+            "Received gossipsub message on {} from {}: {:?}",
+            topic_str, peer_id, message_id
         );
 
         let peer_ip = self.get_peer_ip(&peer_id);
@@ -785,30 +888,47 @@ impl MeshDriver {
             }
         }
 
-        if let Ok(msg) = serde_json::from_slice::<Message>(&message.data) {
-            tracing::info!("Processed message from {}: {:?}", peer_id, msg);
-
-            if msg.message_type != "handshake" {
-                let _ = self.handle_incoming_message(peer_id, msg.clone()).await;
-            }
-
-            if msg.message_type == "handshake" {
-                tracing::info!("🤝 Received Handshake from {}", msg.sender);
-                if let Ok(pub_key_bytes) =
-                    base64::engine::general_purpose::STANDARD.decode(&msg.content)
-                {
-                    self.encryption_manager.add_peer_key(
-                        msg.sender.clone(),
-                        pub_key_bytes,
-                        KeyType::Hybrid,
-                    );
-                    tracing::info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
-                } else {
-                    tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
-                }
+        // Try to decode as Message (bincode via wire_protocol frame)
+        let msg = if let Ok((frame, _consumed)) =
+            crate::core::wire_protocol::Frame::from_bytes(&message.data)
+        {
+            if let Ok(m) = frame.decode::<Message>() {
+                m
+            } else {
+                // Fallback: try direct JSON deserialization
+                serde_json::from_slice::<Message>(&message.data)
+                    .map_err(|e| anyhow::anyhow!("Failed to decode message: {}", e))?
             }
         } else {
-            tracing::warn!("Failed to deserialize message from {}", peer_id);
+            // Fallback: try direct JSON deserialization
+            serde_json::from_slice::<Message>(&message.data)
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize message: {}", e))?
+        };
+
+        if is_dm_for_us {
+            tracing::info!("Received direct message from peer {}", peer_id);
+        } else {
+            tracing::info!("Processed broadcast message from {}: {:?}", peer_id, msg);
+        }
+
+        if msg.message_type != "handshake" {
+            let _ = self.handle_incoming_message(peer_id, msg.clone()).await;
+        }
+
+        if msg.message_type == "handshake" {
+            tracing::info!("🤝 Received Handshake from {}", msg.sender);
+            if let Ok(pub_key_bytes) =
+                base64::engine::general_purpose::STANDARD.decode(&msg.content)
+            {
+                self.encryption_manager.add_peer_key(
+                    msg.sender.clone(),
+                    pub_key_bytes,
+                    KeyType::Hybrid,
+                );
+                tracing::info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
+            } else {
+                tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
+            }
         }
 
         Ok(())
@@ -954,6 +1074,11 @@ impl MeshManager {
     /// Connect to a peer by ID
     pub async fn connect_peer(&mut self, peer_id: PeerId) -> Result<()> {
         self.transport.connect_peer(peer_id).await
+    }
+
+    /// Subscribe to a gossipsub topic (e.g., a peer's DM topic)
+    pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
+        self.transport.subscribe_topic(topic).await
     }
 
     pub async fn stop(&self) -> Result<()> {
