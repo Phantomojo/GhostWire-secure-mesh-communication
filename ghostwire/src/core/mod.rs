@@ -916,9 +916,11 @@ impl Core {
             ));
         }
 
-        // Persist message to encrypted storage
-        if let Err(e) = self.message_store.save_message(message) {
-            tracing::error!("⚠️ Persistence failure: {}", e);
+        // Persist message to encrypted storage (skip for broadcast — no recipient key)
+        if message.recipient != "broadcast" {
+            if let Err(e) = self.message_store.save_message(message) {
+                tracing::error!("⚠️ Persistence failure: {}", e);
+            }
         }
 
         // Add to in-memory history

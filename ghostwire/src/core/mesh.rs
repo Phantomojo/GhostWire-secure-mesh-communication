@@ -944,9 +944,11 @@ impl MeshDriver {
     }
 
     async fn handle_incoming_message(&mut self, _peer_id: PeerId, msg: Message) -> Result<()> {
-        // Persist to store
-        if let Err(e) = self.message_store.save_message(&msg) {
-            tracing::error!("Failed to save incoming message: {}", e);
+        // Persist to store (skip for broadcast — no recipient key for encryption at rest)
+        if msg.recipient != "broadcast" {
+            if let Err(e) = self.message_store.save_message(&msg) {
+                tracing::error!("Failed to save incoming message: {}", e);
+            }
         }
 
         // Add to in-memory
