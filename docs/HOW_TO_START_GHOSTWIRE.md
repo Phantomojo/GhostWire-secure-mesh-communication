@@ -23,7 +23,7 @@
 
 When you see this error:
 ```
-Error: IO error: could not acquire lock on "/home/ph/.ghostwire/vault/ghost_default/db"
+Error: IO error: could not acquire lock on "
 ```
 
 **What it means:**
@@ -85,10 +85,10 @@ ps aux | grep ghostwire
 
 ```bash
 # Remove the lock file
-rm -rf /home/ph/.ghostwire/vault/ghost_default/LOCK
+rm -rf 
 
 # Or remove entire vault (will regenerate)
-rm -rf /home/ph/.ghostwire/vault/ghost_default
+rm -rf 
 ```
 
 ---
@@ -96,7 +96,7 @@ rm -rf /home/ph/.ghostwire/vault/ghost_default
 ### Step 3: Start GhostWire
 
 ```bash
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd 
 
 # Start on port 8080 (default for web UI)
 cargo run -- web --api-host 0.0.0.0 --mesh-host 0.0.0.0 --port 8080
@@ -128,7 +128,7 @@ Listening on:
 ### Step 1: Navigate to Project
 
 ```bash
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd 
 ```
 
 ---
@@ -186,7 +186,7 @@ cargo run -- web --help
 ### Option A: start-backend.sh
 
 ```bash
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd 
 
 # Make executable (first time only)
 chmod +x start-backend.sh
@@ -226,7 +226,7 @@ pkill -9 ghostwire 2>/dev/null || true
 sleep 2
 
 # Start GhostWire
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd 
 cargo run -- web \
   --api-host $API_HOST \
   --mesh-host $MESH_HOST \
@@ -252,7 +252,7 @@ Run:
 
 **Error:**
 ```
-Error: IO error: could not acquire lock on "/home/ph/.ghostwire/vault/ghost_default/db"
+Error: IO error: could not acquire lock on "
 ```
 
 **Solutions:**
@@ -271,7 +271,7 @@ pkill -9 ghostwire
 
 **B. Remove Lock File:**
 ```bash
-rm /home/ph/.ghostwire/vault/ghost_default/LOCK
+rm 
 ```
 
 **C. Wait:**
