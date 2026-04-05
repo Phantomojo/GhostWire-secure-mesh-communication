@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://ghostwire.network/sitemap.xml

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostWire — Security Architecture</title>
+<meta name="description" content="Defense in depth, from cryptography to network topology. GhostWire's security architecture, threat model, and vulnerability disclosure process.">
+<meta name="keywords" content="GhostWire security, threat model, cryptography, AES-256, X25519, ML-KEM-768, vulnerability disclosure">
+<meta name="author" content="Team GhostWire — Open University of Kenya">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://ghostwire.network/security.html">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="GhostWire — Security Architecture">
+<meta property="og:description" content="Defense in depth, from cryptography to network topology.">
+<meta property="og:image" content="https://ghostwire.network/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://ghostwire.network/security.html">
+<meta property="og:site_name" content="GhostWire">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GhostWire — Security Architecture">
+<meta name="twitter:description" content="Defense in depth, from cryptography to network topology.">
+<meta name="twitter:image" content="https://ghostwire.network/assets/og-image.png">
+
+<!-- Favicon -->
+<link rel="icon" type="image/png" sizes="32x32" href="assets/logo.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="shortcut icon" href="assets/logo.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<noscript>
+  <style>
+    .persona-card, .feature, .hiw-step, .community-card, .limitation { opacity: 1 !important; transform: none !important; }
+  </style>
+</noscript>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">
+      <div class="logo-mark">
+        <img src="assets/logo.png" alt="GhostWire" width="28" height="28" loading="eager">
+      </div>
+      <span class="logo-text">GHOSTWIRE</span>
+    </a>
+    <div class="nav-links">
+      <a href="security.html" class="nav-link" aria-current="page">Security</a>
+      <a href="about.html" class="nav-link">About</a>
+      <a href="download.html" class="nav-link">Download</a>
+      <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="nav-link nav-link--gh" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav-mobile" id="navMobile">
+    <a href="security.html">Security</a>
+    <a href="about.html">About</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<!-- PAGE HERO -->
+<section class="page-hero">
+  <div class="container page-hero-inner">
+    <div class="page-hero-label mono">// security</div>
+    <h1>Security<br>Architecture</h1>
+    <p>Defense in depth, from cryptography to network topology. Every layer is designed to protect communication when infrastructure fails or is actively hostile.</p>
+  </div>
+</section>
+
+<!-- CRYPTOGRAPHY -->
+<section class="cryptography" id="cryptography">
+  <div class="container">
+    <div class="section-label mono">// cryptography</div>
+    <h2 class="section-title">Cryptographic primitives</h2>
+    <table class="algo-table">
+      <thead>
+        <tr>
+          <th>Algorithm</th>
+          <th>Purpose</th>
+          <th>Status</th>
+          <th>Implementation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="algo-name">AES-256-GCM</span></td>
+          <td>Authenticated encryption for all messages</td>
+          <td><span class="algo-status algo-status--active">Active</span></td>
+          <td class="mono" style="font-size:12px;">ghostwire/src/core/crypto_machine.rs</td>
+        </tr>
+        <tr>
+          <td><span class="algo-name">Ed25519</span></td>
+          <td>Digital signatures for identity and message authentication</td>
+          <td><span class="algo-status algo-status--active">Active</span></td>
+          <td class="mono" style="font-size:12px;">ghostwire/src/core/crypto_machine.rs</td>
+        </tr>
+        <tr>
+          <td><span class="algo-name">X25519</span></td>
+          <td>Key exchange with perfect forward secrecy</td>
+          <td><span class="algo-status algo-status--active">Active</span></td>
+          <td class="mono" style="font-size:12px;">ghostwire/src/core/encryption.rs</td>
+        </tr>
+        <tr>
+          <td><span class="algo-name">ML-KEM-768</span></td>
+          <td>Post-quantum key encapsulation (NIST standard)</td>
+          <td><span class="algo-status algo-status--planned">Planned</span></td>
+          <td class="mono" style="font-size:12px;">ghostwire/src/core/encryption.rs</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- THREAT MODEL -->
+<section class="threat-model" id="threat-model" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <div class="section-label mono">// threat model</div>
+    <h2 class="section-title">Threat landscape</h2>
+    <div class="sec-grid">
+      <div class="threat-card">
+        <h3>Network Surveillance <span class="threat-level threat-level--high">HIGH</span></h3>
+        <p>State-level or ISP-level monitoring of all traffic. GhostWire mitigates through end-to-end AES-256-GCM encryption, traffic obfuscation, cover traffic generation, and timing randomization. Metadata is minimized at every layer.</p>
+      </div>
+      <div class="threat-card">
+        <h3>Infrastructure Failure <span class="threat-level threat-level--medium">MEDIUM</span></h3>
+        <p>Cell tower outages, ISP failures, power grid collapse. GhostWire operates independently of centralized infrastructure via WiFi Direct, Bluetooth LE, LoRa radio, and Reticulum mesh. Messages queue and deliver when connectivity resumes.</p>
+      </div>
+      <div class="threat-card">
+        <h3>Physical Seizure <span class="threat-level threat-level--high">HIGH</span></h3>
+        <p>Device confiscation or raid. Mitigated through full-disk encryption recommendations, GhostWire lockdown mode, ephemeral session keys, and identity keys that never leave the device. Users in high-threat environments should enable additional protections.</p>
+      </div>
+      <div class="threat-card">
+        <h3>Sybil Attack <span class="threat-level threat-level--medium">MEDIUM</span></h3>
+        <p>Adversary creates many fake nodes to infiltrate the mesh. Mitigated through proof-of-work node admission, quota enforcement, blacklist management, and the TrustStore reputation system. Fake nodes are computationally expensive to maintain.</p>
+      </div>
+      <div class="threat-card">
+        <h3>Traffic Analysis <span class="threat-level threat-level--medium">MEDIUM</span></h3>
+        <p>Pattern analysis of message timing, size, and routing. Mitigated through cover traffic generation, timing randomization, stealth TCP transport, and metadata minimization. Full protection requires a well-populated mesh with active cover traffic.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEFENSE IN DEPTH -->
+<section class="defense-in-depth" id="defense-in-depth">
+  <div class="container">
+    <div class="section-label mono">// defense in depth</div>
+    <h2 class="section-title">Layered security architecture</h2>
+    <div class="defense-layers">
+      <div class="defense-layer">
+        <div class="layer-num mono">L1</div>
+        <div class="layer-content">
+          <h3>Encryption Layer</h3>
+          <p>AES-256-GCM authenticated encryption for all messages. X25519 key exchange with perfect forward secrecy. ML-KEM-768 post-quantum integration planned. Identity keys (Ed25519) never leave the device. All cryptographic operations implemented in Rust for memory safety.</p>
+          <span class="mono">crypto_machine.rs / encryption.rs</span>
+        </div>
+      </div>
+      <div class="defense-layer">
+        <div class="layer-num mono">L2</div>
+        <div class="layer-content">
+          <h3>Networking Layer (libp2p)</h3>
+          <p>S/Kademlia-hardened DHT routing. Gossipsub pub/sub messaging. QUIC and TCP transports. Noise protocol framework for secure handshakes. No single point of failure — the mesh routes around any compromised or offline node.</p>
+          <span class="mono">libp2p / tokio / axum</span>
+        </div>
+      </div>
+      <div class="defense-layer">
+        <div class="layer-num mono">L3</div>
+        <div class="layer-content">
+          <h3>AI Layer (Anomaly Detection)</h3>
+          <p>LightGBM anomaly detection model (AUC 1.0, 76.7us inference) exported to ONNX and wired into Rust via ONNX Runtime. Detects anomalous node behavior, routing attacks, and potential Sybil nodes. GNN routing model trained on real GuifiSants mesh data.</p>
+          <span class="mono">LightGBM / ONNX / GNN</span>
+        </div>
+      </div>
+      <div class="defense-layer">
+        <div class="layer-num mono">L4</div>
+        <div class="layer-content">
+          <h3>Identity Layer (Multi-Profile)</h3>
+          <p>Separate cryptographic identities for different contexts. Community coordinator, disaster responder, privacy advocate profiles. Each profile has independent key pairs. QR code peer pairing for secure initial key exchange. Username discovery without central registry.</p>
+          <span class="mono">Ed25519 identity keys / QR pairing</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- VULNERABILITY DISCLOSURE -->
+<section class="disclosure" id="disclosure" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <div class="section-label mono">// vulnerability disclosure</div>
+    <h2 class="section-title">Responsible disclosure</h2>
+    <div class="disclosure-block">
+      <h3>Report a vulnerability</h3>
+      <p>If you discover a security vulnerability in GhostWire, please report it responsibly. We appreciate your help in keeping the project secure.</p>
+      <p><strong>Email:</strong> <a href="mailto:mirungu015@proton.me" class="mono">mirungu015@proton.me</a></p>
+      <p><strong>PGP Key:</strong> Available upon request. Include your PGP public key in your initial email for encrypted communication.</p>
+      <p><strong>Expected response time:</strong> Within 48 hours for initial acknowledgment.</p>
+    </div>
+    <div class="disclosure-block">
+      <h3>Disclosure timeline</h3>
+      <p><span class="mono">Day 0</span> — Reporter submits vulnerability details via encrypted email.</p>
+      <p><span class="mono">Day 0-2</span> — Team acknowledges receipt and begins triage.</p>
+      <p><span class="mono">Day 2-14</span> — Vulnerability is investigated and a fix is developed.</p>
+      <p><span class="mono">Day 14-30</span> — Fix is tested, reviewed, and merged. Security advisory drafted.</p>
+      <p><span class="mono">Day 30+</span> — Public disclosure with credit to reporter (unless anonymity requested).</p>
+    </div>
+    <div style="margin-top:2rem;">
+      <p style="font-size:14px; color:var(--white-dim); margin-bottom:1rem;">Additional security documentation:</p>
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/SECURITY.md" class="btn btn--outline" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          docs/SECURITY.md
+        </a>
+        <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/SECURITY_AUDIT_REPORT_2026.md" class="btn btn--outline" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Security Audit Report 2026
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="nav-logo">
+          <div class="logo-mark">
+            <img src="assets/logo.png" alt="GhostWire" width="22" height="22" loading="lazy">
+          </div>
+          <span class="logo-text">GHOSTWIRE</span>
+        </div>
+        <p class="footer-tagline">Resilient Mesh Communication for Connectivity-Constrained Communities.<br>Built in Nairobi, for the world.</p>
+        <p class="footer-license mono">AGPLv3 / Commercial License available</p>
+        <p class="footer-competition mono" style="font-size:10px; color:var(--white-faint); margin-top:0.5rem;">GCD4F 2026 — Open University of Kenya</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>Project</h4>
+          <a href="about.html">About</a>
+          <a href="about.html#manifesto">Manifesto</a>
+          <a href="about.html#team">Team</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Get Started</h4>
+          <a href="download.html">Download</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/QUICK_START.md" target="_blank" rel="noopener">Quick Start</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">Installation</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/API_QUICK_REFERENCE.md" target="_blank" rel="noopener">API Reference</a>
+        </div>
+        <div class="footer-col">
+          <h4>Security</h4>
+          <a href="security.html">Overview</a>
+          <a href="security.html#threat-model">Threat Model</a>
+          <a href="security.html#cryptography">Cryptography</a>
+          <a href="security.html#disclosure">Vulnerability Disclosure</a>
+        </div>
+        <div class="footer-col">
+          <h4>Community</h4>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+          <a href="mailto:mirungu015@proton.me">Contact</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="mono">&copy; 2026 GhostWire — Team GhostWire, Open University of Kenya</span>
+      <span class="mono footer-pgp">PGP: <a href="mailto:mirungu015@proton.me">mirungu015@proton.me</a></span>
+    </div>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>
