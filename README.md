@@ -2,6 +2,8 @@
 
 <div align="center">
 
+### 🌐 **[Visit the GhostWire Website →](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)**
+
 ![GhostWire Logo](webui/public/ghostwire-logo.png)
 
 # 🚀 GhostWire
