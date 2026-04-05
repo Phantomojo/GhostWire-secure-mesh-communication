@@ -48,7 +48,7 @@ impl SecureMessageStore {
             &message.content,
             &message.recipient,
             MessageType::Text,
-        )?;
+        ).map_err(|e| anyhow::anyhow!("Message encryption failed: {}", e))?;
         
         // Store encrypted wrapper, NOT plaintext
         let key = format!("msg_{}_{}", message.timestamp, message.id);

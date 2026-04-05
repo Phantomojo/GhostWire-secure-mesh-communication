@@ -446,9 +446,10 @@ impl ProfilesController {
 
                 // Start background tasks
                 let mesh_host = state.config.mesh_host.clone();
+                let mesh_port = state.config.mesh_port;
                 let core_for_tasks = core_arc.clone();
                 tokio::spawn(async move {
-                    core_for_tasks.start_nervous_system(mesh_host).await;
+                    core_for_tasks.start_nervous_system(mesh_host, mesh_port).await;
                 });
 
                 Json(ApiV2Response::success(serde_json::json!({

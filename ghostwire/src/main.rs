@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 use tracing::{error, info};
-use tracing_subscriber::{fmt, prelude::*};
 
 // Use modules from the library crate
 use ghostwire::config::Config;
@@ -169,14 +168,13 @@ async fn main() -> Result<()> {
     };
 
     // Auto-update check
-    if config.server.auto_update {
-        if updater::is_update_available() {
+    if config.server.auto_update
+        && updater::is_update_available() {
             info!("✨ Applying automatic update...");
             if let Err(e) = updater::apply_update() {
                 error!("❌ Automatic update failed: {}", e);
             }
         }
-    }
 
     // Parse bootstrap nodes
     let mut bootstrap_multiaddrs = Vec::new();
@@ -228,6 +226,7 @@ async fn main() -> Result<()> {
                     bootstrap_multiaddrs.clone(),
                     args.sim_addr.clone(),
                     args.mesh_host.clone(),
+                    args.mesh_port,
                     config.clone(),
                 )
                 .await

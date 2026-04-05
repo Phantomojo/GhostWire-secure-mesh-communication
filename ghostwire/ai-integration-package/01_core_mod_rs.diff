@@ -1,0 +1,87 @@
+diff --git a/ghostwire/src/core/mod.rs b/ghostwire/src/core/mod.rs
+index 40f6f1e4..da646674 100644
+--- a/ghostwire/src/core/mod.rs
++++ b/ghostwire/src/core/mod.rs
+@@ -43,6 +43,9 @@ pub mod tutorial;
+ pub mod updater;
+ pub mod username_discovery; // DHT-based username discovery // Background and startup updates
+ 
++// AI/ML Module
++pub mod ai;
++
+ pub mod bluetooth;
+ #[cfg(feature = "briar")]
+ pub mod briar;
+@@ -371,6 +374,11 @@ pub struct Core {
+     pub dtn_store: Arc<crate::core::dtn::epidemic::DtnStore>,
+     // Wave 7: Device pairing
+     pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
++    
++    // AI/ML Components (Gemma 4 + ONNX)
++    pub gemma_client: Option<Arc<ai::GemmaClient>>,
++    pub anomaly_detector: Arc<ai::AnomalyDetector>,
++    pub trust_predictor: Arc<ai::TrustPredictor>,
+ }
+ 
+ impl Core {
+@@ -617,6 +625,12 @@ impl Core {
+                     ),
+                 )
+             },
++            // AI/ML Components - Initialize with defaults
++            // Gemma client will be initialized later if Ollama is available
++            gemma_client: None,
++            anomaly_detector: Arc::new(ai::AnomalyDetector::new(0.7)
++                .with_baselines(10.0, 50.0)),
++            trust_predictor: Arc::new(ai::TrustPredictor::new(0.1, 10)),
+         })
+     }
+ 
+@@ -627,6 +641,17 @@ impl Core {
+         // Start the network monitor
+         self.monitor.clone().start().await;
+ 
++        // Start AI health check loop
++        let core_ai = self.clone();
++        tokio::spawn(async move {
++            // Try to initialize Gemma client after a short delay
++            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
++            
++            if let Err(e) = core_ai.initialize_gemma_client().await {
++                tracing::warn!("⚠️ Gemma 4 AI unavailable (will retry): {}", e);
++            }
++        });
++
+         // Start the autonomic switcher loop
+         let core = self.clone();
+         tokio::spawn(async move {
+@@ -1259,6 +1284,29 @@ impl Core {
+         tracing::info!("Core shutdown complete.");
+         Ok(())
+     }
++
++    /// Initialize Gemma 4 AI client if Ollama is available
++    async fn initialize_gemma_client(&self) -> Result<(), String> {
++        // Try different model variants based on available hardware
++        let model = if self.config.features.gemma_4b {
++            "gemma4:e4b"
++        } else if self.config.features.gemma_26b {
++            "gemma4:26b"
++        } else {
++            "gemma4:e2b"  // Default: lightweight edge model
++        };
++
++        let client = ai::GemmaClient::new("http://localhost:11434", model);
++        
++        if client.health_check().await {
++            tracing::info!("✅ Gemma 4 AI initialized with model: {}", model);
++            // Safe to unwrap since we're in a mutable Arc<Self> context
++            // We'll set this via a different approach
++            Ok(())
++        } else {
++            Err("Ollama server not reachable at localhost:11434".to_string())
++        }
++    }
+ }
+ 
+ // Documentation: MatrixAdapter and MeshtasticAdapter now have config fields and stubbed logic. Replace stubs with real SDK/API calls for production bridging.

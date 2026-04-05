@@ -54,6 +54,18 @@ pub enum TransportType {
     LoRa,
 }
 
+impl TransportType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TransportType::Mesh => "mesh",
+            TransportType::StealthTcp => "stealth_tcp",
+            TransportType::WiFi => "wifi",
+            TransportType::Bluetooth => "bluetooth",
+            TransportType::LoRa => "lora",
+        }
+    }
+}
+
 /// Logic for evaluating metrics into a disaster level with anti-thrashing hysteresis.
 pub struct DisasterManager {
     latency_threshold: u32,
