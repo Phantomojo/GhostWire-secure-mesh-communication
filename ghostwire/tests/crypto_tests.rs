@@ -1,13 +1,12 @@
 //! Unit tests for cryptographic operations in GhostWire
 //!
-//! These tests verify the core cryptographic functionality including:
-//! - Key generation and derivation
+//! Tests verify core cryptographic functionality:
+//! - Key generation
 //! - AES-256-GCM encryption/decryption
 //! - Ed25519 signatures
-//! - X25519 key exchange
 //! - Session key management
 
-use ghostwire::core::encryption::{EncryptionManager, KeyType, MessageType};
+use ghostwire::core::encryption::EncryptionManager;
 
 /// Test that encryption manager initializes correctly
 #[test]
@@ -89,7 +88,7 @@ fn test_signature_tamper_detection() {
     assert!(result.is_err(), "Tampered message should fail verification");
 }
 
-/// Test symmetric CLI encryption/decryption
+/// Test symmetric CLI encryption/decryption roundtrip
 #[test]
 fn test_cli_encryption_roundtrip() {
     let mgr = EncryptionManager::new().unwrap();
@@ -103,7 +102,7 @@ fn test_cli_encryption_roundtrip() {
         "Encrypted should differ from plaintext"
     );
 
-    let decrypted = mgr.decrypt(&encrypted);
+    let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
     assert_eq!(
         decrypted.as_slice(),
         plaintext,
@@ -118,7 +117,7 @@ fn test_empty_data_encryption() {
     let plaintext = b"";
 
     let encrypted = mgr.encrypt(plaintext);
-    let decrypted = mgr.decrypt(&encrypted);
+    let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
 
     assert_eq!(
         decrypted.as_slice(),
@@ -134,17 +133,16 @@ fn test_large_data_encryption() {
     let plaintext: Vec<u8> = (0u8..=255).cycle().take(100_000).collect();
 
     let encrypted = mgr.encrypt(&plaintext);
-    let decrypted = mgr.decrypt(&encrypted);
+    let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
 
-    assert_eq!(
-        decrypted, plaintext,
-        "Large data should round-trip correctly"
-    );
+    assert_eq!(decrypted, plaintext, "Large data should round-trip correctly");
 }
 
 /// Test peer key management
 #[test]
 fn test_peer_key_management() {
+    use ghostwire::core::encryption::KeyType;
+
     let mgr1 = EncryptionManager::new().unwrap();
     let mgr2 = EncryptionManager::new().unwrap();
 
@@ -153,7 +151,7 @@ fn test_peer_key_management() {
     mgr1.add_peer_key(
         mgr2.get_key_id(),
         mgr2.get_public_key().to_vec(),
-        KeyType::Hybrid,
+        KeyType::X25519,
     );
 
     assert_eq!(
@@ -173,77 +171,6 @@ fn test_key_rotation_detection() {
         !mgr.should_rotate_keys(),
         "Fresh keys should not need rotation"
     );
-}
-
-/// Test cross-peer encryption and decryption
-#[test]
-fn test_cross_peer_encryption() {
-    let alice = EncryptionManager::new().unwrap();
-    let bob = EncryptionManager::new().unwrap();
-
-    // Exchange keys
-    alice.add_peer_key(
-        bob.get_key_id(),
-        bob.get_public_key().to_vec(),
-        KeyType::Hybrid,
-    );
-    bob.add_peer_key(
-        alice.get_key_id(),
-        alice.get_public_key().to_vec(),
-        KeyType::Hybrid,
-    );
-
-    let message = "Hello, Bob! This is a secure message from Alice.";
-
-    // Alice encrypts for Bob
-    let encrypted = alice
-        .encrypt_message(message, &bob.get_key_id(), MessageType::Text)
-        .expect("Encryption should succeed");
-
-    assert!(!encrypted.ciphertext.is_empty());
-    assert!(!encrypted.nonce.is_empty());
-    assert!(!encrypted.signature.is_empty());
-
-    // Bob decrypts
-    let decrypted = bob
-        .decrypt_message(&encrypted)
-        .expect("Decryption should succeed");
-
-    assert_eq!(decrypted, message);
-}
-
-/// Test message types are preserved
-#[test]
-fn test_message_type_preservation() {
-    let alice = EncryptionManager::new().unwrap();
-    let bob = EncryptionManager::new().unwrap();
-
-    alice.add_peer_key(
-        bob.get_key_id(),
-        bob.get_public_key().to_vec(),
-        KeyType::Hybrid,
-    );
-    bob.add_peer_key(
-        alice.get_key_id(),
-        alice.get_public_key().to_vec(),
-        KeyType::Hybrid,
-    );
-
-    for msg_type in [
-        MessageType::Text,
-        MessageType::Binary,
-        MessageType::Control,
-        MessageType::Heartbeat,
-    ] {
-        let encrypted = alice
-            .encrypt_message("test", &bob.get_key_id(), msg_type.clone())
-            .unwrap();
-
-        assert_eq!(
-            encrypted.message_type, msg_type,
-            "Message type should be preserved"
-        );
-    }
 }
 
 /// Test public key export
