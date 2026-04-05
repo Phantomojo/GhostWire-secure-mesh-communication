@@ -219,6 +219,13 @@ pub struct Message {
     /// **Purpose:** Track encryption state
     /// **Security:** Local state indicator, not a security guarantee
     pub encryption_status: String,
+    
+    /// Hop count for multi-hop relay
+    /// 
+    /// **Purpose:** Track how many hops this message has traversed
+    /// **Security:** Prevents infinite loops (max 5 hops)
+    /// **Default:** 0 (originating node)
+    pub hops: u8,
 }
 
 impl Message {
@@ -271,6 +278,7 @@ impl Message {
             encrypted: false,
             message_type: "text".to_string(),
             encryption_status: "none".to_string(),
+            hops: 0,
         }
     }
     
@@ -315,6 +323,7 @@ impl Message {
             encrypted: false,
             message_type: format!("{:?}", message_type),
             encryption_status: "none".to_string(),
+            hops: 0,
         }
     }
     

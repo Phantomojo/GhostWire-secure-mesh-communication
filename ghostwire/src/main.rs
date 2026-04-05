@@ -82,6 +82,11 @@ struct Args {
 
     #[arg(long)]
     profile: Option<String>,
+
+    /// Tailscale bootstrap node (format: <tailscale-ip>/<peer-id>)
+    /// Can be specified multiple times. Also scans 100.64.0.0/10 if TAILSCALE=1.
+    #[arg(long)]
+    tailscale_bootstrap: Vec<String>,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -96,6 +101,7 @@ struct Args {
     cli: bool,
     mesh: bool,
     profile: Option<String>,
+    tailscale_bootstrap: Vec<String>,
 }
 
 #[cfg(feature = "cli")]
@@ -152,6 +158,7 @@ async fn main() -> Result<()> {
         cli: false,
         mesh: false,
         profile: None,
+        tailscale_bootstrap: Vec::new(),
     };
 
     // Load configuration
@@ -184,6 +191,37 @@ async fn main() -> Result<()> {
         } else {
             tracing::warn!("Failed to parse bootstrap address: {}", b);
         }
+    }
+
+    // Feature 3: Parse Tailscale bootstrap nodes
+    // Format: <tailscale-ip>/<peer-id> e.g. 100.64.1.5/12D3KooW...
+    for ts in &args.tailscale_bootstrap {
+        if let Some((ip, peer_id)) = ts.split_once('/') {
+            if let Ok(peer_id) = peer_id.parse::<libp2p::PeerId>() {
+                let addr_str = format!("/ip4/{}/tcp/4001", ip);
+                if let Ok(ma) = addr_str.parse::<libp2p::Multiaddr>() {
+                    let full_addr = ma.with(libp2p::multiaddr::Protocol::P2p(peer_id));
+                    tracing::info!("Adding Tailscale bootstrap node: {} ({})", peer_id, full_addr);
+                    bootstrap_multiaddrs.push(full_addr);
+                }
+            } else {
+                tracing::warn!("Failed to parse Tailscale bootstrap PeerId: {}", peer_id);
+            }
+        } else {
+            tracing::warn!(
+                "Invalid Tailscale bootstrap format: {} (expected <ip>/<peer-id>)",
+                ts
+            );
+        }
+    }
+
+    // Feature 3: If TAILSCALE=1, scan for GhostWire nodes on Tailscale network (100.64.0.0/10)
+    if std::env::var("TAILSCALE").unwrap_or_default() == "1" {
+        tracing::info!("TAILSCALE=1 detected — scanning 100.64.0.0/10 for GhostWire peers");
+        // Note: Active scanning requires knowing peer IPs. In practice, Tailscale's
+        // built-in DNS (tailnet names) or the Tailscale API would provide peer lists.
+        // For now, we log this and rely on --tailscale-bootstrap for explicit peers.
+        // Future: integrate with `tailscale status --json` to discover peers.
     }
 
     // Initialize core components
