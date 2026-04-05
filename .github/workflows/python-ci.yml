@@ -1,0 +1,125 @@
+name: Python CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "ghostwire/scripts/**/*.py"
+      - "scripts/**/*.py"
+      - "requirements-team.txt"
+      - ".github/workflows/python-ci.yml"
+  pull_request:
+    branches: ["main", "develop"]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: 🐍 Python Lint & Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install linting tools
+        run: pip install black flake8
+      - name: Black check (scripts/)
+        run: black --check ghostwire/scripts/ scripts/
+        continue-on-error: true
+      - name: Flake8
+        run: flake8 --max-line-length=120 --extend-ignore=E203,W503,E501 ghostwire/scripts/ scripts/
+        continue-on-error: true
+      - name: Syntax check all Python files
+        run: |
+          find ghostwire/scripts/ scripts/ -name "*.py" -not -path "*/vendor/*" -exec python -m py_compile {} \;
+
+  validate-imports:
+    name: 📦 Validate Script Imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install core dependencies
+        run: |
+          pip install numpy pandas scikit-learn lightgbm onnx onnxruntime requests pyyaml
+          pip install -r requirements-team.txt 2>/dev/null || true
+      - name: Verify scripts parse correctly
+        run: |
+          cd ghostwire/scripts
+          python -c "
+          import ast, pathlib, sys
+          errors = []
+          for f in pathlib.Path('.').glob('*.py'):
+              try:
+                  ast.parse(f.read_text())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}', file=sys.stderr)
+              sys.exit(1)
+          print(f'All {len(list(pathlib.Path(\".\").glob(\"*.py\")))} scripts parse OK')
+          "
+
+  smoke-test:
+    name: 🧪 LightGBM Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install numpy scikit-learn lightgbm onnx onnxruntime
+      - name: LightGBM training smoke test
+        run: |
+          python -c "
+          import numpy as np
+          import lightgbm as lgb
+          from sklearn.model_selection import train_test_split
+
+          # Generate synthetic data
+          np.random.seed(42)
+          X = np.random.rand(500, 7)
+          y = (X[:, 0] + X[:, 1] > 1).astype(int)
+
+          X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+          model = lgb.LGBMClassifier(n_estimators=10, verbose=-1, random_state=42)
+          model.fit(X_train, y_train)
+          acc = model.score(X_test, y_test)
+          print(f'LightGBM smoke test: accuracy={acc:.3f}')
+          assert acc > 0.5, f'Model accuracy {acc} too low'
+          print('Smoke test PASSED')
+          "
+      - name: ONNX export smoke test
+        run: |
+          python -c "
+          import numpy as np
+          import lightgbm as lgb
+          import onnx
+          import onnxmltools
+
+          # Train tiny model
+          X = np.random.rand(100, 5)
+          y = (X[:, 0] > 0.5).astype(int)
+          model = lgb.LGBMClassifier(n_estimators=5, verbose=-1)
+          model.fit(X, y)
+
+          # Export to ONNX
+          onnx_model = onnxmltools.convert_lightgbm(model, initial_types=[('input', onnxmltools.utils.FloatTensorType([None, 5]))])
+          onnx.save(onnx_model, '/tmp/test_model.onnx')
+
+          # Verify
+          loaded = onnx.load('/tmp/test_model.onnx')
+          onnx.checker.check_model(loaded)
+          print('ONNX export smoke test PASSED')
+          "
