@@ -274,6 +274,7 @@ async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Resul
         encrypted: false,
         message_type: "text".to_string(),
         encryption_status: "unknown".to_string(),
+        hops: 0,
     };
 
     match core.send_message(&msg).await {

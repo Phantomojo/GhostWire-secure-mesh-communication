@@ -1,4 +1,4 @@
-use crate::core::encryption::{EncryptionManager, KeyType};
+use crate::core::encryption::{EncryptionManager, EncryptedMessage, KeyType, MessageType as EncMessageType};
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
@@ -32,6 +32,9 @@ use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 use uuid::Uuid;
+
+/// Maximum hop count for multi-hop relay
+const MAX_HOPS: u8 = 5;
 
 pub enum MeshCommand {
     PutRecord {
@@ -393,6 +396,7 @@ impl MeshTransport {
             pending_get_queries: HashMap::new(),
             message_store: self._message_store.clone(),
             core_messages: self._core_messages.clone(),
+            seen_messages: std::collections::HashSet::new(),
         };
 
         tokio::spawn(driver.run());
@@ -576,6 +580,8 @@ struct MeshDriver {
     pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
     message_store: Arc<crate::core::store::SecureMessageStore>,
     core_messages: Arc<RwLock<Vec<Message>>>,
+    /// Seen message IDs for relay deduplication
+    seen_messages: std::collections::HashSet<Uuid>,
 }
 
 impl MeshDriver {
@@ -714,11 +720,32 @@ impl MeshDriver {
                 reply,
             } => {
                 let res = (|| -> Result<()> {
-                    // Send direct message via gossipsub on a per-peer topic
+                    // Feature 1: Send direct message via gossipsub on per-peer DM topic
                     // Topic format: ghostwire-dm-{recipient_peer_id}
                     let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
+
+                    // Feature 2: Encrypt message content before publishing
+                    let mut encrypted_msg = message.clone();
+                    if let Ok(encrypted_content) = self.encryption_manager.encrypt_message(
+                        &message.content,
+                        &message.recipient,
+                        EncMessageType::Text,
+                    ) {
+                        // Replace content with base64-encoded encrypted payload
+                        encrypted_msg.content =
+                            base64::engine::general_purpose::STANDARD.encode(&encrypted_content.ciphertext);
+                        encrypted_msg.encrypted = true;
+                        encrypted_msg.encryption_status = "full".to_string();
+                        // Store nonce and signature in message for decryption
+                        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
+                        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.signature);
+                        encrypted_msg.message_type = format!("encrypted:{}:{}", nonce_b64, sig_b64);
+                    } else {
+                        tracing::warn!("Failed to encrypt DM to {}, sending plaintext", recipient);
+                    }
+
                     use crate::core::wire_protocol::{Frame, FrameKind};
-                    let frame = Frame::encode(FrameKind::Message, &message)?;
+                    let frame = Frame::encode(FrameKind::Message, &encrypted_msg)?;
                     let data = frame.to_bytes();
                     self.swarm
                         .behaviour_mut()
@@ -873,9 +900,11 @@ impl MeshDriver {
         // Determine if this is a direct message for us or a broadcast
         let is_dm_for_us = topic_str.starts_with("ghostwire-dm-")
             && topic_str.ends_with(&self.local_peer_id.to_string());
+        // Also detect DM topics for other peers (for relay forwarding)
+        let is_dm_topic = topic_str.starts_with("ghostwire-dm-");
 
-        if !is_dm_for_us && topic_str != "ghostwire-messages" {
-            // Not our DM topic and not the broadcast topic — ignore
+        if !is_dm_for_us && !is_dm_topic && topic_str != "ghostwire-messages" {
+            // Not our DM topic, not any DM topic, and not the broadcast topic — ignore
             return Ok(());
         }
 
@@ -894,7 +923,7 @@ impl MeshDriver {
         }
 
         // Try to decode as Message (bincode via wire_protocol frame)
-        let msg = if let Ok((frame, _consumed)) =
+        let mut msg = if let Ok((frame, _consumed)) =
             crate::core::wire_protocol::Frame::from_bytes(&message.data)
         {
             if let Ok(m) = frame.decode::<Message>() {
@@ -910,13 +939,79 @@ impl MeshDriver {
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize message: {}", e))?
         };
 
+        // Feature 4: Multi-hop relay deduplication
+        if self.seen_messages.contains(&msg.id) {
+            debug!("Skipping already-seen message {}", msg.id);
+            return Ok(());
+        }
+        self.seen_messages.insert(msg.id);
+
+        // Feature 4: Multi-hop relay forwarding
+        // If message is a DM not intended for us, and hops < MAX_HOPS, forward it
+        if !msg.is_broadcast() && msg.recipient != self.local_peer_id.to_string() && msg.hops < MAX_HOPS {
+            let mut forwarded = msg.clone();
+            forwarded.hops += 1;
+            tracing::info!(
+                "Relaying message {} (hop {}/{}) to {}",
+                forwarded.id, forwarded.hops, MAX_HOPS, forwarded.recipient
+            );
+            // Publish to the recipient's DM topic
+            let relay_topic = IdentTopic::new(&format!("ghostwire-dm-{}", forwarded.recipient));
+            use crate::core::wire_protocol::{Frame, FrameKind};
+            if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
+                let _ = self.swarm.behaviour_mut().gossipsub.publish(relay_topic, frame.to_bytes());
+            }
+        }
+
+        // If this DM is not for us, we're done (already forwarded above if applicable)
+        if !is_dm_for_us && topic_str != "ghostwire-messages" {
+            return Ok(());
+        }
+
+        // Feature 2: Decrypt message content if encrypted
+        if msg.encrypted && msg.message_type.starts_with("encrypted:") {
+            let parts: Vec<&str> = msg.message_type.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                let nonce_b64 = parts[1];
+                let sig_b64 = parts[2];
+                if let (Ok(ciphertext), Ok(nonce), Ok(signature)) = (
+                    base64::engine::general_purpose::STANDARD.decode(&msg.content),
+                    base64::engine::general_purpose::STANDARD.decode(nonce_b64),
+                    base64::engine::general_purpose::STANDARD.decode(sig_b64),
+                ) {
+                    // Reconstruct EncryptedMessage for decryption
+                    let enc_msg = crate::core::encryption::EncryptedMessage {
+                        ciphertext,
+                        nonce,
+                        signature,
+                        sender_id: msg.sender.clone(),
+                        timestamp: msg.timestamp,
+                        key_id: "".to_string(),
+                        message_type: EncMessageType::Text,
+                        version: 0x03,
+                        pq_key: None,
+                    };
+                    match self.encryption_manager.decrypt_message(&enc_msg) {
+                        Ok(plaintext) => {
+                            msg.content = plaintext;
+                            msg.encryption_status = "decrypted".to_string();
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to decrypt message from {}: {}", msg.sender, e);
+                            msg.encryption_status = "decrypt_failed".to_string();
+                        }
+                    }
+                }
+            }
+        }
+
         if is_dm_for_us {
             tracing::info!("Received direct message from peer {}", peer_id);
         } else {
             tracing::info!("Processed broadcast message from {}: {:?}", peer_id, msg);
         }
 
-        if msg.message_type != "handshake" {
+        if msg.message_type != "handshake" && !msg.message_type.starts_with("encrypted:") {
             let _ = self.handle_incoming_message(peer_id, msg.clone()).await;
         }
 
