@@ -1314,9 +1314,24 @@ section { padding: 6rem 0; }
    RESPONSIVE
    ================================================ */
 
+/* Mobile touch targets — minimum 44px for accessibility */
+@media (hover: none) and (pointer: coarse) {
+  .nav-link { min-height: 44px; display: flex; align-items: center; }
+  .nav-link--gh { min-height: 44px; }
+  .btn { min-height: 44px; }
+  .qs-tab { min-height: 44px; }
+  .modal-close { min-width: 44px; min-height: 44px; }
+  .persona-card { min-height: 44px; }
+  .feature { min-height: 44px; }
+  .community-card { min-height: 44px; }
+  .limitation { min-height: 44px; }
+  .doc-card { min-height: 44px; }
+  .nav-mobile a { min-height: 48px; display: flex; align-items: center; }
+}
+
 @media (max-width: 900px) {
   .nav-links { display: none; }
-  .nav-toggle { display: flex; }
+  .nav-toggle { display: flex; min-width: 44px; min-height: 44px; }
   .hiw-grid { grid-template-columns: 1fr; }
   .hiw-visual { order: -1; }
   .manifesto-inner { grid-template-columns: 1fr; gap: 3rem; }
