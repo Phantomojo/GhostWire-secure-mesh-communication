@@ -13,7 +13,7 @@
 | **ollama** | ✅ Running | PID 1136175 |
 | **ffmpeg** | ✅ Installed | For audio extraction |
 | **whisper** | ✅ INSTALLED | pipx, base model ready |
-| **transcribe.sh** | ✅ Created | `/home/ph/GhostWire-secure-mesh-communication/scripts/` |
+| **transcribe.sh** | ✅ Created | ` |
 
 ---
 
@@ -22,12 +22,12 @@
 ### Option 1: Use the Script (Recommended)
 
 ```bash
-cd /home/ph/GhostWire-secure-mesh-communication
+cd 
 
 # Transcribe a file
-./scripts/transcribe.sh "/home/ph/Downloads/your_audio.mp3"
+./scripts/transcribe.sh "
 
-# Output will be: /home/ph/Downloads/your_audio.txt
+# Output will be: 
 ```
 
 ### Option 2: Use whisper directly
@@ -37,9 +37,9 @@ cd /home/ph/GhostWire-secure-mesh-communication
 export PATH="$PATH:/root/.local/bin"
 
 # Transcribe a file
-whisper "/home/ph/Downloads/audio.mp3" --model base --language en
+whisper " --model base --language en
 
-# Output: /home/ph/Downloads/audio.txt
+# Output: 
 ```
 
 ### Option 3: Use vibe GUI (if you have display)
@@ -64,7 +64,7 @@ vibe
 
 ## Your Audio Files Ready for Transcription
 
-Found in `/home/ph/Downloads/`:
+Found in `
 
 1. `CERBERUS__The_Digital_Trap.mp4` (28 MB)
 2. `Civilization_s_Backup_Plan.mp4` (55 MB)
@@ -92,13 +92,13 @@ whisper-large-v3    xxxxx    3.1 GB    Recently
 ### 2. Test transcription
 
 ```bash
-./scripts/transcribe.sh "/home/ph/Downloads/Closing_the_Cerberus_Uncanny_Valley.m4a"
+./scripts/transcribe.sh "
 ```
 
 ### 3. Check output
 
 ```bash
-cat "/home/ph/Downloads/Closing_the_Cerberus_Uncanny_Valley.txt"
+cat "
 ```
 
 ---
@@ -164,11 +164,11 @@ whisper "/path/to/audio.mp3" --model base --language en
 To transcribe all audio files in Downloads:
 
 ```bash
-cd /home/ph/Downloads
+cd 
 for file in *.mp3 *.m4a *.wav; do
     [ -f "$file" ] || continue
     echo "Transcribing: $file"
-    /home/ph/GhostWire-secure-mesh-communication/scripts/transcribe.sh "$file"
+     "$file"
 done
 ```
 

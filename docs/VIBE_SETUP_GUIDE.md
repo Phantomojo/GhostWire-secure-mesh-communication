@@ -27,7 +27,7 @@
 | **vibe binary** | ✅ Installed | `/usr/bin/vibe` |
 | **GUI dependencies** | ✅ Installed | GTK3, WebKit2GTK |
 | **whisper (CLI)** | ✅ Installed | `/root/.local/bin/whisper` |
-| **Models directory** | ⏳ Setting up | `/home/ph/.local/share/vibe/models/` |
+| **Models directory** | ⏳ Setting up | ` |
 
 ---
 
@@ -55,7 +55,7 @@ Open a terminal **in your desktop environment** and run:
 
 ```bash
 # Run the setup script
-cd /home/ph/GhostWire-secure-mesh-communication
+cd 
 ./scripts/setup-vibe.sh
 ```
 
@@ -63,7 +63,7 @@ Or manually download models:
 
 ```bash
 # Using Python
-python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='openai/whisper-base', local_dir='/home/ph/.local/share/vibe/models/whisper-base')"
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='openai/whisper-base', local_dir='
 ```
 
 ### Step 2: Launch Vibe
@@ -111,7 +111,7 @@ If you need transcription without a GUI, use the CLI version:
 export PATH="$PATH:/root/.local/bin"
 
 # Transcribe a file
-whisper "/home/ph/Downloads/audio.mp3" --model base --language en
+whisper " --model base --language en
 
 # Output formats
 whisper "audio.mp3" --output_format txt    # Plain text
@@ -132,7 +132,7 @@ whisper "audio.mp3" --language es  # Spanish
 
 ## Your Audio Files
 
-Ready to transcribe in `/home/ph/Downloads/`:
+Ready to transcribe in `
 
 | File | Size | Format |
 |------|------|--------|
@@ -176,7 +176,7 @@ echo $DISPLAY  # Should show :0 or similar
 **Solution:**
 ```bash
 # Manual download
-cd /home/ph/.local/share/vibe/models
+cd 
 python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='openai/whisper-base', local_dir='whisper-base')"
 ```
 
@@ -213,7 +213,7 @@ for f in *.mp3; do whisper "$f" --model base; done
 
 ### Using Transcribe Script
 ```bash
-cd /home/ph/GhostWire-secure-mesh-communication
+cd 
 ./scripts/transcribe.sh "/path/to/audio.mp3"
 ```
 
@@ -221,7 +221,7 @@ cd /home/ph/GhostWire-secure-mesh-communication
 
 ## Model Storage
 
-Models are stored in: `/home/ph/.local/share/vibe/models/`
+Models are stored in: `
 
 **Directory structure:**
 ```

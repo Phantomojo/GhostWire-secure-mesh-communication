@@ -12,7 +12,7 @@
 | **Whisper** | ✅ Installed | `/root/.local/bin/whisper` |
 | **ffmpeg** | ✅ Installed | `/usr/bin/ffmpeg` |
 | **ollama** | ✅ Running | `/usr/local/bin/ollama` |
-| **transcribe.sh** | ✅ Ready | `/home/ph/GhostWire-secure-mesh-communication/scripts/` |
+| **transcribe.sh** | ✅ Ready | ` |
 
 ---
 
@@ -22,18 +22,18 @@
 
 ```bash
 # Method 1: Using the script (easiest)
-cd /home/ph/GhostWire-secure-mesh-communication
-./scripts/transcribe.sh "/home/ph/Downloads/Closing_the_Cerberus_Uncanny_Valley.m4a"
+cd 
+./scripts/transcribe.sh "
 
 # Method 2: Direct whisper command
 export PATH="$PATH:/root/.local/bin"
-whisper "/home/ph/Downloads/audio.mp3" --model base --language en
+whisper " --model base --language en
 ```
 
 ### Output
 
 Transcription will be saved as:
-- `/home/ph/Downloads/Closing_the_Cerberus_Uncanny_Valley.txt`
+- `
 
 ---
 
@@ -70,7 +70,7 @@ Exactly. It rotates through six different device profiles...
 ## Batch Transcribe All Files
 
 ```bash
-cd /home/ph/Downloads
+cd 
 export PATH="$PATH:/root/.local/bin"
 
 for file in *.mp3 *.m4a *.wav; do
@@ -202,7 +202,7 @@ Transcripts can be used for:
 
 ## Next Steps
 
-1. ✅ Transcribe remaining audio files in `/home/ph/Downloads/`
+1. ✅ Transcribe remaining audio files in `
 2. ✅ Review and edit transcripts
 3. ✅ Organize into GhostWire documentation
 4. ✅ Use for blog posts and guides
