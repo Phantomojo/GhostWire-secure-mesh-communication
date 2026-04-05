@@ -132,7 +132,7 @@ impl EncryptedStore {
 
         // Check expiry
         if let Some(expires_at) = meta.expires_at {
-            if now_secs() > expires_at {
+            if now_secs() >= expires_at {
                 // Lazily delete expired entry
                 self.db.remove(&db_key)?;
                 return Ok(None);

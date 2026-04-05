@@ -20,7 +20,6 @@
 //!    The reference hash is embedded by build.rs from GHOSTWIRE_BINARY_HASH env var.
 
 use anyhow::Result;
-use std::path::PathBuf;
 
 // ── Memory locking ────────────────────────────────────────────────────────────
 

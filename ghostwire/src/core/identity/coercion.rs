@@ -19,8 +19,6 @@ use anyhow::Result;
 use argon2::{Argon2, Params, Version};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Which profile a given password decrypts

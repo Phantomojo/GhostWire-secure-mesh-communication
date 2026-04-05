@@ -1,7 +1,6 @@
 use crate::core::identity::encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
 use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
-use libp2p::PeerId;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
@@ -448,7 +447,6 @@ impl Identity {
     /// Stub for Wave 7 integration — returns empty vec until identity is unlocked
     pub fn get_public_key(&self) -> Vec<u8> {
         // libp2p 0.56 PublicKey - encode to protobuf bytes
-        use libp2p::identity::PublicKey;
         match self.public_key() {
             Some(pk) => match pk.try_into_ed25519() {
                 Ok(ed_pk) => ed_pk.to_bytes().to_vec(),

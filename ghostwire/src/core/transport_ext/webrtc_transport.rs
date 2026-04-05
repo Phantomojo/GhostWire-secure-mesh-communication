@@ -16,7 +16,6 @@
 //! Auto-escalation: this tier activates automatically when stealth TCP
 //! is blocked (detected by the AutoTransportSwitcher in transport_manager.rs)
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

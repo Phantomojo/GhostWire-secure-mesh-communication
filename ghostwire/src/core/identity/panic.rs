@@ -24,7 +24,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
-use zeroize::Zeroize;
 
 /// Configuration for panic mode and dead man's switch
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,10 +22,9 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use zeroize::Zeroize;
 
 /// Default block size: 256 KiB (balances DHT overhead vs. transfer efficiency)

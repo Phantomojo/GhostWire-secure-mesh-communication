@@ -8,9 +8,7 @@
 //! This implementation provides the foundation for future integration.
 
 use anyhow::Result;
-use base64::Engine;
 use rand::RngCore;
-use tracing::warn;
 
 /// Obfs4 configuration
 #[derive(Debug, Clone)]

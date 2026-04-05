@@ -21,12 +21,9 @@
 //!   4. **Stable pseudo-presence** — instead of going truly offline, maintain
 //!      a minimal keepalive that doesn't leak session timing.
 
-use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tokio::time::sleep;
 
 /// Configuration for presence obfuscation

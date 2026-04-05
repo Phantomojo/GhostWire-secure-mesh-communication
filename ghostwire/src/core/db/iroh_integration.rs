@@ -23,8 +23,6 @@
 //!   [features]
 //!   iroh = ["dep:iroh", "dep:iroh-bytes", "dep:iroh-docs"]
 
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 // ── Why Iroh specifically ─────────────────────────────────────────────────────
 //
