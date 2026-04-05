@@ -356,6 +356,11 @@ impl MeshTransport {
         // Get local peer ID before moving swarm into driver
         let local_peer_id = *swarm.local_peer_id();
 
+        // Subscribe to our own DM topic so we can receive direct messages
+        let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", local_peer_id));
+        swarm.behaviour_mut().gossipsub.subscribe(&dm_topic)?;
+        tracing::info!("Subscribed to own DM topic: ghostwire-dm-{}", local_peer_id);
+
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
             if let Some(peer_id) = addr.iter().find_map(|p| {
