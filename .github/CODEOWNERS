@@ -1,0 +1,37 @@
+# CODEOWNERS - GhostWire
+# These owners will be automatically requested for review on PRs
+# that touch files in their directories.
+
+# Michael (repo owner) reviews everything critical
+* @Phantomojo
+
+# Core Rust code
+/ghostwire/src/ @Phantomojo
+/ghostwire/Cargo.toml @Phantomojo
+/ghostwire/Cargo.lock @Phantomojo
+
+# Tauri app code
+/src-tauri/src/ @Phantomojo
+/src-tauri/Cargo.toml @Phantomojo
+
+# AI/ML models and training
+/models/ @Phantomojo
+/ghostwire/scripts/train_*.py @Phantomojo
+/ghostwire/scripts/gnn_*.py @Phantomojo
+
+# Configuration
+/config/ @Phantomojo
+/ghostwire/tauri.conf.json @Phantomojo
+
+# Documentation
+/docs/ @Phantomojo
+/README.md @Phantomojo
+
+# Web UI
+/webui/ @Phantomojo
+/webui-src/ @Phantomojo
+
+# Security
+/.github/ @Phantomojo
+/Dockerfile @Phantomojo
+/docker-compose.yml @Phantomojo
