@@ -110,7 +110,6 @@ if (meshCanvas && !prefersReducedMotion) {
   resize();
   drawMesh();
 } else if (meshCanvas && prefersReducedMotion) {
-  // Static CSS gradient fallback for reduced motion users
   meshCanvas.style.background = 'radial-gradient(ellipse at 30% 40%, rgba(0,220,154,0.06) 0%, transparent 60%)';
 }
 
@@ -203,7 +202,6 @@ if (diagramCanvas && !prefersReducedMotion) {
   resizeDiagram();
   drawDiagram();
 } else if (diagramCanvas && prefersReducedMotion) {
-  // Static fallback for reduced motion
   const dctx = diagramCanvas.getContext('2d');
   const GREEN = '#00DC9A';
 
@@ -265,6 +263,84 @@ if (diagramCanvas && !prefersReducedMotion) {
   resizeDiagram();
 }
 
+// ---- MODAL SYSTEM ----
+function openModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (!modal) return;
+  modal.classList.add('active');
+  document.body.style.overflow = 'hidden';
+  // Focus the close button for accessibility
+  const closeBtn = modal.querySelector('.modal-close');
+  if (closeBtn) closeBtn.focus();
+  // Trap focus
+  trapFocus(modal);
+}
+
+function closeModal(modal) {
+  if (typeof modal === 'string') modal = document.getElementById(modal);
+  if (!modal) return;
+  modal.classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+function trapFocus(modal) {
+  const focusable = modal.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  );
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  modal.addEventListener('keydown', function handler(e) {
+    if (e.key === 'Escape') {
+      closeModal(modal);
+      return;
+    }
+    if (e.key === 'Tab') {
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+  });
+}
+
+// Click handlers for data-modal cards and features
+document.querySelectorAll('[data-modal]').forEach(trigger => {
+  trigger.addEventListener('click', () => {
+    openModal(trigger.dataset.modal);
+  });
+  // Keyboard support for role="button" elements
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openModal(trigger.dataset.modal);
+    }
+  });
+});
+
+// Close on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      closeModal(overlay);
+    }
+  });
+});
+
+// Close on Escape (global fallback)
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m));
+  }
+});
+
 // ---- QUICK START TABS ----
 const qsTabs = document.querySelectorAll('.qs-tab');
 const qsPanels = document.querySelectorAll('.qs-panel');
@@ -273,10 +349,12 @@ function activateTab(tab) {
   qsTabs.forEach(t => {
     t.classList.remove('active');
     t.setAttribute('aria-selected', 'false');
+    t.setAttribute('tabindex', '-1');
   });
   qsPanels.forEach(p => p.classList.remove('active'));
   tab.classList.add('active');
   tab.setAttribute('aria-selected', 'true');
+  tab.setAttribute('tabindex', '0');
   const target = document.getElementById('tab-' + tab.dataset.tab);
   if (target) target.classList.add('active');
 }
@@ -284,7 +362,6 @@ function activateTab(tab) {
 qsTabs.forEach(tab => {
   tab.addEventListener('click', () => activateTab(tab));
 
-  // Keyboard navigation for tabs
   tab.addEventListener('keydown', (e) => {
     const tabArray = Array.from(qsTabs);
     const currentIndex = tabArray.indexOf(tab);
