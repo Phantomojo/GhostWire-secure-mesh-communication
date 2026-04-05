@@ -1031,6 +1031,41 @@ impl Core {
         }
     }
 
+    /// Get messages from both in-memory buffer and encrypted store
+    /// This ensures incoming mesh messages are visible via the API even if
+    /// they haven't been persisted to the encrypted store yet.
+    pub async fn get_messages(&self, peer_id: &str, limit: usize) -> Vec<crate::core::message::Message> {
+        use crate::core::message::Message;
+
+        // Start with in-memory messages (includes incoming mesh messages)
+        let mut messages: Vec<Message> = {
+            let mem = self.messages.read().await;
+            mem.iter()
+                .filter(|m| {
+                    m.recipient == peer_id || m.sender == peer_id || peer_id == "all"
+                })
+                .cloned()
+                .collect()
+        };
+
+        // Also load from encrypted store
+        if let Ok(store_messages) = self.message_store.load() {
+            for m in store_messages {
+                if m.recipient == peer_id || m.sender == peer_id || peer_id == "all" {
+                    // Avoid duplicates — check if already in memory list
+                    if !messages.iter().any(|existing| existing.id == m.id) {
+                        messages.push(m);
+                    }
+                }
+            }
+        }
+
+        // Sort by timestamp (newest first) and limit
+        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        messages.truncate(limit);
+        messages
+    }
+
     /// Get the identity ID
     pub async fn get_identity_id(&self) -> String {
         self.identity.read().await.id.clone()
