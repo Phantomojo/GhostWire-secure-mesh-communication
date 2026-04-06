@@ -49,36 +49,49 @@ impl SecureMessageStore {
             &message.recipient,
             MessageType::Text,
         ).map_err(|e| anyhow::anyhow!("Message encryption failed: {}", e))?;
-        
+
         // Store encrypted wrapper, NOT plaintext
         let key = format!("msg_{}_{}", message.timestamp, message.id);
         self.persistence.store_secure("messages", &key, &encrypted)?;
-        
+
         info!(
             message_id = %message.id,
             encrypted_len = encrypted.ciphertext.len(),
             "Message encrypted and stored"
         );
-        
+
+        Ok(())
+    }
+
+    /// Store a message without encryption (for broadcasts/local-only messages)
+    pub fn save_message_plain(&self, message: &Message) -> Result<()> {
+        // Store as JSON without encryption
+        let key = format!("msg_{}_{}", message.timestamp, message.id);
+        self.persistence.store_secure("messages_plain", &key, message)?;
+
+        info!(
+            message_id = %message.id,
+            "Message stored (plaintext)"
+        );
+
         Ok(())
     }
 
     /// Load all messages from the ledger and decrypt them
     pub fn load(&self) -> Result<Vec<Message>> {
-        let encrypted_messages: Vec<EncryptedMessage> = 
+        let mut all_messages = Vec::new();
+
+        // Load encrypted messages
+        let encrypted_messages: Vec<EncryptedMessage> =
             self.persistence.load_all_secure::<EncryptedMessage>("messages")?;
-        
-        let mut decrypted_messages = Vec::with_capacity(encrypted_messages.len());
-        
+
         for encrypted in encrypted_messages {
             match self.encryption.decrypt_message(&encrypted) {
                 Ok(content) => {
-                    // Reconstruct Message from decrypted content
-                    // Note: In production, you'd store metadata separately encrypted
-                    decrypted_messages.push(Message {
-                        id: uuid::Uuid::new_v4(), // Original ID lost - TODO: fix metadata storage
+                    all_messages.push(Message {
+                        id: uuid::Uuid::new_v4(),
                         sender: encrypted.sender_id.clone(),
-                        recipient: "unknown".to_string(), // TODO: encrypt recipient separately
+                        recipient: "unknown".to_string(),
                         content,
                         timestamp: encrypted.timestamp,
                         encrypted: true,
@@ -93,12 +106,19 @@ impl SecureMessageStore {
                         sender_id = %encrypted.sender_id,
                         "Failed to decrypt message - possible key rotation or corruption"
                     );
-                    // Continue loading other messages
                 }
             }
         }
-        
-        Ok(decrypted_messages)
+
+        // Load plain messages (broadcasts)
+        let plain_messages: Vec<Message> =
+            self.persistence.load_all_secure::<Message>("messages_plain")?;
+        all_messages.extend(plain_messages);
+
+        // Sort by timestamp (newest first)
+        all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        Ok(all_messages)
     }
 
     /// Retrieve historical messages for a specific peer or broadcast

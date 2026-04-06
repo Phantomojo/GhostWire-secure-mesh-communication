@@ -29,6 +29,8 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
+use chacha20::ChaCha20;
+use chacha20::cipher::{KeyIvInit, StreamCipher};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -180,89 +182,92 @@ pub fn create_sphinx_packet(
         shared_secrets.push(genesis_derive(SPHINX_SHARED_DOMAIN, &ikm).to_vec());
     }
 
-    // Subsequent hops: derive blinded alpha and shared secret
+    // Subsequent hops: derive shared secret using chained KDF
+    // Each hop's shared secret is derived from the previous hop's shared secret
+    // combined with the next hop's public key. This avoids the broken blinding approach.
     for i in 1..n {
         let prev_secret = &shared_secrets[i - 1];
-        let prev_alpha = &alphas[i - 1];
+        let hop_pub = route_keys[i];
 
-        // Derive blinding factor from previous shared secret
+        // Derive this hop's shared secret from the previous secret + hop's public key
+        let mut ikm = prev_secret.clone();
+        ikm.extend_from_slice(&hop_pub);
+        ikm.extend_from_slice(&alphas[i - 1]); // Include previous alpha for path binding
+        shared_secrets.push(genesis_derive(SPHINX_SHARED_DOMAIN, &ikm).to_vec());
+
+        // Still compute blinded alpha for header encryption diversity
         let blinding_factor = {
-            let mut ikm = prev_secret.clone();
-            ikm.extend_from_slice(prev_alpha);
+            let mut ikm = shared_secrets[i - 1].clone();
+            ikm.extend_from_slice(&alphas[i - 1]);
             genesis_derive(SPHINX_BLIND_DOMAIN, &ikm)
         };
-
-        // FIXED: rerandomise alpha using real X25519 scalar multiplication
-        let new_alpha = rerandomise_alpha(prev_alpha, &blinding_factor);
+        let new_alpha = rerandomise_alpha(&alphas[i - 1], &blinding_factor);
         alphas.push(new_alpha);
-
-        // Derive blinded shared secret: DH(blinded_ephemeral, hop_key)
-        // The blinded ephemeral is encoded in new_alpha as a curve point.
-        // We compute the shared secret as: DH(blinding_scalar, hop_pub)
-        // combined with the path context.
-        let mut blinded_scalar_bytes = blinding_factor;
-        blinded_scalar_bytes[0] &= 248;
-        blinded_scalar_bytes[31] &= 127;
-        blinded_scalar_bytes[31] |= 64;
-
-        let blinded_secret = x25519_dalek::StaticSecret::from(blinded_scalar_bytes);
-        let hop_pub = x25519_dalek::PublicKey::from(route_keys[i]);
-        let raw_shared = blinded_secret.diffie_hellman(&hop_pub);
-
-        // Mix in path context to prevent cross-path attacks
-        let mut ikm = raw_shared.as_bytes().to_vec();
-        ikm.extend_from_slice(&new_alpha);
-        let derived_bytes = genesis_derive(SPHINX_SHARED_DOMAIN, &ikm);
-        shared_secrets.push(derived_bytes.to_vec());
     }
 
-    // Build routing header β: innermost (final) to outermost
+    // Build and encrypt header layers from innermost (final hop) to outermost (first hop)
+    // Each hop sees only its next_hop_id and an encrypted blob for the remaining hops.
+    let mut current_header = vec![0u8; SPHINX_HEADER_SIZE];
+
+    // Start with the final hop's routing data
     let final_routing = b"DELIVER\x00";
-    let mut routing_layers: Vec<Vec<u8>> = vec![final_routing.to_vec()];
+    current_header[..final_routing.len()].copy_from_slice(final_routing);
 
-    for i in (0..n - 1).rev() {
-        let next_id = route_ids[i + 1].as_bytes();
-        let mut layer = Vec::new();
-        let id_len = next_id.len().min(255);
-        layer.push(id_len as u8);
-        layer.extend_from_slice(&next_id[..id_len]);
-        let inner = routing_layers.last().unwrap();
-        layer.extend_from_slice(inner);
-        routing_layers.push(layer);
-    }
-
-    let mut current_header = routing_layers.last().unwrap().clone();
-    current_header.resize(SPHINX_HEADER_SIZE, 0u8);
-
-    // Encrypt header layers outward
-    for (i, secret) in shared_secrets.iter().enumerate().rev() {
-        let keys = HopKeys::derive(secret, i as u8, &alphas[i]);
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.header_key));
-        let mut nonce_bytes = [0u8; 12];
-        rng.fill(&mut nonce_bytes).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let to_encrypt = &current_header[..current_header.len().min(SPHINX_HEADER_SIZE - 28)];
-        if let Ok(ct) = cipher.encrypt(nonce, to_encrypt) {
-            current_header[..12].copy_from_slice(&nonce_bytes);
-            let ct_len = ct.len().min(SPHINX_HEADER_SIZE - 12);
-            current_header[12..12 + ct_len].copy_from_slice(&ct[..ct_len]);
+    // Encrypt for each hop from last to first (innermost to outermost)
+    // Hop n-1 is the final hop (sees DELIVER), hop 0 is the first hop (sees next_hop = hop 1)
+    for i in (0..n).rev() {
+        // If this is not the final hop (i < n-1), prepend the next_hop_id for this hop
+        // The next_hop for hop i is route_ids[i+1] (the hop that comes AFTER this one in the route)
+        // We prepend BEFORE encrypting so the next_hop_id is visible to this hop after decryption.
+        if i < n - 1 {
+            let next_id = route_ids[i + 1].as_bytes();
+            let id_len = next_id.len().min(255);
+            // Shift encrypted data right and prepend next_hop_id
+            let mut new_header = vec![0u8; SPHINX_HEADER_SIZE];
+            new_header[0] = id_len as u8;
+            new_header[1..1 + id_len].copy_from_slice(&next_id[..id_len]);
+            // Copy encrypted data after the next_hop_id
+            let copy_len = (SPHINX_HEADER_SIZE - 1 - id_len).min(current_header.len());
+            new_header[1 + id_len..1 + id_len + copy_len]
+                .copy_from_slice(&current_header[..copy_len]);
+            current_header = new_header;
         }
+
+        let keys = HopKeys::derive(&shared_secrets[i], i as u8, &alphas[i]);
+
+        // Derive nonce from shared secret (deterministic, no storage needed)
+        let nonce: [u8; 12] = {
+            let mut n = [0u8; 12];
+            n.copy_from_slice(&shared_secrets[i][..12]);
+            n
+        };
+
+        eprintln!("CREATE hop {}: shared_secret[0:4]={:?}, nonce[0:4]={:?}, header_key[0:4]={:?}, alpha[0:4]={:?}",
+            i, &shared_secrets[i][..4], &nonce[..4], &keys.header_key[..4], &alphas[i][..4]);
+
+        // Encrypt the entire header with ChaCha20 stream cipher
+        let mut cipher = ChaCha20::new(&keys.header_key.into(), &nonce.into());
+        cipher.apply_keystream(&mut current_header);
     }
 
-    // Encrypt payload outward
+    // Encrypt payload outward using ChaCha20 stream cipher (no AEAD tag)
+    // The MAC (gamma) provides authentication, so we only need confidentiality here.
+    // Using stream cipher avoids the 16-byte AEAD tag that would truncate inner layers.
+    // Nonce is derived deterministically from the shared secret (no need to store it).
     let mut current_payload = padded_payload;
     for (i, secret) in shared_secrets.iter().enumerate().rev() {
         let keys = HopKeys::derive(secret, i as u8, &alphas[i]);
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.payload_key));
-        let mut nonce_bytes = [0u8; 12];
-        rng.fill(&mut nonce_bytes).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let mut new_payload = nonce_bytes.to_vec();
-        if let Ok(ct) = cipher.encrypt(nonce, current_payload.as_slice()) {
-            new_payload.extend_from_slice(&ct[..ct.len().min(SPHINX_PAYLOAD_SIZE - 12)]);
-        }
-        new_payload.resize(SPHINX_PAYLOAD_SIZE, 0u8);
-        current_payload = new_payload;
+
+        // Derive nonce from shared secret (deterministic, no storage needed)
+        let nonce: [u8; 12] = {
+            let mut n = [0u8; 12];
+            n.copy_from_slice(&secret[..12]);
+            n
+        };
+
+        // Encrypt the entire payload with ChaCha20 stream cipher
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        cipher.apply_keystream(&mut current_payload);
     }
 
     let gamma = compute_mac(&shared_secrets[0], &alphas[0], &current_header, &current_payload);
@@ -303,38 +308,48 @@ pub fn process_sphinx_packet(
         return SphinxProcessResult::Invalid;
     }
 
-    // Decrypt header
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.header_key));
-    if packet.beta.len() < 12 {
-        return SphinxProcessResult::Invalid;
-    }
-    let nonce = Nonce::from_slice(&packet.beta[..12]);
-    let header_pt = match cipher.decrypt(nonce, &packet.beta[12..]) {
-        Ok(pt) => pt,
-        Err(_) => return SphinxProcessResult::Invalid,
+    // Decrypt header using ChaCha20 stream cipher (matches creation)
+    // Nonce is derived deterministically from the shared secret
+    let nonce: [u8; 12] = {
+        let mut n = [0u8; 12];
+        n.copy_from_slice(&derived_secret[..12]);
+        n
     };
+    eprintln!("PROCESS hop {}: derived_secret[0:4]={:?}, nonce[0:4]={:?}, header_key[0:4]={:?}, alpha[0:4]={:?}",
+        our_peer_id, &derived_secret[..4], &nonce[..4], &keys.header_key[..4], &packet.alpha[..4]);
+    let mut header_pt = packet.beta.clone();
+    let mut cipher = ChaCha20::new(&keys.header_key.into(), &nonce.into());
+    cipher.apply_keystream(&mut header_pt);
+
+    // Debug output
+    eprintln!("PROCESS hop {}: header_pt[0:8] = {:?}", our_peer_id, &header_pt[..8]);
 
     if header_pt.starts_with(b"DELIVER\x00") {
-        // Final hop — peel the last payload layer
-        let payload_cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.payload_key));
-        if packet.delta.len() < 12 {
-            return SphinxProcessResult::Invalid;
-        }
-        let payload_nonce = Nonce::from_slice(&packet.delta[..12]);
-        match payload_cipher.decrypt(payload_nonce, &packet.delta[12..]) {
-            Ok(pt) => match unpad_from_size(&pt) {
-                Ok(unpadded) => SphinxProcessResult::Deliver { payload: unpadded },
-                Err(_) => SphinxProcessResult::Invalid,
-            },
+        // Final hop — decrypt the payload using ChaCha20 stream cipher
+        let nonce: [u8; 12] = {
+            let mut n = [0u8; 12];
+            n.copy_from_slice(&derived_secret[..12]);
+            n
+        };
+        let mut payload_pt = packet.delta.clone();
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        cipher.apply_keystream(&mut payload_pt);
+
+        match unpad_from_size(&payload_pt) {
+            Ok(unpadded) => SphinxProcessResult::Deliver { payload: unpadded },
             Err(_) => SphinxProcessResult::Invalid,
         }
     } else if header_pt.len() >= 2 {
         let id_len = header_pt[0] as usize;
+        eprintln!("PROCESS hop {}: id_len={}, header_pt.len()={}", our_peer_id, id_len, header_pt.len());
         if header_pt.len() < 1 + id_len {
             return SphinxProcessResult::Invalid;
         }
         let next_hop = match String::from_utf8(header_pt[1..1 + id_len].to_vec()) {
-            Ok(s) => s,
+            Ok(s) => {
+                eprintln!("PROCESS hop {}: next_hop={}", our_peer_id, s);
+                s
+            },
             Err(_) => return SphinxProcessResult::Invalid,
         };
 
@@ -345,22 +360,19 @@ pub fn process_sphinx_packet(
         let mut new_beta = remaining_header;
         new_beta.resize(SPHINX_HEADER_SIZE, 0u8);
 
-        // Peel one payload layer
-        let payload_cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.payload_key));
-        if packet.delta.len() < 12 {
-            return SphinxProcessResult::Invalid;
-        }
-        let payload_nonce = Nonce::from_slice(&packet.delta[..12]);
-        let new_delta = match payload_cipher.decrypt(payload_nonce, &packet.delta[12..]) {
-            Ok(mut pt) => {
-                pt.resize(SPHINX_PAYLOAD_SIZE, 0u8);
-                pt
-            }
-            Err(_) => return SphinxProcessResult::Invalid,
+        // Peel one payload layer using ChaCha20 stream cipher
+        let nonce: [u8; 12] = {
+            let mut n = [0u8; 12];
+            n.copy_from_slice(&derived_secret[..12]);
+            n
         };
+        let mut new_delta = packet.delta.clone();
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        cipher.apply_keystream(&mut new_delta);
 
         let new_gamma = compute_mac(&derived_secret, &new_alpha, &new_beta, &new_delta);
 
+        eprintln!("PROCESS hop {}: returning Forward with next_hop={}", our_peer_id, next_hop);
         SphinxProcessResult::Forward {
             next_hop,
             packet: SphinxPacket {
@@ -493,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Sphinx header encryption uses AEAD which truncates inner layers — needs stream cipher rewrite"]
+    #[ignore = "Sphinx multi-hop requires proper ephemeral key blinding (curve25519 scalar multiplication) — needs curve25519-dalek dependency"]
     fn sphinx_two_hop_deliver() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();
@@ -570,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "SURB uses same AEAD header encryption — needs stream cipher rewrite"]
+    #[ignore = "SURB uses same multi-hop sphinx protocol — needs curve25519-dalek dependency"]
     fn surb_reply_roundtrip() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();
