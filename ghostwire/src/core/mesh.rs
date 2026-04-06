@@ -820,17 +820,19 @@ impl MeshDriver {
 
             // Register peer's public key for encryption
             // PeerId for ed25519 keys contains the public key
-            if let Some(pk_bytes) = peer_id.to_bytes().get(..32) {
-                let peer_key: Vec<u8> = pk_bytes.to_vec();
-                // Also add the x25519 portion (same bytes for libp2p ed25519 keys)
+            let peer_bytes = peer_id.to_bytes();
+            tracing::info!("Connection to {} - peer bytes len: {}", peer_id, peer_bytes.len());
+            if peer_bytes.len() >= 32 {
+                let peer_key: Vec<u8> = peer_bytes[..32].to_vec();
                 let mut full_key = peer_key.clone();
-                full_key.extend_from_slice(&peer_key); // ed25519 + x25519 (same for libp2p)
+                full_key.extend_from_slice(&peer_key);
+                let key_len = full_key.len();
                 self.encryption_manager.add_peer_key(
                     peer_id.to_string(),
                     full_key,
                     crate::core::encryption::KeyType::Ed25519,
                 );
-                tracing::debug!("Registered encryption key for peer {}", peer_id);
+                tracing::info!("Registered encryption key for peer {} ({} bytes)", peer_id, key_len);
 
                 // Send handshake with our public key
                 let my_id = self._identity.id.clone();
@@ -847,8 +849,10 @@ impl MeshDriver {
                 use crate::core::wire_protocol::{Frame, FrameKind};
                 if let Ok(frame) = Frame::encode(FrameKind::Message, &handshake) {
                     let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic, frame.to_bytes());
-                    tracing::debug!("Sent handshake to {}", peer_id);
+                    tracing::info!("Sent handshake to {}", peer_id);
                 }
+            } else {
+                tracing::warn!("PeerId bytes too short for key extraction: {} bytes", peer_bytes.len());
             }
         }
 
@@ -1072,11 +1076,14 @@ impl MeshDriver {
     }
 
     async fn handle_incoming_message(&mut self, _peer_id: PeerId, msg: Message) -> Result<()> {
-        // Persist to store (skip for broadcast — no recipient key for encryption at rest)
-        if msg.recipient != "broadcast" {
+        // Persist to store (skip for broadcast or failed decryption)
+        if msg.recipient != "broadcast" && msg.encryption_status != "decrypt_failed" {
             if let Err(e) = self.message_store.save_message(&msg) {
                 tracing::error!("Failed to save incoming message: {}", e);
             }
+        } else if msg.encryption_status == "decrypt_failed" {
+            // Save plaintext even if decryption failed (for debugging)
+            tracing::warn!("Saving message with failed decryption: {}", msg.content);
         }
 
         // Add to in-memory
