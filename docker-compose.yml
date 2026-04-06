@@ -2,27 +2,55 @@ version: '3.8'
 
 services:
   ghostwire:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Pin Rust version for reproducible builds
+        RUST_VERSION: "1.82"
     container_name: ghostwire
     restart: unless-stopped
     ports:
       - "3000:3000"  # Web UI
       - "9000:9000"  # API
+      - "4001:4001"  # libp2p TCP
+      - "4001:4001/udp"  # libp2p QUIC
     environment:
-      - RUST_LOG=info
+      - RUST_LOG=ghostwire=info,libp2p=warn,tower_http=error
       - GHOSTWIRE_HOST=0.0.0.0
-      - GHOSTWIRE_PORT=3000
+      - GHOSTWIRE_PORT=9000
+      # Security: generate a random API token at runtime
+      - GHOSTWIRE_API_TOKEN_FILE=/run/secrets/api_token
     volumes:
-      - ghostwire_data:/app/data
-      - ghostwire_config:/app/config
+      - ghostwire_data:/home/ghostwire/.ghostwire:rw
+      - ghostwire_config:/app/config:rw
     networks:
       - ghostwire_network
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64M
+      - /run:noexec,nosuid,size=16M
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/status"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/api/v2/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+    # Drop all capabilities except what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
 
   # Optional: Redis for caching (uncomment if needed)
   # redis:

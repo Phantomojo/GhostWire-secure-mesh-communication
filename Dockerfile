@@ -1,13 +1,14 @@
-# Multi-stage build for GhostWire - Optimized for First Ping Test
+# Multi-stage build for GhostWire - Security hardened
 # Build: docker build -t ghostwire-node:latest -f Dockerfile .
 
 # =============================================================================
 # Stage 1: Builder
 # =============================================================================
-FROM rust:latest AS builder
+ARG RUST_VERSION=1.82
+FROM rust:${RUST_VERSION}-bookworm AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     libdbus-1-dev \
@@ -54,15 +55,18 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 
 # Install ONLY runtime dependencies (minimal attack surface)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean \
+    && rm -rf /tmp/* /var/tmp/*
 
 # Create non-root user for security
-RUN useradd -r -s /bin/false ghostwire
+RUN groupadd -r ghostwire && useradd -r -g ghostwire -d /home/ghostwire -s /bin/false ghostwire \
+    && mkdir -p /home/ghostwire/.ghostwire \
+    && chown -R ghostwire:ghostwire /home/ghostwire
 
 # Set working directory
 WORKDIR /app
@@ -70,13 +74,10 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/target/release/ghostwire /usr/local/bin/ghostwire
 
-# Create config directory and default config
-RUN mkdir -p /app/config && \
-    echo '[server]' > /app/config.toml && \
-    echo 'host = "0.0.0.0"' >> /app/config.toml && \
-    echo 'port = 9000' >> /app/config.toml
+# Create config directory with proper ownership
+RUN mkdir -p /app/config && chown -R ghostwire:ghostwire /app
 
-# Set ownership
+# Set ownership of app directory
 RUN chown -R ghostwire:ghostwire /app
 
 # Switch to non-root user
@@ -84,19 +85,20 @@ USER ghostwire
 
 # Expose ports
 # 3000 - Web UI
-# 9000 - API server  
+# 9000 - API server
 # 4001 - libp2p TCP
 # 4001/udp - libp2p QUIC (if enabled)
 EXPOSE 3000 9000 4001 4001/udp
 
 # Health check using new /api/v2/health endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -sf http://localhost:9000/api/v2/health || exit 1
 
 # Set environment variables
 ENV RUST_LOG=ghostwire=info,libp2p=warn,tower_http=error
 ENV GHOSTWIRE_HOST=0.0.0.0
 ENV GHOSTWIRE_PORT=9000
+ENV HOME=/home/ghostwire
 
 # Start the application
-CMD ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000"] 
+CMD ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000"]
