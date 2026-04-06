@@ -818,41 +818,22 @@ impl MeshDriver {
             let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
             let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
 
-            // Register peer's public key for encryption
-            // PeerId for ed25519 keys contains the public key
-            let peer_bytes = peer_id.to_bytes();
-            tracing::info!("Connection to {} - peer bytes len: {}", peer_id, peer_bytes.len());
-            if peer_bytes.len() >= 32 {
-                let peer_key: Vec<u8> = peer_bytes[..32].to_vec();
-                let mut full_key = peer_key.clone();
-                full_key.extend_from_slice(&peer_key);
-                let key_len = full_key.len();
-                self.encryption_manager.add_peer_key(
-                    peer_id.to_string(),
-                    full_key,
-                    crate::core::encryption::KeyType::Ed25519,
-                );
-                tracing::info!("Registered encryption key for peer {} ({} bytes)", peer_id, key_len);
-
-                // Send handshake with our public key
-                let my_id = self._identity.id.clone();
-                let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
-                    self.encryption_manager.get_public_key()
-                );
-                let handshake = Message::with_type(
-                    my_id,
-                    peer_id.to_string(),
-                    my_pubkey,
-                    crate::core::message::MessageType::Text,
-                );
-                let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-                use crate::core::wire_protocol::{Frame, FrameKind};
-                if let Ok(frame) = Frame::encode(FrameKind::Message, &handshake) {
-                    let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic, frame.to_bytes());
-                    tracing::info!("Sent handshake to {}", peer_id);
-                }
-            } else {
-                tracing::warn!("PeerId bytes too short for key extraction: {} bytes", peer_bytes.len());
+            // Send handshake with our public key to establish encryption
+            // The peer will receive this and store our public key for encryption
+            let my_id = self._identity.id.clone();
+            let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
+                self.encryption_manager.get_public_key()
+            );
+            let handshake = Message::with_type(
+                my_id,
+                peer_id.to_string(),
+                my_pubkey,
+                crate::core::message::MessageType::Text,
+            );
+            use crate::core::wire_protocol::{Frame, FrameKind};
+            if let Ok(frame) = Frame::encode(FrameKind::Message, &handshake) {
+                let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic.clone(), frame.to_bytes());
+                tracing::info!("Sent encryption handshake to {} (key: {} bytes)", peer_id, self.encryption_manager.get_public_key().len());
             }
         }
 
@@ -1053,16 +1034,41 @@ impl MeshDriver {
         }
 
         if msg.message_type == "handshake" {
-            tracing::info!("🤝 Received Handshake from {}", msg.sender);
+            tracing::info!("🤝 Received Handshake from {} (sender_id: {})", peer_id, msg.sender);
             if let Ok(pub_key_bytes) =
                 base64::engine::general_purpose::STANDARD.decode(&msg.content)
             {
+                let key_len = pub_key_bytes.len();
+                // Store key by BOTH PeerId and sender identity ID
+                self.encryption_manager.add_peer_key(
+                    peer_id.to_string(),
+                    pub_key_bytes.clone(),
+                    KeyType::Hybrid,
+                );
                 self.encryption_manager.add_peer_key(
                     msg.sender.clone(),
                     pub_key_bytes,
                     KeyType::Hybrid,
                 );
-                tracing::info!("✅ Verified & Stored Identity for peer: {}", msg.sender);
+                tracing::info!("✅ Stored encryption key for peer {} (key: {} bytes)", peer_id, key_len);
+
+                // Send handshake back to complete the exchange
+                let my_id = self._identity.id.clone();
+                let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
+                    self.encryption_manager.get_public_key()
+                );
+                let reply_handshake = Message::with_type(
+                    my_id,
+                    peer_id.to_string(),
+                    my_pubkey,
+                    crate::core::message::MessageType::Text,
+                );
+                let reply_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                use crate::core::wire_protocol::{Frame, FrameKind};
+                if let Ok(frame) = Frame::encode(FrameKind::Message, &reply_handshake) {
+                    let _ = self.swarm.behaviour_mut().gossipsub.publish(reply_topic, frame.to_bytes());
+                    tracing::info!("Sent handshake reply to {}", peer_id);
+                }
             } else {
                 tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
             }
