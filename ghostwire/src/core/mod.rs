@@ -917,7 +917,12 @@ impl Core {
         }
 
         // Persist message to encrypted storage (skip for broadcast — no recipient key)
-        if message.recipient != "broadcast" {
+        if message.recipient == "broadcast" {
+            // Store broadcast messages as plaintext (they're public anyway)
+            if let Err(e) = self.message_store.save_message_plain(message) {
+                tracing::error!("⚠️ Persistence failure for broadcast: {}", e);
+            }
+        } else {
             if let Err(e) = self.message_store.save_message(message) {
                 tracing::error!("⚠️ Persistence failure: {}", e);
             }

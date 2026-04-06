@@ -29,6 +29,7 @@ ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 aes-gcm = { version = "0.10" }
 chacha20poly1305 = { version = "0.10", features = ["std"] }
+chacha20 = "0.9"
 pqcrypto-mlkem = { version = "0.1.1" }
 pqcrypto-traits = { version = "0.3" }
 blake2b_simd = "1.0"
