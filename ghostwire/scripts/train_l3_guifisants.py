@@ -100,7 +100,7 @@ def build_graph_samples(routing_tables, metrics, adj_files, max_samples=2000):
     rng = np.random.RandomState(42)
     indices = rng.choice(n_routing, min(max_samples, n_routing), replace=False)
 
-    samples_per_graph = 5  # Extract 5 (src,dst) pairs per routing snapshot
+    samples_per_graph = 10  # Extract 10 (src,dst) pairs per routing snapshot (was 5)
     target_samples = max_samples
 
     for idx in indices:
@@ -111,8 +111,8 @@ def build_graph_samples(routing_tables, metrics, adj_files, max_samples=2000):
         routing = routing_tables[idx]
         metric = metrics[idx]
 
-        # Precompute node features
-        node_features = np.zeros((num_nodes, 5), dtype=np.float32)
+        # Precompute node features (FIXED: removed duplicate, added meaningful features)
+        node_features = np.zeros((num_nodes, 6), dtype=np.float32)
         for i in range(num_nodes):
             out_degree = (routing[i] >= 0).sum()
             in_degree = (routing[:, i] >= 0).sum()
@@ -120,12 +120,17 @@ def build_graph_samples(routing_tables, metrics, adj_files, max_samples=2000):
             avg_quality = valid_links.mean() if len(valid_links) > 0 else 0
             valid_hops = routing[i][routing[i] >= 0]
             avg_hops = valid_hops.mean() / num_nodes if len(valid_hops) > 0 else 0
+            # Count how many nodes route THROUGH this node (betweenness proxy)
+            transit_count = (routing[:, :] == i).sum() / num_nodes
+            # Link diversity: how many unique link qualities this node has
+            link_diversity = len(valid_links) / num_nodes if len(valid_links) > 0 else 0
             node_features[i] = [
                 out_degree / num_nodes,
                 in_degree / num_nodes,
                 avg_quality / 1e8,
                 avg_hops,
-                out_degree / num_nodes,
+                transit_count,          # NEW: betweenness centrality proxy
+                link_diversity,         # NEW: link quality diversity
             ]
 
         # Build edge index from routing
@@ -206,7 +211,7 @@ def build_graph_samples(routing_tables, metrics, adj_files, max_samples=2000):
 # Build dataset
 start = time.time()
 np.random.seed(42)
-graphs = build_graph_samples(routing_tables, metrics, adj_files, max_samples=3000)
+graphs = build_graph_samples(routing_tables, metrics, adj_files, max_samples=7931)
 build_time = time.time() - start
 print(f"  Build time: {build_time:.1f}s")
 
@@ -235,8 +240,8 @@ print(f"\n  Train: {len(train_data):,} | Val: {len(val_data):,} | Test: {len(tes
 class MeshGAT(nn.Module):
     """Graph Attention Network for real mesh routing."""
 
-    def __init__(self, node_features=5, edge_features=2, hidden_dim=64,
-                 num_layers=2, num_heads=4, dropout=0.1):
+    def __init__(self, node_features=6, edge_features=2, hidden_dim=128,
+                 num_layers=3, num_heads=4, dropout=0.1):
         super().__init__()
         self.node_encoder = nn.Linear(node_features, hidden_dim)
         self.convs = nn.ModuleList()
@@ -355,10 +360,10 @@ if torch.cuda.is_available():
     print(f"  GPU: {torch.cuda.get_device_name(0)}")
 
 model = MeshGAT(
-    node_features=5,
+    node_features=6,
     edge_features=2,
-    hidden_dim=64,
-    num_layers=2,
+    hidden_dim=128,
+    num_layers=3,
     num_heads=4,
     dropout=0.1,
 ).to(device)
@@ -366,13 +371,13 @@ model = MeshGAT(
 num_params = sum(p.numel() for p in model.parameters())
 print(f"  Parameters: {num_params:,}")
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-scheduler = CosineAnnealingLR(optimizer, T_max=50)
+optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
+scheduler = CosineAnnealingLR(optimizer, T_max=100)
 
 best_val_acc = 0
 patience_counter = 0
 training_history = []
-epochs = 50
+epochs = 100
 
 for epoch in range(1, epochs + 1):
     start = time.time()
@@ -405,17 +410,17 @@ for epoch in range(1, epochs + 1):
             "val_acc": val_acc,
             "val_loss": val_loss,
             "config": {
-                "node_features": 5,
+                "node_features": 6,
                 "edge_features": 2,
-                "hidden_dim": 64,
-                "num_layers": 2,
+                "hidden_dim": 128,
+                "num_layers": 3,
                 "num_heads": 4,
                 "num_nodes": num_nodes,
             },
         }, MODEL_DIR / "gnn_routing_best.pt")
     else:
         patience_counter += 1
-        if patience_counter >= 10:
+        if patience_counter >= 15:
             print(f"  Early stopping at epoch {epoch}")
             break
 
