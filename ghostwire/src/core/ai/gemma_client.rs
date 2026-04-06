@@ -1,9 +1,20 @@
 // Gemma 4 Client for GhostWire
-// Local AI inference via Ollama for mesh network intelligence
+// Local AI inference via Ollama or LiteRT-LM for mesh network intelligence
+//
+// Supports all Gemma 4 variants:
+//   - E2B: 2.3B params, ~5GB RAM, phones + Raspberry Pi 5
+//   - E4B: ~4B params, ~7.5GB RAM, phones + tablets
+//   - 26B MoE: 4B active params, ~15GB RAM, laptops
+//   - 31B Dense: flagship, ~30GB RAM, servers
+//
+// Also supports FunctionGemma (270M) for on-device tool calling.
+// Backends: Ollama (HTTP), LiteRT-LM (native), Local (ONNX/runtime)
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use super::litert_backend::{Gemma4Variant, InferenceBackend};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeTelemetry {
@@ -61,15 +72,29 @@ pub struct GemmaClient {
     base_url: String,
     model: String,
     timeout: Duration,
+    /// The inference backend being used (Ollama, LiteRT, or Local)
+    backend: InferenceBackend,
+    /// The Gemma 4 variant loaded
+    variant: Gemma4Variant,
 }
 
 impl GemmaClient {
-    /// Create new Gemma 4 client
+    /// Create new Gemma 4 client with Ollama backend (backward compatible)
     ///
     /// # Arguments
     /// * `base_url` - Ollama server URL (e.g., "http://localhost:11434")
     /// * `model` - Gemma 4 model tag (e.g., "gemma4:e2b", "gemma4:26b")
     pub fn new(base_url: &str, model: &str) -> Self {
+        Self::with_backend(base_url, model, InferenceBackend::Ollama, Gemma4Variant::E2B)
+    }
+
+    /// Create new Gemma 4 client with explicit backend and variant
+    pub fn with_backend(
+        base_url: &str,
+        model: &str,
+        backend: InferenceBackend,
+        variant: Gemma4Variant,
+    ) -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(60))
@@ -78,7 +103,29 @@ impl GemmaClient {
             base_url: base_url.to_string(),
             model: model.to_string(),
             timeout: Duration::from_secs(60),
+            backend,
+            variant,
         }
+    }
+
+    /// Get the inference backend in use
+    pub fn backend(&self) -> InferenceBackend {
+        self.backend
+    }
+
+    /// Get the Gemma 4 variant in use
+    pub fn variant(&self) -> Gemma4Variant {
+        self.variant
+    }
+
+    /// Get the model name
+    pub fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    /// Check if this client uses network-based inference
+    pub fn requires_network(&self) -> bool {
+        self.backend.requires_network()
     }
 
     /// Analyze mesh network and recommend optimal relay nodes
@@ -274,7 +321,37 @@ mod tests {
     #[test]
     fn test_client_creation() {
         let client = GemmaClient::new("http://localhost:11434", "gemma4:e2b");
-        assert_eq!(client.model, "gemma4:e2b");
+        assert_eq!(client.model_name(), "gemma4:e2b");
+        assert_eq!(client.backend(), InferenceBackend::Ollama);
+        assert_eq!(client.variant(), Gemma4Variant::E2B);
+    }
+
+    #[test]
+    fn test_client_with_backend() {
+        let client = GemmaClient::with_backend(
+            "litert://local",
+            "gemma4:e4b",
+            InferenceBackend::LiteRt,
+            Gemma4Variant::E4B,
+        );
+        assert_eq!(client.model_name(), "gemma4:e4b");
+        assert_eq!(client.backend(), InferenceBackend::LiteRt);
+        assert_eq!(client.variant(), Gemma4Variant::E4B);
+        assert!(!client.requires_network());
+    }
+
+    #[test]
+    fn test_client_network_requirement() {
+        let ollama_client = GemmaClient::new("http://localhost:11434", "gemma4:e2b");
+        assert!(ollama_client.requires_network());
+
+        let litert_client = GemmaClient::with_backend(
+            "litert://local",
+            "gemma4:e2b",
+            InferenceBackend::LiteRt,
+            Gemma4Variant::E2B,
+        );
+        assert!(!litert_client.requires_network());
     }
 
     #[tokio::test]

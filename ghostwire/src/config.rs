@@ -85,12 +85,28 @@ pub struct FeatureFlags {
     pub cli: bool,
     pub api: bool,
     // AI/ML Features
-    pub gemma_2b: bool,      // Gemma 4 E2B (2B params, edge-optimized)
+    pub gemma_2b: bool,      // Gemma 4 E2B (2.3B params, edge-optimized)
     pub gemma_4b: bool,      // Gemma 4 E4B (4B params, balanced)
     pub gemma_26b: bool,     // Gemma 4 MoE (26B total, 4B active)
     pub gemma_31b: bool,     // Gemma 4 Dense (31B, max quality)
     pub ai_routing: bool,    // Enable AI-powered routing decisions
     pub ai_threat_detection: bool,  // Enable AI threat analysis
+    // Gemma 4 Configuration
+    pub gemma_version: String,          // "3", "3n", or "4" (default: "4")
+    pub inference_backend: String,      // "ollama", "litert", or "local" (default: "ollama")
+    pub gemma_model_variant: String,    // "e2b", "e4b", "26b", "31b" (auto-detected if empty)
+    pub ollama_url: String,             // Ollama server URL (default: "http://localhost:11434")
+    pub litert_model_path: String,      // Path to LiteRT-LM .tflite model file
+    pub litert_num_threads: usize,      // CPU threads for LiteRT-LM inference
+    pub litert_use_gpu: bool,           // Use GPU delegate for LiteRT-LM
+    // FunctionGemma Configuration
+    pub function_gemma_enabled: bool,   // Enable FunctionGemma tool calling
+    pub function_gemma_model: String,   // FunctionGemma model tag (default: "functiongemma:270m")
+    pub function_gemma_url: String,     // FunctionGemma backend URL
+    // Edge Device Detection
+    pub auto_detect_device: bool,       // Auto-detect device class and select model
+    pub device_class: String,           // "phone", "tablet", "raspberry_pi", "laptop", "server"
+    pub available_ram_mb: u64,          // Available RAM in MB (0 = auto-detect)
 }
 
 impl Default for Config {
@@ -141,6 +157,22 @@ impl Default for Config {
                 gemma_31b: false,
                 ai_routing: true,
                 ai_threat_detection: true,
+                // Gemma 4 Configuration
+                gemma_version: "4".to_string(),
+                inference_backend: "ollama".to_string(),
+                gemma_model_variant: String::new(), // Auto-detect
+                ollama_url: "http://localhost:11434".to_string(),
+                litert_model_path: "models/gemma4_e2b_litert.tflite".to_string(),
+                litert_num_threads: 4,
+                litert_use_gpu: false,
+                // FunctionGemma Configuration
+                function_gemma_enabled: true,
+                function_gemma_model: "functiongemma:270m".to_string(),
+                function_gemma_url: "http://localhost:11434".to_string(),
+                // Edge Device Detection
+                auto_detect_device: true,
+                device_class: String::new(), // Auto-detect
+                available_ram_mb: 0, // Auto-detect
             },
         }
     }
