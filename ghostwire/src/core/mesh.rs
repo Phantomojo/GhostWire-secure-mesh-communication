@@ -819,20 +819,22 @@ impl MeshDriver {
             let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
 
             // Send handshake with our public key to establish encryption
-            // The peer will receive this and store our public key for encryption
+            // Send on BOTH the peer's DM topic AND the broadcast topic for reliability
             let my_id = self._identity.id.clone();
             let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
                 self.encryption_manager.get_public_key()
             );
-            let handshake = Message::with_type(
-                my_id,
-                peer_id.to_string(),
-                my_pubkey,
-                crate::core::message::MessageType::Text,
-            );
+            // Create handshake message with message_type = "handshake" (not "Text")
+            let mut handshake = Message::new(my_id, peer_id.to_string(), my_pubkey);
+            handshake.message_type = "handshake".to_string();
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &handshake) {
-                let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic.clone(), frame.to_bytes());
+                // Send on DM topic
+                let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic, frame.to_bytes());
+                // Also send on broadcast topic for reliability
+                let broadcast_topic = IdentTopic::new("ghostwire-messages");
+                let _ = self.swarm.behaviour_mut().gossipsub.publish(broadcast_topic, frame.to_bytes());
                 tracing::info!("Sent encryption handshake to {} (key: {} bytes)", peer_id, self.encryption_manager.get_public_key().len());
             }
         }
