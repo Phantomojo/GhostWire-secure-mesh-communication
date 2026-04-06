@@ -14,6 +14,7 @@
 [![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
 ![Status](https://img.shields.io/badge/Status-Active%20Development-blue?style=for-the-badge)
 ![Tech Stack](https://img.shields.io/badge/Tech-Rust%20|%20libp2p%20|%20React-orange?style=for-the-badge)
+[![First Ping](https://img.shields.io/badge/First%20Ping-2026--04--05T22%3A50%3A37.125669222Z-brightgreen?style=for-the-badge)](docs/FIRST_PING.md)
 [![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
 
 **GCD4F 2026 Submission** | [Learn More →](#-competition)
@@ -60,6 +61,24 @@ docker-compose up -d
 ```
 
 **Full installation guide:** [docs/INSTALL.md](docs/INSTALL.md)
+
+---
+
+## 🎯 First Ping
+
+On **April 5, 2026 at 22:50:37.125669222 UTC**, GhostWire achieved its first
+cross-machine communication. A message traveled from one computer to another
+through the mesh network — no central server, no internet, just pure P2P.
+
+| | |
+|---|---|
+| **Message** | `"FINAL TEST - should work now!"` |
+| **From** | Node A (omen) → Node B (stratsytem) |
+| **Protocol** | libp2p/gossipsub |
+| **Latency** | ~18ms |
+| **Record** | [docs/FIRST_PING.md](docs/FIRST_PING.md) |
+
+This is GhostWire's equivalent of ARPANET's "LO" (October 29, 1969).
 
 ---
 

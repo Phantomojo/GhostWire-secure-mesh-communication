@@ -6,6 +6,7 @@ pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
+pub mod constants;
 pub mod db;
 pub mod dht_signatures;
 pub mod disaster;
