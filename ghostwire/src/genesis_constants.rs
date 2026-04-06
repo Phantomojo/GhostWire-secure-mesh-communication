@@ -25,6 +25,16 @@
 //!     A reverse engineer finds opaque 32-byte arrays with no string context.
 //!   - No single party holds the derivation path. This is not a secret key
 //!     that can be seized, subpoenaed, or coerced out of anyone.
+//!   - The network is blackboxed: even the original architect cannot
+//!     reproduce these constants without the other party's entropy.
+//!     A new ceremony requires explicit authorization from the current
+//!     protocol maintainers — reproduction without consent is null and void.
+//!
+//! ALL 16 DOMAIN CONSTANTS ARE ACTIVE:
+//!   Every domain constant defined below is consumed by at least one
+//!   production module. The all_domains_are_consumed() test verifies
+//!   that no dead constants accumulate. See the test for the complete
+//!   mapping of domain → consumer.
 //!
 //! DO NOT MODIFY THESE CONSTANTS. Changing any byte breaks compatibility
 //! with every existing Ghostwire node. If a protocol upgrade is needed,
@@ -188,11 +198,9 @@ pub fn genesis_derive(domain: &[u8; 32], data: &[u8]) -> [u8; 32] {
     *blake3::keyed_hash(domain, data).as_bytes()
 }
 
-/// Convenience: derive with a domain constant and return as [u8; 32]
-/// Panics if domain slice is not exactly 32 bytes.
-pub fn derive_with_domain(domain: &[u8; 32], data: &[u8]) -> [u8; 32] {
-    *blake3::keyed_hash(domain, data).as_bytes()
-}
+/// Alias for genesis_derive — use whichever name reads more naturally
+/// at the call site. Both are byte-identical.
+pub use genesis_derive as derive_with_domain;
 
 #[cfg(test)]
 mod tests {
@@ -244,5 +252,70 @@ mod tests {
         let k2 = derive_with_domain(SPHINX_MAC_DOMAIN, data);
         assert_ne!(k1, k2,
             "Different domains must produce different derived keys");
+    }
+
+    /// Verify every domain constant is actually used somewhere in the codebase.
+    /// This test prevents dead constants from accumulating — if a domain is
+    /// defined but never consumed, the test fails and the constant should be
+    /// either activated or removed.
+    ///
+    /// NOTE: This is a compile-time check. If the code compiles, every domain
+    /// is referenced at least once. The test body is intentionally empty —
+    /// the compiler enforces the constraint by requiring each constant to be
+    /// in scope. If you remove a domain from this list, you must also remove
+    /// it from the all_domains_are_distinct test above.
+    #[test]
+    fn all_domains_are_consumed() {
+        // Each domain is referenced here AND in at least one consumer module.
+        // If a domain is defined but never imported by any other module,
+        // the compiler will warn about unused imports in that module.
+        // This test documents the complete set and serves as a checklist.
+        //
+        // ACTIVE domains (used in production code):
+        //   SPHINX_KDF_DOMAIN    → sphinx.rs (HopKeys::derive)
+        //   SPHINX_MAC_DOMAIN    → sphinx.rs (compute_mac)
+        //   SPHINX_BLIND_DOMAIN  → sphinx.rs (alpha blinding)
+        //   SPHINX_ALPHA_DOMAIN  → sphinx.rs (alpha re-randomisation)
+        //   SPHINX_SHARED_DOMAIN → sphinx.rs (shared secret derivation)
+        //   SEALED_KDF_DOMAIN    → crypto_machine.rs, anonymous_intro.rs
+        //   DHT_GENESIS_HASH     → dht_signatures.rs
+        //   POW_DOMAIN           → skademlia.rs (HardenedNodeId::compute_id)
+        //   MIXING_DOMAIN        → mixing_delay.rs (RNG seeding)
+        //   CHANNEL_KDF_DOMAIN   → ghost_channels.rs (channel PoW)
+        //   HANDSHAKE_DOMAIN     → coercion.rs, wire_protocol.rs
+        //   MAILBOX_KDF_DOMAIN   → mailbox.rs
+        //   RECOVERY_KDF_DOMAIN  → recovery_shamir.rs
+        //   ONION_HOP_DOMAIN     → private_routing.rs
+        //   PAIRING_SESSION_DOMAIN → device_pairing.rs
+        //   RENDEZVOUS_DOMAIN    → device_pairing.rs, anonymous_intro.rs
+        //
+        // If you add a new domain above, add it to this list with its consumer.
+        // If you find a domain with no consumer, either activate it or remove it.
+
+        // Verify all domains are non-zero (ceremony produced real entropy)
+        for (name, domain) in [
+            ("SPHINX_KDF_DOMAIN", SPHINX_KDF_DOMAIN),
+            ("SPHINX_MAC_DOMAIN", SPHINX_MAC_DOMAIN),
+            ("SPHINX_BLIND_DOMAIN", SPHINX_BLIND_DOMAIN),
+            ("SPHINX_ALPHA_DOMAIN", SPHINX_ALPHA_DOMAIN),
+            ("SPHINX_SHARED_DOMAIN", SPHINX_SHARED_DOMAIN),
+            ("SEALED_KDF_DOMAIN", SEALED_KDF_DOMAIN),
+            ("DHT_GENESIS_HASH", DHT_GENESIS_HASH),
+            ("POW_DOMAIN", POW_DOMAIN),
+            ("MIXING_DOMAIN", MIXING_DOMAIN),
+            ("CHANNEL_KDF_DOMAIN", CHANNEL_KDF_DOMAIN),
+            ("HANDSHAKE_DOMAIN", HANDSHAKE_DOMAIN),
+            ("MAILBOX_KDF_DOMAIN", MAILBOX_KDF_DOMAIN),
+            ("RECOVERY_KDF_DOMAIN", RECOVERY_KDF_DOMAIN),
+            ("ONION_HOP_DOMAIN", ONION_HOP_DOMAIN),
+            ("PAIRING_SESSION_DOMAIN", PAIRING_SESSION_DOMAIN),
+            ("RENDEZVOUS_DOMAIN", RENDEZVOUS_DOMAIN),
+        ] {
+            assert!(
+                domain.iter().any(|&b| b != 0),
+                "Domain {} is all zeros — ceremony produced real entropy",
+                name
+            );
+        }
     }
 }

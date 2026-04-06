@@ -11,7 +11,6 @@
 use crate::genesis_constants::{CHANNEL_INVITE_PREFIX, CHANNEL_KDF_DOMAIN, derive_with_domain};
 
 use anyhow::Result;
-use blake3;
 use lru::LruCache;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -77,7 +76,8 @@ impl ChannelMessage {
         let mut data = self.content.clone();
         data.extend_from_slice(&self.pow_nonce.to_le_bytes());
         data.extend_from_slice(&self.channel_id);
-        meets_difficulty(blake3::hash(&data).as_bytes(), CHANNEL_POW_DIFFICULTY)
+        let hash = derive_with_domain(CHANNEL_KDF_DOMAIN, &data);
+        meets_difficulty(&hash, CHANNEL_POW_DIFFICULTY)
     }
 }
 
@@ -87,7 +87,8 @@ pub fn solve_pow(content: &[u8], channel_id: &[u8; 32]) -> u64 {
         let mut data = content.to_vec();
         data.extend_from_slice(&nonce.to_le_bytes());
         data.extend_from_slice(channel_id);
-        if meets_difficulty(blake3::hash(&data).as_bytes(), CHANNEL_POW_DIFFICULTY) {
+        let hash = derive_with_domain(CHANNEL_KDF_DOMAIN, &data);
+        if meets_difficulty(&hash, CHANNEL_POW_DIFFICULTY) {
             return nonce;
         }
         nonce = nonce.wrapping_add(1);

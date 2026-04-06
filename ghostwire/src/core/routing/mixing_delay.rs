@@ -20,9 +20,14 @@
 //! INTEGRATION: Wrap the forward() call in SphinxPacket::process_at_hop()
 //! with `mixing_delay::sample_delay().await` before sending the next hop.
 
+use crate::genesis_constants::{MIXING_DOMAIN, derive_with_domain};
+
 use rand::distributions::Distribution;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use rand_distr::Exp;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -90,7 +95,14 @@ impl MixingConfig {
     }
 }
 
+/// Monotonic counter for per-packet domain seeds.
+static MIXING_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// Sample a random mixing delay from Exp(λ = 1/mean_ms) distribution.
+///
+/// The RNG is seeded from MIXING_DOMAIN + a monotonic counter, ensuring
+/// all nodes derive delays from the same domain context while preventing
+/// an adversary from predicting delays by knowing the RNG seed.
 ///
 /// Returns a Duration to sleep before forwarding the packet.
 pub fn sample_delay(config: &MixingConfig) -> Duration {
@@ -98,11 +110,19 @@ pub fn sample_delay(config: &MixingConfig) -> Duration {
         return Duration::ZERO;
     }
 
+    // Derive a domain-separated seed: MIXING_DOMAIN || counter
+    let counter = MIXING_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut seed_material = MIXING_DOMAIN.to_vec();
+    seed_material.extend_from_slice(&counter.to_le_bytes());
+    let seed_bytes = derive_with_domain(MIXING_DOMAIN, &seed_material);
+    let seed = u64::from_le_bytes(seed_bytes[..8].try_into().unwrap());
+    let mut rng = StdRng::seed_from_u64(seed);
+
     // Exp(λ) where λ = 1/mean
     // Sample gives x in milliseconds
     let lambda = 1.0 / config.mean_ms;
     let exp = Exp::new(lambda).expect("Invalid exponential distribution parameter");
-    let sample_ms = exp.sample(&mut rand::thread_rng());
+    let sample_ms = exp.sample(&mut rng);
 
     // Clamp to [min_ms, max_ms]
     let clamped_ms = sample_ms

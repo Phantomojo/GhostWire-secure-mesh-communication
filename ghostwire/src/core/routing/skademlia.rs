@@ -20,9 +20,7 @@
 //! routing table updates, `disjoint_lookup()` instead of bare DHT get.
 
 use anyhow::Result;
-use blake3;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -44,7 +42,7 @@ pub const MAX_AS_FRACTION: f64 = 0.25;
 // ── NodeId PoW ────────────────────────────────────────────────────────────────
 
 /// A proof-of-work validated node ID.
-/// Format: SHA256(public_key || nonce) with `NODE_ID_DIFFICULTY` leading zero bits.
+/// Format: BLAKE3_keyed(POW_DOMAIN, public_key || nonce) with `NODE_ID_DIFFICULTY` leading zero bits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct HardenedNodeId {
     /// The 32-byte node ID (hash output)
@@ -81,10 +79,10 @@ impl HardenedNodeId {
     }
 
     fn compute_id(public_key: &[u8], nonce: u64) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(public_key);
-        hasher.update(nonce.to_le_bytes());
-        hasher.finalize().into()
+        use crate::genesis_constants::{POW_DOMAIN, genesis_derive};
+        let mut ikm = public_key.to_vec();
+        ikm.extend_from_slice(&nonce.to_le_bytes());
+        genesis_derive(POW_DOMAIN, &ikm)
     }
 
     fn meets_difficulty(id: &[u8; 32], bits: u32) -> bool {
