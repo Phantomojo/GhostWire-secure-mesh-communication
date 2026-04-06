@@ -817,6 +817,39 @@ impl MeshDriver {
             // Subscribe to this peer's DM topic
             let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
             let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
+
+            // Register peer's public key for encryption
+            // PeerId for ed25519 keys contains the public key
+            if let Some(pk_bytes) = peer_id.to_bytes().get(..32) {
+                let peer_key: Vec<u8> = pk_bytes.to_vec();
+                // Also add the x25519 portion (same bytes for libp2p ed25519 keys)
+                let mut full_key = peer_key.clone();
+                full_key.extend_from_slice(&peer_key); // ed25519 + x25519 (same for libp2p)
+                self.encryption_manager.add_peer_key(
+                    peer_id.to_string(),
+                    full_key,
+                    crate::core::encryption::KeyType::Ed25519,
+                );
+                tracing::debug!("Registered encryption key for peer {}", peer_id);
+
+                // Send handshake with our public key
+                let my_id = self._identity.id.clone();
+                let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
+                    self.encryption_manager.get_public_key()
+                );
+                let handshake = Message::with_type(
+                    my_id,
+                    peer_id.to_string(),
+                    my_pubkey,
+                    crate::core::message::MessageType::Text,
+                );
+                let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                use crate::core::wire_protocol::{Frame, FrameKind};
+                if let Ok(frame) = Frame::encode(FrameKind::Message, &handshake) {
+                    let _ = self.swarm.behaviour_mut().gossipsub.publish(dm_topic, frame.to_bytes());
+                    tracing::debug!("Sent handshake to {}", peer_id);
+                }
+            }
         }
 
         if let SwarmEvent::ConnectionClosed {
