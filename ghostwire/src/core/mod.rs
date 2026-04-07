@@ -1079,6 +1079,29 @@ impl Core {
         self.identity.read().await.id.clone()
     }
 
+    /// Check if a display name profile has been set
+    pub async fn has_profile(&self) -> bool {
+        let metadata = self.get_metadata().await;
+        !metadata.nickname.is_empty()
+    }
+
+    /// Save a display name to the identity profile
+    pub async fn save_profile(&self, display_name: &str) -> Result<()> {
+        self.update_metadata(
+            Some(display_name.to_string()),
+            None,
+            None,
+            Some(true),
+        )
+        .await;
+        // Persist to disk (empty password — identity is already unlocked)
+        if let Err(e) = self.identity.read().await.save_to_disk("") {
+            tracing::warn!("Profile metadata saved, but disk persistence failed: {}", e);
+        }
+        tracing::info!("📝 Profile saved: {}", display_name);
+        Ok(())
+    }
+
     /// Get the DID
     pub async fn get_did(&self) -> String {
         self.identity.read().await.did.clone()
