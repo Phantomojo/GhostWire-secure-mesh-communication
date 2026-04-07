@@ -4,23 +4,21 @@ GhostWire L3 GNN Training — Kaggle GPU Kernel
 ================================================
 Trains a Graph Attention Network (GAT) for mesh routing optimization.
 
-Generates realistic mesh topology data based on Guifi.net Guifisants node
-characteristics (63 nodes, temporal adjacency, routing tables, link metrics).
+Uses REAL Guifi.net Guifisants mesh topology data:
+  - 63 nodes (real mesh routers)
+  - 7,931 temporal adjacency snapshots (time-series topology)
+  - 7,931 routing table samples (63×63 next-hop matrices)
+  - 7,931 metric samples (63×63 link quality matrices)
 
-Architecture improvements over v0.1.0 (54% accuracy):
-  1. Better node features (6 → 8 dimensions with betweenness, link diversity)
-  2. Deeper GAT (3 layers → 4 layers with residual connections)
-  3. Multi-head attention (4 → 8 heads with concat=False for stability)
-  4. Edge-aware GATConv with edge features
-  5. Cosine annealing LR with warmup
-  6. Gradient clipping (max_norm=1.0)
-  7. Larger batch size (32 → 64)
-  8. More training samples (2000 → 7931)
-  9. Label smoothing for regularization
- 10. Ensemble of top-3 checkpoints
+Task: Next-hop routing prediction
+  For each (src, dst) pair, predict the optimal next-hop node.
 
-Target: 85%+ accuracy (was 54%)
+Architecture: Graph Attention Network (GAT) with real topology
 """
+
+import subprocess
+import sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "torch-geometric"])
 
 import numpy as np
 import torch
@@ -32,18 +30,55 @@ from torch_geometric.data import Data
 import time
 import json
 import os
+import zipfile
+import bz2
+import pickle
 from pathlib import Path
+from scipy import sparse
 
 print("=" * 70)
-print("GHOSTWIRE L3 — GNN Routing Model Training (Kaggle GPU)")
+print("GHOSTWIRE L3 — GNN on REAL Guifi.net Mesh Topology")
 print("=" * 70)
+
+# ============================================================
+# Load REAL Guifi.net mesh data from Kaggle dataset
+# ============================================================
+print("\nLoading REAL Guifi.net mesh data...")
+
+# Find the dataset files
+dataset_dir = Path("/kaggle/input/guifi-net-guifisants-mesh-topology")
+zip_file = dataset_dir / "dataverse_files.zip"
+
+if zip_file.exists():
+    print(f"  Extracting {zip_file}...")
+    with zipfile.ZipFile(zip_file, 'r') as z:
+        z.extractall("/tmp/guifi_data")
+
+    # Load the compressed data files
+    with bz2.open("/tmp/guifi_data/dataset_meshmon_rt.pkl.bz2", 'rb') as f:
+        rt_data = pickle.load(f)
+
+    adj_list = rt_data['adj']
+    routing_tables = rt_data['rt']
+    metrics = rt_data['metric']
+
+    num_nodes = adj_list[0].shape[0]
+    print(f"  Nodes: {num_nodes}")
+    print(f"  Adjacency snapshots: {len(adj_list)}")
+    print(f"  First snapshot edges: {np.count_nonzero(adj_list[0])}")
+    print(f"  Routing tables: {len(routing_tables)}")
+    print(f"  Routing shape: {routing_tables[0].shape}")
+    print(f"  Metric samples: {len(metrics)}")
+    print(f"  Metric shape: {metrics[0].shape}")
+else:
+    print(f"ERROR: Dataset not found at {dataset_dir}")
+    print("Make sure the dataset source is added to this kernel.")
+    exit(1)
 
 # ============================================================
 # Configuration
 # ============================================================
 CONFIG = {
-    "num_nodes": 63,
-    "num_samples": 7931,
     "node_features": 8,
     "edge_features": 2,
     "hidden_dim": 128,
@@ -63,105 +98,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 np.random.seed(CONFIG["seed"])
 torch.manual_seed(CONFIG["seed"])
-
-# ============================================================
-# Generate Realistic Mesh Topology Data
-# ============================================================
-print("\nGenerating realistic Guifi.net-style mesh topology...")
-
-NUM_NODES = CONFIG["num_nodes"]
-NUM_SAMPLES = CONFIG["num_samples"]
-
-def generate_mesh_topology(num_nodes, num_samples, seed=42):
-    """Generate realistic mesh routing data based on Guifi.net characteristics."""
-    rng = np.random.RandomState(seed)
-
-    # Generate temporal adjacency snapshots (80 time steps)
-    # Real mesh networks have ~15-25% connectivity density
-    base_density = 0.18
-    adj_snapshots = []
-    for t in range(80):
-        # Temporal variation: links come and go
-        density = base_density + rng.uniform(-0.05, 0.05)
-        adj = np.zeros((num_nodes, num_nodes), dtype=np.float32)
-        for i in range(num_nodes):
-            for j in range(i + 1, num_nodes):
-                if rng.random() < density:
-                    weight = rng.uniform(0.3, 1.0)
-                    adj[i, j] = weight
-                    adj[j, i] = weight
-        adj_snapshots.append(adj)
-
-    # Generate routing tables and metrics
-    routing_tables = []
-    metrics = []
-
-    for _ in range(num_samples):
-        # Pick a random adjacency snapshot as base topology
-        base_adj = adj_snapshots[rng.randint(0, len(adj_snapshots))].copy()
-
-        # Build routing table using shortest path on this topology
-        routing = np.full((num_nodes, num_nodes), -1, dtype=np.int32)
-        metric = np.full((num_nodes, num_nodes), -1.0, dtype=np.float32)
-
-        for src in range(num_nodes):
-            # Dijkstra-like routing
-            dist = np.full(num_nodes, np.inf)
-            prev = np.full(num_nodes, -1, dtype=np.int32)
-            dist[src] = 0
-            visited = set()
-
-            for _ in range(num_nodes):
-                # Find unvisited node with minimum distance
-                min_dist = np.inf
-                u = -1
-                for v in range(num_nodes):
-                    if v not in visited and dist[v] < min_dist:
-                        min_dist = dist[v]
-                        u = v
-
-                if u == -1:
-                    break
-
-                visited.add(u)
-
-                for v in range(num_nodes):
-                    if base_adj[u, v] > 0:
-                        # Link quality as inverse weight
-                        link_cost = 1.0 / base_adj[u, v]
-                        # Add some noise for realistic routing variation
-                        link_cost *= (1.0 + rng.uniform(-0.1, 0.1))
-                        alt = dist[u] + link_cost
-                        if alt < dist[v]:
-                            dist[v] = alt
-                            prev[v] = u
-
-            # Build routing table from prev pointers
-            for dst in range(num_nodes):
-                if dist[dst] < np.inf:
-                    # Trace back to find next hop
-                    current = dst
-                    while prev[current] != src and prev[current] != -1:
-                        current = prev[current]
-                    if prev[current] == src:
-                        routing[src, dst] = current
-                        # Metric: inverse of path cost
-                        metric[src, dst] = max(0, 1e8 / (dist[dst] + 1))
-
-        routing_tables.append(routing)
-        metrics.append(metric)
-
-    return adj_snapshots, routing_tables, metrics
-
-
-adj_snapshots, routing_tables, metrics = generate_mesh_topology(
-    NUM_NODES, NUM_SAMPLES, seed=42
-)
-
-print(f"  Nodes: {NUM_NODES}")
-print(f"  Routing samples: {len(routing_tables)}")
-print(f"  Adjacency snapshots: {len(adj_snapshots)}")
-print(f"  Avg density: {np.mean([np.count_nonzero(a) / (NUM_NODES**2) for a in adj_snapshots]):.3f}")
 
 # ============================================================
 # Build Graph Dataset
