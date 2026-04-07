@@ -1,3 +1,7 @@
+<div align="center">
+
+<img src="../docs/assets/ghostwire-logo.png" alt="GhostWire Logo" width="150" />
+
 # GhostWire
 
 > **Decentralized encrypted mesh networking. Run it on any machine — no servers, no cloud, no middlemen.**
@@ -6,6 +10,8 @@
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/Phantomojo/GhostWire/actions)
+
+</div>
 
 ---
 

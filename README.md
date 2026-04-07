@@ -4,15 +4,16 @@
 
 ### 🌐 **[Visit the GhostWire Website →](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)**
 
-![GhostWire Logo](webui/public/ghostwire-logo.png)
+<img src="docs/assets/ghostwire-logo.png" alt="GhostWire Logo" width="200" />
 
 # 🚀 GhostWire
 
-**Resilient Mesh Communication for Connectivity-Constrained Communities**
+**Decentralized encrypted mesh networking. Run it on any machine — no servers, no cloud, no middlemen.**
 
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](ghostwire/CHANGELOG.md)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
-![Status](https://img.shields.io/badge/Status-Active%20Development-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge)
 ![Tech Stack](https://img.shields.io/badge/Tech-Rust%20|%20libp2p%20|%20React-orange?style=for-the-badge)
 [![First Ping](https://img.shields.io/badge/First%20Ping-2026--04--05T22%3A50%3A37.125669222Z-brightgreen?style=for-the-badge)](docs/FIRST_PING.md)
 [![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
@@ -39,26 +40,27 @@ Existing solutions require centralized infrastructure, sacrifice privacy, or lac
 
 ## ⚡ Quick Start
 
-### One-Line Installation
+### Build & Run
 ```bash
-git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git && cd GhostWire-secure-mesh-communication && ./scripts/install.sh
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication/ghostwire
+cargo run --release
 ```
 
-### First Message
-```bash
-# Start GhostWire
-./scripts/ghostwire-manager.sh start --profile community_coordinator
+The node starts on `http://127.0.0.1:8080`. Mesh networking activates with `--mesh-port`.
 
-# Send a test message
-curl -X POST http://localhost:8080/api/v2/messages \
-  -H "Content-Type: application/json" \
-  -d '{"to": "peer_id", "message": "Hello, mesh!"}'
+### Interactive TUI
+```bash
+cargo run --release -- tui
 ```
 
-### Docker (Alternative)
-```bash
-docker-compose up -d
-```
+Terminal interface with dashboard, peer list, message history, and compose — all in one screen.
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch tabs |
+| `i` | Compose message |
+| `q` | Quit |
 
 **Full installation guide:** [docs/INSTALL.md](docs/INSTALL.md)
 
@@ -85,21 +87,23 @@ This is GhostWire's equivalent of ARPANET's "LO" (October 29, 1969).
 ## 🎯 Key Features
 
 ### 🛡️ Security-First
-- **End-to-End Encryption:** AES-256-GCM, Ed25519/X25519
-- **Post-Quantum Ready:** ML-KEM-768 integration
-- **Privacy-Preserving:** Metadata minimization, traffic obfuscation
-- **Multi-Profile Support:** Separate identities for different contexts
+- **End-to-End Encryption:** XChaCha20-Poly1305 with X25519 key exchange
+- **Forward Secrecy:** Symmetric ratchet with chain key aliasing
+- **Identity:** Ed25519 signing + X25519 encryption keypairs
+- **Recovery:** Shamir Secret Sharing with encrypted shares
+- **Threat Detection:** Isolation Forest anomaly scoring
 
 ### 🔗 Decentralized Mesh
-- **Serverless Architecture:** Pure P2P, no central point of failure
-- **Multi-Transport:** WiFi Direct, Bluetooth LE, LoRa, WebRTC, TCP/IP
-- **AI-Powered Routing:** PRoPHET protocol learns optimal paths
-- **Delay-Tolerant Networking:** Messages queue and deliver when peers reconnect
+- **Serverless Architecture:** Pure P2P via libp2p — no central point of failure
+- **GossipSub + Kademlia:** Efficient message propagation and peer discovery
+- **AI-Powered Routing:** 4-layer system (LightGBM → Gemma 4 → GNN → PRoPHET)
+- **Delay-Tolerant Networking:** PRoPHET protocol for store-and-forward delivery
+- **Stealth TCP Transport:** Obfuscated handshakes and traffic patterns
 
 ### 📊 Real-time Monitoring
-- **Network Visualization:** Interactive mesh topology
-- **System Health:** Live CPU, RAM, and network metrics
-- **Message Dashboard:** High-density communication interface
+- **Terminal UI:** Ratatui-based dashboard with peer list and message history
+- **Web API:** Axum HTTP server with REST endpoints
+- **Network Visualization:** Live topology and health metrics
 
 ---
 
@@ -107,13 +111,19 @@ This is GhostWire's equivalent of ARPANET's "LO" (October 29, 1969).
 
 <div align="center">
 
-![Dashboard](docs/assets/screenshot-dashboard.png)
+![Network Topology](docs/screenshots/network_topology.png)
 
-*Real-time mesh network monitoring with peer discovery and message routing*
+*Real-time mesh network topology with peer discovery and message routing*
+
+![Communication Panel](docs/screenshots/communication_panel.png)
+
+*Encrypted messaging interface with peer management*
+
+![Tactical HUD](docs/screenshots/tactical_hud.png)
+
+*System health dashboard with live CPU, RAM, and network metrics*
 
 </div>
-
-> **Note:** Add your actual screenshots to `docs/assets/` and update the image reference above.
 
 ---
 
@@ -121,22 +131,26 @@ This is GhostWire's equivalent of ARPANET's "LO" (October 29, 1969).
 
 ```mermaid
 graph TD
-    A[Frontend: React/TS] <--> B[Backend API: Rust/Axum]
-    B <--> C[Security Layer: Privacy-Enhanced Transport]
-    C <--> D[Mesh Protocol: libp2p]
-    D <--> E[Transports: WiFi/BLE/LoRa/WebRTC]
-    B <--> F[Local Storage: Identity/Chain]
+    A[Terminal UI: Ratatui] <--> B[Core: Rust/Axum]
+    A2[Web API: Axum] <--> B
+    B <--> C[Encryption: XChaCha20-Poly1305]
+    C <--> D[Mesh: libp2p/GossipSub]
+    D <--> E[Discovery: mDNS + Kademlia DHT]
+    B <--> F[AI: LightGBM + PRoPHET]
+    B <--> G[Store: Sled DB]
 ```
 
 ### Core Components
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Backend** | Rust + Axum | High-performance core, encryption, state management |
-| **Frontend** | React + TypeScript | Real-time monitoring dashboard |
-| **Mesh Protocol** | libp2p v0.56 | P2P networking, Kademlia DHT, Gossipsub |
-| **Security** | Custom + Standard | AES-256-GCM, Ed25519, ML-KEM-768, Double Ratchet |
-| **Transports** | Pluggable | WiFi, Bluetooth, LoRa, WebRTC, TCP/IP |
+| **Core** | Rust + Axum | High-performance mesh engine, encryption, state management |
+| **Terminal UI** | Ratatui | Interactive dashboard with peer list, messages, compose |
+| **Web API** | Axum HTTP | REST endpoints for external integrations |
+| **Mesh Protocol** | libp2p v0.56 | P2P networking, Kademlia DHT, GossipSub |
+| **Encryption** | XChaCha20-Poly1305 | E2E encryption with X25519 key exchange |
+| **AI Routing** | LightGBM + PRoPHET | 4-layer intelligent path selection |
+| **Security** | Isolation Forest | Anomaly detection and threat scoring |
 
 ---
 
@@ -146,16 +160,17 @@ graph TD
 |---------|-----------|-------|------------|--------|
 | **Works Offline** | ✅ | ✅ | ✅ | ❌ |
 | **AI-Powered Routing** | ✅ | ❌ | ❌ | ❌ |
-| **Post-Quantum Crypto** | ✅ | ❌ | ❌ | ❌ |
-| **Multi-Transport** | ✅ | Limited | Limited | ❌ |
+| **Forward Secrecy** | ✅ | ✅ | ❌ | ✅ |
+| **Multi-Transport** | ✅ (planned) | Limited | Limited | ❌ |
 | **Serverless** | ✅ | ✅ | ✅ | ❌ |
 | **Open Source** | ✅ | ✅ | ✅ | ✅ |
-| **Commercial License** | ✅ | ❌ |  | ❌ |
+| **Terminal UI** | ✅ | ❌ | ❌ | ❌ |
+| **Anomaly Detection** | ✅ | ❌ | ❌ | ❌ |
 
 **Key Differentiators:**
-1. **AI Integration:** PRoPHET routing learns from network experience
-2. **Future-Proof Security:** Post-quantum cryptography ready
-3. **Flexible Deployment:** From Raspberry Pi to enterprise servers
+1. **AI Integration:** 4-layer routing (LightGBM → Gemma 4 → GNN → PRoPHET)
+2. **Terminal-First UX:** Full TUI for operators who live in the terminal
+3. **Zero External Dependencies:** Runs entirely offline, no cloud required
 4. **Dual Licensing:** AGPL for community, Commercial for proprietary use
 
 ---
@@ -178,17 +193,17 @@ GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F)
 
 ## 📚 Documentation
 
-Comprehensive guides are located in the [`docs/`](docs/) directory:
+Comprehensive guides are located in the [`docs/`](docs/) directory and the [Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki):
 
 | Guide | Description |
 |-------|-------------|
 | **[🏗️ Architecture](docs/ARCHITECTURE.md)** | System internals and design decisions |
 | **[🛠️ Installation](docs/INSTALL.md)** | Detailed setup for various platforms |
 | **[🔒 Security](docs/SECURITY.md)** | Security model and vulnerability disclosure |
-| **[🧪 Testing](docs/TESTING_GUIDE.md)** | Network and security simulations |
-| **[🌐 libp2p Guide](docs/LIBP2P_NETWORK_CONNECTIVITY.md)** | Connecting to bootstrap nodes |
-| **[👤 Identity Lifecycle](docs/PROFILE_IDENTITY_LIFECYCLE.md)** | Profile management from creation to deletion |
-| **[🎨 Brand Guidelines](docs/BRAND_GUIDELINES.md)** | Visual identity and logo usage |
+| **[📡 First Ping](docs/FIRST_PING.md)** | First cross-machine mesh communication record |
+| **[🤖 AI Integration](ghostwire/GEMMA4_INTEGRATION.md)** | Gemma 4 and AI routing setup |
+| **[🔧 Build Instructions](ghostwire/BUILD_INSTRUCTIONS.md)** | Compilation and development guide |
+| **[📋 Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
 
 ---
 
@@ -248,9 +263,7 @@ We welcome contributions from everyone! Whether you're fixing bugs, adding featu
 
 | Name | Role | Contact |
 |------|------|---------|
-| **Michael Irungu** | Team Lead, Architecture | mirungu015@proton.me |
-| [Team Member] | [Role] | [Email] |
-| [Team Member] | [Role] | [Email] |
+| **Michael Irungu Muriithi** | Team Lead, Architecture | mirungu015@proton.me |
 
 **Advisors & Contributors:**
 - Frank — Technical Advisor
@@ -280,21 +293,29 @@ We welcome contributions from everyone! Whether you're fixing bugs, adding featu
 
 ## 🏆 Roadmap
 
-### Completed
-- [x] **Phase 1: Foundation** — Rust core + libp2p integration
-- [x] **Phase 2: Monitoring Dashboard** — Real-time UI (Node Cluster V2)
-- [x] **Phase 3: Security Hardening** — Post-quantum crypto, threat detection
+### ✅ Completed
+- [x] **P2P mesh networking** — libp2p GossipSub + Kademlia DHT
+- [x] **End-to-end encryption** — XChaCha20-Poly1305 with X25519
+- [x] **Forward secrecy** — Symmetric ratchet
+- [x] **AI routing** — LightGBM + PRoPHET fallback (4-layer system)
+- [x] **Terminal UI** — Ratatui dashboard
+- [x] **Web API** — Axum HTTP server
+- [x] **Anomaly detection** — Isolation Forest
+- [x] **Shamir recovery** — Secret sharing for key recovery
+- [x] **First cross-machine ping** — April 5, 2026
 
-### In Progress
-- [/] **Phase 4: Deep Resilience** — LoRa integration, delay-tolerant networking
-- [/] **Phase 5: AI Enhancement** — PRoPHET routing optimization, trust scoring
+### 🔄 In Progress
+- [ ] Message persistence and history
+- [ ] Full Double Ratchet with DH steps
+- [ ] GNN routing optimization (target: 85%+ accuracy)
+- [ ] Mobile clients (Tauri Android/iOS)
 
-### Planned
-- [ ] **Phase 6: Knowledge Ark** — Offline content serving
-- [ ] **Phase 7: Privacy Layers** — Zero-knowledge proofs, enhanced anonymity
-- [ ] **Phase 8: Mobile Apps** — Android/iOS native applications
-
-**Full roadmap:** See [project milestones](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/milestones)
+### 📋 Planned
+- [ ] Voice over mesh (VoIP)
+- [ ] LoRa/Reticulum bridge
+- [ ] Protocol adapters (Matrix, Meshtastic, Briar)
+- [ ] Knowledge Ark — offline content serving
+- [ ] Zero-knowledge proofs
 
 ---
 
@@ -304,9 +325,9 @@ We welcome contributions from everyone! Whether you're fixing bugs, adding featu
 
 **GhostWire** — Connecting the disconnected, regardless of the odds.
 
-![GhostWire Logo](webui/public/ghostwire-logo.png)
+<img src="docs/assets/ghostwire-logo.png" alt="GhostWire Logo" width="120" />
 
-**📍 Nairobi, Kenya** | **🌐 [Website](https://gcd4fe.bnu.edu.cn/en/)** | **📧 mirungu015@proton.me**
+**📍 Nairobi, Kenya** | **🌐 [Website](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)** | **📧 mirungu015@proton.me**
 
 ---
 
