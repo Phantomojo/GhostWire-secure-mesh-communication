@@ -680,7 +680,8 @@ async fn handle_setup() -> Result<()> {
 /// Run the interactive TUI mode — starts node + TUI in one command
 async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
     info!("🖥️  Starting GhostWire TUI (node running in background)...");
-    crate::tui::run_tui(core.clone())
+    let port = core.config.server.port;
+    crate::tui::run_tui(port)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {}", e))
 }
