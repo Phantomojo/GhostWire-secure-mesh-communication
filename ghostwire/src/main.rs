@@ -13,6 +13,7 @@ use tracing::{error, info};
 use ghostwire::config::Config;
 use ghostwire::core::updater;
 use ghostwire::core::Core;
+use ghostwire::daemon;
 
 /// Initialize logging with structured JSON output for production
 fn init_logging() {
@@ -40,9 +41,9 @@ fn init_logging() {
         info!(target: "ghostwire", "Pretty logging initialized");
     }
 }
-#[cfg(any(feature = "web", feature = "cli"))]
-#[derive(Parser)]
+
 #[cfg(feature = "cli")]
+#[derive(Parser)]
 #[command(name = "ghostwire")]
 #[command(about = "GhostWire - Secure Mesh Networking and Messaging")]
 #[command(version = "0.1.0")]
@@ -60,7 +61,7 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     mesh_port: u16,
 
-    #[arg(long, default_value_t = 8080)]
+    #[arg(long, default_value_t = daemon::DEFAULT_DAEMON_PORT)]
     port: u16,
 
     #[arg(long)]
@@ -84,8 +85,11 @@ struct Args {
     #[arg(long)]
     profile: Option<String>,
 
+    /// Run as a background daemon (used internally by 'ghostwire start')
+    #[arg(long)]
+    daemon: bool,
+
     /// Tailscale bootstrap node (format: <tailscale-ip>/<peer-id>)
-    /// Can be specified multiple times. Also scans 100.64.0.0/10 if TAILSCALE=1.
     #[arg(long)]
     tailscale_bootstrap: Vec<String>,
 }
@@ -102,12 +106,19 @@ struct Args {
     cli: bool,
     mesh: bool,
     profile: Option<String>,
+    daemon: bool,
     tailscale_bootstrap: Vec<String>,
 }
 
 #[cfg(feature = "cli")]
 #[derive(Subcommand)]
 enum Commands {
+    /// Start the GhostWire daemon in the background
+    Start,
+    /// Stop the running GhostWire daemon
+    Stop,
+    /// Check if the GhostWire daemon is running
+    Status,
     /// Run CLI mode
     Cli {
         #[arg(num_args = 0..)]
@@ -124,7 +135,6 @@ enum Commands {
         #[arg(long)]
         bootstrap: Vec<String>,
     },
-    Status,
     /// List known peers
     Peers,
     /// Send a message: send <recipient_id> <content>
@@ -132,7 +142,7 @@ enum Commands {
         recipient: String,
         content: String,
     },
-    /// Interactive terminal user interface
+    /// Interactive terminal user interface (connects to daemon)
     Tui,
 }
 
@@ -158,16 +168,82 @@ async fn main() -> Result<()> {
         api_host: "127.0.0.1".to_string(),
         mesh_host: "0.0.0.0".to_string(),
         mesh_port: 0,
-        port: 8080,
+        port: daemon::DEFAULT_DAEMON_PORT,
         bootstrap: Vec::new(),
         web: false,
         cli: false,
         mesh: false,
         profile: None,
+        daemon: false,
         tailscale_bootstrap: Vec::new(),
     };
 
-    // Load configuration
+    // Handle daemon management commands (don't need Core — they talk to the daemon)
+    #[cfg(feature = "cli")]
+    {
+        match &args.command {
+            Some(Commands::Start) => {
+                match daemon::start_daemon(Some(args.port)) {
+                    Ok(pid) => {
+                        println!("✅ GhostWire daemon started (PID {})", pid);
+                        println!("   Port: {}", args.port);
+                        println!("   API:  http://127.0.0.1:{}", args.port);
+                        println!("   Logs: {}", daemon::daemon_log_path().display());
+                        println!();
+                        println!("Run 'ghostwire tui' to open the terminal interface.");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ {}", e);
+                        return Err(e);
+                    }
+                }
+                return Ok(());
+            }
+            Some(Commands::Stop) => {
+                match daemon::stop_daemon() {
+                    Ok(()) => {
+                        println!("✅ GhostWire daemon stopped");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ {}", e);
+                        return Err(e);
+                    }
+                }
+                return Ok(());
+            }
+            Some(Commands::Status) => {
+                println!("{}", daemon::daemon_status());
+                return Ok(());
+            }
+            Some(Commands::Tui) => {
+                // TUI connects to the daemon — ensure it's running
+                let port = args.port;
+                if !daemon::is_daemon_running() {
+                    eprintln!("⚫ Daemon not running — starting it automatically...");
+                    match daemon::start_daemon(Some(port)) {
+                        Ok(pid) => {
+                            eprintln!("✅ Daemon started (PID {})", pid);
+                            // Give it a moment to initialize
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to auto-start daemon: {}", e);
+                            eprintln!("   Try running 'ghostwire start' manually.");
+                            return Err(e);
+                        }
+                    }
+                }
+
+                eprintln!("🔌 Connecting to daemon on port {}...", port);
+                ghostwire::tui::run_tui(port).await
+                    .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
+    // Load configuration (only needed for Core-based commands)
     let config = if let Some(config_path) = &args.config {
         match Config::load_from_path(config_path) {
             Ok(c) => c,
@@ -180,8 +256,49 @@ async fn main() -> Result<()> {
         Config::load().unwrap_or_else(|_| Config::default())
     };
 
-    // Auto-update check
-    if config.server.auto_update
+    // Handle daemon management commands (don't need Core)
+    #[cfg(feature = "cli")]
+    {
+        match &args.command {
+            Some(Commands::Start) => {
+                match daemon::start_daemon(Some(args.port)) {
+                    Ok(pid) => {
+                        println!("✅ GhostWire daemon started (PID {})", pid);
+                        println!("   Port: {}", args.port);
+                        println!("   API:  http://127.0.0.1:{}", args.port);
+                        println!("   Logs: {}", daemon::daemon_log_path().display());
+                        println!();
+                        println!("Run 'ghostwire tui' to open the terminal interface.");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ {}", e);
+                        return Err(e);
+                    }
+                }
+                return Ok(());
+            }
+            Some(Commands::Stop) => {
+                match daemon::stop_daemon() {
+                    Ok(()) => {
+                        println!("✅ GhostWire daemon stopped");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ {}", e);
+                        return Err(e);
+                    }
+                }
+                return Ok(());
+            }
+            Some(Commands::Status) => {
+                println!("{}", daemon::daemon_status());
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
+    // Auto-update check (skip for daemon mode — it runs forever)
+    if !args.daemon && config.server.auto_update
         && updater::is_update_available() {
             info!("✨ Applying automatic update...");
             if let Err(e) = updater::apply_update() {
@@ -199,8 +316,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Feature 3: Parse Tailscale bootstrap nodes
-    // Format: <tailscale-ip>/<peer-id> e.g. 100.64.1.5/12D3KooW...
+    // Parse Tailscale bootstrap nodes
     for ts in &args.tailscale_bootstrap {
         if let Some((ip, peer_id)) = ts.split_once('/') {
             if let Ok(peer_id) = peer_id.parse::<libp2p::PeerId>() {
@@ -221,13 +337,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Feature 3: If TAILSCALE=1, scan for GhostWire nodes on Tailscale network (100.64.0.0/10)
+    // If TAILSCALE=1, scan for GhostWire nodes on Tailscale network
     if std::env::var("TAILSCALE").unwrap_or_default() == "1" {
         tracing::info!("TAILSCALE=1 detected — scanning 100.64.0.0/10 for GhostWire peers");
-        // Note: Active scanning requires knowing peer IPs. In practice, Tailscale's
-        // built-in DNS (tailnet names) or the Tailscale API would provide peer lists.
-        // For now, we log this and rely on --tailscale-bootstrap for explicit peers.
-        // Future: integrate with `tailscale status --json` to discover peers.
     }
 
     // Initialize core components
@@ -243,14 +355,9 @@ async fn main() -> Result<()> {
     match args.command {
         #[cfg(feature = "cli")]
         Some(Commands::Cli { rest }) => {
-            // Pass the already-created Core to CLI (avoid double-open of sled DB)
             let mut cli_args = vec![OsString::from("ghostwire")];
             cli_args.extend(rest.into_iter().map(OsString::from));
             ghostwire::cli::run_cli_with_args_and_core(cli_args, core_arc).await?;
-        }
-        #[cfg(feature = "cli")]
-        Some(Commands::Status) => {
-            ghostwire::cli::show_stats(&core_arc).await?;
         }
         #[cfg(feature = "cli")]
         Some(Commands::Peers) => {
@@ -259,12 +366,6 @@ async fn main() -> Result<()> {
         #[cfg(feature = "cli")]
         Some(Commands::Send { recipient, content }) => {
             ghostwire::cli::send_message(&core_arc, &recipient, &content).await?;
-        }
-        #[cfg(feature = "cli")]
-        Some(Commands::Tui) => {
-            info!("Starting TUI mode");
-            ghostwire::tui::run_tui(core_arc).await
-                .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
         }
         #[cfg(feature = "cli")]
         Some(Commands::Web { api_host, mesh_host, port, bootstrap }) => {
@@ -278,29 +379,36 @@ async fn main() -> Result<()> {
                 Some(core_arc), api_host, port, bs, None, mesh_host, 0, config.clone(),
             ).await.map_err(|e| anyhow::anyhow!(e))?;
         }
+        #[cfg(feature = "cli")]
+        Some(Commands::Start) | Some(Commands::Stop) | Some(Commands::Status) | Some(Commands::Tui) => {
+            // Already handled above (before Core creation)
+            unreachable!()
+        }
         #[cfg(not(feature = "cli"))]
         Some(_) => {
             println!("CLI feature not enabled.");
         }
         None => {
-            // Default behavior: start the services
-            // Activate the autonomic nervous system
-            core_arc
-                .clone()
-                .start_nervous_system(args.mesh_host.clone(), args.mesh_port)
-                .await;
+            if args.daemon {
+                // ═══════════════════════════════════════════════
+                // DAEMON MODE — runs in background, owns the DB
+                // ═══════════════════════════════════════════════
+                info!("🔧 Running as daemon on port {}", args.port);
 
-            if args.web || config.server.web_enabled {
-                info!(
-                    "Starting web server mode on {}:{}",
-                    args.api_host, args.port
-                );
+                // Start the nervous system (mesh networking, AI, etc.)
+                core_arc
+                    .clone()
+                    .start_nervous_system(args.mesh_host.clone(), args.mesh_port)
+                    .await;
+
+                // Start the web API server (this is how clients talk to the daemon)
+                info!("🌐 Daemon API listening on 127.0.0.1:{}", args.port);
                 ghostwire::web::start_web_server(
                     Some(core_arc),
-                    args.api_host,
+                    "127.0.0.1".to_string(),
                     args.port,
                     bootstrap_multiaddrs.clone(),
-                    args.sim_addr.clone(),
+                    None,
                     args.mesh_host.clone(),
                     args.mesh_port,
                     config.clone(),
@@ -308,8 +416,35 @@ async fn main() -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
             } else {
-                info!("Running in minimal mode - core only");
-                tokio::signal::ctrl_c().await?;
+                // ═══════════════════════════════════════════════
+                // INTERACTIVE MODE — direct Core access (legacy)
+                // ═══════════════════════════════════════════════
+                core_arc
+                    .clone()
+                    .start_nervous_system(args.mesh_host.clone(), args.mesh_port)
+                    .await;
+
+                if args.web || config.server.web_enabled {
+                    info!(
+                        "Starting web server mode on {}:{}",
+                        args.api_host, args.port
+                    );
+                    ghostwire::web::start_web_server(
+                        Some(core_arc),
+                        args.api_host,
+                        args.port,
+                        bootstrap_multiaddrs.clone(),
+                        args.sim_addr.clone(),
+                        args.mesh_host.clone(),
+                        args.mesh_port,
+                        config.clone(),
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                } else {
+                    info!("Running in minimal mode - core only");
+                    tokio::signal::ctrl_c().await?;
+                }
             }
         }
     }

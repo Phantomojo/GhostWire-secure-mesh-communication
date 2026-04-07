@@ -1,7 +1,11 @@
 //! TUI Application — main state, event loop, and screen rendering.
+//!
+//! Connects to the GhostWire daemon via HTTP API (no direct Core access).
+//! This means the daemon stays alive when the TUI closes, and multiple
+//! TUI instances can connect simultaneously.
 
+use super::daemon_client::{DaemonClient, DaemonContact, DaemonMessage};
 use super::theme;
-use crate::core::{Core, Message};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -15,7 +19,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
-use std::{collections::HashMap, io, sync::Arc, time::Duration};
+use std::{io, time::Duration};
 
 // ═══════════════════════════════════════════════════════════
 // Application State
@@ -32,37 +36,18 @@ enum View {
     Dashboard,
 }
 
-/// A contact entry in the user's address book
-#[derive(Debug, Clone)]
-struct Contact {
-    display_name: String,
-    peer_id: String,
-    online: bool,
-    trust_score: f64,
-    unread_count: usize,
-    last_seen_secs: u64,
-}
-
-/// A message in a conversation
-#[derive(Debug, Clone)]
-struct ChatMessage {
-    sender: String,       // display name
-    content: String,
-    timestamp: u64,
-    is_mine: bool,
-}
-
 /// TUI application state
 pub struct TuiApp {
-    core: Arc<Core>,
+    /// HTTP client for the daemon
+    client: DaemonClient,
     /// Current view
     view: View,
     /// Selected contact index in the sidebar
     selected_contact: Option<usize>,
-    /// Contacts list (cached from core)
-    contacts: Vec<Contact>,
+    /// Contacts list (fetched from daemon)
+    contacts: Vec<DaemonContact>,
     /// Messages in the current conversation
-    messages: Vec<ChatMessage>,
+    messages: Vec<DaemonMessage>,
     /// Message input buffer
     input: String,
     /// Cursor position in input
@@ -77,18 +62,20 @@ pub struct TuiApp {
     status: Option<String>,
     /// My display name
     my_name: String,
-    /// Peer count (cached)
+    /// Peer count (fetched from daemon)
     peer_count: usize,
     /// Total unread messages
     total_unread: usize,
-    /// Whether the nervous system has been started
-    nervous_system_started: bool,
+    /// Network mode
+    network_mode: String,
+    /// Encryption type
+    encryption_type: String,
 }
 
 impl TuiApp {
-    pub fn new(core: Arc<Core>) -> Self {
+    pub fn new(client: DaemonClient) -> Self {
         Self {
-            core,
+            client,
             view: View::Chat,
             selected_contact: None,
             contacts: Vec::new(),
@@ -99,29 +86,27 @@ impl TuiApp {
             running: true,
             error: None,
             status: None,
-            my_name: String::new(),
+            my_name: String::from("connecting..."),
             peer_count: 0,
             total_unread: 0,
-            nervous_system_started: false,
+            network_mode: String::from("Mesh P2P"),
+            encryption_type: String::from("XChaCha20-Poly1305"),
         }
     }
 
     /// Run the TUI application
     pub async fn run(&mut self) -> io::Result<()> {
-        // First-run wizard if needed
-        if let Some(name) = super::first_run::run_first_run(&self.core).await? {
-            self.my_name = name;
-        } else {
-            // Load existing profile
-            self.my_name = self.core.get_identity_id().await;
+        // Verify daemon is reachable
+        if !self.client.health_check().await {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!(
+                    "Cannot connect to GhostWire daemon on port {}.\n\
+                     Run 'ghostwire start' first, or check 'ghostwire status'.",
+                    self.client.port()
+                ),
+            ));
         }
-
-        // Start the nervous system (mesh networking, etc.)
-        self.core
-            .clone()
-            .start_nervous_system("0.0.0.0".to_string(), 0)
-            .await;
-        self.nervous_system_started = true;
 
         // Initial data load
         self.refresh_data().await;
@@ -184,28 +169,32 @@ impl TuiApp {
     }
 
     // ═══════════════════════════════════════════════════
-    // Data Refresh
+    // Data Refresh (via daemon API)
     // ═══════════════════════════════════════════════════
 
     async fn refresh_data(&mut self) {
-        // Get peer count — placeholder until mesh peer API is wired
-        #[cfg(feature = "mesh")]
-        {
-            if let Some(_mesh_mgr) = &self.core.mesh_manager {
-                // TODO: wire real peer count from mesh manager
-                self.peer_count = 0;
-            }
+        // Fetch identity
+        if let Some(identity) = self.client.get_identity().await {
+            self.my_name = if identity.nickname.is_empty() {
+                identity.id
+            } else {
+                identity.nickname
+            };
         }
 
-        // Build contacts from known peers
-        // For now, this is a placeholder — in production, wire to real peer data
-        self.contacts.clear();
-        self.total_unread = 0;
+        // Fetch contacts/peers
+        self.contacts = self.client.get_contacts().await;
+        self.total_unread = self.contacts.iter().map(|c| c.unread_count).sum();
 
-        // Add placeholder contacts for demonstration
-        // These will be replaced with real mesh-discovered peers
+        // Fetch network status
+        let net = self.client.get_network_status().await;
+        self.peer_count = net.peer_count;
+        self.network_mode = net.mode;
+        self.encryption_type = net.encryption;
+
+        // If no contacts yet, show a placeholder
         if self.contacts.is_empty() {
-            self.contacts.push(Contact {
+            self.contacts.push(DaemonContact {
                 display_name: "Waiting for mesh peers...".to_string(),
                 peer_id: String::new(),
                 online: false,
@@ -214,9 +203,6 @@ impl TuiApp {
                 last_seen_secs: 0,
             });
         }
-
-        // Recalculate unread
-        self.total_unread = self.contacts.iter().map(|c| c.unread_count).sum();
     }
 
     // ═══════════════════════════════════════════════════
@@ -332,7 +318,7 @@ impl TuiApp {
     }
 
     // ═══════════════════════════════════════════════════
-    // Message Sending
+    // Message Sending (via daemon API)
     // ═══════════════════════════════════════════════════
 
     fn send_message(&mut self) {
@@ -361,25 +347,25 @@ impl TuiApp {
         }
 
         let recipient = contact.peer_id.clone();
-        let core = self.core.clone();
         let my_name = self.my_name.clone();
+        let client = self.client.clone_for_send();
 
-        // Add to local message list immediately (optimistic)
-        self.messages.push(ChatMessage {
+        // Add to local message list immediately (optimistic UI)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.messages.push(DaemonMessage {
             sender: my_name.clone(),
             content: message.clone(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: now,
             is_mine: true,
         });
 
-        // Spawn async send
+        // Send via daemon API (async, fire-and-forget)
         tokio::spawn(async move {
-            let msg = Message::new(my_name, recipient.clone(), message.clone());
-            match core.send_direct_message(recipient, &msg).await {
-                Ok(_) => tracing::info!("Message sent via mesh"),
+            match client.send_message(&recipient, &message).await {
+                Ok(()) => tracing::info!("Message sent via daemon"),
                 Err(e) => tracing::error!("Failed to send message: {}", e),
             }
         });
@@ -448,7 +434,8 @@ impl TuiApp {
             Span::styled(&self.my_name, theme::primary_bold()),
             Span::raw("  "),
             theme::status_dot(self.peer_count > 0),
-            Span::raw(format!(" {} peer", self.peer_count)),
+            Span::raw(" "),
+            Span::raw(format!("{} peer", self.peer_count)),
             if self.peer_count != 1 {
                 Span::raw("s")
             } else {
@@ -720,7 +707,7 @@ impl TuiApp {
         let network = Paragraph::new(vec![
             Line::from(vec![
                 Span::styled("Mode:      ", theme::muted_style()),
-                Span::styled("Mesh P2P", theme::text_style()),
+                Span::styled(&self.network_mode, theme::text_style()),
             ]),
             Line::from(vec![
                 Span::styled("Peers:     ", theme::muted_style()),
@@ -751,7 +738,6 @@ impl TuiApp {
 // ═══════════════════════════════════════════════════════════
 
 fn format_time(timestamp: u64) -> String {
-    // Simple HH:MM format
     let secs = timestamp % 86400;
     let hours = secs / 3600;
     let mins = (secs % 3600) / 60;
@@ -774,8 +760,9 @@ fn format_duration(secs: u64) -> String {
 // Public Entry Point
 // ═══════════════════════════════════════════════════════════
 
-/// Run the TUI with an existing Core
-pub async fn run_tui(core: Arc<Core>) -> io::Result<()> {
-    let mut app = TuiApp::new(core);
+/// Run the TUI, connecting to the daemon on the given port
+pub async fn run_tui(port: u16) -> io::Result<()> {
+    let client = DaemonClient::new(port);
+    let mut app = TuiApp::new(client);
     app.run().await
 }
