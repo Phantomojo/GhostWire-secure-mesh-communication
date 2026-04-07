@@ -1,0 +1,32 @@
+diff --git a/ghostwire/src/config.rs b/ghostwire/src/config.rs
+index f192cd9f..fdf313e5 100644
+--- a/ghostwire/src/config.rs
++++ b/ghostwire/src/config.rs
+@@ -84,6 +84,13 @@ pub struct FeatureFlags {
+     pub web_ui: bool,
+     pub cli: bool,
+     pub api: bool,
++    // AI/ML Features
++    pub gemma_2b: bool,      // Gemma 4 E2B (2B params, edge-optimized)
++    pub gemma_4b: bool,      // Gemma 4 E4B (4B params, balanced)
++    pub gemma_26b: bool,     // Gemma 4 MoE (26B total, 4B active)
++    pub gemma_31b: bool,     // Gemma 4 Dense (31B, max quality)
++    pub ai_routing: bool,    // Enable AI-powered routing decisions
++    pub ai_threat_detection: bool,  // Enable AI threat analysis
+ }
+ 
+ impl Default for Config {
+@@ -127,6 +134,13 @@ impl Default for Config {
+                 web_ui: true,
+                 cli: true,
+                 api: true,
++                // AI/ML: Default to E2B for edge compatibility
++                gemma_2b: true,
++                gemma_4b: false,
++                gemma_26b: false,
++                gemma_31b: false,
++                ai_routing: true,
++                ai_threat_detection: true,
+             },
+         }
+     }

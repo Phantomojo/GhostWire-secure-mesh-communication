@@ -1,0 +1,44 @@
+# GhostWire Configuration File
+# Copy this to ghostwire.toml and modify as needed
+
+[server]
+host = "127.0.0.1"
+port = 8080
+web_enabled = true
+cli_enabled = true
+
+[security]
+max_connections_per_ip = 10
+max_messages_per_minute = 100
+blacklist_enabled = true
+threat_detection_enabled = true
+allowed_ips = []
+blocked_ips = []
+key_rotation_interval_days = 7
+
+[network]
+mesh_enabled = true
+reticulum_enabled = false
+briar_enabled = false
+stealth_tcp_enabled = false
+max_peers = 50
+connection_timeout_secs = 30
+
+[encryption]
+algorithm = "AES-256-GCM"
+key_size = 32
+session_timeout_hours = 1
+
+[features]
+matrix_bridge = false
+meshtastic_bridge = false
+web_ui = true
+cli = true
+api = true
+
+# Environment variables for sensitive data:
+# MATRIX_HOMESERVER=https://matrix.org
+# MATRIX_USER=@youruser:matrix.org
+# MATRIX_ACCESS_TOKEN=your_access_token_here
+# MESHTASTIC_DEVICE_PATH=/dev/ttyUSB0
+# MESHTASTIC_CHANNEL=main 
