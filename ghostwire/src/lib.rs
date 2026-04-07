@@ -7,6 +7,7 @@ pub mod core;
 pub mod genesis_constants;
 #[cfg(feature = "web")]
 pub mod web;
+pub mod tui;
 
 // API v2
 pub mod api_v2_endpoints;

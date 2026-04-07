@@ -4,6 +4,7 @@
 use anyhow::Result;
 #[cfg(feature = "cli")]
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::sync::Arc;
 
 use tracing::{error, info};
@@ -108,7 +109,10 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     /// Run CLI mode
-    Cli,
+    Cli {
+        #[arg(num_args = 0..)]
+        rest: Vec<String>,
+    },
     /// Run web server mode
     Web {
         #[arg(long, default_value = "127.0.0.1")]
@@ -128,6 +132,8 @@ enum Commands {
         recipient: String,
         content: String,
     },
+    /// Interactive terminal user interface
+    Tui,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -236,9 +242,41 @@ async fn main() -> Result<()> {
 
     match args.command {
         #[cfg(feature = "cli")]
-        Some(_) => {
-            // Let the unified CLI module handle the command
-            ghostwire::cli::run_cli().await?;
+        Some(Commands::Cli { rest }) => {
+            // Pass the already-created Core to CLI (avoid double-open of sled DB)
+            let mut cli_args = vec![OsString::from("ghostwire")];
+            cli_args.extend(rest.into_iter().map(OsString::from));
+            ghostwire::cli::run_cli_with_args_and_core(cli_args, core_arc).await?;
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Status) => {
+            ghostwire::cli::show_stats(&core_arc).await?;
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Peers) => {
+            ghostwire::cli::list_peers(&core_arc).await?;
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Send { recipient, content }) => {
+            ghostwire::cli::send_message(&core_arc, &recipient, &content).await?;
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Tui) => {
+            info!("Starting TUI mode");
+            ghostwire::tui::run_tui(core_arc).await
+                .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
+        }
+        #[cfg(feature = "cli")]
+        Some(Commands::Web { api_host, mesh_host, port, bootstrap }) => {
+            info!("Starting web server via CLI on {}:{}", api_host, port);
+            let mut bs = bootstrap_multiaddrs.clone();
+            for b in &bootstrap {
+                if let Ok(ma) = b.parse::<libp2p::Multiaddr>() { bs.push(ma); }
+            }
+            core_arc.clone().start_nervous_system(mesh_host.clone(), 0).await;
+            ghostwire::web::start_web_server(
+                Some(core_arc), api_host, port, bs, None, mesh_host, 0, config.clone(),
+            ).await.map_err(|e| anyhow::anyhow!(e))?;
         }
         #[cfg(not(feature = "cli"))]
         Some(_) => {

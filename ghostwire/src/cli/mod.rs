@@ -3,6 +3,7 @@ pub mod commands;
 use crate::core::Core;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -80,6 +81,8 @@ pub enum Commands {
         #[arg(short = 'f', long)]
         follow: bool,
     },
+    /// Interactive terminal interface
+    Tui,
     /// Setup dependencies and environment
     Setup,
 }
@@ -103,9 +106,14 @@ pub enum ManageCommand {
     },
 }
 
-/// Run the CLI application
+/// Run the CLI application (legacy — parses from env)
 pub async fn run_cli() -> Result<()> {
-    let cli = Cli::parse();
+    run_cli_with_args(std::env::args_os().skip(1).collect()).await
+}
+
+/// Run the CLI with explicit arguments (for integration with main.rs)
+pub async fn run_cli_with_args(args: Vec<OsString>) -> Result<()> {
+    let cli = Cli::try_parse_from(args).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
 
@@ -113,49 +121,64 @@ pub async fn run_cli() -> Result<()> {
     let core = Core::new(config.clone(), Vec::new(), None, None).await?;
     let core_arc = Arc::new(core);
 
-    match cli.command {
+    dispatch_cli_command(cli.command, &core_arc, &config).await
+}
+
+/// Run CLI with a pre-existing Core (avoids double-open of sled DB)
+pub async fn run_cli_with_args_and_core(args: Vec<OsString>, core_arc: Arc<Core>) -> Result<()> {
+    let cli = Cli::try_parse_from(args).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
+    dispatch_cli_command(cli.command, &core_arc, &config).await
+}
+
+/// Dispatch a CLI command to the appropriate handler
+async fn dispatch_cli_command(command: Commands, core_arc: &Arc<Core>, _config: &crate::config::Config) -> Result<()> {
+    match command {
         Commands::Init { username } => {
-            init_identity(&core_arc, username).await?;
+            init_identity(core_arc, username).await?;
         }
         Commands::Start { host, port, mesh_port, web } => {
             if web {
-                start_web_server(&core_arc, host, port, mesh_port).await?;
+                start_web_server(core_arc, host, port, mesh_port).await?;
             } else {
-                start_node(&core_arc, host, port, mesh_port).await?;
+                start_node(core_arc, host, port, mesh_port).await?;
             }
         }
         Commands::Send { recipient, message } => {
-            send_message(&core_arc, &recipient, &message).await?;
+            send_message(core_arc, &recipient, &message).await?;
         }
         Commands::Peers => {
-            list_peers(&core_arc).await?;
+            list_peers(core_arc).await?;
         }
         Commands::Stats => {
-            show_stats(&core_arc).await?;
+            show_stats(core_arc).await?;
         }
         Commands::Security => {
-            show_security_info(&core_arc).await?;
+            show_security_info(core_arc).await?;
         }
         Commands::GenKey => {
-            generate_key(&core_arc).await?;
+            generate_key(core_arc).await?;
         }
         Commands::Encrypt { message } => {
-            encrypt_message(&core_arc, &message).await?;
+            encrypt_message(core_arc, &message).await?;
         }
         Commands::Decrypt { encrypted } => {
-            decrypt_message(&core_arc, &encrypted).await?;
+            decrypt_message(core_arc, &encrypted).await?;
         }
         Commands::Connect { username } => {
-            connect_by_username(&core_arc, &username).await?;
+            connect_by_username(core_arc, &username).await?;
         }
         Commands::Manage { subcommand } => {
-            handle_manage(&core_arc, subcommand).await?;
+            handle_manage(core_arc, subcommand).await?;
         }
         Commands::Deploy { target, platform } => {
-            handle_deploy(&core_arc, target, platform).await?;
+            handle_deploy(core_arc, target, platform).await?;
         }
         Commands::Monitor { follow } => {
-            handle_monitor(&core_arc, follow).await?;
+            handle_monitor(core_arc, follow).await?;
+        }
+        Commands::Tui => {
+            run_tui_mode(core_arc).await?;
         }
         Commands::Setup => {
             handle_setup().await?;
@@ -236,7 +259,7 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -
     Ok(())
 }
 
-async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Result<()> {
+pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Result<()> {
     use crate::core::Message;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -262,24 +285,17 @@ async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Resul
         }
     }
 
-    let msg = Message {
-        id: uuid::Uuid::new_v4(),
-        sender: core.get_identity_id().await,
-        recipient: final_recipient,
-        content: message.to_string(),
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        encrypted: false,
-        message_type: "text".to_string(),
-        encryption_status: "unknown".to_string(),
-        hops: 0,
-    };
+    // Use Message::new() which sets proper defaults including sequence_num and requires_ack
+    let msg = Message::new(
+        core.get_identity_id().await,
+        final_recipient.clone(),
+        message.to_string(),
+    );
 
-    match core.send_message(&msg).await {
+    // Use send_direct_message for proper routing (mailbox fallback, peer health)
+    match core.send_direct_message(final_recipient.clone(), &msg).await {
         Ok(_) => {
-            println!("✅ Message sent successfully to {}", recipient);
+            println!("✅ Message sent successfully to {} (id={})", recipient, msg.id);
         }
         Err(e) => {
             error!("Failed to send message: {}", e);
@@ -329,7 +345,7 @@ async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
     Ok(())
 }
 
-async fn list_peers(core: &Arc<Core>) -> Result<()> {
+pub async fn list_peers(core: &Arc<Core>) -> Result<()> {
     if let Some(mesh_stats) = core.get_mesh_stats().await {
         println!("📡 Mesh Network Peers:");
         println!("Total nodes: {}", mesh_stats.total_nodes);
@@ -351,7 +367,7 @@ async fn list_peers(core: &Arc<Core>) -> Result<()> {
     Ok(())
 }
 
-async fn show_stats(core: &Arc<Core>) -> Result<()> {
+pub async fn show_stats(core: &Arc<Core>) -> Result<()> {
     println!("📊 GhostWire Network Statistics");
     println!("================================");
 
@@ -659,4 +675,12 @@ async fn handle_setup() -> Result<()> {
 
     println!("\n✨ Setup complete. Run 'ghostwire manage start' to begin.");
     Ok(())
+}
+
+/// Run the interactive TUI mode — starts node + TUI in one command
+async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
+    info!("🖥️  Starting GhostWire TUI (node running in background)...");
+    crate::tui::run_tui(core.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("TUI error: {}", e))
 }
