@@ -1,0 +1,781 @@
+//! TUI Application — main state, event loop, and screen rendering.
+
+use super::theme;
+use crate::core::{Core, Message};
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame, Terminal,
+};
+use std::{collections::HashMap, io, sync::Arc, time::Duration};
+
+// ═══════════════════════════════════════════════════════════
+// Application State
+// ═══════════════════════════════════════════════════════════
+
+/// Which screen/view is active
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// Main chat view (contacts sidebar + conversation + input)
+    Chat,
+    /// Full contact list / address book
+    Contacts,
+    /// Dashboard / node status
+    Dashboard,
+}
+
+/// A contact entry in the user's address book
+#[derive(Debug, Clone)]
+struct Contact {
+    display_name: String,
+    peer_id: String,
+    online: bool,
+    trust_score: f64,
+    unread_count: usize,
+    last_seen_secs: u64,
+}
+
+/// A message in a conversation
+#[derive(Debug, Clone)]
+struct ChatMessage {
+    sender: String,       // display name
+    content: String,
+    timestamp: u64,
+    is_mine: bool,
+}
+
+/// TUI application state
+pub struct TuiApp {
+    core: Arc<Core>,
+    /// Current view
+    view: View,
+    /// Selected contact index in the sidebar
+    selected_contact: Option<usize>,
+    /// Contacts list (cached from core)
+    contacts: Vec<Contact>,
+    /// Messages in the current conversation
+    messages: Vec<ChatMessage>,
+    /// Message input buffer
+    input: String,
+    /// Cursor position in input
+    cursor_pos: usize,
+    /// Whether we're in input mode (typing)
+    input_mode: bool,
+    /// Running flag
+    running: bool,
+    /// Error message
+    error: Option<String>,
+    /// Status / toast message
+    status: Option<String>,
+    /// My display name
+    my_name: String,
+    /// Peer count (cached)
+    peer_count: usize,
+    /// Total unread messages
+    total_unread: usize,
+    /// Whether the nervous system has been started
+    nervous_system_started: bool,
+}
+
+impl TuiApp {
+    pub fn new(core: Arc<Core>) -> Self {
+        Self {
+            core,
+            view: View::Chat,
+            selected_contact: None,
+            contacts: Vec::new(),
+            messages: Vec::new(),
+            input: String::new(),
+            cursor_pos: 0,
+            input_mode: false,
+            running: true,
+            error: None,
+            status: None,
+            my_name: String::new(),
+            peer_count: 0,
+            total_unread: 0,
+            nervous_system_started: false,
+        }
+    }
+
+    /// Run the TUI application
+    pub async fn run(&mut self) -> io::Result<()> {
+        // First-run wizard if needed
+        if let Some(name) = super::first_run::run_first_run(&self.core).await? {
+            self.my_name = name;
+        } else {
+            // Load existing profile
+            self.my_name = self.core.get_identity_id().await;
+        }
+
+        // Start the nervous system (mesh networking, etc.)
+        self.core
+            .clone()
+            .start_nervous_system("0.0.0.0".to_string(), 0)
+            .await;
+        self.nervous_system_started = true;
+
+        // Initial data load
+        self.refresh_data().await;
+
+        // Setup terminal
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+
+        // Run event loop
+        let result = self.run_event_loop(&mut terminal).await;
+
+        // Restore terminal
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+
+        result
+    }
+
+    async fn run_event_loop(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> io::Result<()> {
+        let mut refresh_tick = 0;
+
+        loop {
+            if !self.running {
+                break;
+            }
+
+            // Refresh data every ~30 ticks (3 seconds at 100ms poll)
+            refresh_tick += 1;
+            if refresh_tick >= 30 {
+                refresh_tick = 0;
+                self.refresh_data().await;
+            }
+
+            // Draw UI
+            terminal.draw(|f| self.ui(f))?;
+
+            // Poll for events
+            if event::poll(Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    self.handle_key(key);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Data Refresh
+    // ═══════════════════════════════════════════════════
+
+    async fn refresh_data(&mut self) {
+        // Get peer count — placeholder until mesh peer API is wired
+        #[cfg(feature = "mesh")]
+        {
+            if let Some(_mesh_mgr) = &self.core.mesh_manager {
+                // TODO: wire real peer count from mesh manager
+                self.peer_count = 0;
+            }
+        }
+
+        // Build contacts from known peers
+        // For now, this is a placeholder — in production, wire to real peer data
+        self.contacts.clear();
+        self.total_unread = 0;
+
+        // Add placeholder contacts for demonstration
+        // These will be replaced with real mesh-discovered peers
+        if self.contacts.is_empty() {
+            self.contacts.push(Contact {
+                display_name: "Waiting for mesh peers...".to_string(),
+                peer_id: String::new(),
+                online: false,
+                trust_score: 0.0,
+                unread_count: 0,
+                last_seen_secs: 0,
+            });
+        }
+
+        // Recalculate unread
+        self.total_unread = self.contacts.iter().map(|c| c.unread_count).sum();
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Input Handling
+    // ═══════════════════════════════════════════════════
+
+    fn handle_key(&mut self, key: event::KeyEvent) {
+        if self.input_mode {
+            self.handle_input_key(key);
+        } else {
+            self.handle_normal_key(key);
+        }
+    }
+
+    fn handle_normal_key(&mut self, key: event::KeyEvent) {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                self.running = false;
+            }
+            KeyCode::Char('i') | KeyCode::Char('I') => {
+                // Enter input mode
+                self.input_mode = true;
+                self.cursor_pos = self.input.len();
+            }
+            KeyCode::Char('1') => self.view = View::Chat,
+            KeyCode::Char('2') => self.view = View::Contacts,
+            KeyCode::Char('3') => self.view = View::Dashboard,
+            KeyCode::Tab => {
+                // Cycle views
+                self.view = match self.view {
+                    View::Chat => View::Contacts,
+                    View::Contacts => View::Dashboard,
+                    View::Dashboard => View::Chat,
+                };
+            }
+            KeyCode::Up => {
+                if let Some(idx) = self.selected_contact {
+                    if idx > 0 {
+                        self.selected_contact = Some(idx - 1);
+                    }
+                } else if !self.contacts.is_empty() {
+                    self.selected_contact = Some(0);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(idx) = self.selected_contact {
+                    if idx + 1 < self.contacts.len() {
+                        self.selected_contact = Some(idx + 1);
+                    }
+                } else if !self.contacts.is_empty() {
+                    self.selected_contact = Some(0);
+                }
+            }
+            KeyCode::Enter => {
+                // Open selected conversation
+                if let Some(idx) = self.selected_contact {
+                    if idx < self.contacts.len() {
+                        let contact = &self.contacts[idx];
+                        if !contact.peer_id.is_empty() {
+                            self.selected_contact = Some(idx);
+                            self.input_mode = true;
+                            self.cursor_pos = self.input.len();
+                        }
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                self.error = None;
+                self.status = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_input_key(&mut self, key: event::KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.input_mode = false;
+                self.error = None;
+            }
+            KeyCode::Enter => {
+                if !self.input.trim().is_empty() {
+                    self.send_message();
+                }
+            }
+            KeyCode::Backspace => {
+                if self.cursor_pos > 0 {
+                    self.input.remove(self.cursor_pos - 1);
+                    self.cursor_pos -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                if self.cursor_pos < self.input.len() {
+                    self.input.remove(self.cursor_pos);
+                }
+            }
+            KeyCode::Left => {
+                if self.cursor_pos > 0 {
+                    self.cursor_pos -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.cursor_pos < self.input.len() {
+                    self.cursor_pos += 1;
+                }
+            }
+            KeyCode::Char(c) => {
+                self.input.insert(self.cursor_pos, c);
+                self.cursor_pos += 1;
+            }
+            _ => {}
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Message Sending
+    // ═══════════════════════════════════════════════════
+
+    fn send_message(&mut self) {
+        let message = self.input.clone();
+        let recipient_idx = self.selected_contact;
+
+        if message.trim().is_empty() {
+            self.error = Some("Message cannot be empty".to_string());
+            return;
+        }
+
+        let Some(idx) = recipient_idx else {
+            self.error = Some("Select a contact first".to_string());
+            return;
+        };
+
+        if idx >= self.contacts.len() {
+            self.error = Some("Invalid contact selection".to_string());
+            return;
+        }
+
+        let contact = &self.contacts[idx];
+        if contact.peer_id.is_empty() {
+            self.error = Some("No valid peer selected".to_string());
+            return;
+        }
+
+        let recipient = contact.peer_id.clone();
+        let core = self.core.clone();
+        let my_name = self.my_name.clone();
+
+        // Add to local message list immediately (optimistic)
+        self.messages.push(ChatMessage {
+            sender: my_name.clone(),
+            content: message.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            is_mine: true,
+        });
+
+        // Spawn async send
+        tokio::spawn(async move {
+            let msg = Message::new(my_name, recipient.clone(), message.clone());
+            match core.send_direct_message(recipient, &msg).await {
+                Ok(_) => tracing::info!("Message sent via mesh"),
+                Err(e) => tracing::error!("Failed to send message: {}", e),
+            }
+        });
+
+        self.status = Some(format!("Sent to {}", contact.display_name));
+        self.input.clear();
+        self.cursor_pos = 0;
+        self.input_mode = false;
+    }
+
+    // ═══════════════════════════════════════════════════
+    // UI Rendering
+    // ═══════════════════════════════════════════════════
+
+    fn ui(&self, f: &mut Frame) {
+        match self.view {
+            View::Chat => self.render_chat_view(f),
+            View::Contacts => self.render_contacts_view(f),
+            View::Dashboard => self.render_dashboard_view(f),
+        }
+    }
+
+    fn render_chat_view(&self, f: &mut Frame) {
+        let area = f.area();
+
+        // Main layout: status bar | sidebar+content | input | help
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),   // Status bar
+                Constraint::Min(8),      // Main content (sidebar + conversation)
+                Constraint::Length(3),   // Input area
+                Constraint::Length(3),   // Help bar
+            ])
+            .split(area);
+
+        // Status bar
+        self.render_status_bar(f, main[0]);
+
+        // Split main into sidebar + conversation
+        let content = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(25), // Sidebar (contacts)
+                Constraint::Percentage(75), // Conversation
+            ])
+            .split(main[1]);
+
+        // Sidebar
+        self.render_sidebar(f, content[0]);
+
+        // Conversation area
+        self.render_conversation(f, content[1]);
+
+        // Input area
+        self.render_input_area(f, main[2]);
+
+        // Help bar
+        self.render_help_bar(f, main[3]);
+    }
+
+    fn render_status_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let status_text = Line::from(vec![
+            Span::styled(theme::LOGO_SYMBOL, theme::primary_bold()),
+            Span::raw(" "),
+            Span::styled(&self.my_name, theme::primary_bold()),
+            Span::raw("  "),
+            theme::status_dot(self.peer_count > 0),
+            Span::raw(format!(" {} peer", self.peer_count)),
+            if self.peer_count != 1 {
+                Span::raw("s")
+            } else {
+                Span::raw("")
+            },
+            Span::raw("  "),
+            if self.total_unread > 0 {
+                Span::styled(
+                    format!("{} unread", self.total_unread),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("0 unread", theme::muted_style())
+            },
+        ]);
+
+        let status = Paragraph::new(status_text).block(Block::default().borders(Borders::NONE));
+        f.render_widget(status, area);
+    }
+
+    fn render_sidebar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let items: Vec<ListItem> = self
+            .contacts
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let is_selected = self.selected_contact == Some(i);
+                let unread_indicator = if c.unread_count > 0 {
+                    format!(" ({})", c.unread_count)
+                } else {
+                    String::new()
+                };
+
+                let style = if is_selected {
+                    theme::highlight_style()
+                } else {
+                    theme::text_style()
+                };
+
+                let name_line = Line::from(vec![
+                    theme::status_dot(c.online),
+                    Span::raw(" "),
+                    Span::styled(&c.display_name, style),
+                    Span::styled(unread_indicator, theme::warning_style()),
+                ]);
+
+                ListItem::new(name_line)
+            })
+            .collect();
+
+        let contact_list = List::new(items).block(theme::themed_block("Contacts"));
+        f.render_widget(contact_list, area);
+    }
+
+    fn render_conversation(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let contact_name = self
+            .selected_contact
+            .and_then(|i| self.contacts.get(i))
+            .map(|c| c.display_name.as_str())
+            .unwrap_or("Select a contact");
+
+        if self.messages.is_empty() {
+            let welcome = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "No messages yet",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "Select a contact and press 'i' to start chatting.",
+                    theme::muted_style(),
+                )]),
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "Messages are end-to-end encrypted.",
+                    theme::muted_style(),
+                )]),
+            ])
+            .block(theme::themed_block(contact_name));
+            f.render_widget(welcome, area);
+        } else {
+            let msg_lines: Vec<Line> = self
+                .messages
+                .iter()
+                .flat_map(|m| {
+                    let time = format_time(m.timestamp);
+                    let sender_style = if m.is_mine {
+                        theme::sent_style()
+                    } else {
+                        theme::primary_bold()
+                    };
+                    let prefix = if m.is_mine { "→" } else { "←" };
+
+                    vec![
+                        Line::from(vec![
+                            Span::styled(prefix, theme::muted_style()),
+                            Span::raw(" "),
+                            Span::raw(time),
+                            Span::raw(" "),
+                            Span::styled(m.sender.clone(), sender_style),
+                        ]),
+                        Line::from(vec![
+                            Span::raw("   "),
+                            Span::styled(m.content.clone(), theme::text_style()),
+                        ]),
+                        Line::from(""), // spacing between messages
+                    ]
+                })
+                .collect();
+
+            let conversation = Paragraph::new(msg_lines)
+                .block(theme::themed_block(contact_name));
+            f.render_widget(conversation, area);
+        }
+    }
+
+    fn render_input_area(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let input_text = if self.input_mode {
+            // Show cursor
+            let before = &self.input[..self.cursor_pos];
+            let after = &self.input[self.cursor_pos..];
+            format!(" {before}█{after}")
+        } else if self.input.is_empty() {
+            " Press 'i' to type a message...".to_string()
+        } else {
+            format!(" {}", self.input)
+        };
+
+        let border_style = if self.input_mode {
+            theme::primary_bold()
+        } else {
+            Style::default().fg(theme::MUTED)
+        };
+
+        let input_widget = Paragraph::new(input_text)
+            .style(if self.input_mode {
+                theme::text_style()
+            } else {
+                theme::muted_style()
+            })
+            .block(
+                Block::default()
+                    .title(if self.input_mode {
+                        " Message "
+                    } else {
+                        " Type to chat "
+                    })
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(border_style),
+            );
+        f.render_widget(input_widget, area);
+    }
+
+    fn render_help_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let hints = if self.input_mode {
+            theme::help_bar(&[
+                ("Enter", "Send"),
+                ("Esc", "Cancel"),
+                ("←→", "Move cursor"),
+            ])
+        } else {
+            theme::help_bar(&[
+                ("↑↓", "Navigate"),
+                ("Enter", "Open chat"),
+                ("i", "Type message"),
+                ("Tab", "Switch view"),
+                ("1/2/3", "Chat/Contacts/Dashboard"),
+                ("q", "Quit"),
+            ])
+        };
+        f.render_widget(hints, area);
+    }
+
+    fn render_contacts_view(&self, f: &mut Frame) {
+        let area = f.area();
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(area);
+
+        self.render_status_bar(f, main[0]);
+
+        // Contact list with details
+        let contact_items: Vec<ListItem> = self
+            .contacts
+            .iter()
+            .map(|c| {
+                let status_text = if c.online {
+                    "online".to_string()
+                } else {
+                    format!("last seen {} ago", format_duration(c.last_seen_secs))
+                };
+                let name_line = Line::from(vec![
+                    theme::status_dot(c.online),
+                    Span::raw(" "),
+                    Span::styled(&c.display_name, theme::text_style()),
+                    Span::raw("  "),
+                    Span::styled(status_text, theme::muted_style()),
+                ]);
+                let trust_line = theme::trust_bar_line(c.trust_score, &c.display_name);
+
+                ListItem::new(vec![name_line, trust_line])
+            })
+            .collect();
+
+        let list = List::new(contact_items).block(theme::themed_block("All Contacts"));
+        f.render_widget(list, main[1]);
+
+        let help = theme::help_bar(&[
+            ("↑↓", "Navigate"),
+            ("Enter", "Message"),
+            ("Tab", "Switch view"),
+            ("q", "Quit"),
+        ]);
+        f.render_widget(help, main[2]);
+    }
+
+    fn render_dashboard_view(&self, f: &mut Frame) {
+        let area = f.area();
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(area);
+
+        self.render_status_bar(f, main[0]);
+
+        // Dashboard content
+        let content = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(5), // Node info
+                Constraint::Length(5), // Network
+                Constraint::Min(1),    // Spacer
+            ])
+            .split(main[1]);
+
+        let node_info = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("Name:      ", theme::muted_style()),
+                Span::styled(&self.my_name, theme::primary_bold()),
+            ]),
+            Line::from(vec![
+                Span::styled("Status:    ", theme::muted_style()),
+                Span::styled("🟢 Running", theme::online_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("Encryption:", theme::muted_style()),
+                Span::styled(" XChaCha20-Poly1305", theme::text_style()),
+            ]),
+        ])
+        .block(theme::themed_block("Your Node"));
+        f.render_widget(node_info, content[0]);
+
+        let network = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("Mode:      ", theme::muted_style()),
+                Span::styled("Mesh P2P", theme::text_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("Peers:     ", theme::muted_style()),
+                Span::styled(
+                    format!("{} connected", self.peer_count),
+                    theme::online_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("AI Layer:  ", theme::muted_style()),
+                Span::styled("L1 Active (91μs)", theme::text_style()),
+            ]),
+        ])
+        .block(theme::themed_block("Network"));
+        f.render_widget(network, content[1]);
+
+        let help = theme::help_bar(&[
+            ("Tab", "Switch view"),
+            ("1/2/3", "Chat/Contacts/Dashboard"),
+            ("q", "Quit"),
+        ]);
+        f.render_widget(help, main[2]);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════
+
+fn format_time(timestamp: u64) -> String {
+    // Simple HH:MM format
+    let secs = timestamp % 86400;
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    format!("{:02}:{:02}", hours, mins)
+}
+
+fn format_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86400)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Public Entry Point
+// ═══════════════════════════════════════════════════════════
+
+/// Run the TUI with an existing Core
+pub async fn run_tui(core: Arc<Core>) -> io::Result<()> {
+    let mut app = TuiApp::new(core);
+    app.run().await
+}
