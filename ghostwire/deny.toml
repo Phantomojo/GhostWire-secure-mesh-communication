@@ -1,5 +1,20 @@
 # cargo-deny configuration for GhostWire
-# https://github.com/EmbarkStudios/cargo-deny
+# Enforces license, security, and dependency policies
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "x86_64-unknown-linux-musl" },
+]
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+    "RUSTSEC-2026-0002",  # lru Stacked Borrows — ratatui dependency, not exploitable in our usage
+]
 
 [licenses]
 allow = [
@@ -10,22 +25,45 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
-    "OpenSSL",
     "Unicode-DFS-2016",
+    "Zlib",
+    "OpenSSL",
     "MPL-2.0",
     "CC0-1.0",
-    "Zlib",
-    "BSL-1.0",
-    "Unicode-DFS-2016",
-    "EUPL-1.2",
+    "0BSD",
     "AGPL-3.0",
+    "AGPL-3.0-or-later",
     "GPL-3.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    # ring uses OpenSSL license but is actually BoringSSL-derived
+    { allow = ["OpenSSL"], name = "ring" },
+    # webpki-roots uses MPL-2.0
+    { allow = ["MPL-2.0"], name = "webpki-roots" },
+]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+deny = [
+    # Known problematic crates
+    { name = "openssl", reason = "Use rustls instead" },
+    { name = "native-tls", reason = "Use rustls instead" },
 ]
 
 [sources]
-unknown-registry = "warn"
+unknown-registry = "deny"
 unknown-git = "warn"
-allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-
-[sources.allow-org]
-github = ["Phantomojo"]
+allow-git = [
+    "https://github.com/libp2p/rust-libp2p",
+]
