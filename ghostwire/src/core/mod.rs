@@ -381,6 +381,7 @@ pub struct Core {
     pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
     pub anomaly_detector: Option<Arc<ai::IsolationForestModel>>,
     pub onnx_router: Option<Arc<ai::RoutingClassifier>>,
+    pub gnn_router: Option<Arc<ai::GnnRouter>>,
     pub feature_extractor: Arc<RwLock<ai::FeatureExtractor>>,
     // Trust/reputation uses the existing TrustStore (reputation.rs) — not a duplicate
 }
@@ -676,9 +677,175 @@ impl Core {
                     None
                 }
             },
+            // Load GNN routing model (Layer 3 — Graph Attention Network)
+            gnn_router: match ai::GnnRouter::new("models/ghostwire_gnn_routing.onnx") {
+                Ok(router) => {
+                    tracing::info!("✅ GNN routing system loaded (GAT, Guifi.net trained)");
+                    Some(Arc::new(router))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "⚠️ GNN routing system not loaded (will use PRoPHET fallback): {}",
+                        e
+                    );
+                    None
+                }
+            },
             // Feature extractor for L1 anomaly detection
             feature_extractor: Arc::new(RwLock::new(ai::FeatureExtractor::new())),
         })
+    }
+
+    /// Process a DTN encounter with GNN-enhanced routing
+    ///
+    /// When GNN router is available, builds mesh topology from current peer state
+    /// and uses GNN predictions to optimize bundle forwarding.
+    /// Falls back to standard PRoPHET when GNN is unavailable or inference fails.
+    pub async fn handle_dtn_encounter(
+        &self,
+        their_node_id: &[u8; 32],
+        their_bloom: &dtn::epidemic::SyncBloom,
+        their_delivery_scores: &[([u8; 32], f32)],
+    ) -> Vec<dtn::epidemic::DtnBundle> {
+        // If GNN router is available, try GNN-enhanced forwarding
+        if let Some(gnn) = &self.gnn_router {
+            // Build topology from current mesh peer state
+            let peers = self.collect_mesh_peer_features().await;
+
+            if !peers.is_empty() {
+                let routing_table = self.collect_routing_table().await;
+                let link_metrics = self.collect_link_metrics().await;
+
+                let topology = ai::build_topology_from_mesh(&peers, &routing_table, &link_metrics);
+
+                // Register all peers in the GNN mapper
+                for peer in peers.keys() {
+                    gnn.register_peer(peer.clone()).await;
+                }
+
+                // Build GNN decisions for each bundle destination
+                let mut gnn_decisions = std::collections::HashMap::new();
+                let bundles = self.dtn_store.bundles.read().await;
+                let our_id_str = self.identity.read().await.id.clone();
+                let mut our_id_bytes = [0u8; 32];
+                let bytes = our_id_str.as_bytes();
+                our_id_bytes[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
+
+                let destinations: Vec<[u8; 32]> = bundles.values()
+                    .filter(|b| !b.is_expired() && b.destination != our_id_bytes)
+                    .map(|b| b.destination)
+                    .collect();
+                drop(bundles);
+
+                // For each destination, get GNN next-hop prediction
+                for dest in &destinations {
+                    // Find src node (us) in topology
+                    let mapper = gnn.mapper.read().await;
+                    let our_peer = mapper.peers().iter().find(|p| {
+                        let mut buf = [0u8; 32];
+                        let id_bytes = p.to_bytes();
+                        let len = id_bytes.len().min(32);
+                        buf[..len].copy_from_slice(&id_bytes[..len]);
+                        buf == our_id_bytes
+                    }).cloned();
+
+                    if let Some(our_peer) = our_peer {
+                        if let Some(&src_idx) = mapper.peer_to_index.get(&our_peer) {
+                            // Find dest in mapper
+                            let dest_peer = mapper.peers().iter().find(|p| {
+                                let mut buf = [0u8; 32];
+                                let id_bytes = p.to_bytes();
+                                let len = id_bytes.len().min(32);
+                                buf[..len].copy_from_slice(&id_bytes[..len]);
+                                &buf == dest
+                            }).cloned();
+
+                            if let Some(dest_peer) = dest_peer {
+                                if let Some(&dst_idx) = mapper.peer_to_index.get(&dest_peer) {
+                                    // Get candidates (our neighbors in topology)
+                                    if let Some(neighbors) = topology.adjacency.get(&src_idx) {
+                                        if !neighbors.is_empty() {
+                                            let mut peer_features = std::collections::HashMap::new();
+                                            for &cand in neighbors {
+                                                peer_features.insert(cand, ai::RoutingFeatures::default());
+                                            }
+
+                                            match gnn.select_next_hop(
+                                                &topology, src_idx, dst_idx, neighbors, &peer_features
+                                            ).await {
+                                                Ok(decision) => {
+                                                    // Check if encountered peer is the recommended next-hop
+                                                    let their_peer = mapper.peers().iter().find(|p| {
+                                                        let mut buf = [0u8; 32];
+                                                        let id_bytes = p.to_bytes();
+                                                        let len = id_bytes.len().min(32);
+                                                        buf[..len].copy_from_slice(&id_bytes[..len]);
+                                                        &buf == their_node_id
+                                                    }).cloned();
+
+                                                    if let Some(their_peer) = their_peer {
+                                                        let their_idx = mapper.get_index(&their_peer);
+                                                        let should_forward = their_idx.map(|idx| {
+                                                            decision.scored_candidates.iter()
+                                                                .any(|(p, _)| mapper.get_index(p) == Some(idx))
+                                                        }).unwrap_or(false);
+                                                        gnn_decisions.insert(*dest, (should_forward, decision.confidence));
+                                                    }
+                                                }
+                                                Err(_) => {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Use GNN-enhanced encounter if we got decisions
+                if !gnn_decisions.is_empty() {
+                    tracing::debug!("GNN-enhanced DTN encounter: {} decisions", gnn_decisions.len());
+                    return self.dtn_store.on_encounter_with_gnn(
+                        their_node_id, their_bloom, their_delivery_scores, &gnn_decisions
+                    ).await;
+                }
+            }
+        }
+
+        // Fallback to standard PRoPHET encounter
+        tracing::debug!("Standard PRoPHET DTN encounter (GNN unavailable or no decisions)");
+        self.dtn_store.on_encounter(
+            their_node_id, their_bloom, their_delivery_scores
+        ).await
+    }
+
+    /// Collect peer features from current mesh state
+    async fn collect_mesh_peer_features(&self) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
+        let mut features = std::collections::HashMap::new();
+        // In production, collect from mesh manager. For now, return empty.
+        // This would query mesh_manager for connected peers and their link quality.
+        features
+    }
+
+    /// Collect routing table from mesh state
+    async fn collect_routing_table(&self) -> std::collections::HashMap<libp2p::PeerId, std::collections::HashMap<libp2p::PeerId, libp2p::PeerId>> {
+        std::collections::HashMap::new()
+    }
+
+    /// Collect link metrics from mesh state
+    async fn collect_link_metrics(&self) -> std::collections::HashMap<(libp2p::PeerId, libp2p::PeerId), f32> {
+        std::collections::HashMap::new()
+    }
+
+    /// Get our node ID as bytes (for DTN operations)
+    pub fn our_node_id(&self) -> [u8; 32] {
+        // This matches how dtn_store was initialized in new()
+        let id_str = self.identity.blocking_read().id.clone();
+        let mut arr = [0u8; 32];
+        let bytes = id_str.as_bytes();
+        let len = bytes.len().min(32);
+        arr[..len].copy_from_slice(&bytes[..len]);
+        arr
     }
 
     /// Starts the autonomic nervous system heartbeat

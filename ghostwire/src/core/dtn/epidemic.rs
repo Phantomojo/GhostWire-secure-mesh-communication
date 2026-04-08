@@ -139,7 +139,7 @@ impl Default for DeliveryTable { fn default() -> Self { Self::new() } }
 /// The GhostDTN store: bundles + delivery table
 pub struct DtnStore {
     /// Stored bundles keyed by CID
-    bundles: Arc<RwLock<HashMap<[u8; 32], DtnBundle>>>,
+    pub bundles: Arc<RwLock<HashMap<[u8; 32], DtnBundle>>>,
     /// PRoPHET delivery table
     delivery_table: Arc<RwLock<DeliveryTable>>,
     /// Our own node ID
@@ -266,6 +266,76 @@ impl DtnStore {
 
             // Spray phase: share copies if they have better delivery probability
             if bundle.copies_remaining > 1 {
+                let our_prob = table.get(&bundle.destination);
+                let their_prob = their_delivery_scores.iter()
+                    .find(|(d, _)| d == &bundle.destination)
+                    .map(|(_, p)| *p)
+                    .unwrap_or(0.0);
+
+                if their_prob > our_prob && !their_bloom.contains(&bundle.cid) {
+                    to_send.push(bundle.clone());
+                }
+            }
+        }
+
+        to_send
+    }
+
+    /// Process an encounter with GNN-enhanced routing
+    ///
+    /// Same as `on_encounter` but accepts pre-computed GNN routing decisions
+    /// for each bundle destination. When a GNN decision is available and
+    /// agrees that the encountered peer is a good next-hop, the bundle is forwarded.
+    ///
+    /// `gnn_decisions`: map from destination node_id → (should_forward, confidence)
+    pub async fn on_encounter_with_gnn(
+        &self,
+        their_node_id: &[u8; 32],
+        their_bloom: &SyncBloom,
+        their_delivery_scores: &[([u8; 32], f32)],
+        gnn_decisions: &HashMap<[u8; 32], (bool, f32)>,
+    ) -> Vec<DtnBundle> {
+        // Update delivery table (same as regular on_encounter)
+        {
+            let mut table = self.delivery_table.write().await;
+            table.on_encounter(their_node_id);
+            table.decay_all();
+            for (dest, score) in their_delivery_scores {
+                table.apply_transitivity(dest, *score);
+            }
+        }
+
+        let table = self.delivery_table.read().await;
+        let bundles = self.bundles.read().await;
+
+        let mut to_send: Vec<DtnBundle> = Vec::new();
+
+        for bundle in bundles.values() {
+            if bundle.is_expired() { continue; }
+
+            // If we ARE the destination — don't forward, deliver locally
+            if bundle.destination == self.our_node_id { continue; }
+
+            // If they ARE the destination — always send (deliver!)
+            if &bundle.destination == their_node_id {
+                if !their_bloom.contains(&bundle.cid) {
+                    to_send.push(bundle.clone());
+                }
+                continue;
+            }
+
+            // GNN-enhanced forwarding decision
+            if bundle.copies_remaining > 1 {
+                // Check if GNN has a decision for this destination
+                if let Some(&(should_forward, confidence)) = gnn_decisions.get(&bundle.destination) {
+                    // GNN says forward AND confidence is reasonable
+                    if should_forward && confidence >= 0.3 && !their_bloom.contains(&bundle.cid) {
+                        to_send.push(bundle.clone());
+                        continue;
+                    }
+                }
+
+                // Fallback to PRoPHET if no GNN decision or GNN said no
                 let our_prob = table.get(&bundle.destination);
                 let their_prob = their_delivery_scores.iter()
                     .find(|(d, _)| d == &bundle.destination)
