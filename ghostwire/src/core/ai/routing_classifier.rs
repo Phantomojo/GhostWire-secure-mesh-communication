@@ -10,7 +10,7 @@ use libp2p::PeerId;
 use anyhow::{Result, Context};
 
 /// Features for routing decision
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RoutingFeatures {
     pub rssi: i16,              // Signal strength (-100 to 0 dBm)
     pub latency_ms: u64,        // Round-trip latency
