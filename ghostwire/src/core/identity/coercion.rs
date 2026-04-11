@@ -95,12 +95,11 @@ impl CoercionConfig {
 
     /// Generate a fresh coercion config for a new identity
     pub fn generate(real_password: &str, decoy_display_name: &str) -> Result<Self> {
-        let mut rng = rand::thread_rng();
-
+        // SECURITY FIX: use getrandom (CSPRNG) instead of rand::thread_rng()
         let mut real_salt = [0u8; 32];
         let mut duress_salt = [0u8; 32];
-        rng.fill_bytes(&mut real_salt);
-        rng.fill_bytes(&mut duress_salt);
+        getrandom::getrandom(&mut real_salt).map_err(|e| anyhow!("RNG failed: {}", e))?;
+        getrandom::getrandom(&mut duress_salt).map_err(|e| anyhow!("RNG failed: {}", e))?;
 
         let real_key = Self::derive_key(real_password, &hex::encode(real_salt))?;
         // Duress password starts empty — user sets it later via set_duress_password()
@@ -129,11 +128,30 @@ impl CoercionConfig {
 
     /// Attempt to unlock with the given password.
     /// Returns which namespace it unlocked, or Err if wrong password.
+    ///
+    /// SECURITY FIX: Always runs BOTH password derivations regardless of
+    /// which matches first. This prevents timing side-channel attacks where
+    /// an attacker can distinguish "wrong password" (time ≈ 2× Argon2) from
+    /// "duress password" (time ≈ 1× Argon2).
     pub fn unlock(&self, password: &str) -> Result<UnlockResult> {
-        // Try real password first
+        // SECURITY FIX: Always derive BOTH keys to prevent timing oracle
         let real_key = Self::derive_key(password, &self.real_salt_hex)?;
         let real_verifier = Self::compute_verifier(&real_key);
-        if real_verifier == self.real_verifier_hex {
+
+        // Always derive duress key even if real matches (constant-time behavior)
+        let duress_key = if self.duress_enabled {
+            Some(Self::derive_key(password, &self.duress_salt_hex)?)
+        } else {
+            None
+        };
+
+        let real_matches = real_verifier == self.real_verifier_hex;
+        let duress_matches = duress_key.as_ref().map_or(false, |dk| {
+            Self::compute_verifier(dk) == self.duress_verifier_hex
+        });
+
+        // Check real first (legitimate unlock takes priority)
+        if real_matches {
             return Ok(UnlockResult {
                 kind: ProfileKind::Real,
                 namespace_key: real_key,
@@ -141,21 +159,17 @@ impl CoercionConfig {
             });
         }
 
-        // Try duress password
-        if self.duress_enabled {
-            let duress_key = Self::derive_key(password, &self.duress_salt_hex)?;
-            let duress_verifier = Self::compute_verifier(&duress_key);
-            if duress_verifier == self.duress_verifier_hex {
-                tracing::warn!(
-                    "DURESS PASSWORD USED — activating decoy profile '{}'",
-                    self.decoy_display_name
-                );
-                return Ok(UnlockResult {
-                    kind: ProfileKind::Decoy,
-                    namespace_key: duress_key,
-                    namespace: "decoy".to_string(),
-                });
-            }
+        // Then duress
+        if duress_matches {
+            tracing::warn!(
+                "DURESS PASSWORD USED — activating decoy profile '{}'",
+                self.decoy_display_name
+            );
+            return Ok(UnlockResult {
+                kind: ProfileKind::Decoy,
+                namespace_key: duress_key.unwrap(),
+                namespace: "decoy".to_string(),
+            });
         }
 
         anyhow::bail!("Incorrect password")
