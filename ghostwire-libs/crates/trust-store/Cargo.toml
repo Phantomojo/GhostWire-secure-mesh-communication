@@ -1,0 +1,30 @@
+[package]
+name = "trust-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Web of Trust with TOFU key verification and social graph attestation for P2P networks"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["trust", "web-of-trust", "tofu", "p2p", "identity"]
+categories = ["cryptography", "network-programming"]
+
+[dependencies]
+serde = { workspace = true }
+tokio = { version = "1.0", features = ["sync", "macros", "rt"] }
+ring = "0.17"
+hex = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = ["std"]
+std = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
