@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../docs/assets/ghostwire-logo.png" alt="GhostWire Logo" width="150" />
+<img src="../docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="150" />
 
 # GhostWire
 
