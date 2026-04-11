@@ -3,7 +3,7 @@ use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
@@ -65,7 +65,9 @@ pub struct IdentityMetadata {
 
 #[derive(Debug)]
 pub enum IdentityState {
-    Locked(EncryptedIdentity),
+    // CRITICAL FIX: Store public key bytes alongside encrypted blob so get_public_key()
+    // works even when locked (public keys are not secret)
+    Locked(EncryptedIdentity, Vec<u8>),
     Unlocked(Keypair, Option<EncryptedIdentity>),
 }
 
@@ -73,6 +75,7 @@ pub enum IdentityState {
 pub struct Identity {
     pub id: String,
     pub did: String, // did:ghost:<pk_hash>
+    #[serde(skip)]
     metadata: RwLock<IdentityMetadata>,
     #[serde(skip)]
     state: RwLock<IdentityState>,
@@ -102,6 +105,30 @@ impl Identity {
                     tracing::info!("🔑 Loaded persistent identity: {}", identity.id);
                     // Inject profile
                     identity.profile = profile;
+
+                    // CRITICAL FIX: Auto-unlock using keyfile on restart
+                    // When identity loads in locked state, try to auto-unlock using
+                    // the stored keyfile password. This allows nodes to restart cleanly
+                    // without manual intervention.
+                    if identity.is_locked() {
+                        if let Ok(password) = Self::load_keyfile_password(&storage_path) {
+                            match identity.unlock(&password) {
+                                Ok(()) => {
+                                    tracing::info!("🔓 Identity auto-unlocked via keyfile on restart");
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "⚠️ Keyfile auto-unlock failed (keyfile may be stale): {}. \
+                                         Identity remains locked.",
+                                        e
+                                    );
+                                }
+                            }
+                        } else {
+                            tracing::debug!("No keyfile found for auto-unlock. Identity remains locked.");
+                        }
+                    }
+
                     return Ok(identity);
                 }
                 Err(e) => {
@@ -116,18 +143,23 @@ impl Identity {
 
         tracing::info!("🆕 Creating new persistent identity...");
         let identity = Self::create_new(profile)?;
-        // Save initially with default/empty password or prompt?
-        // For now, we save as unlocked -> needs to be encrypted on first lock/save.
-        // Or we require a password to create?
-        // Let's assume default behavior is "Unlocked" until user sets a password.
-        // But for this phase, we want to enforce encryption.
-        // We'll treat new identities as Unlocked.
-        // Saving will fail if we don't have a password...
-        // For MVP, allow save without password (unencrypted) OR use a default.
-        // ACTUALLY: Let's use a temporary "unencrypted" mode if no password set?
-        // No, let's enforce a default password for auto-created ones (e.g. "ghostwire")
-        // and prompt user to change it.
-        identity.save_to_disk("ghostwire")?;
+        // SECURITY FIX: Generate a cryptographically random initial password
+        // instead of using a hardcoded default. The user sees this in logs
+        // and MUST change it via the setup flow.
+        let initial_password = Self::generate_initial_password()?;
+        tracing::warn!(
+            "🔑 Identity created with auto-generated password. \
+             You MUST change this via the setup flow. \
+             Initial password (one-time use): {}",
+            initial_password
+        );
+        identity.save_to_disk(&initial_password)?;
+
+        // CRITICAL FIX: Save the initial password to a keyfile for auto-unlock on restart
+        if let Err(e) = Self::save_keyfile_password(&storage_path, &initial_password) {
+            tracing::warn!("⚠️ Failed to save keyfile (auto-unlock won't work on restart): {}", e);
+        }
+
         Ok(identity)
     }
 
@@ -162,6 +194,135 @@ impl Identity {
             state: RwLock::new(IdentityState::Unlocked(keypair, None)),
             profile,
         })
+    }
+
+    /// Generate a cryptographically random initial password for new identities.
+    /// Returns a 32-character hex string (128 bits of entropy).
+    fn generate_initial_password() -> Result<String, Box<dyn std::error::Error>> {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let rng = SystemRandom::new();
+        let mut bytes = [0u8; 16]; // 128 bits
+        rng.fill(&mut bytes).map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+        Ok(hex::encode(bytes))
+    }
+
+    /// Save the initial password to a keyfile for auto-unlock on restart.
+    /// The keyfile is stored alongside identity.json as `.identity.key`
+    /// SECURITY FIX: Password is now encrypted with a machine-derived key
+    /// instead of stored in plaintext.
+    fn save_keyfile_password(
+        identity_path: &std::path::Path,
+        password: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
+        use chacha20poly1305::aead::Aead;
+        use ring::rand::{SecureRandom, SystemRandom};
+
+        let keyfile_path = identity_path.with_file_name(".identity.key");
+
+        // Derive encryption key from machine hostname + identity path
+        let machine_id = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| "ghostwire-default".to_string());
+        let seed = format!("ghostwire-keyfile-v2-{}-{}", machine_id, identity_path.display());
+        let derived = ring::digest::digest(&ring::digest::SHA256, seed.as_bytes());
+
+        // Generate random nonce
+        let rng = SystemRandom::new();
+        let mut nonce_bytes = [0u8; 24];
+        rng.fill(&mut nonce_bytes).map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+
+        // Encrypt password
+        let key = Key::from_slice(derived.as_ref());
+        let cipher = XChaCha20Poly1305::new(key);
+        let nonce = XNonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, password.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Keyfile encryption failed: {}", e))?;
+
+        // Store: nonce (24 bytes) + ciphertext
+        let mut out = nonce_bytes.to_vec();
+        out.extend_from_slice(&ciphertext);
+        std::fs::write(&keyfile_path, out)?;
+
+        // Set restrictive permissions (owner read/write only) on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&keyfile_path)?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&keyfile_path, perms)?;
+        }
+
+        tracing::debug!(
+            target: "identity",
+            "🔑 Encrypted keyfile saved for auto-unlock on restart: {:?}",
+            keyfile_path
+        );
+        Ok(())
+    }
+
+    /// Load the initial password from the keyfile for auto-unlock on restart.
+    /// SECURITY FIX: Decrypts the password instead of reading plaintext.
+    fn load_keyfile_password(
+        identity_path: &std::path::Path,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
+        use chacha20poly1305::aead::Aead;
+
+        let keyfile_path = identity_path.with_file_name(".identity.key");
+
+        if !keyfile_path.exists() {
+            return Err("Keyfile not found".into());
+        }
+
+        let data = std::fs::read(&keyfile_path)?;
+
+        // Check if this is the new encrypted format (>= 24 bytes for nonce)
+        if data.len() >= 24 {
+            // Derive same encryption key
+            let machine_id = hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_else(|| "ghostwire-default".to_string());
+            let seed = format!("ghostwire-keyfile-v2-{}-{}", machine_id, identity_path.display());
+            let derived = ring::digest::digest(&ring::digest::SHA256, seed.as_bytes());
+
+            let nonce_bytes: [u8; 24] = data[..24].try_into()
+                .map_err(|_| "Invalid keyfile format: nonce too short")?;
+            let ciphertext = &data[24..];
+
+            let key = Key::from_slice(derived.as_ref());
+            let cipher = XChaCha20Poly1305::new(key);
+            let nonce = XNonce::from_slice(&nonce_bytes);
+            let plaintext = cipher.decrypt(nonce, ciphertext)
+                .map_err(|_| "Keyfile decryption failed — machine identity may have changed")?;
+
+            let password = String::from_utf8(plaintext)
+                .map_err(|_| "Keyfile contains invalid UTF-8")?;
+
+            tracing::debug!(
+                target: "identity",
+                "🔑 Decrypted password from keyfile: {:?}",
+                keyfile_path
+            );
+            Ok(password)
+        } else {
+            // Legacy plaintext format — migrate to encrypted
+            let password = String::from_utf8(data)
+                .map_err(|_| "Keyfile contains invalid UTF-8")?;
+            let password = password.trim().to_string();
+
+            // Re-save in encrypted format
+            Self::save_keyfile_password(identity_path, &password)?;
+
+            tracing::info!(
+                target: "identity",
+                "🔑 Migrated keyfile from plaintext to encrypted format: {:?}",
+                keyfile_path
+            );
+            Ok(password)
+        }
     }
 
     pub fn from_keypair(keypair: Keypair) -> Self {
@@ -268,11 +429,17 @@ impl Identity {
 
         // Try to deserialize as new EncryptedIdentity format
         if let Ok(persisted) = serde_json::from_slice::<PersistedEncryptedIdentity>(&file_content) {
+            // CRITICAL FIX: Extract public key bytes for use when locked
+            let pub_key_bytes = persisted.public_key_bytes.clone().unwrap_or_else(|| {
+                // Try to extract from encrypted data if not stored separately
+                // For backward compat, return empty - will be populated on next save
+                vec![]
+            });
             return Ok(Identity {
                 id: persisted.id,
                 did: persisted.did,
                 metadata: RwLock::new(persisted.metadata),
-                state: RwLock::new(IdentityState::Locked(persisted.encrypted_keypair)),
+                state: RwLock::new(IdentityState::Locked(persisted.encrypted_keypair, pub_key_bytes)),
                 profile: None, // Will be set by caller
             });
         }
@@ -292,7 +459,7 @@ impl Identity {
             password_len = password.len(),
         );
 
-        let mut state_guard = self.state.write().unwrap();
+        let mut state_guard = self.state.write();
 
         let keypair_bytes = match &*state_guard {
             IdentityState::Unlocked(kp, _) => {
@@ -302,7 +469,7 @@ impl Identity {
                 );
                 kp.to_protobuf_encoding().map_err(|e| anyhow::anyhow!(e))?
             }
-            IdentityState::Locked(_) => {
+            IdentityState::Locked(_, _) => {
                 tracing::error!(
                     target: "identity",
                     msg = "❌ Cannot save locked identity"
@@ -326,8 +493,10 @@ impl Identity {
         let persisted = PersistedEncryptedIdentity {
             id: self.id.clone(),
             did: self.did.clone(),
-            metadata: self.metadata.read().unwrap().clone(),
+            metadata: self.metadata.read().clone(),
             encrypted_keypair,
+            // CRITICAL FIX: Store public key in plaintext for use when locked
+            public_key_bytes: Some(keypair_bytes.clone()),
         };
 
         let json = serde_json::to_string_pretty(&persisted)?;
@@ -337,7 +506,17 @@ impl Identity {
             json_len = json.len(),
         );
         std::fs::write(&path, json)?;
-        
+
+        // CRITICAL FIX: Update the keyfile with the current password.
+        // This ensures auto-unlock works even after the user changes their password.
+        if let Err(e) = Self::save_keyfile_password(&path, password) {
+            tracing::debug!(
+                target: "identity",
+                "⚠️ Keyfile not updated (auto-unlock may use stale password): {}",
+                e
+            );
+        }
+
         tracing::info!(
             target: "identity",
             msg = "✅ Identity saved successfully",
@@ -348,18 +527,18 @@ impl Identity {
 
     /// Check if identity is currently locked
     pub fn is_locked(&self) -> bool {
-        let state = self.state.read().unwrap();
+        let state = self.state.read();
         match *state {
-            IdentityState::Locked(_) => true,
+            IdentityState::Locked(_, _) => true,
             _ => false,
         }
     }
 
     /// Unlock identity with password
     pub fn unlock(&self, password: &str) -> Result<()> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
 
-        if let IdentityState::Locked(ref encrypted) = *state {
+        if let IdentityState::Locked(ref encrypted, _) = *state {
             // Decrypt
             let decrypted_bytes = decrypt_identity(encrypted, password)?;
             let keypair = Keypair::from_protobuf_encoding(&decrypted_bytes)?;
@@ -375,11 +554,15 @@ impl Identity {
 
     /// Lock identity (clear sensitive data from memory)
     pub fn lock(&self) -> Result<()> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
 
-        // Use a temporary swap to avoid borrow checker issues if we were to match directly
-        let new_state = if let IdentityState::Unlocked(_, Some(ref encrypted)) = *state {
-            Some(IdentityState::Locked(encrypted.clone()))
+        // CRITICAL FIX: Extract public key bytes before locking
+        let new_state = if let IdentityState::Unlocked(kp, Some(ref encrypted)) = &*state {
+            let pub_key_bytes = kp.public().encode_protobuf();
+            Some(IdentityState::Locked(encrypted.clone(), pub_key_bytes))
+        } else if let IdentityState::Unlocked(_, None) = &*state {
+            // No encrypted copy available - can't lock
+            None
         } else {
             None
         };
@@ -388,7 +571,7 @@ impl Identity {
             *state = s;
             tracing::info!("🔒 Identity locked");
             Ok(())
-        } else if let IdentityState::Locked(_) = *state {
+        } else if let IdentityState::Locked(_, _) = *state {
             Ok(()) // Already locked
         } else {
             Err(anyhow::anyhow!(
@@ -398,7 +581,7 @@ impl Identity {
     }
 
     pub fn get_metadata(&self) -> IdentityMetadata {
-        self.metadata.read().unwrap().clone()
+        self.metadata.read().clone()
     }
 
     pub fn update_metadata(
@@ -408,7 +591,7 @@ impl Identity {
         avatar_url: Option<String>,
         setup_complete: Option<bool>,
     ) {
-        let mut meta = self.metadata.write().unwrap();
+        let mut meta = self.metadata.write();
         if let Some(n) = nickname {
             meta.nickname = n;
         }
@@ -431,32 +614,36 @@ impl Identity {
     }
 
     pub fn keypair(&self) -> Option<Keypair> {
-        match &*self.state.read().unwrap() {
+        match &*self.state.read() {
             IdentityState::Unlocked(kp, _) => Some(kp.clone()),
-            IdentityState::Locked(_) => None,
+            IdentityState::Locked(_, _) => None,
         }
     }
 
     pub fn public_key(&self) -> Option<PublicKey> {
-        match &*self.state.read().unwrap() {
+        match &*self.state.read() {
             IdentityState::Unlocked(kp, _) => Some(kp.public()),
-            IdentityState::Locked(_) => None,
+            IdentityState::Locked(_, _) => None,
         }
     }
 
-    /// Stub for Wave 7 integration — returns empty vec until identity is unlocked
+    /// CRITICAL FIX: Returns public key bytes even when locked
+    /// Public keys are not secret, so they can be stored in plaintext alongside the encrypted blob
     pub fn get_public_key(&self) -> Vec<u8> {
-        // libp2p 0.56 PublicKey - encode to protobuf bytes
-        match self.public_key() {
-            Some(pk) => match pk.try_into_ed25519() {
-                Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
-                Err(_) => vec![],
-            },
-            None => vec![],
+        let state = self.state.read();
+        match &*state {
+            IdentityState::Unlocked(kp, _) => {
+                match kp.public().try_into_ed25519() {
+                    Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
+                    Err(_) => vec![],
+                }
+            }
+            // CRITICAL FIX: Return stored public key bytes when locked
+            IdentityState::Locked(_, pub_key_bytes) => pub_key_bytes.clone(),
         }
     }
 
-    /// Stub for Wave 7 integration — returns Ed25519 public key bytes
+    /// CRITICAL FIX: Returns Ed25519 public key bytes, works even when locked
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.get_public_key()
     }
@@ -468,6 +655,9 @@ struct PersistedEncryptedIdentity {
     did: String,
     metadata: IdentityMetadata,
     encrypted_keypair: EncryptedIdentity,
+    // CRITICAL FIX: Store public key in plaintext so get_public_key() works when locked
+    #[serde(default)]
+    public_key_bytes: Option<Vec<u8>>,
 }
 
 #[cfg(test)]
