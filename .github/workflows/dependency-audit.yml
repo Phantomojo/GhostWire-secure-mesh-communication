@@ -1,5 +1,6 @@
 name: Dependency Audit
 
+permissions: {}
 on:
   push:
     branches: ["main"]
@@ -14,16 +15,17 @@ on:
     - cron: "0 6 * * 1"  # Weekly Monday 06:00 UTC
   workflow_dispatch:
 
+permissions: {}
 jobs:
   cargo-audit:
     name: 🔒 Rust Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@stable # pinned
       - name: Cache cargo-audit
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Run audit
@@ -34,9 +36,9 @@ jobs:
     name: 📋 Rust License & Dependency Policy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Run cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@ac5da7b151d5b8ed3d422ae8c357d1ff62ff9cb5 # v2
         with:
           manifest-path: ghostwire/Cargo.toml
           command: check licenses,sources
@@ -45,9 +47,9 @@ jobs:
     name: 🐍 Python Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -55,4 +57,3 @@ jobs:
         run: pip install pip-audit
       - name: Audit requirements
         run: pip-audit -r requirements-team.txt
-        continue-on-error: true
