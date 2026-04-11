@@ -2,48 +2,13 @@
 # Docs: https://release-plz.dev/docs/reference/config
 
 [workspace]
-# Path to the workspace Cargo.toml
-manifest_path = "ghostwire-libs/Cargo.toml"
+# Update dependencies before releasing
+dependencies_update = false
 
-# Git configuration
+# Git release settings
+git_release_enable = true
+git_release_draft = false
 publish_allow_dirty = true
 
 # Changelog configuration
 changelog_config = "ghostwire-libs/cliff.toml"
-
-# Package-specific overrides
-[[package]]
-name = "sphinx-rs"
-publish = true
-changelog_update = true
-git_release_enable = true
-git_release_name = "sphinx-rs-v{{ version }}"
-git_release_draft = false
-git_release_type = "auto"
-
-[[package]]
-name = "ghostwire-dtn"
-publish = true
-changelog_update = true
-git_release_enable = true
-git_release_name = "ghostwire-dtn-v{{ version }}"
-git_release_draft = false
-git_release_type = "auto"
-
-[[package]]
-name = "hlc-rs"
-publish = true
-changelog_update = true
-git_release_enable = true
-git_release_name = "hlc-rs-v{{ version }}"
-git_release_draft = false
-git_release_type = "auto"
-
-[[package]]
-name = "trust-store"
-publish = true
-changelog_update = true
-git_release_enable = true
-git_release_name = "trust-store-v{{ version }}"
-git_release_draft = false
-git_release_type = "auto"
