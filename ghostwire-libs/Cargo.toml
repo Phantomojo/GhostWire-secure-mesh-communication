@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sphinx-rs",
+    "crates/ghostwire-dtn",
+    "crates/hlc-rs",
+    "crates/trust-store",
+]
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+edition = "2021"
+rust-version = "1.75"
+repository = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+homepage = "https://ghostwire.org"
+
+[workspace.dependencies]
+# Crypto
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+curve25519-dalek = { version = "4.1", features = ["rand_core"] }
+chacha20 = "0.9"
+chacha20poly1305 = "0.10"
+blake3 = "1.5"
+subtle = "2.5"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# Errors
+thiserror = "1.0"
+anyhow = "1.0"
+
+# RNG
+rand_core = "0.6"
+rand = "0.8"
+
+# Security
+zeroize = { version = "1.7", features = ["derive"] }
+
+# Testing
+hex = "0.4"
