@@ -1,0 +1,23 @@
+[package]
+name = "hlc-rs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Hybrid Logical Clocks for causally correct distributed event ordering"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["hlc", "logical-clock", "distributed-systems", "causality", "crdt"]
+categories = ["algorithms", "data-structures"]
+
+[dependencies]
+serde = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
