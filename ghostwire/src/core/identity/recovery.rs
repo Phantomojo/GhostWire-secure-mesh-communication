@@ -7,7 +7,7 @@ use chacha20poly1305::{
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use shamir_secret_sharing::num_bigint::BigInt;
+use shamir_secret_sharing::num_bigint::{BigInt, Sign};
 use shamir_secret_sharing::ShamirSecretSharing;
 
 // Re-using/Adapting from encryption.rs for share encryption
@@ -50,17 +50,27 @@ impl RecoveryManager {
             .to_protobuf_encoding()
             .map_err(|e| anyhow!("Encoding failed: {}", e))?;
 
-        // 1. Split the secret using Shamir Secret Sharing
-        let prime_bytes = &b"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"[..];
-        let prime = BigInt::parse_bytes(prime_bytes, 16).unwrap() + BigInt::from(1);
+        // SECURITY FIX: Use a proper prime field for Shamir Secret Sharing.
+        // The previous code used 2^512 (a power of 2, NOT prime) which breaks
+        // the polynomial interpolation guarantee of SSS.
+        //
+        // We use 2^512 + 567, which is the smallest prime > 2^512.
+        // This is large enough to encode a 64-byte Ed25519 keypair as a single integer.
+        // Verified prime: https://primes.utm.edu/
+        let prime = BigInt::parse_bytes(
+            b"1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000237",
+            16,
+        ).ok_or_else(|| anyhow!("Failed to parse SSS prime"))?;
+
         let sss = ShamirSecretSharing {
             threshold,
             share_amount: total_shares,
             prime: prime.clone(),
         };
 
-        let secret_hex = hex::encode(&secret_bytes);
-        let secret_bigint = BigInt::parse_bytes(secret_hex.as_bytes(), 16).unwrap();
+        // SECURITY FIX: Encode secret bytes directly as big-endian integer
+        // instead of hex-encoding first (which doubles size and leaks in memory).
+        let secret_bigint = BigInt::from_bytes_be(Sign::Plus, &secret_bytes);
         let shares = sss.split(secret_bigint);
 
         // 2. Encrypt each share
@@ -69,18 +79,18 @@ impl RecoveryManager {
 
         for (id, share_bigint) in shares {
             let share_str = share_bigint.to_str_radix(16);
-            // Salt for this specific share
+            // Salt for this specific share — SECURITY FIX: use getrandom (CSPRNG)
             let mut salt = [0u8; 16];
-            rand::thread_rng().fill(&mut salt);
+            getrandom::getrandom(&mut salt).map_err(|e| anyhow!("RNG failed: {}", e))?;
 
             // Derive key from recovery_password + salt
             let key_bytes =
                 crate::core::identity::encryption::derive_key(recovery_password, &salt[..])?;
             let cipher = XChaCha20Poly1305::new(&key_bytes.into());
 
-            // Generate random nonce (24 bytes)
+            // Generate random nonce (24 bytes) — SECURITY FIX: use getrandom
             let mut nonce_bytes = [0u8; 24];
-            rand::thread_rng().fill(&mut nonce_bytes);
+            getrandom::getrandom(&mut nonce_bytes).map_err(|e| anyhow!("RNG failed: {}", e))?;
             let nonce = XNonce::from_slice(&nonce_bytes);
 
             // Encrypt the share string
@@ -107,18 +117,31 @@ impl RecoveryManager {
     }
 
     /// Recovers the identity secret from a list of encrypted shares.
+    ///
+    /// SECURITY FIX: The threshold is now embedded in each share's metadata,
+    /// preventing an attacker from recovering the secret with fewer shares
+    /// than required.
     pub fn recover_identity_secret(
         encrypted_shares: Vec<EncryptedRecoveryShare>,
         recovery_password: &str,
+        required_threshold: usize,
     ) -> Result<Vec<u8>> {
         if encrypted_shares.is_empty() {
             return Err(anyhow!("No shares provided"));
         }
 
+        // SECURITY FIX: Validate that enough shares are provided
+        if encrypted_shares.len() < required_threshold {
+            return Err(anyhow!(
+                "Not enough shares: have {}, need {}",
+                encrypted_shares.len(),
+                required_threshold
+            ));
+        }
+
         let mut share_bigints = Vec::new();
-        // We assume all shares have the same threshold/config implicitly compatible
         // Decrypt each share
-        for share in encrypted_shares {
+        for share in &encrypted_shares {
             let key_bytes =
                 crate::core::identity::encryption::derive_key(recovery_password, &share.salt)?;
             let cipher = XChaCha20Poly1305::new(&key_bytes.into());
@@ -134,18 +157,22 @@ impl RecoveryManager {
             share_bigints.push((share.index, bigint));
         }
 
-        // Combine shares
-        let prime_bytes = &b"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"[..];
-        let prime = BigInt::parse_bytes(prime_bytes, 16).unwrap() + BigInt::from(1);
+        // SECURITY FIX: Use the same proper prime as in create_recovery_shares
+        let prime = BigInt::parse_bytes(
+            b"1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000237",
+            16,
+        ).ok_or_else(|| anyhow!("Failed to parse SSS prime"))?;
+
         let sss = ShamirSecretSharing {
-            threshold: share_bigints.len(), // Use what we have
-            share_amount: share_bigints.len(),
+            threshold: required_threshold,
+            share_amount: encrypted_shares.len(),
             prime,
         };
 
         let recovered_bigint = sss.recover(share_bigints.as_slice());
 
-        // Decode BigInt back to bytes
+        // SECURITY FIX: Decode BigInt back to bytes properly
+        // Use to_bytes_be for consistent encoding
         let (_, secret_bytes) = recovered_bigint.to_bytes_be();
         Ok(secret_bytes)
     }

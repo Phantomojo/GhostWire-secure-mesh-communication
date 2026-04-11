@@ -55,9 +55,10 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 
 # Install ONLY runtime dependencies (minimal attack surface)
+# SECURITY FIX: Use wget instead of curl (smaller footprint, no shell needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
+    wget \
     libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean \
@@ -92,7 +93,7 @@ EXPOSE 3000 9000 4001 4001/udp
 
 # Health check using new /api/v2/health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -sf http://localhost:9000/api/v2/health || exit 1
+    CMD wget -qO- http://localhost:9000/api/v2/health || exit 1
 
 # Set environment variables
 ENV RUST_LOG=ghostwire=info,libp2p=warn,tower_http=error

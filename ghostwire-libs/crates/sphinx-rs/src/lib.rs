@@ -618,7 +618,7 @@ pub fn process_sphinx_packet(
     }
 
     // Check if this is the final hop (DELIVER marker)
-    if plain[..DELIVER_MARKER.len()] == *DELIVER_MARKER {
+    if plain[..DELIVER_MARKER.len()].ct_eq(&DELIVER_MARKER).into() {
         // Final hop — decrypt the payload
         let payload_key = derive_payload_key(&derived_secret, config);
         let payload_nonce: [u8; 12] = {
