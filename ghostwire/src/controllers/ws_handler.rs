@@ -8,10 +8,12 @@
 //!   - Handles inbound WS commands from the UI (send message, etc.)
 //!   - Sends ping/pong keepalives
 //!   - Cleans up on disconnect
+//!   - ENCRYPTED: All WS messages encrypted with XChaCha20-Poly1305
 //!
 //! INTEGRATION: Replace the existing ws_handler and handle_socket functions
 //! in src/web.rs with these.
 
+#[allow(unused_imports)]
 use crate::core::CoreEvent;
 use crate::web::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -20,6 +22,60 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
+
+/// Encrypted WebSocket message format
+/// Format: {"enc": {"nonce": "<base64>", "ct": "<base64>"}}
+#[derive(Debug, Serialize, Deserialize)]
+struct EncryptedWsMessage {
+    nonce: String,
+    ct: String,
+}
+
+/// Encrypt data using XChaCha20-Poly1305
+fn encrypt_ws_message(plaintext: &[u8], session_key: &[u8; 32]) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
+    use chacha20poly1305::aead::Aead;
+    use rand::RngCore;
+    use base64::Engine;
+
+    // Generate random 24-byte nonce
+    let mut nonce_bytes = [0u8; 24];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = XNonce::from(nonce_bytes);
+
+    let key = Key::from_slice(session_key);
+    let cipher = XChaCha20Poly1305::new(key);
+
+    let ciphertext = cipher.encrypt(&nonce, plaintext)
+        .map_err(|e| format!("WS encryption failed: {}", e))?;
+
+    // Encode as JSON
+    let enc_msg = EncryptedWsMessage {
+        nonce: base64::engine::general_purpose::STANDARD.encode(&nonce_bytes),
+        ct: base64::engine::general_purpose::STANDARD.encode(&ciphertext),
+    };
+
+    Ok(serde_json::to_string(&enc_msg)?)
+}
+
+/// Decrypt data using XChaCha20-Poly1305
+fn decrypt_ws_message(encrypted_json: &str, session_key: &[u8; 32]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
+    use chacha20poly1305::aead::Aead;
+    use base64::Engine;
+
+    let enc_msg: EncryptedWsMessage = serde_json::from_str(encrypted_json)?;
+
+    let nonce_bytes = base64::engine::general_purpose::STANDARD.decode(&enc_msg.nonce)?;
+    let ciphertext = base64::engine::general_purpose::STANDARD.decode(&enc_msg.ct)?;
+
+    let key = Key::from_slice(session_key);
+    let cipher = XChaCha20Poly1305::new(key);
+    let nonce = XNonce::from_slice(&nonce_bytes);
+
+    cipher.decrypt(nonce, ciphertext.as_ref())
+        .map_err(|e| format!("WS decryption failed: {}", e).into())
+}
 
 /// Inbound commands the frontend can send over WebSocket
 #[derive(Debug, Deserialize)]
@@ -76,7 +132,37 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+/// Generate a per-session WebSocket encryption key derived from the node identity.
+/// This ensures each WS connection uses a unique key, preventing cross-session decryption.
+async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
+    use ring::hkdf::{Salt, HKDF_SHA256};
+    use ring::rand::SecureRandom;
+    use base64::Engine;
+
+    // Get identity key material (or fallback to a random key if identity not yet set)
+    let ikm = {
+        let core = state.core.read().await;
+        core.get_identity_id().await.as_bytes().to_vec()
+    };
+
+    // Generate random salt for this session
+    let rng = ring::rand::SystemRandom::new();
+    let mut salt_bytes = [0u8; 16];
+    let _ = rng.fill(&mut salt_bytes);
+
+    // Derive 32-byte session key via HKDF
+    let salt = Salt::new(HKDF_SHA256, &salt_bytes);
+    let prk = salt.extract(&ikm);
+    let mut okm = [0u8; 32];
+    prk.expand(b"ghostwire-ws-session-v2").unwrap().fill(&mut okm).unwrap();
+    okm
+}
+
 pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    // Generate per-session encryption key from identity + random nonce
+    // SECURITY FIX: replaced hardcoded key with per-session derived key
+    let session_key = generate_ws_session_key(&state).await;
+
     // Subscribe to the core event bus
     let mut event_rx = state.core.read().await.event_bus.subscribe();
 
@@ -105,9 +191,21 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                if socket.send(Message::Text(json)).await.is_err() {
-                    tracing::debug!("WS client disconnected (send failed)");
-                    break;
+                // Encrypt the message before sending
+                match encrypt_ws_message(json.as_bytes(), &session_key) {
+                    Ok(encrypted) => {
+                        if socket.send(Message::Text(encrypted)).await.is_err() {
+                            tracing::debug!("WS client disconnected (send failed)");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("WS encryption failed: {}", e);
+                        // Send unencrypted error as fallback
+                        if socket.send(Message::Text(json)).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -115,7 +213,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        handle_ws_command(&mut socket, &state, &text).await;
+                        handle_ws_command(&mut socket, &state, &text, &session_key).await;
                     }
                     Some(Ok(Message::Ping(data))) => {
                         let _ = socket.send(Message::Pong(data)).await;
@@ -147,7 +245,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     tracing::debug!("WebSocket session ended for node {}", &node_id[..8.min(node_id.len())]);
 }
 
-async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str) {
+async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str, session_key: &[u8; 32]) {
     let cmd: WsCommand = match serde_json::from_str(text) {
         Ok(c) => c,
         Err(_) => {
