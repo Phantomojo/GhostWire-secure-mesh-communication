@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+# Global: deny all permissions by default (least privilege)
+permissions: {}
+
 jobs:
   # Job 1: Create release PRs with version bumps and changelogs
   release-plz-pr:
@@ -12,23 +15,31 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'Phantomojo' }}
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read       # checkout only
+      pull-requests: write # create release PRs
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
     steps:
+      # Harden the runner environment
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f9f6adb3ea4a98f7 # v2.11.0
+        with:
+          egress-policy: audit
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.1.7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
 
       - name: Run release-plz
-        uses: release-plz/action@v0.5.128
+        uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
         with:
           command: release-pr
           manifest_path: ghostwire-libs/Cargo.toml
@@ -45,20 +56,26 @@ jobs:
     if: ${{ github.repository_owner == 'Phantomojo' }}
     needs: release-plz-pr
     permissions:
-      contents: write
-      pull-requests: read
+      contents: write      # create git tags + releases
+      pull-requests: read  # read PR metadata
     steps:
+      # Harden the runner environment
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f9f6adb3ea4a98f7 # v2.11.0
+        with:
+          egress-policy: audit
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.1.7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Run release-plz
-        uses: release-plz/action@v0.5.128
+        uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
         with:
           command: release
           manifest_path: ghostwire-libs/Cargo.toml
