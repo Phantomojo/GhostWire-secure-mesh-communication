@@ -8,7 +8,7 @@ dependencies_update = false
 # Git release settings
 git_release_enable = true
 git_release_draft = false
-publish_allow_dirty = true
+publish_allow_dirty = false
 
 # Changelog configuration
 changelog_config = "ghostwire-libs/cliff.toml"
