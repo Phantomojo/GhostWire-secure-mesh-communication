@@ -27,9 +27,10 @@ tower_governor = { version = "0.4" }
 ring = { version = "0.17.12" }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
+curve25519-dalek = { version = "4.1", features = ["zeroize"] }
 aes-gcm = { version = "0.10" }
 chacha20poly1305 = { version = "0.10", features = ["std"] }
-chacha20 = "0.9"
+chacha20 = "0.10"
 pqcrypto-mlkem = { version = "0.1.1" }
 pqcrypto-traits = { version = "0.3" }
 blake2b_simd = "1.0"
@@ -46,6 +47,8 @@ num-derive = "0.4"
 rand_distr = "0.4.3"
 anyhow = { version = "1.0" }
 thiserror = { version = "1.0" }
+parking_lot = "0.12"
+dashmap = "5.5"
 
 # AI/ML - ONNX Runtime for model inference
 ort = { version = "2.0.0-rc.4", features = ["download-binaries", "tls-rustls", "std"], default-features = false }
@@ -53,13 +56,13 @@ ndarray = "0.15"
 ndarray-stats = "0.5"
 half = { version = "2.4", features = ["num-traits"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
+hkdf = "0.12"
 chrono = { version = "=0.4.44", features = ["serde"] }
 base64 = { version = "0.21" }
 hex = { version = "0.4" }
 bs58 = { version = "0.5" }
 lazy_static = { version = "1.4" }
 rand = { version = "0.8" }
-dashmap = { version = "6.1" }
 bytes = { version = "1.5" }
 bincode = { version = "1.3" }
 zeroize = { version = "1.7", features = ["derive"] }
@@ -73,7 +76,9 @@ hostname = { version = "0.3" }
 local-ip-address = { version = "0.5" }
 sled = "0.34"
 dirs = "6.0.0"
-btleplug = "0.11"
+# Bluetooth: bluer supports both central AND peripheral roles via BlueZ D-Bus
+# Works with ANY Bluetooth adapter that BlueZ supports (built-in, USB dongles, etc.)
+bluer = { version = "0.17", features = ["bluetoothd"] }
 qrcode-generator = "5.0"
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
@@ -138,3 +143,20 @@ opt-level = 3
 # Wave 7-8 additions - binary hardening and protocol fixes
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"                # mlock/munlock for memory locking (unix only)
+
+# ── GhostWire Standalone Crates (published to crates.io) ──
+# These are developed independently in ghostwire-libs/crates/ and
+# auto-published on changes. Ghostwire consumes them as regular deps.
+#
+# During development, uncomment the path dependencies below to test
+# against the local crate source without publishing:
+#
+#   sphinx-rs = { path = "../ghostwire-libs/crates/sphinx-rs" }
+#   ghostwire-dtn = { path = "../ghostwire-libs/crates/ghostwire-dtn" }
+#   hlc-rs = { path = "../ghostwire-libs/crates/hlc-rs" }
+#   trust-store = { path = "../ghostwire-libs/crates/trust-store" }
+
+sphinx-rs = "0.1"           # Sphinx onion routing with SURBs
+ghostwire-dtn = "0.1"       # DTN with Spray-and-Wait + PRoPHET
+hlc-rs = "0.1"              # Hybrid Logical Clocks
+trust-store = "0.1"         # Web of Trust + TOFU key verification

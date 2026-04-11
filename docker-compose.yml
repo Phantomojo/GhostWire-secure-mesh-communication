@@ -11,10 +11,10 @@ services:
     container_name: ghostwire
     restart: unless-stopped
     ports:
-      - "3000:3000"  # Web UI
-      - "9000:9000"  # API
-      - "4001:4001"  # libp2p TCP
-      - "4001:4001/udp"  # libp2p QUIC
+      - "127.0.0.1:3000:3000"  # Web UI - localhost only (SECURITY FIX)
+      - "127.0.0.1:9000:9000"  # API - localhost only (SECURITY FIX)
+      - "4001:4001"  # libp2p TCP - public (intentional)
+      - "4001:4001/udp"  # libp2p QUIC - public (intentional)
     environment:
       - RUST_LOG=ghostwire=info,libp2p=warn,tower_http=error
       - GHOSTWIRE_HOST=0.0.0.0

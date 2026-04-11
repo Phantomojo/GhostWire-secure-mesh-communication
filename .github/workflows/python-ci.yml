@@ -1,5 +1,6 @@
 name: Python CI
 
+permissions: {}
 on:
   push:
     branches: ["main", "develop"]
@@ -12,14 +13,15 @@ on:
     branches: ["main", "develop"]
   workflow_dispatch:
 
+permissions: {}
 jobs:
   lint:
     name: 🐍 Python Lint & Syntax Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -27,10 +29,8 @@ jobs:
         run: pip install black flake8
       - name: Black check (scripts/)
         run: black --check ghostwire/scripts/ scripts/
-        continue-on-error: true
       - name: Flake8
         run: flake8 --max-line-length=120 --extend-ignore=E203,W503,E501 ghostwire/scripts/ scripts/
-        continue-on-error: true
       - name: Syntax check all Python files
         run: |
           find ghostwire/scripts/ scripts/ -name "*.py" -not -path "*/vendor/*" -exec python -m py_compile {} \;
@@ -39,9 +39,9 @@ jobs:
     name: 📦 Validate Script Imports
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -71,9 +71,9 @@ jobs:
     name: 🧪 LightGBM Smoke Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
           cache: "pip"
