@@ -28,7 +28,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
-        uses: release-plz/release-plz-action@release-plz-v0.3.157
+        uses: release-plz/action@v0.5.128
         with:
           command: release-pr
           manifest_path: ghostwire-libs/Cargo.toml
@@ -57,7 +57,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
-        uses: release-plz/release-plz-action@release-plz-v0.3.157
+        uses: release-plz/action@v0.5.128
         with:
           command: release
           manifest_path: ghostwire-libs/Cargo.toml
