@@ -1,0 +1,38 @@
+[package]
+name = "sphinx-rs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Production-grade Sphinx onion routing with Single-Use Reply Blocks (SURBs) for anonymous messaging"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["sphinx", "onion-routing", "anonymity", "cryptography", "mesh"]
+categories = ["cryptography", "network-programming"]
+
+[dependencies]
+x25519-dalek = { workspace = true }
+curve25519-dalek = { workspace = true }
+chacha20 = { workspace = true }
+chacha20poly1305 = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+rand_core = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+hex = { workspace = true }
+
+[features]
+default = ["std", "surb"]
+std = []
+surb = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
