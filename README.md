@@ -2,7 +2,7 @@
 
 ### 🌐 **[Visit the GhostWire Website →](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)**
 
-<img src="docs/assets/ghostwirelogo.png" alt="GhostWire Logo" width="200" />
+<img src="docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="200" />
 
 # GhostWire
 
@@ -369,7 +369,7 @@ We welcome contributors across all layers of the protocol:
 
 **GhostWire** — An open protocol for resilient peer-to-peer communication.
 
-<img src="docs/assets/ghostwirelogo.png" alt="GhostWire Logo" width="120" />
+<img src="docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="120" />
 
 **📍 Nairobi, Kenya** | **🌐 [Website](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)** | **📧 mirungu015@proton.me**
 
