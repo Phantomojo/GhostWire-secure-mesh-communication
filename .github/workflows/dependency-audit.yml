@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Run cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@ac5da7b151d5b8ed3d422ae8c357d1ff62ff9cb5 # v2
+        uses: EmbarkStudios/cargo-deny-action@175dc7fd4fb85ec8f46948fb98f44db001149081 # v2
         with:
           manifest-path: ghostwire/Cargo.toml
           command: check licenses,sources
