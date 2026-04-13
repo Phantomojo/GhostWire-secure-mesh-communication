@@ -44,7 +44,7 @@ argon2 = "0.5.3"
 cryptify = "3.2.1"
 num-traits = "0.2"
 num-derive = "0.4"
-rand_distr = "0.4.3"
+rand_distr = "0.6.0"
 anyhow = { version = "1.0" }
 thiserror = { version = "1.0" }
 parking_lot = "0.12"
