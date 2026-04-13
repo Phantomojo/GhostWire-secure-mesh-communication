@@ -92,7 +92,7 @@ time = "0.3.47"             # Required for jsonwebtoken 9.2.0
 proc-macro2 = "1.0"         # Edition 2024 support for time crate
 num-bigint = "0.4"          # Required for shamir_secret_sharing
 ratatui = "0.29"            # Terminal UI framework
-crossterm = "0.28"          # Terminal manipulation (used by ratatui)
+crossterm = "0.29"          # Terminal manipulation (used by ratatui)
 
 
 [features]
