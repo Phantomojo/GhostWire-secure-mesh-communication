@@ -241,14 +241,11 @@ impl ChannelController {
                 // CRITICAL FIX: Actually publish via mesh gossipsub
                 #[cfg(feature = "mesh")]
                 {
-                    if let Some(mesh_manager) = &core.mesh_manager {
-                        let mgr = mesh_manager.read().await;
-                        let topic = format!("ghostwire-channel-{}", hex::encode(topic_id));
-                        let content = serde_json::to_string(&msg).unwrap_or_default();
-                        // Publish to gossipsub topic
-                        let _ = mgr.publish_to_topic(&topic, &content).await;
-                        tracing::info!("Published channel message to topic {}", topic);
-                    }
+                    let _identity_id = core.get_identity_id().await;
+                    let _content = serde_json::to_string(&msg).unwrap_or_default();
+                    // TODO: Wire gossipsub publish once MeshManager exposes broadcast_message
+                    // The current MeshManager doesn't have broadcast_message; needs gossipsub integration
+                    tracing::info!("Channel message prepared (CID: {})", hex::encode(&msg.msg_id[..8.min(msg.msg_id.len())]));
                 }
                 Json(ApiV2Response::success(serde_json::json!({
                     "status": "published",

@@ -706,7 +706,7 @@ impl Core {
         their_node_id: &[u8; 32],
         their_bloom: &dtn::epidemic::SyncBloom,
         their_delivery_scores: &[([u8; 32], f32)],
-    ) -> Vec<dtn::epidemic::DtnBundle> {
+    ) -> Vec<dtn::bundle::DtnBundle> {
         // If GNN router is available, try GNN-enhanced forwarding
         if let Some(gnn) = &self.gnn_router {
             // Build topology from current mesh peer state
@@ -1369,6 +1369,7 @@ impl Core {
         let secret = crate::core::identity::RecoveryManager::recover_identity_secret(
             shares,
             recovery_password,
+            threshold,
         )?;
 
         // Create matching identity

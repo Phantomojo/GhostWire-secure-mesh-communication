@@ -153,9 +153,10 @@ async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
     // Derive 32-byte session key via HKDF
     let salt = Salt::new(HKDF_SHA256, &salt_bytes);
     let prk = salt.extract(&ikm);
-    let mut okm = [0u8; 32];
-    prk.expand(b"ghostwire-ws-session-v2").unwrap().fill(&mut okm).unwrap();
-    okm
+    let okm = prk.expand(&[b"ghostwire-ws-session-v2"], ring::hkdf::HKDF_SHA256).unwrap();
+    let mut session_key = [0u8; 32];
+    okm.fill(&mut session_key).unwrap();
+    session_key
 }
 
 pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {

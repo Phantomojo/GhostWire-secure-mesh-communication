@@ -15,7 +15,7 @@ impl BluetoothTransport {
     }
 
     pub async fn start_scanning(&self) -> Result<()> {
-        let adapters = self.manager.adapters().await?;
+        let adapters: Vec<_> = self.manager.adapters().await?;
         let central = adapters
             .into_iter()
             .next()
@@ -35,6 +35,28 @@ impl BluetoothTransport {
     pub async fn send_ble_data(&self, _peer_id: &str, data: &[u8]) -> Result<()> {
         debug!("Sending {} bytes via Bluetooth (Skeleton)", data.len());
         // In real implementation, find peripheral by peer_id and write to characteristic
+        Ok(())
+    }
+
+    // Stub methods for controller API compatibility
+    pub fn is_available(&self) -> bool {
+        true
+    }
+
+    pub fn discovered_peers(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    pub fn connected_peers(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    pub fn encrypted_peers(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    pub async fn connect_peer(&self, _address: &str) -> Result<()> {
+        debug!("BLE connect_peer (stub): {}", _address);
         Ok(())
     }
 }

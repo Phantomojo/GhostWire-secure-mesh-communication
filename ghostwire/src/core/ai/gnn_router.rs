@@ -299,7 +299,7 @@ impl GnnRouter {
         }
 
         // Try GNN inference
-        match self.run_gnn_inference(topology, src, dst, candidates) {
+        match self.run_gnn_inference(topology, src, dst, candidates).await {
             Ok((gnn_scores, candidate_peers)) => {
                 // Find best GNN candidate
                 let mut scored: Vec<(PeerId, f32)> = candidate_peers
@@ -407,7 +407,7 @@ impl GnnRouter {
     /// - edge_attr: [num_edges × 2] edge features
     /// - src, dst: source and destination node indices
     /// - candidates: list of candidate neighbor indices
-    fn run_gnn_inference(
+    async fn run_gnn_inference(
         &self,
         topology: &MeshTopology,
         src: usize,
@@ -475,7 +475,7 @@ impl GnnRouter {
         // For now, implement a simplified GNN-like scoring using the loaded model.
         // In production, this would call the full GAT forward pass.
 
-        let session = self
+        let mut session = self
             .session
             .lock()
             .map_err(|e| anyhow::anyhow!("GNN session mutex poisoned: {}", e))?;

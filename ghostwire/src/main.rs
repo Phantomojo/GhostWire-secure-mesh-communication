@@ -6,8 +6,12 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tracing::{error, info};
+use tracing_subscriber::prelude::*;
+
+use opentelemetry::trace::TracerProvider;
 
 // Use modules from the library crate
 use ghostwire::config::Config;
@@ -15,30 +19,96 @@ use ghostwire::core::updater;
 use ghostwire::core::Core;
 use ghostwire::daemon;
 
-/// Initialize logging with structured JSON output for production
-fn init_logging() {
-    // Production: JSON format for log aggregation
+/// Holds the guards that must stay in scope for the app lifetime
+struct ObservabilityGuards {
+    sentry: Option<sentry::ClientInitGuard>,
+    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+}
+
+/// Initialize logging, Sentry error tracking, and Datadog APM tracing
+fn init_logging() -> ObservabilityGuards {
+    let sentry_dsn = std::env::var("GHOSTWIRE_SENTRY_DSN").ok();
+    let sentry_enabled = sentry_dsn.is_some();
+    let dd_api_key = std::env::var("DD_API_KEY").ok();
+    let dd_enabled = dd_api_key.is_some();
+
+    // ── Sentry ──────────────────────────────────────────────
+    let sentry_guard = if let Some(ref dsn) = sentry_dsn {
+        let guard = sentry::init((
+            dsn.as_str(),
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                traces_sample_rate: 1.0,
+                send_default_pii: false,
+                ..Default::default()
+            },
+        ));
+        Some(guard)
+    } else {
+        None
+    };
+
+    // ── Datadog APM ─────────────────────────────────────────
+    let tracer_provider = if dd_enabled {
+        let provider = datadog_opentelemetry::tracing().init();
+        Some(provider)
+    } else {
+        None
+    };
+
+    // ── Tracing subscriber pipeline ─────────────────────────
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_thread_names(true);
+
     #[cfg(not(debug_assertions))]
-    {
-        tracing_subscriber::fmt()
-            .json()
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_thread_names(true)
+    let fmt_layer = fmt_layer.json();
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            #[cfg(not(debug_assertions))]
+            { "ghostwire=info,libp2p=warn" }
+            #[cfg(debug_assertions)]
+            { "ghostwire=debug,libp2p=warn" }
+            .into()
+        });
+
+    // Build the subscriber pipeline
+    // Sentry layer: only sends when DSN is configured (controlled by sentry::init above)
+    // Datadog layer: only sends when DD_API_KEY is set (controlled by datadog_opentelemetry::init above)
+    if let Some(ref provider) = tracer_provider {
+        let tracer = provider.tracer("ghostwire");
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .with(sentry::integrations::tracing::layer())
+            .with(tracing_opentelemetry::layer().with_tracer(tracer))
             .init();
-        info!(target: "ghostwire", "Structured JSON logging initialized");
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .with(sentry::integrations::tracing::layer())
+            .init();
     }
 
-    // Development: Pretty format for readability
-    #[cfg(debug_assertions)]
-    {
-        tracing_subscriber::fmt()
-            .pretty()
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_thread_names(true)
-            .init();
-        info!(target: "ghostwire", "Pretty logging initialized");
+    // Log initialization (now that the subscriber is active)
+    if sentry_enabled {
+        info!(target: "ghostwire", release = ?sentry::release_name!(), "Sentry error tracking initialized");
+    } else {
+        info!(target: "ghostwire", "Sentry DSN not configured — error tracking disabled");
+    }
+    if dd_enabled {
+        info!(target: "ghostwire", "Datadog APM tracing initialized (service={})",
+            std::env::var("DD_SERVICE").unwrap_or_else(|_| "ghostwire".into()));
+    } else {
+        info!(target: "ghostwire", "Datadog API key not configured — APM tracing disabled");
+    }
+
+    ObservabilityGuards {
+        sentry: sentry_guard,
+        tracer_provider,
     }
 }
 
@@ -154,8 +224,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize structured logging
-    init_logging();
+    // Initialize observability (guards must be kept in scope)
+    let _guards = init_logging();
 
     info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
     info!("🔒 Security features: End-to-end encryption, threat detection, anonymity");

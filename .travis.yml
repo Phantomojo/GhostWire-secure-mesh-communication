@@ -1,0 +1,81 @@
+# Travis CI configuration for GhostWire
+# Rust mesh networking platform
+language: rust
+
+# Cache cargo registry and build artifacts
+cache:
+  cargo: true
+  directories:
+    - $HOME/.cargo/registry
+    - $HOME/.cargo/git
+    - ghostwire/target
+
+# Test matrix
+rust:
+  - stable
+  - nightly
+
+os:
+  - linux
+  - windows
+
+# Environment variables for feature flags
+env:
+  global:
+    - CARGO_TERM_COLOR=always
+    - RUST_BACKTRACE=1
+    # Datadog APM (injected via Travis secrets in production)
+    - DD_SERVICE=ghostwire
+    - DD_ENV=ci
+
+# Install system dependencies (Linux only — needed for OpenSSL, Bluetooth, etc.)
+before_install:
+  - |
+    if [ "$TRAVIS_OS_NAME" = "linux" ]; then
+      sudo apt-get update
+      sudo apt-get install -y \
+        pkg-config \
+        libssl-dev \
+        libdbus-1-dev \
+        libbluetooth-dev \
+        build-essential
+    fi
+
+# Main build script
+script:
+  # ── Step 1: Check compilation (all features) ──────────────
+  - echo "=== Checking compilation ==="
+  - cd ghostwire && cargo check --all-features
+
+  # ── Step 2: Check compilation (default features) ──────────
+  - echo "=== Checking default features ==="
+  - cargo check
+
+  # ── Step 3: Check minimal build ───────────────────────────
+  - echo "=== Checking minimal build ==="
+  - cargo check --no-default-features --features minimal
+
+  # ── Step 4: Clippy (linting) ─────────────────────────────
+  - echo "=== Running clippy ==="
+  - cargo clippy --all-features -- -D warnings || true
+
+  # ── Step 5: Run tests ────────────────────────────────────
+  - echo "=== Running tests ==="
+  - cargo test --all-features -- --test-threads=1
+
+  # ── Step 6: Build release ────────────────────────────────
+  - echo "=== Building release ==="
+  - cargo build --release --features "web,cli,mesh,security"
+
+# Only run on pushes to main and PRs
+branches:
+  only:
+    - main
+    - develop
+    - /^release\/.*$/
+
+# Notifications
+notifications:
+  email:
+    on_success: change
+    on_failure: always

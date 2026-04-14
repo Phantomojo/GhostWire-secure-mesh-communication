@@ -72,6 +72,14 @@ lru = "0.16.3"
 clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json", "env-filter"] }
+sentry = { version = "0.47", features = ["tracing", "panic", "rustls"] }
+
+# Datadog APM — OpenTelemetry tracing with Datadog exporter
+datadog-opentelemetry = "0.3"
+tracing-opentelemetry = "0.32"
+opentelemetry = { version = "0.31", features = ["trace"] }
+opentelemetry_sdk = { version = "0.31", features = ["trace"] }
+
 hostname = { version = "0.3" }
 local-ip-address = { version = "0.5" }
 sled = "0.34"
@@ -79,6 +87,7 @@ dirs = "6.0.0"
 # Bluetooth: bluer supports both central AND peripheral roles via BlueZ D-Bus
 # Works with ANY Bluetooth adapter that BlueZ supports (built-in, USB dongles, etc.)
 bluer = { version = "0.17", features = ["bluetoothd"] }
+btleplug = "0.11"
 qrcode-generator = "5.0"
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
@@ -96,7 +105,7 @@ crossterm = "0.28"          # Terminal manipulation (used by ratatui)
 
 
 [features]
-default = ["web", "cli", "mesh", "security", "stealth", "bluetooth", "qr"]
+default = ["web", "cli", "mesh", "security", "stealth", "bluetooth", "qr", "sentry"]
 web = []
 cli = []
 mesh = []
@@ -110,6 +119,7 @@ stealth = []
 bluetooth = []
 qr = []
 minimal = []
+sentry = []  # Enables Sentry error tracking and panic capture
 
 [dev-dependencies]
 tokio-test = "0.4"

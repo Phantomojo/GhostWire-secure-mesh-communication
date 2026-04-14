@@ -162,7 +162,7 @@ impl GhostWireError {
         self
     }
     
-    /// Log the error with appropriate level
+    /// Log the error with appropriate level and capture in Sentry if configured
     pub fn log(&self) {
         match self.code {
             ErrorCode::HandshakeFailed |
@@ -177,8 +177,23 @@ impl GhostWireError {
                     self.code,
                     self.message
                 );
+                // Capture in Sentry with context
+                sentry::with_scope(
+                    |scope| {
+                        scope.set_tag("error.category", self.code.category());
+                        scope.set_tag("error.code", format!("0x{:04X}", self.code as u16));
+                        scope.set_tag("error.retryable", self.code.is_retryable());
+                        if let Some(ref peer_id) = self.peer_id {
+                            scope.set_tag("error.peer_id", peer_id);
+                        }
+                        if let Some(ref addr) = self.multiaddr {
+                            scope.set_tag("error.multiaddr", addr);
+                        }
+                    },
+                    || sentry::capture_message(&self.to_string(), sentry::Level::Error),
+                );
             }
-            
+
             ErrorCode::ConnectionFailed |
             ErrorCode::ConnectionTimeout |
             ErrorCode::MessageTimeout => {
@@ -191,8 +206,20 @@ impl GhostWireError {
                     self.code,
                     self.message
                 );
+                // Capture in Sentry as warning
+                sentry::with_scope(
+                    |scope| {
+                        scope.set_tag("error.category", self.code.category());
+                        scope.set_tag("error.code", format!("0x{:04X}", self.code as u16));
+                        scope.set_tag("error.retryable", self.code.is_retryable());
+                        if let Some(ref peer_id) = self.peer_id {
+                            scope.set_tag("error.peer_id", peer_id);
+                        }
+                    },
+                    || sentry::capture_message(&self.to_string(), sentry::Level::Warning),
+                );
             }
-            
+
             _ => {
                 tracing::info!(
                     target: "ghostwire::error",
@@ -201,6 +228,14 @@ impl GhostWireError {
                     "{}: {}",
                     self.code,
                     self.message
+                );
+                // Capture in Sentry as info
+                sentry::with_scope(
+                    |scope| {
+                        scope.set_tag("error.category", self.code.category());
+                        scope.set_tag("error.code", format!("0x{:04X}", self.code as u16));
+                    },
+                    || sentry::capture_message(&self.to_string(), sentry::Level::Info),
                 );
             }
         }

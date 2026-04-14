@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod ble_controller;
 pub mod health;
 pub mod identity;
 pub mod messaging;
