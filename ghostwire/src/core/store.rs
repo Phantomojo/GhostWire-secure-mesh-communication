@@ -91,7 +91,7 @@ impl SecureMessageStore {
                     all_messages.push(Message {
                         id: uuid::Uuid::new_v4(),
                         sender: encrypted.sender_id.clone(),
-                        recipient: "unknown".to_string(),
+                        recipient: encrypted.recipient_id.clone(),
                         content,
                         timestamp: encrypted.timestamp,
                         encrypted: true,

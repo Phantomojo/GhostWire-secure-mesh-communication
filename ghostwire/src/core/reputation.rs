@@ -193,7 +193,7 @@ impl TrustStore {
     /// Record an attestation from a trusted peer about another peer
     pub async fn add_attestation(&self, attestation: Attestation) -> Result<()> {
         // Verify the attestation signature before accepting it
-        self.verify_attestation_signature(&attestation)?;
+        self.verify_attestation_signature(&attestation).await?;
 
         let mut peers = self.peers.write().await;
         let record = peers
@@ -289,22 +289,30 @@ impl TrustStore {
             .insert(peer_id, score.clamp(0.0, 1.0));
     }
 
-    fn verify_attestation_signature(&self, att: &Attestation) -> Result<()> {
-        // In production: verify att.signature using att.attester_id's public key
-        // against payload: (subject_id || subject_pub_key || timestamp as 8-byte LE)
-        //
-        // Using ring::signature::Ed25519 or ed25519-dalek:
-        //
-        // let attester_pub_key = self.get_attester_pub_key(&att.attester_id)?;
-        // let payload = [att.subject_id.as_bytes(), &att.subject_pub_key,
-        //                &att.timestamp.to_le_bytes()].concat();
-        // ring::signature::UnparsedPublicKey::new(
-        //     &ring::signature::ED25519, &attester_pub_key
-        // ).verify(&payload, &att.signature)?;
-        //
-        // Stub for now — TODO: wire with identity keypair lookup
-        let _ = att;
-        Ok(())
+    pub async fn verify_attestation_signature(&self, att: &Attestation) -> Result<()> {
+        let peers = self.peers.read().await;
+        
+        // 1. Get attester's public key from our trust store
+        let record = peers.get(&att.attester_id)
+            .ok_or_else(|| anyhow::anyhow!("Attester unknown: cannot verify vouch from {}", att.attester_id))?;
+            
+        // 2. Parse public key into libp2p format
+        use libp2p::identity::PublicKey;
+        let public_key = PublicKey::try_decode_protobuf(&record.pinned_key)
+            .map_err(|e| anyhow::anyhow!("Invalid attester public key: {}", e))?;
+
+        // 3. Construct payload: (subject_id || subject_pub_key || timestamp as 8-byte LE)
+        let mut payload = Vec::new();
+        payload.extend_from_slice(att.subject_id.as_bytes());
+        payload.extend_from_slice(&att.subject_pub_key);
+        payload.extend_from_slice(&att.timestamp.to_le_bytes());
+
+        // 4. Verify signature
+        if public_key.verify(&payload, &att.signature) {
+            Ok(())
+        } else {
+            anyhow::bail!("Invalid attestation signature from {}", att.attester_id)
+        }
     }
 }
 

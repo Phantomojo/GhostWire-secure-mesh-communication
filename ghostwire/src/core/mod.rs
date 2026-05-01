@@ -7,6 +7,8 @@ pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
 pub mod constants;
+pub mod crypto_machine;
+pub mod crypto_processor;
 pub mod db;
 pub mod dht_signatures;
 pub mod disaster;
@@ -377,8 +379,15 @@ pub struct Core {
     // Wave 7: Device pairing
     pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
 
+    // Wave 8: vodozemac Double Ratchet
+    pub crypto_processor: Arc<RwLock<Option<crypto_processor::CryptoProcessor>>>,
+
+    // Wave 9: Health metrics tracking
+    pub start_time: std::time::Instant,
+
     // AI/ML Components (Gemma 4 + ONNX)
     pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
+    pub function_gemma_client: Arc<OnceLock<Arc<ai::FunctionGemmaClient>>>, // ✅ Tool calling AI
     pub anomaly_detector: Option<Arc<ai::IsolationForestModel>>,
     pub onnx_router: Option<Arc<ai::RoutingClassifier>>,
     pub gnn_router: Option<Arc<ai::GnnRouter>>,
@@ -427,6 +436,17 @@ impl Core {
         let persistence = Arc::new(persistence_manager::PersistenceManager::new(
             profile.clone(),
         )?);
+
+        // Initialize CryptoProcessor (vodozemac Double Ratchet)
+        let storage_path = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ghostwire")
+            .join("crypto_machine.dat");
+        let (crypto_processor, _action_rx) = crypto_processor::CryptoProcessor::new(
+            identity.clone(),
+            storage_path,
+        );
+        let crypto_processor = Arc::new(RwLock::new(Some(crypto_processor)));
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
@@ -633,8 +653,13 @@ impl Core {
                     ),
                 )
             },
+            // Wave 8: vodozemac Double Ratchet
+            crypto_processor,
+            // Wave 9: Health metrics tracking
+            start_time: std::time::Instant::now(),
             // AI/ML Components - Initialize Gemma client via OnceLock
             gemma_client: Arc::new(OnceLock::new()),
+            function_gemma_client: Arc::new(OnceLock::new()),
             // Load trained Isolation Forest model — try mesh-domain first, fall back to legacy
             anomaly_detector: match ai::IsolationForestModel::from_file(
                 "models/mesh_anomaly_detector.json",
@@ -1057,7 +1082,19 @@ impl Core {
                 Err(e) => tracing::warn!("⚠️ Failed to auto-start mesh: {}", e),
             }
         });
+    } // end start_nervous_system
+
+    /// Link AI components to the core (resolves circular dependencies via Weak)
+    pub fn link_ai_components(self: &Arc<Self>) {
+        if let Some(fg) = self.function_gemma_client.get() {
+            let weak = Arc::downgrade(self);
+            let fg_clone = fg.clone();
+            tokio::spawn(async move {
+                fg_clone.set_core(weak).await;
+            });
+        }
     }
+
 
     /// Select an active transport by name
     pub async fn set_active_transport(&self, name: &str) -> Result<()> {
@@ -1105,21 +1142,39 @@ impl Core {
         // Record message for security stats
         self.security_manager.record_message(&message.sender).await;
 
+        // WIRED: Real Wave 8 E2EE via CryptoProcessor
+        let mut final_message = message.clone();
+        if let Some(cp) = self.crypto_processor.read().await.as_ref() {
+            if message.recipient != "broadcast" {
+                match cp.encrypt_for_peer(&message.recipient, message.content.as_bytes()).await {
+                    Ok(encrypted_data) => {
+                        final_message.content = hex::encode(encrypted_data);
+                        final_message.message_type = "encrypted".to_string();
+                        final_message.encryption_status = "full".to_string();
+                        tracing::info!("🔒 Message E2EE encrypted for {}", message.recipient);
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️ E2EE encryption failed, falling back to transport-only security: {}", e);
+                    }
+                }
+            }
+        }
+
         // Broadcast to Event Bus
-        let _ = self.event_bus.send(CoreEvent::NewMessage(message.clone()));
+        let _ = self.event_bus.send(CoreEvent::NewMessage(final_message.clone()));
 
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = &self.mesh_manager {
             let mut mgr = mesh_manager.write().await;
-            return mgr.send_message(message).await;
+            return mgr.send_message(&final_message).await;
         }
 
         if let Some(transport) = self.active_transport.read().await.as_ref() {
-            return transport.send_message(message).await;
+            return transport.send_message(&final_message).await;
         } else {
             tracing::info!(
                 "Message processed locally (no active transport): {}",
-                message.content
+                final_message.content
             );
             Ok(())
         }
@@ -1311,11 +1366,25 @@ impl Core {
     }
 
     pub async fn unlock(&self, password: &str) -> Result<()> {
-        self.identity
-            .read()
-            .await
-            .unlock(password)
-            .map_err(|e| anyhow::anyhow!("{}", e))
+        match self.identity.read().await.unlock(password) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Log failed unlock attempt
+                let record = crate::core::security_v2::SecurityAuditRecord {
+                    event_type: "identity_unlock_failed".to_string(),
+                    entity_type: crate::core::security_v2::EntityType::Node,
+                    entity_id: "local".to_string(),
+                    threat_level: crate::core::security_v2::ThreatLevel::High,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    description: format!("Failed unlock attempt: {}", e),
+                };
+                self.audit_logger.log_event(&record);
+                Err(anyhow::anyhow!("{}", e))
+            }
+        }
     }
 
     pub async fn save_to_disk(&self, password: &str) -> Result<()> {
@@ -1455,6 +1524,7 @@ impl Core {
                     username_discovery,
                     Some(self.event_bus.clone()),
                     self.handshake_secret.clone(),
+                    self.crypto_processor.clone(),
                 )
                 .await?;
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
@@ -1659,6 +1729,11 @@ impl Core {
         self.encryption.get_peer_count()
     }
 
+    /// Uptime in seconds for health metrics
+    pub fn get_uptime_secs(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
     pub async fn shutdown(&self) -> Result<()> {
         tracing::info!("Core initiating shutdown sequence...");
 
@@ -1697,14 +1772,19 @@ impl Core {
             "gemma4:e2b" // Default: lightweight edge model
         };
 
-        let client = ai::GemmaClient::new("http://localhost:11434", model);
+        let gemma_client = ai::GemmaClient::new("http://localhost:11434", model);
 
-        if client.health_check().await {
+        if gemma_client.health_check().await {
             tracing::info!("✅ Gemma 4 AI initialized with model: {}", model);
-            // Store in OnceLock — this is thread-safe and can only succeed once
-            self.gemma_client
-                .set(Arc::new(client))
-                .map_err(|_| "Gemma client already initialized".to_string())?;
+            
+            // Store in OnceLock
+            let _ = self.gemma_client.set(Arc::new(gemma_client));
+
+            // Also initialize FunctionGemma for tool calling (270M model)
+            let fg_client = ai::FunctionGemmaClient::new("http://localhost:11434", "functiongemma:270m");
+            let _ = self.function_gemma_client.set(Arc::new(fg_client));
+            
+            tracing::info!("✅ FunctionGemma (270M) tool-calling AI initialized");
             Ok(())
         } else {
             Err("Ollama server not reachable at localhost:11434".to_string())

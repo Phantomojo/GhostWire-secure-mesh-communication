@@ -448,7 +448,8 @@ async fn generate_key(core: &Arc<Core>) -> Result<()> {
 }
 
 async fn encrypt_message(core: &Arc<Core>, message: &str) -> Result<()> {
-    let encrypted = core.encryption.encrypt(message.as_bytes());
+    let encrypted = core.encryption.encrypt(message.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &encrypted);
 
     println!("🔐 Encrypted message:");

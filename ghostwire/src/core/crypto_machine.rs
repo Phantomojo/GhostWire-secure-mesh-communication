@@ -19,8 +19,8 @@
 //!   The "sealed" fallback (for offline peers) uses a plain ECIES construction
 //!   with ChaCha20Poly1305 and a fresh X25519 ephemeral — no session needed.
 
+use crate::genesis_constants::{derive_with_domain, SEALED_KDF_DOMAIN};
 use anyhow::Result;
-use crate::genesis_constants::{SEALED_KDF_DOMAIN, derive_with_domain};
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vodozemac::{
-    olm::{Account, AccountPickle, OlmMessage, Session, SessionPickle},
+    olm::{Account, AccountPickle, OlmMessage, Session, SessionConfig, SessionPickle},
     Curve25519PublicKey, Ed25519PublicKey,
 };
 use zeroize::Zeroize;
@@ -71,13 +71,22 @@ pub enum CryptoAction {
         recipient_id: String,
         packet: Vec<u8>,
     },
-    StoreSecret { key: String, data: Vec<u8> },
+    StoreSecret {
+        key: String,
+        data: Vec<u8>,
+    },
     MessageDecrypted {
         sender_id: String,
         plaintext: Vec<u8>,
     },
-    DecryptionFailed { sender_id: String, reason: String },
-    Log { level: String, message: String },
+    DecryptionFailed {
+        sender_id: String,
+        reason: String,
+    },
+    Log {
+        level: String,
+        message: String,
+    },
     DepositMailbox {
         recipient_id: String,
         packet: SealedPacket,
@@ -163,35 +172,44 @@ impl CryptoMachine {
     pub fn generate_one_time_keys(&self, count: usize) -> Vec<Curve25519PublicKey> {
         let mut account = self.account.lock().unwrap();
         account.generate_one_time_keys(count);
-        let keys = account.one_time_keys();
         account.mark_keys_as_published();
-        keys.curve25519().values().cloned().collect()
+        // Get unpublished keys via one_time_keys() method
+        account.one_time_keys().values().cloned().collect()
     }
 
     /// Process a crypto event and produce a list of actions.
     /// This is the pure state-machine dispatch method.
     pub fn process(&self, event: CryptoEvent) -> Vec<CryptoAction> {
         match event {
-            CryptoEvent::EncryptMessage { recipient_id, plaintext } => {
-                self.encrypt_for_peer(&recipient_id, &plaintext)
-            }
-            CryptoEvent::EncryptSealedMessage { recipient_id, recipient_curve25519_pub, plaintext } => {
-                match self.encrypt_sealed(&recipient_curve25519_pub, &plaintext) {
-                    Ok(packet) => vec![
-                        CryptoAction::DepositMailbox { recipient_id, packet }
-                    ],
-                    Err(e) => vec![CryptoAction::Log {
-                        level: "error".into(),
-                        message: format!("Sealed encrypt failed: {}", e),
-                    }],
-                }
-            }
-            CryptoEvent::IncomingMessage { sender_id, device_id: _, payload } => {
-                self.decrypt_from_peer(&sender_id, &payload)
-            }
-            CryptoEvent::PeerDiscovered { peer_id, identity_keys, one_time_key, .. } => {
-                self.establish_session(&peer_id, &identity_keys, &one_time_key)
-            }
+            CryptoEvent::EncryptMessage {
+                recipient_id,
+                plaintext,
+            } => self.encrypt_for_peer(&recipient_id, &plaintext),
+            CryptoEvent::EncryptSealedMessage {
+                recipient_id,
+                recipient_curve25519_pub,
+                plaintext,
+            } => match self.encrypt_sealed(&recipient_curve25519_pub, &plaintext) {
+                Ok(packet) => vec![CryptoAction::DepositMailbox {
+                    recipient_id,
+                    packet,
+                }],
+                Err(e) => vec![CryptoAction::Log {
+                    level: "error".into(),
+                    message: format!("Sealed encrypt failed: {}", e),
+                }],
+            },
+            CryptoEvent::IncomingMessage {
+                sender_id,
+                device_id: _,
+                payload,
+            } => self.decrypt_from_peer(&sender_id, &payload),
+            CryptoEvent::PeerDiscovered {
+                peer_id,
+                identity_keys,
+                one_time_key,
+                ..
+            } => self.establish_session(&peer_id, &identity_keys, &one_time_key),
         }
     }
 
@@ -202,18 +220,26 @@ impl CryptoMachine {
                 let olm_msg = session.encrypt(plaintext);
                 let packet = match serde_json::to_vec(&olm_msg) {
                     Ok(p) => p,
-                    Err(e) => return vec![CryptoAction::Log {
-                        level: "error".into(),
-                        message: format!("Olm serialize failed: {}", e),
-                    }],
+                    Err(e) => {
+                        return vec![CryptoAction::Log {
+                            level: "error".into(),
+                            message: format!("Olm serialize failed: {}", e),
+                        }]
+                    }
                 };
-                vec![CryptoAction::SendPacket { recipient_id: peer_id.to_string(), packet }]
+                vec![CryptoAction::SendPacket {
+                    recipient_id: peer_id.to_string(),
+                    packet,
+                }]
             }
             None => {
                 // No session yet — fall back to sealed packet via mailbox
                 vec![CryptoAction::Log {
                     level: "warn".into(),
-                    message: format!("No session for {} — cannot encrypt; request peer identity first", peer_id),
+                    message: format!(
+                        "No session for {} — cannot encrypt; request peer identity first",
+                        peer_id
+                    ),
                 }]
             }
         }
@@ -222,10 +248,12 @@ impl CryptoMachine {
     fn decrypt_from_peer(&self, sender_id: &str, payload: &[u8]) -> Vec<CryptoAction> {
         let olm_msg: OlmMessage = match serde_json::from_slice(payload) {
             Ok(m) => m,
-            Err(e) => return vec![CryptoAction::DecryptionFailed {
-                sender_id: sender_id.to_string(),
-                reason: format!("Deserialize failed: {}", e),
-            }],
+            Err(e) => {
+                return vec![CryptoAction::DecryptionFailed {
+                    sender_id: sender_id.to_string(),
+                    reason: format!("Deserialize failed: {}", e),
+                }]
+            }
         };
 
         let mut sessions = self.sessions.lock().unwrap();
@@ -243,9 +271,10 @@ impl CryptoMachine {
                 }],
             }
         } else if let OlmMessage::PreKey(prekey_msg) = &olm_msg {
-            // New inbound session — create from prekey message
+            // New inbound session — get identity key first, then create session
             let mut account = self.account.lock().unwrap();
-            match account.create_inbound_session(prekey_msg) {
+            let my_identity_key = account.curve25519_key();
+            match account.create_inbound_session(my_identity_key, prekey_msg) {
                 Ok(result) => {
                     let (session, plaintext) = (result.session, result.plaintext);
                     sessions.insert(sender_id.to_string(), session);
@@ -268,28 +297,43 @@ impl CryptoMachine {
     }
 
     fn establish_session(
-        &self, peer_id: &str, identity_keys_bytes: &[u8], one_time_key_bytes: &[u8],
+        &self,
+        peer_id: &str,
+        identity_keys_bytes: &[u8],
+        one_time_key_bytes: &[u8],
     ) -> Vec<CryptoAction> {
-        let curve25519_key: Curve25519PublicKey = match serde_json::from_slice(identity_keys_bytes) {
+        let curve25519_key: Curve25519PublicKey = match serde_json::from_slice(identity_keys_bytes)
+        {
             Ok(k) => k,
-            Err(e) => return vec![CryptoAction::Log {
-                level: "error".into(),
-                message: format!("Bad peer identity key for {}: {}", peer_id, e),
-            }],
+            Err(e) => {
+                return vec![CryptoAction::Log {
+                    level: "error".into(),
+                    message: format!("Bad peer identity key for {}: {}", peer_id, e),
+                }]
+            }
         };
         let one_time_key: Curve25519PublicKey = match serde_json::from_slice(one_time_key_bytes) {
             Ok(k) => k,
-            Err(e) => return vec![CryptoAction::Log {
-                level: "error".into(),
-                message: format!("Bad one-time key for {}: {}", peer_id, e),
-            }],
+            Err(e) => {
+                return vec![CryptoAction::Log {
+                    level: "error".into(),
+                    message: format!("Bad one-time key for {}: {}", peer_id, e),
+                }]
+            }
         };
 
         let mut account = self.account.lock().unwrap();
-        let session = account.create_outbound_session(curve25519_key, one_time_key);
+        let session = account.create_outbound_session(
+            SessionConfig::version_1(),
+            curve25519_key,
+            one_time_key,
+        );
         drop(account);
 
-        self.sessions.lock().unwrap().insert(peer_id.to_string(), session);
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(peer_id.to_string(), session);
 
         vec![CryptoAction::Log {
             level: "info".into(),
@@ -299,20 +343,32 @@ impl CryptoMachine {
 
     /// ECIES sealed encrypt: fresh X25519 ephemeral + ChaCha20Poly1305.
     /// Used when no session exists (offline peer, mailbox delivery).
-    pub fn encrypt_sealed(&self, recipient_pub: &[u8; 32], plaintext: &[u8]) -> Result<SealedPacket> {
+    pub fn encrypt_sealed(
+        &self,
+        recipient_pub: &[u8; 32],
+        plaintext: &[u8],
+    ) -> Result<SealedPacket> {
         let mut ephemeral_bytes = [0u8; 32];
-        self.system_rng.fill(&mut ephemeral_bytes).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        ephemeral_bytes[0] &= 248; ephemeral_bytes[31] &= 127; ephemeral_bytes[31] |= 64;
+        self.system_rng
+            .fill(&mut ephemeral_bytes)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        ephemeral_bytes[0] &= 248;
+        ephemeral_bytes[31] &= 127;
+        ephemeral_bytes[31] |= 64;
         let ephemeral_secret = x25519_dalek::StaticSecret::from(ephemeral_bytes);
         let ephemeral_pub_key = x25519_dalek::PublicKey::from(&ephemeral_secret);
         let recipient_key = x25519_dalek::PublicKey::from(*recipient_pub);
         let shared = ephemeral_secret.diffie_hellman(&recipient_key);
-        let sym_key = derive_with_domain(SEALED_KDF_DOMAIN, shared.as_bytes());
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(sym_key.as_bytes()));
+        let shared_bytes: [u8; 32] = shared.to_bytes();
+        let sym_key = derive_with_domain(SEALED_KDF_DOMAIN, &shared_bytes);
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&sym_key));
         let mut nonce_bytes = [0u8; 12];
-        self.system_rng.fill(&mut nonce_bytes).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        self.system_rng
+            .fill(&mut nonce_bytes)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
-        let ciphertext = cipher.encrypt(nonce, plaintext)
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext)
             .map_err(|_| anyhow::anyhow!("Sealed encrypt failed"))?;
         Ok(SealedPacket {
             ephemeral_pub: *ephemeral_pub_key.as_bytes(),
@@ -322,13 +378,19 @@ impl CryptoMachine {
     }
 
     /// Decrypt a sealed packet using our Curve25519 identity key.
-    pub fn decrypt_sealed(&self, packet: &SealedPacket, our_secret: &x25519_dalek::StaticSecret) -> Result<Vec<u8>> {
+    pub fn decrypt_sealed(
+        &self,
+        packet: &SealedPacket,
+        our_secret: &x25519_dalek::StaticSecret,
+    ) -> Result<Vec<u8>> {
         let sender_pub = x25519_dalek::PublicKey::from(packet.ephemeral_pub);
         let shared = our_secret.diffie_hellman(&sender_pub);
-        let sym_key = derive_with_domain(SEALED_KDF_DOMAIN, shared.as_bytes());
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(sym_key.as_bytes()));
+        let shared_bytes: [u8; 32] = shared.to_bytes();
+        let sym_key = derive_with_domain(SEALED_KDF_DOMAIN, &shared_bytes);
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&sym_key));
         let nonce = Nonce::from_slice(&packet.nonce);
-        cipher.decrypt(nonce, packet.ciphertext.as_slice())
+        cipher
+            .decrypt(nonce, packet.ciphertext.as_slice())
             .map_err(|_| anyhow::anyhow!("Sealed decrypt failed — wrong key or tampered"))
     }
 
@@ -352,12 +414,16 @@ mod tests {
         let machine = CryptoMachine::new();
         let mut secret_bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut secret_bytes);
-        secret_bytes[0] &= 248; secret_bytes[31] &= 127; secret_bytes[31] |= 64;
+        secret_bytes[0] &= 248;
+        secret_bytes[31] &= 127;
+        secret_bytes[31] |= 64;
         let recipient_secret = x25519_dalek::StaticSecret::from(secret_bytes);
         let recipient_pub = x25519_dalek::PublicKey::from(&recipient_secret);
 
         let plaintext = b"Nairobi sunrise";
-        let packet = machine.encrypt_sealed(recipient_pub.as_bytes(), plaintext).unwrap();
+        let packet = machine
+            .encrypt_sealed(recipient_pub.as_bytes(), plaintext)
+            .unwrap();
         let decrypted = machine.decrypt_sealed(&packet, &recipient_secret).unwrap();
         assert_eq!(decrypted, plaintext);
     }
@@ -367,11 +433,15 @@ mod tests {
         let machine = CryptoMachine::new();
         let mut secret_bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut secret_bytes);
-        secret_bytes[0] &= 248; secret_bytes[31] &= 127; secret_bytes[31] |= 64;
+        secret_bytes[0] &= 248;
+        secret_bytes[31] &= 127;
+        secret_bytes[31] |= 64;
         let recipient_secret = x25519_dalek::StaticSecret::from(secret_bytes);
         let recipient_pub = x25519_dalek::PublicKey::from(&recipient_secret);
 
-        let mut packet = machine.encrypt_sealed(recipient_pub.as_bytes(), b"secret").unwrap();
+        let mut packet = machine
+            .encrypt_sealed(recipient_pub.as_bytes(), b"secret")
+            .unwrap();
         packet.ciphertext[0] ^= 0xFF;
         assert!(machine.decrypt_sealed(&packet, &recipient_secret).is_err());
     }

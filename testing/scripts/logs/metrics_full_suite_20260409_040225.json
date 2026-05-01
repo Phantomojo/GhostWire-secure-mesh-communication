@@ -1,0 +1,22 @@
+{
+  "strat": {
+    "cpu": "5.2",
+    "mem_used_mb": "4031",
+    "mem_total_mb": "9836",
+    "load_avg": "0.72 0.54 0.45",
+    "uptime": "up 6 days, 8 hours, 45 minutes",
+    "ghostwire_pid": "1939634",
+    "ghostwire_mem": "0.5",
+    "ghostwire_cpu": "0.0"
+  },
+  "omen": {
+    "cpu": "4.5",
+    "mem_used_mb": "8078",
+    "mem_total_mb": "15649",
+    "load_avg": "2.41 2.93 3.35",
+    "uptime": "up 2 days, 9 hours, 35 minutes",
+    "ghostwire_pid": "958491",
+    "ghostwire_mem": "0.2",
+    "ghostwire_cpu": "0.1"
+  }
+}

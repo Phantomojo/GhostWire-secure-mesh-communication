@@ -1,0 +1,395 @@
+/* GhostWire Professional Cockpit HUD */
+
+:root {
+  --neon-green: #00ff41;
+  --neon-cyan: #00f3ff;
+  --neon-red: #ff3131;
+  --neon-yellow: #ffde59;
+  --glass-bg: rgba(10, 20, 30, 0.7);
+  --glass-border: rgba(0, 243, 255, 0.3);
+  --hud-font: 'Outfit', 'Inter', 'Courier New', monospace;
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 10px var(--neon-cyan); }
+  50% { box-shadow: 0 0 25px var(--neon-cyan); }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: radial-gradient(circle at center, #0d1b2a 0%, #000814 100%);
+  color: var(--neon-cyan);
+  font-family: var(--hud-font);
+  perspective: 1000px;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.15;
+}
+
+/* Cockpit HUD Layout */
+.control-center {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  position: relative;
+}
+
+/* HUD Top Instrument Panel */
+.cockpit-hud-top {
+  position: relative;
+  height: 90px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border-bottom: 2px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 40px;
+  box-shadow: 0 5px 30px rgba(0, 0, 0, 0.8);
+  clip-path: polygon(0 0, 100% 0, 95% 100%, 5% 100%);
+  margin: 0 2%;
+  z-index: 100;
+  border-top: none;
+}
+
+.hud-instruments {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 30px;
+}
+
+/* Sensor Array */
+.sensor-array {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+}
+
+.sensor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 110px;
+}
+
+.sensor-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--neon-cyan);
+  opacity: 0.7;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sensor-meter {
+  height: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--glass-border);
+  position: relative;
+  border-radius: 2px;
+}
+
+.meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--neon-cyan), #00a8ff);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.sensor-value {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.status-critical .meter-fill { background: var(--neon-red); box-shadow: 0 0 10px var(--neon-red); }
+.status-warning .meter-fill { background: var(--neon-yellow); box-shadow: 0 0 10px var(--neon-yellow); }
+
+/* Telemetry Deck */
+.telemetry-deck {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 8px 15px;
+  border-radius: 4px;
+  border: 1px solid var(--glass-border);
+}
+
+.telemetry-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.telemetry-icon { font-size: 18px; }
+
+.telemetry-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.telemetry-value {
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.telemetry-label {
+  font-size: 8px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.telemetry-divider {
+  width: 1px;
+  height: 30px;
+  background: var(--glass-border);
+}
+
+/* HUD Status Node */
+.hud-status-node {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.status-node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 15px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+}
+
+.node-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.node-active .node-pulse {
+  background: var(--neon-green);
+  box-shadow: 0 0 15px var(--neon-green);
+  animation: pulse-glow 2s infinite;
+}
+
+.node-failure .node-pulse {
+  background: var(--neon-red);
+  box-shadow: 0 0 15px var(--neon-red);
+}
+
+.node-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.hud-config-btn {
+  background: none;
+  border: 1px solid var(--glass-border);
+  color: var(--neon-cyan);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.3s;
+}
+
+.hud-config-btn:hover {
+  background: var(--neon-cyan);
+  color: #000;
+  box-shadow: 0 0 20px var(--neon-cyan);
+}
+
+/* Main UI Container */
+.control-interface {
+  flex: 1;
+  display: flex;
+  padding: 15px;
+  gap: 15px;
+  overflow: hidden;
+}
+
+/* Sidebar "Sidecars" */
+.control-panel {
+  width: 280px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(15px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 20px rgba(0, 243, 255, 0.05);
+}
+
+.sidebar-module {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.module-title {
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  font-weight: 900;
+  margin-bottom: 15px;
+  border-left: 2px solid var(--neon-cyan);
+  padding-left: 10px;
+}
+
+/* Nav Buttons */
+.panel-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 15px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+  text-align: left;
+}
+
+.nav-btn:hover {
+  background: rgba(0, 243, 255, 0.05);
+  color: #fff;
+  border-color: var(--glass-border);
+  transform: translateX(5px);
+}
+
+.nav-btn.active {
+  background: rgba(0, 243, 255, 0.15);
+  color: var(--neon-cyan);
+  border-color: var(--neon-cyan);
+  box-shadow: inset 0 0 15px rgba(0, 243, 255, 0.2), 0 0 10px rgba(0, 243, 255, 0.1);
+}
+
+/* Quick Controls */
+.quick-control-btn {
+  width: 100%;
+  padding: 10px 15px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  transition: 0.3s;
+}
+
+.emergency-btn:hover, .emergency-btn.active { border-color: var(--neon-red); color: var(--neon-red); background: rgba(255, 49, 49, 0.15); }
+.stealth-btn:hover, .stealth-btn.active { border-color: var(--neon-cyan); color: var(--neon-cyan); background: rgba(0, 243, 255, 0.15); }
+.panic-btn:hover, .panic-btn.active { border-color: #ff3e3e; background: #8e0000; color: #fff; }
+
+/* Main Dynamic Viewport */
+.main-content {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(5px);
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  overflow-y: auto;
+  padding: 30px;
+  position: relative;
+  box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.5);
+}
+
+.main-content::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    linear-gradient(to right, var(--neon-cyan) 1px, transparent 1px) 0 0,
+    linear-gradient(to right, var(--neon-cyan) 1px, transparent 1px) 0 100%,
+    linear-gradient(to left, var(--neon-cyan) 1px, transparent 1px) 100% 0,
+    linear-gradient(to left, var(--neon-cyan) 1px, transparent 1px) 100% 100%,
+    linear-gradient(to bottom, var(--neon-cyan) 1px, transparent 1px) 0 0,
+    linear-gradient(to bottom, var(--neon-cyan) 1px, transparent 1px) 100% 0,
+    linear-gradient(to top, var(--neon-cyan) 1px, transparent 1px) 0 100%,
+    linear-gradient(to top, var(--neon-cyan) 1px, transparent 1px) 100% 100%;
+  background-repeat: no-repeat;
+  background-size: 20px 20px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--neon-cyan); }
+
+@keyframes emergency-flash {
+  0%, 100% { box-shadow: inset 0 0 50px rgba(255, 0, 0, 0.2); border-color: var(--neon-red); }
+  50% { box-shadow: inset 0 0 100px rgba(255, 0, 0, 0.4); border-color: #fff; }
+}
+
+.emergency-state { animation: emergency-flash 2s infinite; }

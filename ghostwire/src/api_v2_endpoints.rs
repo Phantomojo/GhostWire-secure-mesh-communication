@@ -328,6 +328,7 @@ pub async fn get_messages_v2(
         .and_then(|l| l.parse().ok())
         .unwrap_or(50);
 
+    let my_id = state.core.read().await.get_identity_id().await;
     let messages = state
         .core
         .read()
@@ -336,5 +337,19 @@ pub async fn get_messages_v2(
         .clone()
         .get_history(&peer_id, limit);
 
-    Json(ApiV2Response::success(messages).with_links("/api/v2/messages".to_string()))
+    // Map to include is_mine flag
+    let mapped_messages: Vec<serde_json::Value> = messages.into_iter().map(|m| {
+        let is_mine = m.sender == my_id;
+        serde_json::json!({
+            "sender": m.sender,
+            "recipient": m.recipient,
+            "content": m.content,
+            "timestamp": m.timestamp,
+            "is_mine": is_mine,
+            "id": m.id,
+            "message_type": m.message_type,
+        })
+    }).collect();
+
+    Json(ApiV2Response::success(mapped_messages).with_links("/api/v2/messages".to_string()))
 }

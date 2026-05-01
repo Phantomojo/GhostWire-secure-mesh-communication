@@ -771,6 +771,28 @@ impl AuditLogger {
         let events = self.events.read().await;
         events.iter().rev().take(limit).cloned().collect()
     }
+
+    /// Count events in the last N seconds
+    pub async fn count_recent(&self, duration_secs: u64) -> usize {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let events = self.events.read().await;
+        events.iter().filter(|e| now.saturating_sub(e.timestamp) < duration_secs).count()
+    }
+
+    /// Count specific event types in the last N seconds
+    pub async fn count_recent_by_type(&self, duration_secs: u64, event_type: &str) -> usize {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let events = self.events.read().await;
+        events.iter()
+            .filter(|e| e.event_type == event_type && now.saturating_sub(e.timestamp) < duration_secs)
+            .count()
+    }
 }
 
 impl Default for AuditLogger {

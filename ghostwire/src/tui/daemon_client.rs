@@ -261,9 +261,31 @@ impl DaemonClient {
     }
 
     /// Get message history with a peer
-    pub async fn get_messages(&self, _peer_id: &str) -> Vec<DaemonMessage> {
-        // TODO: wire to actual message history endpoint
-        // For now, return empty — messages are shown optimistically in the TUI
-        Vec::new()
+    pub async fn get_messages(&self, peer_id: &str) -> Vec<DaemonMessage> {
+        let url = format!("{}/api/v2/messages?peer_id={}&limit=100", self.base_url, peer_id);
+        
+        match self.http.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(val) => {
+                        let data = val.get("data").unwrap_or(&val);
+                        if let Some(messages) = data.as_array() {
+                            messages.iter().map(|m| {
+                                DaemonMessage {
+                                    sender: m.get("sender").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    content: m.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    timestamp: m.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    is_mine: m.get("is_mine").and_then(|v| v.as_bool()).unwrap_or(false),
+                                }
+                            }).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    Err(_) => Vec::new(),
+                }
+            }
+            _ => Vec::new(),
+        }
     }
 }

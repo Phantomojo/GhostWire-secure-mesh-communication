@@ -141,12 +141,13 @@ fn subnet_key(ip: &IpAddr) -> String {
     }
 }
 
-/// Routing table with IP diversity enforcement
 pub struct DiverseRoutingTable {
     /// peer_id → (ip, node_id)
     entries: Arc<RwLock<HashMap<String, (IpAddr, HardenedNodeId)>>>,
     /// subnet_key → count of peers from that subnet
     subnet_counts: Arc<RwLock<HashMap<String, usize>>>,
+    /// counter for rejections due to subnet limit or PoW failure
+    sybil_rejections: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl DiverseRoutingTable {
@@ -154,6 +155,7 @@ impl DiverseRoutingTable {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
             subnet_counts: Arc::new(RwLock::new(HashMap::new())),
+            sybil_rejections: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -172,6 +174,7 @@ impl DiverseRoutingTable {
                 peer_id,
                 node_id.nonce
             );
+            self.sybil_rejections.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(false);
         }
 
@@ -186,6 +189,7 @@ impl DiverseRoutingTable {
                 subnet,
                 count
             );
+            self.sybil_rejections.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(false);
         }
 
@@ -233,6 +237,17 @@ impl DiverseRoutingTable {
 
     pub async fn subnet_distribution(&self) -> HashMap<String, usize> {
         self.subnet_counts.read().await.clone()
+    }
+
+    /// Get total number of sybil rejections (subnet limits + PoW failures)
+    pub fn sybil_rejections(&self) -> u32 {
+        self.sybil_rejections.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Get the IP address associated with a peer ID
+    pub async fn get_ip(&self, peer_id: &str) -> Option<IpAddr> {
+        let entries = self.entries.read().await;
+        entries.get(peer_id).map(|(ip, _)| *ip)
     }
 }
 

@@ -66,13 +66,7 @@ fn init_logging() -> ObservabilityGuards {
     let fmt_layer = fmt_layer.json();
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            #[cfg(not(debug_assertions))]
-            { "ghostwire=info,libp2p=warn" }
-            #[cfg(debug_assertions)]
-            { "ghostwire=debug,libp2p=warn" }
-            .into()
-        });
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ghostwire=info,libp2p=warn"));
 
     // Build the subscriber pipeline
     // Sentry layer: only sends when DSN is configured (controlled by sentry::init above)
@@ -421,6 +415,7 @@ async fn main() -> Result<()> {
     )
     .await?;
     let core_arc = Arc::new(core);
+    core_arc.link_ai_components();
 
     match args.command {
         #[cfg(feature = "cli")]

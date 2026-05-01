@@ -144,6 +144,11 @@ impl PersistenceManager {
         self.db.flush()?;
         Ok(())
     }
+
+    /// Get total size of database on disk (in bytes)
+    pub fn db_size(&self) -> u64 {
+        self.db.size_on_disk().unwrap_or(0)
+    }
 }
 
 #[cfg(test)]

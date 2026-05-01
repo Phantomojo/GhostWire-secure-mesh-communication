@@ -1,80 +1,73 @@
-# Rust build artifacts
-/target/
+# GhostWire Core Exclusions
+
+# Rust Build Artifacts (Recursive)
+target/
 *.rs.bk
+*.rs.bak
+*.profraw
+*.profdata
+flamegraph.svg
+coverage/
+*.lcov
 
-# Vendored dependencies (downloaded by cargo, not committed)
-ghostwire/vendor/
-
-# Node.js dependencies
+# Node.js / Frontend Artifacts (Recursive)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-
-# Build outputs
-dist/
-/build/
 webui/dist/
+dist/
+build/
 
-# IDE files
+# IDE & OS Junk
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Temporary files
-*.tmp
-*.temp
-
-# Secrets and tokens
+# Secrets (MANDATORY EXCLUSIONS)
 ghostwire_token.txt
+username.txt
 *.token
 *.key
 *.pem
 *.enc
+.env
+.env.*
 token
+GHOSTWIRE_RELEASE_SIGNING_KEY_HEX
 
-# GhostWire node data (user data, not repo)
-# Note: ~/.local/share/ghostwire/ is outside repo, handled by app
-
-# GhostWire config
+# Local Config (Keep templates, ignore live)
 ghostwire.toml
-build-tools/
+config.toml
+litellm-config.yaml
+ghostwire_settings.json
 
-# Archives - old versions and backups
+# Databases & Runtime Data
+.ghostwire_db/
+ghostwire/data/advisory-db/
+*.log
+build_errors.txt
+
+# External SDKs & Large Blobs (Not Code)
+esp-idf/
+ghostwire-libs/
+ghostwire/vendor/
+release/
 archives/
+team_packages/
 
-# Reports - temporary status documents
-reports/
-
-# AI agent files - temporary
+# Temporary / AI Scaffolding
 .qwen/
 *_AGENT_*.md
 *_AGENT_*.zip
-
-# Status/Summary files - temporary
 *_STATUS.md
 *_SUMMARY.md
 *_BRIEF.md
 *_COMPLETE.md
 *_PROGRESS.md
 *_AUDIT_STATUS.md
-
-# Temporary documentation
 LIVE_*.md
 QUICK_*.md
 IMPLEMENTATION_*.md
@@ -96,53 +89,9 @@ HONEST_*.md
 KIMI_*.md
 GOVERNOR_*.md
 
-# Database files
-.ghostwire_db/
-
-# Well-known (auto-generated)
-.well-known/
-
-# Large binary archives (downloaded datasets, models)
-*.tar.gz
-
-# Team distribution packages (not code)
-team_packages/
-
-# Internal directories (not for public)
-knowledge-base/
-social-media/
-website-content-pack/
-webui-new/
-webui/
-release/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.venv/
-venv/
-
-# Rust profiling
-*.profraw
-*.profdata
-flamegraph.svg
-coverage/
-*.lcov
-
-# Tauri build artifacts
-src-tauri/target/
-ghostwire/data/advisory-db/
-
-# GhostWire runtime files
-ghostwire_token.txt
-username.txt
-ghostwire_settings.json
-config.toml
-litellm-config.yaml
-build_errors.txt
-*.sh
-*.rs.bak
+# Scratch Scripts & Proofs
 probe_sss.rs
 test_dalek.rs
+
+# Note: webui/, knowledge-base/, and website-content-pack/ are NOT ignored.
+# They are core parts of the GhostWire mission and must be tracked.

@@ -43,6 +43,7 @@ pub struct EncryptedMessage {
     pub nonce: Vec<u8>,
     pub signature: Vec<u8>,
     pub sender_id: String,
+    pub recipient_id: String, // ✅ Added for historical tracking
     pub timestamp: u64,
     pub key_id: String,
     pub message_type: MessageType,
@@ -479,6 +480,7 @@ impl EncryptionManager {
             nonce: encrypted_data.nonce,
             signature,
             sender_id: self.key_pair.key_id.clone(),
+            recipient_id: recipient_id.to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -714,8 +716,8 @@ impl EncryptionManager {
         Ok(key.to_vec())
     }
 
-    // Enhanced encryption method for CLI compatibility
-    pub fn encrypt(&self, data: &[u8]) -> Vec<u8> {
+    // Enhanced encryption method for CLI compatibility (returns Result)
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
         // Derive a strong 32-byte key from our key pair
         let key = self.derive_cli_key();
 
@@ -724,14 +726,11 @@ impl EncryptionManager {
                 // Combine nonce and ciphertext
                 let mut combined = result.nonce;
                 combined.extend_from_slice(&result.ciphertext);
-                combined
+                Ok(combined)
             }
             Err(e) => {
                 tracing::error!(inner_error = %e, "CLI encryption failed");
-                panic!(
-                    "Encryption failed - this should never happen in production: {}",
-                    e
-                );
+                Err(DecryptionError::DecryptionFailed)
             }
         }
     }

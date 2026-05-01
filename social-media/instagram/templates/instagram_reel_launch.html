@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GhostWire - Instagram Launch Card</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Instagram Reel/Story Format (1080x1920) */
+    .instagram-card {
+      background: #060810;
+      width: 1080px;
+      height: 1920px;
+      position: relative;
+      overflow: hidden;
+      font-family: 'Space Mono', monospace;
+    }
+
+    /* Animated Mesh Background */
+    canvas#mesh {
+      position: absolute;
+      inset: 0;
+      opacity: 0.55;
+    }
+
+    /* Film Grain Overlay */
+    .grain {
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+      background-size: 200px 200px;
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    /* Vignette Effect */
+    .vignette {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, #060810 100%);
+      pointer-events: none;
+    }
+
+    /* Safe Zone for Instagram UI */
+    .safe-zone {
+      position: absolute;
+      top: 200px;
+      bottom: 300px;
+      left: 60px;
+      right: 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 40px;
+      z-index: 10;
+    }
+
+    /* Top Row */
+    .top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .loc {
+      font-size: 14px;
+      letter-spacing: 0.22em;
+      color: #4a5568;
+      text-transform: uppercase;
+    }
+
+    .signal {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #00e5a0;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(0,229,160,0.4);
+      }
+      50% {
+        opacity: 0.7;
+        box-shadow: 0 0 0 10px rgba(0,229,160,0);
+      }
+    }
+
+    .signal-txt {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      color: #00e5a0;
+      text-transform: uppercase;
+    }
+
+    /* Center Content */
+    .center {
+      text-align: center;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 30px;
+    }
+
+    .ghost-mark {
+      width: 120px;
+      height: 120px;
+      opacity: 0.9;
+    }
+
+    .title {
+      font-family: 'Playfair Display', serif;
+      font-weight: 700;
+      font-size: 96px;
+      color: #f0ebe0;
+      letter-spacing: -0.02em;
+      line-height: 0.9;
+      text-shadow: 0 0 80px rgba(240,235,224,0.12);
+      animation: fadeIn 2s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .divider {
+      width: 60px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #00e5a0, transparent);
+    }
+
+    .tagline {
+      font-family: 'Space Mono', monospace;
+      font-size: 18px;
+      color: #8892a4;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      line-height: 1.8;
+    }
+
+    .tagline em {
+      color: #00e5a0;
+      font-style: normal;
+    }
+
+    /* Bottom Row */
+    .bottom-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: #3d4557;
+      text-transform: uppercase;
+    }
+
+    .pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      border: 1px solid #1e2535;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: #5a6478;
+      text-transform: uppercase;
+    }
+
+    .pill.hi {
+      border-color: #00e5a030;
+      color: #00e5a0;
+    }
+
+    .origin {
+      text-align: right;
+    }
+
+    .origin-main {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 20px;
+      color: #f0ebe0;
+      letter-spacing: 0.02em;
+    }
+
+    .origin-sub {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      color: #3d4557;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* Corner Brackets */
+    .bracket-tl, .bracket-tr, .bracket-bl, .bracket-br {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      border-color: #1e2535;
+      border-style: solid;
+      z-index: 5;
+    }
+
+    .bracket-tl {
+      top: 40px;
+      left: 40px;
+      border-width: 2px 0 0 2px;
+    }
+
+    .bracket-tr {
+      top: 40px;
+      right: 40px;
+      border-width: 2px 2px 0 0;
+    }
+
+    .bracket-bl {
+      bottom: 40px;
+      left: 40px;
+      border-width: 0 0 2px 2px;
+    }
+
+    .bracket-br {
+      bottom: 40px;
+      right: 40px;
+      border-width: 0 2px 2px 0;
+    }
+
+    /* CTA Button (for Stories with link sticker area) */
+    .cta-area {
+      position: absolute;
+      bottom: 150px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 20;
+    }
+
+    .cta-text {
+      font-size: 14px;
+      color: #8892a4;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .arrow-down {
+      width: 0;
+      height: 0;
+      border-left: 10px solid transparent;
+      border-right: 10px solid transparent;
+      border-top: 15px solid #00e5a0;
+      animation: bounce 2s ease-in-out infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(10px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="instagram-card">
+    <!-- Animated Mesh -->
+    <canvas id="mesh"></canvas>
+    
+    <!-- Overlays -->
+    <div class="grain"></div>
+    <div class="vignette"></div>
+    
+    <!-- Corner Brackets -->
+    <div class="bracket-tl"></div>
+    <div class="bracket-tr"></div>
+    <div class="bracket-bl"></div>
+    <div class="bracket-br"></div>
+    
+    <!-- Safe Zone Content -->
+    <div class="safe-zone">
+      <!-- Top Row -->
+      <div class="top-row">
+        <div class="loc">Nairobi · Kenya · 2026</div>
+        <div class="signal">
+          <div class="dot"></div>
+          <div class="signal-txt">MESH ACTIVE</div>
+        </div>
+      </div>
+      
+      <!-- Center Content -->
+      <div class="center">
+        <svg class="ghost-mark" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="36" cy="32" rx="20" ry="22" stroke="#00e5a0" stroke-width="1.5" opacity="0.6"/>
+          <path d="M16 32 L16 58 L22 52 L28 58 L34 52 L40 58 L46 52 L52 58 L56 52 L56 32" stroke="#00e5a0" stroke-width="1.5" stroke-linejoin="round" fill="none" opacity="0.6"/>
+          <circle cx="29" cy="30" r="3" fill="#00e5a0" opacity="0.9"/>
+          <circle cx="43" cy="30" r="3" fill="#00e5a0" opacity="0.9"/>
+          <line x1="8" y1="36" x2="14" y2="36" stroke="#00e5a060" stroke-width="1"/>
+          <line x1="58" y1="36" x2="64" y2="36" stroke="#00e5a060" stroke-width="1"/>
+          <circle cx="6" cy="36" r="1.5" fill="#00e5a060"/>
+          <circle cx="66" cy="36" r="1.5" fill="#00e5a060"/>
+        </svg>
+        
+        <div class="title">GHOSTWIRE</div>
+        
+        <div class="divider"></div>
+        
+        <div class="tagline">
+          Sovereign mesh communication.<br>
+          <em>No servers. No surveillance. No permission.</em>
+        </div>
+      </div>
+      
+      <!-- Bottom Row -->
+      <div class="bottom-row">
+        <div class="stack">
+          <div class="label">Stack</div>
+          <div class="pills">
+            <div class="pill hi">Rust</div>
+            <div class="pill hi">libp2p</div>
+            <div class="pill">Sphinx</div>
+            <div class="pill">Ed25519</div>
+          </div>
+        </div>
+        <div class="origin">
+          <div class="origin-main">ngairuru</div>
+          <div class="origin-sub">@phantomojo · github</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- CTA Area (for Stories) -->
+    <div class="cta-area">
+      <div class="cta-text">Link in Bio</div>
+      <div class="arrow-down"></div>
+    </div>
+  </div>
+
+  <script>
+    // Animated Mesh Network
+    (function() {
+      const canvas = document.getElementById('mesh');
+      const card = canvas.parentElement;
+
+      function resize() {
+        const r = card.getBoundingClientRect();
+        canvas.width = r.width;
+        canvas.height = r.height;
+      }
+      resize();
+
+      const ctx = canvas.getContext('2d');
+      const W = () => canvas.width;
+      const H = () => canvas.height;
+
+      const NODE_COUNT = 35;
+      let nodes = [];
+
+      function init() {
+        nodes = [];
+        for (let i = 0; i < NODE_COUNT; i++) {
+          nodes.push({
+            x: Math.random() * W(),
+            y: Math.random() * H(),
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.4,
+            r: Math.random() * 2.5 + 1
+          });
+        }
+      }
+
+      init();
+
+      const DIST = 150;
+
+      function draw() {
+        ctx.clearRect(0, 0, W(), H());
+
+        // Draw connections
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i], b = nodes[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const d = Math.sqrt(dx*dx + dy*dy);
+            if (d < DIST) {
+              const alpha = (1 - d / DIST) * 0.25;
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.strokeStyle = `rgba(0,229,160,${alpha})`;
+              ctx.lineWidth = 0.8;
+              ctx.stroke();
+            }
+          }
+        }
+
+        // Draw nodes
+        for (const n of nodes) {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0,229,160,0.6)';
+          ctx.fill();
+        }
+      }
+
+      function update() {
+        for (const n of nodes) {
+          n.x += n.vx;
+          n.y += n.vy;
+          if (n.x < 0 || n.x > W()) n.vx *= -1;
+          if (n.y < 0 || n.y > H()) n.vy *= -1;
+        }
+      }
+
+      function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+      }
+
+      loop();
+    })();
+  </script>
+</body>
+</html>

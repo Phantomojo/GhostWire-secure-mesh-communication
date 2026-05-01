@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- **vodozemac Double Ratchet Integration** (Wave 8):
+  - Added `crypto_machine.rs` - vodozemac Olm/Megolm implementation
+  - Added `crypto_processor.rs` - Crypto I/O driver
+  - Session-based encryption with forward secrecy
+  - Pre-key message flow for asynchronous peer communication
+  - Real-time health metrics (uptime, peer count, message rate)
 - Comprehensive documentation suite
 - Security policy and code of conduct
 - Development roadmap and changelog
@@ -24,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rate Limit Optimization**: Increased API rate limits (200/s, burst 100) to support frontend initialization
 
 ### Changed
+
 - Refactored `TransportRegistry` to use `Arc<tokio::sync::Mutex<dyn Transport>>` for async, mutable access to all transports.
 - Updated all code to lock the mutex before calling mutating methods on transports.
 - Fixed architectural issue where `send_message` required `&mut self` but registry used `Arc<dyn Transport>`, which only allowed immutable access.
@@ -33,11 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced documentation and guides
 
 ### Fixed
+
 - Various documentation and formatting issues
 
 ## [0.1.0] - 2024-01-15
 
 ### Added
+
 - **Core Architecture**: Complete project structure with modular design
 - **Identity Management**: Ed25519/X25519 key pair generation and management
   - Ephemeral identity support
@@ -93,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - File sharing capabilities
 
 ### Technical Features
+
 - **Async Architecture**: Full async/await implementation with tokio
 - **Error Handling**: Comprehensive error handling with anyhow
 - **Serialization**: Serde integration for data serialization
@@ -101,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing**: Comprehensive test suite with high coverage
 
 ### Security Features
+
 - **Cryptographic Security**: Industry-standard cryptographic algorithms
 - **Network Security**: Advanced network security and privacy features
 - **Threat Detection**: Multi-layered threat detection and response
@@ -108,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Key Management**: Secure key generation, storage, and rotation
 
 ### Dependencies
+
 - **libp2p**: Peer-to-peer networking framework (v0.56.0)
 - **tokio**: Asynchronous runtime
 - **ring**: Cryptographic primitives
@@ -118,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **tracing**: Logging and diagnostics
 
 ### Vendored Dependencies
+
 - **libp2p-mdns**: Local patches for compatibility with libp2p v0.56.0
   - Made Provider trait and module public
   - Fixed import paths and API compatibility
@@ -126,12 +140,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1] - 2024-01-01
 
 ### Added
+
 - Initial project setup and structure
 - Basic Rust project configuration
 - Core module organization
 - Development environment setup
 
 ### Technical Foundation
+
 - Cargo.toml configuration
 - Basic source code structure
 - Development tools and utilities
@@ -142,11 +158,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Version History
 
 ### Version 0.1.0 (Current)
+
 - **Status**: Stable Release
 - **Focus**: Core functionality and security features
 - **Target**: Production-ready core system
 
 ### Version 0.0.1 (Initial)
+
 - **Status**: Development Release
 - **Focus**: Project foundation and setup
 - **Target**: Development environment and basic structure
@@ -156,33 +174,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Version 0.1.0 Release Notes
 
 #### Breaking Changes
+
 - None (first major release)
 
 #### New Features
+
 - Complete mesh networking implementation
 - Advanced security features and threat detection
 - Full CLI and web interfaces
 - Comprehensive encryption and identity management
 
 #### Security Improvements
+
 - Industry-standard cryptographic implementation
 - Advanced threat detection and response
 - Secure key management and rotation
 - Comprehensive audit logging
 
 #### Performance Improvements
+
 - Optimized async/await implementation
 - Efficient memory management
 - High-performance networking stack
 - Minimal resource usage
 
 #### Bug Fixes
+
 - Fixed libp2p compatibility issues
 - Resolved dependency conflicts
 - Corrected API usage patterns
 - Fixed serialization issues
 
 #### Documentation
+
 - Comprehensive API documentation
 - User guides and tutorials
 - Security documentation
@@ -191,12 +215,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known Issues
 
 #### Version 0.1.0
+
 - Some advanced libp2p features may require additional configuration
 - Web interface requires modern browser with WebSocket support
 - CLI interface may have limited functionality on Windows
 - Performance may vary on resource-constrained systems
 
 #### Planned Fixes
+
 - Enhanced cross-platform compatibility
 - Improved error handling and recovery
 - Better performance on low-end devices
@@ -205,6 +231,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Migration Guide
 
 ### From Version 0.0.1 to 0.1.0
+
 - No migration required (first major release)
 - New configuration options available
 - Enhanced security features enabled by default
@@ -213,11 +240,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Support
 
 ### Version Support
+
 - **Current Version**: 0.1.0 (Full Support)
 - **Previous Versions**: Limited support
 - **Future Versions**: Planned support
 
 ### Support Channels
+
 - **GitHub Issues**: Bug reports and feature requests
 - **Documentation**: Comprehensive guides and tutorials
 - **Community**: Discord and forum support
@@ -225,4 +254,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-**Note**: This changelog is maintained alongside the project and will be updated with each release. For detailed information about specific changes, please refer to the commit history and release notes. 
+**Note**: This changelog is maintained alongside the project and will be updated with each release. For detailed information about specific changes, please refer to the commit history and release notes.

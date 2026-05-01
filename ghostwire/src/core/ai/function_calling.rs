@@ -396,6 +396,9 @@ impl Default for ToolRegistry {
 // FunctionGemma Client
 // ============================================================
 
+use std::sync::Weak;
+use crate::core::Core;
+
 /// FunctionGemma client for on-device tool calling
 ///
 /// Communicates with FunctionGemma via Ollama or LiteRT-LM backend.
@@ -406,6 +409,7 @@ pub struct FunctionGemmaClient {
     model: String,
     tool_registry: Arc<RwLock<ToolRegistry>>,
     timeout: Duration,
+    core: RwLock<Option<Weak<Core>>>, // ✅ Link to system core
 }
 
 impl FunctionGemmaClient {
@@ -424,6 +428,7 @@ impl FunctionGemmaClient {
             model: model.to_string(),
             tool_registry: Arc::new(RwLock::new(ToolRegistry::new())),
             timeout: Duration::from_secs(30),
+            core: RwLock::new(None),
         }
     }
 
@@ -438,7 +443,14 @@ impl FunctionGemmaClient {
             model: model.to_string(),
             tool_registry: Arc::new(RwLock::new(registry)),
             timeout: Duration::from_secs(30),
+            core: RwLock::new(None),
         }
+    }
+
+    /// Set the weak reference to the system core
+    pub async fn set_core(&self, core: Weak<Core>) {
+        let mut lock = self.core.write().await;
+        *lock = Some(core);
     }
 
     /// Parse a natural language command into a function call
@@ -588,24 +600,55 @@ impl FunctionGemmaClient {
         let content = args["content"].as_str().unwrap_or("");
         let channel = args["channel"].as_str();
 
-        // TODO: Wire to actual GhostWire message sending
-        tracing::info!(
-            "[FunctionGemma] send_message: recipient={}, content_len={}, channel={:?}",
-            recipient,
-            content.len(),
-            channel
-        );
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
 
-        Ok(FunctionResult {
-            function_name: "send_message".to_string(),
-            success: true,
-            output: serde_json::json!({
-                "status": "queued",
-                "recipient": recipient,
-                "channel": channel
+        // Build a real Message using the correct struct and get sender ID from identity
+        let sender_id = core.identity.read().await.id.clone();
+        let msg = crate::core::message::Message {
+            id: uuid::Uuid::new_v4(),
+            sender: sender_id,
+            recipient: recipient.to_string(),
+            content: content.to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            message_type: channel
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "direct".to_string()),
+            encrypted: false,
+            encryption_status: "none".to_string(),
+            hops: 0,
+        };
+        let msg_id = msg.id.to_string();
+
+        match core.send_message(&msg).await {
+            Ok(()) => Ok(FunctionResult {
+                function_name: "send_message".to_string(),
+                success: true,
+                output: serde_json::json!({
+                    "status": "sent",
+                    "recipient": recipient,
+                    "channel": channel,
+                    "message_id": msg_id
+                }),
+                error: None,
             }),
-            error: None,
-        })
+            Err(e) => Ok(FunctionResult {
+                function_name: "send_message".to_string(),
+                success: false,
+                output: serde_json::json!({}),
+                error: Some(e.to_string()),
+            }),
+        }
     }
 
     async fn handle_check_network_health(
@@ -614,17 +657,25 @@ impl FunctionGemmaClient {
     ) -> Result<FunctionResult, Box<dyn std::error::Error + Send + Sync>> {
         let detail = args["detail_level"].as_str().unwrap_or("summary");
 
-        // TODO: Wire to actual GhostWire mesh health monitoring
-        tracing::info!("[FunctionGemma] check_network_health: detail={}", detail);
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        // Use the real mesh health builder
+        let health = crate::core::mesh_health::build_snapshot(&core, 0).await;
 
         Ok(FunctionResult {
             function_name: "check_network_health".to_string(),
             success: true,
             output: serde_json::json!({
-                "status": "healthy",
-                "peer_count": 0,
-                "avg_latency_ms": 0,
-                "packet_loss": 0.0,
+                "status": if health.network_state.packet_loss_pct > 10.0 { "degraded" } else { "healthy" },
+                "health_snapshot": health,
                 "detail_level": detail
             }),
             error: None,
@@ -638,12 +689,56 @@ impl FunctionGemmaClient {
         let action = args["action"].as_str().unwrap_or("");
         let peer_id = args["peer_id"].as_str();
 
-        // TODO: Wire to actual GhostWire routing
-        tracing::info!(
-            "[FunctionGemma] route_traffic: action={}, peer_id={:?}",
-            action,
-            peer_id
-        );
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        // Wire to real SecurityManager for routing enforcement actions
+        let status = match action {
+            "block" => {
+                if let Some(id) = peer_id {
+                    let mut resolved_ip = id.to_string();
+                    
+                    // Try to resolve PeerID to IP from mesh topology
+                    #[cfg(feature = "mesh")]
+                    if let Some(mesh_manager) = &core.mesh_manager {
+                        let topo = mesh_manager.read().await.get_topology();
+                        if let Some(node) = topo.nodes.get(id) {
+                            for addr in &node.last_seen_addresses {
+                                if let Some(ip) = addr.iter().find_map(|p| match p {
+                                    libp2p::multiaddr::Protocol::Ip4(ip) => Some(ip.to_string()),
+                                    libp2p::multiaddr::Protocol::Ip6(ip) => Some(ip.to_string()),
+                                    _ => None,
+                                }) {
+                                    resolved_ip = ip;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    core.security_manager.block_ip(&resolved_ip).await;
+                    "blocked"
+                } else {
+                    "error: peer_id required for block"
+                }
+            }
+            "lockdown" => {
+                core.security_manager.set_lockdown(true).await;
+                "lockdown_enabled"
+            }
+            "unlock" => {
+                core.security_manager.set_lockdown(false).await;
+                "lockdown_disabled"
+            }
+            _ => "unknown_action",
+        };
 
         Ok(FunctionResult {
             function_name: "route_traffic".to_string(),
@@ -651,7 +746,7 @@ impl FunctionGemmaClient {
             output: serde_json::json!({
                 "action": action,
                 "peer_id": peer_id,
-                "status": "applied"
+                "status": status
             }),
             error: None,
         })
@@ -663,16 +758,46 @@ impl FunctionGemmaClient {
     ) -> Result<FunctionResult, Box<dyn std::error::Error + Send + Sync>> {
         let filter = args["filter"].as_str().unwrap_or("all");
 
-        // TODO: Wire to actual GhostWire peer list
-        tracing::info!("[FunctionGemma] list_peers: filter={}", filter);
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        let mut peer_list = Vec::new();
+
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &core.mesh_manager {
+            let topology = mesh_manager.read().await.get_topology();
+            for (id, node) in topology.nodes {
+                let is_online = node.last_seen > (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() - 300);
+                
+                match filter {
+                    "connected" if !is_online => continue,
+                    "disconnected" if is_online => continue,
+                    _ => {}
+                }
+
+                peer_list.push(serde_json::json!({
+                    "id": id,
+                    "username": node.username,
+                    "status": if is_online { "connected" } else { "disconnected" },
+                    "last_seen": node.last_seen,
+                }));
+            }
+        }
 
         Ok(FunctionResult {
             function_name: "list_peers".to_string(),
             success: true,
             output: serde_json::json!({
-                "peers": [],
+                "peers": peer_list,
                 "filter": filter,
-                "total": 0
+                "total": peer_list.len()
             }),
             error: None,
         })
@@ -684,16 +809,29 @@ impl FunctionGemmaClient {
     ) -> Result<FunctionResult, Box<dyn std::error::Error + Send + Sync>> {
         let scope = args["scope"].as_str().unwrap_or("local");
 
-        // TODO: Wire to actual GhostWire threat detection
-        tracing::info!("[FunctionGemma] analyze_threats: scope={}", scope);
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        // Get recent security events
+        let recent_events = core.audit_logger.get_recent_events(10).await;
+        let health = crate::core::mesh_health::build_snapshot(&core, 0).await;
 
         Ok(FunctionResult {
             function_name: "analyze_threats".to_string(),
             success: true,
             output: serde_json::json!({
-                "threat_level": "none",
+                "threat_level": health.security.trust_score_avg,
                 "scope": scope,
-                "anomalies": []
+                "recent_events": recent_events,
+                "sybil_rejections": health.security.sybil_rejections_24h,
+                "failed_unlocks": health.security.failed_unlock_attempts_24h
             }),
             error: None,
         })
@@ -706,20 +844,30 @@ impl FunctionGemmaClient {
         let peer_id = args["peer_id"].as_str().unwrap_or("");
         let limit = args["limit"].as_u64().unwrap_or(20);
 
-        // TODO: Wire to actual GhostWire message store
-        tracing::info!(
-            "[FunctionGemma] get_message_history: peer_id={}, limit={}",
-            peer_id,
-            limit
-        );
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        let messages = core.messages.read().await;
+        let history: Vec<_> = messages.iter()
+            .filter(|m| m.sender == peer_id || m.recipient == peer_id || peer_id.is_empty())
+            .take(limit as usize)
+            .cloned()
+            .collect();
 
         Ok(FunctionResult {
             function_name: "get_message_history".to_string(),
             success: true,
             output: serde_json::json!({
-                "messages": [],
+                "messages": history,
                 "peer_id": peer_id,
-                "count": 0
+                "count": history.len()
             }),
             error: None,
         })
@@ -732,20 +880,36 @@ impl FunctionGemmaClient {
         let nickname = args["nickname"].as_str();
         let status = args["status"].as_str();
 
-        // TODO: Wire to actual GhostWire identity
-        tracing::info!(
-            "[FunctionGemma] set_identity: nickname={:?}, status={:?}",
-            nickname,
-            status
-        );
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        // Wire to the real identity system via RwLock
+        {
+            let identity = core.identity.read().await;
+            identity.update_metadata(
+                nickname.map(|s| s.to_string()),
+                status.map(|s| s.to_string()),
+                None,
+                None,
+            );
+        }
+        let meta = core.identity.read().await.get_metadata();
 
         Ok(FunctionResult {
             function_name: "set_identity".to_string(),
             success: true,
             output: serde_json::json!({
-                "nickname": nickname,
-                "status": status,
-                "updated": true
+                "nickname": meta.nickname,
+                "bio": meta.bio,
+                "updated": true,
+                "note": "Identity updated in memory. Use /api/v2/profile/save to persist."
             }),
             error: None,
         })
@@ -758,19 +922,36 @@ impl FunctionGemmaClient {
         let scan_type = args["scan_type"].as_str().unwrap_or("all");
         let timeout_secs = args["timeout_secs"].as_u64().unwrap_or(10);
 
-        // TODO: Wire to actual GhostWire network scanning
-        tracing::info!(
-            "[FunctionGemma] scan_network: type={}, timeout={}s",
-            scan_type,
-            timeout_secs
-        );
+        let core_lock = self.core.read().await;
+        let core_weak = match &*core_lock {
+            Some(w) => w.clone(),
+            None => return Err("Core not linked to FunctionGemmaClient".into()),
+        };
+        let core = match core_weak.upgrade() {
+            Some(c) => c,
+            None => return Err("Core has been dropped".into()),
+        };
+
+        // Query real mesh topology for live network scan (get_topology is sync)
+        let (connected_peers, total_known_peers) = if let Some(mesh) = &core.mesh_manager {
+            let topo = mesh.read().await.get_topology();
+            let total = topo.nodes.len();
+            let online = topo.nodes.values().filter(|n| n.is_online).count();
+            (online, total)
+        } else {
+            (0, 0)
+        };
+        let health = crate::core::mesh_health::build_snapshot(&core, 0).await;
 
         Ok(FunctionResult {
             function_name: "scan_network".to_string(),
             success: true,
             output: serde_json::json!({
                 "scan_type": scan_type,
-                "nodes_found": [],
+                "nodes_found": connected_peers,
+                "total_known_peers": total_known_peers,
+                "routing_table_size": health.routing.routing_table_size,
+                "subnet_distribution": health.routing.subnet_distribution,
                 "duration_secs": timeout_secs
             }),
             error: None,

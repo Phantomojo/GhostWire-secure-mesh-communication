@@ -1,0 +1,732 @@
+Crate cadence Copy item path
+
+<span class="sub-heading"><a href="../src/cadence/lib.rs.html#11-591" class="src">Source</a>
+</span>
+
+Expand description
+
+An extensible Statsd client for Rust!
+
+Cadence is a fast and flexible way to emit Statsd metrics from your
+application.
+
+## <a href="#features" class="doc-anchor">§</a>Features
+
+-   [Support](https://docs.rs/cadence/) for emitting counters, timers,
+    histograms, distributions, gauges, meters, and sets to Statsd over
+    UDP (or optionally Unix sockets).
+-   Support for alternate backends via the `MetricSink` trait.
+-   Support for
+    [Datadog](https://docs.datadoghq.com/developers/dogstatsd/) style
+    metrics tags.
+-   [Macros](https://docs.rs/cadence-macros/) to simplify common calls
+    to emit metrics
+-   A simple yet flexible API for sending metrics.
+
+## <a href="#install" class="doc-anchor">§</a>Install
+
+To make use of `cadence` in your project, add it as a dependency in your
+`Cargo.toml` file.
+
+``` language-toml
+[dependencies]
+cadence = "x.y.z"
+```
+
+That’s all you need!
+
+## <a href="#usage" class="doc-anchor">§</a>Usage
+
+Some examples of how to use Cadence are shown below. The examples start
+simple and work up to how you should be using Cadence in a production
+application.
+
+### <a href="#simple-use" class="doc-anchor">§</a>Simple Use
+
+Simple usage of Cadence is shown below. In this example, we just import
+the client, create an instance that will write to some imaginary metrics
+server, and send a few metrics.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, UdpMetricSink, DEFAULT_PORT};
+
+// Create client that will write to the given host over UDP.
+//
+// Note that you'll probably want to actually handle any errors creating
+// the client when you use it for real in your application. We're just
+// using .unwrap() here since this is an example!
+let host = ("metrics.example.com", DEFAULT_PORT);
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+let sink = UdpMetricSink::from(host, socket).unwrap();
+let client = StatsdClient::from_sink("my.metrics", sink);
+
+// Emit metrics!
+client.count("some.counter", 1);
+client.time("some.methodCall", 42);
+client.gauge("some.thing", 7);
+client.meter("some.value", 5);
+```
+
+### <a href="#buffered-udp-sink" class="doc-anchor">§</a>Buffered UDP Sink
+
+While sending a metric over UDP is very fast, the overhead of frequent
+network calls can start to add up. This is especially true if you are
+writing a high performance application that emits a lot of metrics.
+
+To make sure that metrics aren’t interfering with the performance of
+your application, you may want to use a `MetricSink` implementation that
+buffers multiple metrics before sending them in a single network
+operation. For this, there’s `BufferedUdpMetricSink`. An example of
+using this sink is given below.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, BufferedUdpMetricSink, DEFAULT_PORT};
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+socket.set_nonblocking(true).unwrap();
+
+let host = ("metrics.example.com", DEFAULT_PORT);
+let sink = BufferedUdpMetricSink::from(host, socket).unwrap();
+let client = StatsdClient::from_sink("my.prefix", sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+```
+
+As you can see, using this buffered UDP sink is no more complicated than
+using the regular, non-buffered, UDP sink.
+
+The only downside to this sink is that metrics aren’t written to the
+Statsd server until the buffer is full. If you have a busy application
+that is constantly emitting metrics, this shouldn’t be a problem.
+However, if your application only occasionally emits metrics, this sink
+might result in the metrics being delayed for a little while until the
+buffer fills. In this case, it may make sense to use the `UdpMetricSink`
+since it does not do any buffering.
+
+### <a href="#re-resolving-udp-sinks" class="doc-anchor">§</a>Re-resolving UDP Sinks
+
+When using UDP sinks by default, the address of the server you are
+sending metrics to is resolved a single time when the UDP sink is
+created. If you anticipate the IP address of the server you are sending
+metrics to will change, you can configure UDP sinks to periodically
+re-resolve the IP address of the metrics server. This can be done using
+their respective builders. You may also supply a function that is called
+when the re-resolution of the metrics server IP address fails.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use std::time::Duration;
+use cadence::prelude::*;
+use cadence::{StatsdClient, BufferedUdpMetricSink, DEFAULT_PORT};
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+let host = ("metrics.example.com", DEFAULT_PORT);
+
+let sink = BufferedUdpMetricSink::builder()
+    .with_capacity(1024)
+    .with_resolver_period(Duration::from_secs(5))
+    .with_resolver_error_handler(|e| {
+        eprintln!("error: failed to resolve host: {}", e);
+    })
+    .build(host, socket)
+    .unwrap();
+let client = StatsdClient::from_sink("my.prefix", sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+```
+
+If enabled, periodic address resolution is done in a separate thread
+created by the sink when the sink is created. The thread is stopped when
+the sink is dropped.
+
+### <a href="#queuing-asynchronous-metric-sink" class="doc-anchor">§</a>Queuing Asynchronous Metric Sink
+
+To make sure emitting metrics doesn’t interfere with the performance of
+your application (even though emitting metrics is generally quite fast),
+it’s probably a good idea to make sure metrics are emitted in in a
+different thread than your application thread.
+
+To allow you to do this, there is `QueuingMetricSink`. This sink allows
+you to wrap any other metric sink and send metrics to it via a queue, as
+it emits metrics in another thread, asynchronously from the flow of your
+application.
+
+The requirements for the wrapped metric sink are that it is thread safe,
+meaning that it implements the `Send` and `Sync` traits. If you’re using
+the `QueuingMetricSink` with another sink from Cadence, you don’t need
+to worry: they are all thread safe.
+
+An example of using the `QueuingMetricSink` to wrap a buffered UDP
+metric sink is given below. This is the preferred way to use Cadence in
+production.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, QueuingMetricSink, BufferedUdpMetricSink, DEFAULT_PORT};
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+socket.set_nonblocking(true).unwrap();
+
+let host = ("metrics.example.com", DEFAULT_PORT);
+let udp_sink = BufferedUdpMetricSink::from(host, socket).unwrap();
+let queuing_sink = QueuingMetricSink::from(udp_sink);
+let client = StatsdClient::from_sink("my.prefix", queuing_sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+```
+
+In the example above, we use the default constructor for the queuing
+sink which creates an **unbounded** queue, with no maximum size, to
+connect the main thread where the client sends metrics to the background
+thread in which the wrapped sink is running. If instead, you want to
+create a **bounded** queue with a maximum size, you can use the
+`with_capacity` constructor. An example of this is given below.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, QueuingMetricSink, BufferedUdpMetricSink,
+              DEFAULT_PORT};
+
+// Queue with a maximum capacity of 128K elements
+const QUEUE_SIZE: usize = 128 * 1024;
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+socket.set_nonblocking(true).unwrap();
+
+let host = ("metrics.example.com", DEFAULT_PORT);
+let udp_sink = BufferedUdpMetricSink::from(host, socket).unwrap();
+let queuing_sink = QueuingMetricSink::with_capacity(udp_sink, QUEUE_SIZE);
+let client = StatsdClient::from_sink("my.prefix", queuing_sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+```
+
+Using a `QueuingMetricSink` with a capacity set means that when the
+queue is full, attempts to emit metrics via the `StatsdClient` will
+fail. While this is bad, the alternative (if you instead used an
+unbounded queue) is for unsent metrics to slowly use up more and more
+memory until your application exhausts all memory.
+
+Using an **unbounded** queue means that the sending of metrics can
+absorb slowdowns of sending metrics until your application runs out of
+memory. Using a **bounded** queue puts a cap on the amount of memory
+that sending metrics will use in your application. This is a tradeoff
+that users of Cadence must decide for themselves.
+
+It is also possible to supply an error handler for a `QueuingMetricSink`
+to be called whenever the wrapped sink cannot send metrics for whatever
+reason.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, QueuingMetricSink, BufferedUdpMetricSink,
+              DEFAULT_PORT};
+
+// Queue with a maximum capacity of 128K elements
+const QUEUE_SIZE: usize = 128 * 1024;
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+socket.set_nonblocking(true).unwrap();
+
+let host = ("metrics.example.com", DEFAULT_PORT);
+let udp_sink = BufferedUdpMetricSink::from(host, socket).unwrap();
+let queuing_sink = QueuingMetricSink::builder()
+    .with_capacity(QUEUE_SIZE)
+    .with_error_handler(|e| {
+        eprintln!("Error while sending metrics: {:?}", e);
+    })
+    .build(udp_sink);
+let client = StatsdClient::from_sink("my.prefix", queuing_sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+```
+
+### <a href="#use-with-tags" class="doc-anchor">§</a>Use With Tags
+
+Adding tags to metrics is accomplished via the use of each of the
+`_with_tags` methods that are part of the Cadence `StatsdClient` struct.
+An example of using these methods is given below. Note that tags are an
+extension to the Statsd protocol and so may not be supported by all
+servers.
+
+See the [Datadog docs](https://docs.datadoghq.com/developers/dogstatsd/)
+for more information.
+
+``` {.rust .rust-example-rendered}
+use cadence::prelude::*;
+use cadence::{Metric, StatsdClient, NopMetricSink};
+
+let client = StatsdClient::from_sink("my.prefix", NopMetricSink);
+
+let res = client.count_with_tags("my.counter", 29)
+    .with_tag("host", "web03.example.com")
+    .with_tag_value("beta-test")
+    .try_send();
+
+assert_eq!(
+    concat!(
+        "my.prefix.my.counter:29|c|#",
+        "host:web03.example.com,",
+        "beta-test"
+    ),
+    res.unwrap().as_metric_str()
+);
+```
+
+### <a href="#default-tags" class="doc-anchor">§</a>Default Tags
+
+Default tags can be added to a `StatsdClient` when constructed using the
+builder. Default tags are added to every metric emitted by the
+`StatsdClient` without any extra work after building the client. Note
+that tags are an extension to the Statsd protocol and so may not be
+supported by all servers.
+
+See the [Datadog docs](https://docs.datadoghq.com/developers/dogstatsd/)
+for more information.
+
+``` {.rust .rust-example-rendered}
+use cadence::prelude::*;
+use cadence::{Metric, StatsdClient, NopMetricSink};
+
+let client = StatsdClient::builder("my.prefix", NopMetricSink)
+    .with_tag("env", "prod")
+    .with_tag("app", "auth")
+    .build();
+
+let res = client.count_with_tags("my.counter", 29)
+    .with_tag("host", "web03.example.com")
+    .with_tag_value("beta-test")
+    .try_send();
+
+assert_eq!(
+    concat!(
+        "my.prefix.my.counter:29|c|#",
+        "env:prod,",
+        "app:auth,",
+        "host:web03.example.com,",
+        "beta-test"
+    ),
+    res.unwrap().as_metric_str()
+);
+```
+
+### <a href="#value-packing" class="doc-anchor">§</a>Value Packing
+
+Value packing allows multiple values to be sent as a single metric for
+histograms, distributions, and timer types. The Cadence client accepts
+`Vec<T>` for histogram, distribution, and timer methods and will format
+multiple values as described below. Note that this feature is a Datadog
+extension and so may not be supported by your server. It is supported by
+versions `>=v6.25.0 && <v7.0.0` or `>=v7.25.0` of the Datadog agent.
+
+Packed metrics have the following format:
+
+``` language-text
+<METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>`
+```
+
+See the [Datadog
+Docs](https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/?tab=metrics#dogstatsd-protocol-v11)
+for more information.
+
+``` {.rust .rust-example-rendered}
+use cadence::prelude::*;
+use cadence::{Metric, StatsdClient, NopMetricSink};
+
+let client = StatsdClient::from_sink("my.prefix", NopMetricSink);
+
+let res = client.distribution_with_tags("my.distribution", vec![29, 30, 31, 32])
+    .with_tag("host", "web03.example.com")
+    .with_tag_value("beta-test")
+    .try_send();
+
+assert_eq!(
+    concat!(
+        "my.prefix.my.distribution:29:30:31:32|d|#",
+        "host:web03.example.com,",
+        "beta-test"
+    ),
+    res.unwrap().as_metric_str()
+);
+```
+
+### <a href="#implemented-traits" class="doc-anchor">§</a>Implemented Traits
+
+Each of the methods that the Cadence `StatsdClient` struct uses to send
+metrics are implemented as a trait. There is also a trait that combines
+all of these other traits. If we want, we can just use one of the trait
+types to refer to the client instance. This might be useful to you if
+you’d like to swap out the actual Cadence client with a dummy version
+when you are unit testing your code or want to abstract away all the
+implementation details of the client being used behind a trait and
+pointer.
+
+Each of these traits are exported in the prelude module. They are also
+available in the main module but aren’t typically used like that.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use cadence::prelude::*;
+use cadence::{StatsdClient, UdpMetricSink, DEFAULT_PORT};
+
+pub struct User {
+    id: u64,
+    username: String,
+    email: String
+}
+
+
+// Here's a simple DAO (Data Access Object) that doesn't do anything but
+// uses a metric client to keep track of the number of times the
+// 'getUserById' method gets called.
+pub struct MyUserDao {
+    metrics: Box<dyn MetricClient>
+}
+
+
+impl MyUserDao {
+    // Create a new instance that will use the StatsdClient
+    pub fn new<T: MetricClient + 'static>(metrics: T) -> MyUserDao {
+        MyUserDao { metrics: Box::new(metrics) }
+    }
+
+    /// Get a new user by their ID
+    pub fn get_user_by_id(&self, id: u64) -> Option<User> {
+        self.metrics.count("getUserById", 1);
+        None
+    }
+}
+
+
+// Create a new Statsd client that writes to "metrics.example.com"
+let host = ("metrics.example.com", DEFAULT_PORT);
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+let sink = UdpMetricSink::from(host, socket).unwrap();
+let metrics = StatsdClient::from_sink("counter.example", sink);
+
+// Create a new instance of the DAO that will use the client
+let dao = MyUserDao::new(metrics);
+
+// Try to lookup a user by ID!
+match dao.get_user_by_id(123) {
+    Some(u) => println!("Found a user!"),
+    None => println!("No user!")
+};
+```
+
+### <a href="#quiet-metric-sending-and-error-handling"
+class="doc-anchor">§</a>Quiet Metric Sending and Error Handling
+
+When sending metrics sometimes you don’t really care about the `Result`
+of trying to send it or maybe you just don’t want to deal with it inline
+with the rest of your code. In order to handle this, Cadence allows you
+to set a default error handler. This handler is invoked when there are
+errors sending metrics so that the calling code doesn’t have to deal
+with them.
+
+An example of configuring an error handler and an example of when it
+might be invoked is given below.
+
+``` {.rust .rust-example-rendered}
+use cadence::prelude::*;
+use cadence::{MetricError, StatsdClient, NopMetricSink};
+
+fn my_error_handler(err: MetricError) {
+    println!("Metric error! {}", err);
+}
+
+let client = StatsdClient::builder("prefix", NopMetricSink)
+    .with_error_handler(my_error_handler)
+    .build();
+
+// When sending metrics via the `MetricBuilder` used for assembling tags,
+// callers may opt into sending metrics quietly via the `.send()` method
+// as opposed to the `.try_send()` method
+client.count_with_tags("some.counter", 42)
+    .with_tag("region", "us-east-2")
+    .send();
+```
+
+### <a href="#custom-metric-sinks" class="doc-anchor">§</a>Custom Metric Sinks
+
+The Cadence `StatsdClient` uses implementations of the `MetricSink`
+trait to send metrics to a metric server. Most users of the Cadence
+library probably want to use the `QueuingMetricSink` wrapping an
+instance of the `BufferedMetricSink`.
+
+However, maybe you want to do something not covered by an existing sink.
+An example of creating a custom sink is below.
+
+``` {.rust .rust-example-rendered}
+use std::io;
+use cadence::prelude::*;
+use cadence::{StatsdClient, MetricSink, DEFAULT_PORT};
+
+pub struct MyMetricSink;
+
+
+impl MetricSink for MyMetricSink {
+    fn emit(&self, metric: &str) -> io::Result<usize> {
+        // Your custom metric sink implementation goes here!
+        Ok(0)
+    }
+}
+
+
+let sink = MyMetricSink;
+let client = StatsdClient::from_sink("my.prefix", sink);
+
+client.count("my.counter.thing", 42);
+client.time("my.method.time", 25);
+client.count("some.other.counter", 1);
+```
+
+### <a href="#custom-udp-socket" class="doc-anchor">§</a>Custom UDP Socket
+
+Most users of the Cadence `StatsdClient` will be using it to send
+metrics over a UDP socket. If you need to customize the socket, for
+example you want to use the socket in blocking mode but set a write
+timeout, you can do that as demonstrated below.
+
+``` {.rust .rust-example-rendered}
+use std::net::UdpSocket;
+use std::time::Duration;
+use cadence::prelude::*;
+use cadence::{StatsdClient, UdpMetricSink, DEFAULT_PORT};
+
+let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+socket.set_write_timeout(Some(Duration::from_millis(1))).unwrap();
+
+let host = ("metrics.example.com", DEFAULT_PORT);
+let sink = UdpMetricSink::from(host, socket).unwrap();
+let client = StatsdClient::from_sink("my.prefix", sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+client.count("some.event", 33);
+client.set("users.uniques", 42);
+```
+
+### <a href="#unix-sockets" class="doc-anchor">§</a>Unix Sockets
+
+Cadence also supports using Unix datagram sockets with the
+`UnixMetricSink` or `BufferedUnixMetricSink`. Unix sockets can be used
+for sending metrics to a server or agent running on the same machine
+(physical machine, VM, containers in a pod) as your application. Unix
+sockets are somewhat similar to UDP sockets with a few important
+differences:
+
+-   Sending metrics on a socket that doesn’t exist or is not being
+    listened to will result in an error.
+-   Metrics sent on a connected socket are guaranteed to be delievered
+    (i.e. they are reliable as opposed to UDP sockets). However, it’s
+    still possible that the metrics won’t be read by the server due to a
+    variety of environment and server specific reasons.
+
+An example of using the sinks is given below.
+
+``` {.rust .rust-example-rendered}
+use std::os::unix::net::UnixDatagram;
+use cadence::prelude::*;
+use cadence::{StatsdClient, BufferedUnixMetricSink};
+
+let socket = UnixDatagram::unbound().unwrap();
+socket.set_nonblocking(true).unwrap();
+let sink = BufferedUnixMetricSink::from("/run/statsd.sock", socket);
+let client = StatsdClient::from_sink("my.prefix", sink);
+
+client.count("my.counter.thing", 29);
+client.time("my.service.call", 214);
+client.count("some.event", 33);
+client.set("users.uniques", 42);
+```
+
+NOTE: This feature is only available on Unix platforms (Linux, BSD,
+MacOS).
+
+# Modules<a href="#modules" class="anchor">§</a>
+
+<a href="ext/index.html" class="mod" title="mod cadence::ext">ext</a>  
+Advanced extension points for the Cadence library
+
+<a href="prelude/index.html" class="mod"
+title="mod cadence::prelude">prelude</a>  
+Export commonly used parts of Cadence for easy glob imports
+
+# Structs<a href="#structs" class="anchor">§</a>
+
+<a href="struct.BufferedSpyMetricSink.html" class="struct"
+title="struct cadence::BufferedSpyMetricSink">BufferedSpyMetricSink</a>  
+`MetricSink` implementation that buffers metrics and writes them to the
+`Sender` half of a channel while callers are given ownership of the
+`Receiver` half.
+
+<a href="struct.BufferedUdpMetricSink.html" class="struct"
+title="struct cadence::BufferedUdpMetricSink">BufferedUdpMetricSink</a>  
+Implementation of a `MetricSink` that buffers metrics before sending
+them to a UDP socket.
+
+<a href="struct.BufferedUdpMetricSinkBuilder.html" class="struct"
+title="struct cadence::BufferedUdpMetricSinkBuilder">BufferedUdpMetricSinkBuilder</a>  
+Implementation of a builder pattern for `BufferedUdpMetricSink`.
+
+<a href="struct.BufferedUnixMetricSink.html" class="struct"
+title="struct cadence::BufferedUnixMetricSink">BufferedUnixMetricSink</a>  
+Implementation of a `MetricSink` that buffers metrics before sending
+them to a Unix socket.
+
+<a href="struct.Counter.html" class="struct"
+title="struct cadence::Counter">Counter</a>  
+Counters are simple values incremented or decremented by a client.
+
+<a href="struct.Distribution.html" class="struct"
+title="struct cadence::Distribution">Distribution</a>  
+Distributions represent a global statistical distribution of a set of
+values.
+
+<a href="struct.Gauge.html" class="struct"
+title="struct cadence::Gauge">Gauge</a>  
+Gauges are an instantaneous value determined by the client.
+
+<a href="struct.Histogram.html" class="struct"
+title="struct cadence::Histogram">Histogram</a>  
+Histograms are values whose distribution is calculated by the server.
+
+<a href="struct.Meter.html" class="struct"
+title="struct cadence::Meter">Meter</a>  
+Meters measure the rate at which events occur as determined by the
+server.
+
+<a href="struct.MetricBuilder.html" class="struct"
+title="struct cadence::MetricBuilder">MetricBuilder</a>  
+Builder for adding tags to in-progress metrics.
+
+<a href="struct.MetricError.html" class="struct"
+title="struct cadence::MetricError">MetricError</a>  
+Error generated by this library potentially wrapping another type of
+error (exposed via the `Error` trait).
+
+<a href="struct.NopMetricSink.html" class="struct"
+title="struct cadence::NopMetricSink">NopMetricSink</a>  
+Implementation of a `MetricSink` that discards all metrics.
+
+<a href="struct.QueuingMetricSink.html" class="struct"
+title="struct cadence::QueuingMetricSink">QueuingMetricSink</a>  
+Implementation of a `MetricSink` that wraps another implementation and
+uses it to emit metrics asynchronously, in another thread.
+
+<a href="struct.QueuingMetricSinkBuilder.html" class="struct"
+title="struct cadence::QueuingMetricSinkBuilder">QueuingMetricSinkBuilder</a>  
+Implementation of a builder pattern for `QueuingMetricSink`.
+
+<a href="struct.Set.html" class="struct"
+title="struct cadence::Set">Set</a>  
+Sets count the number of unique elements in a group.
+
+<a href="struct.SinkStats.html" class="struct"
+title="struct cadence::SinkStats">SinkStats</a>  
+I/O telemetry for a `MetricSink` implementation.
+
+<a href="struct.SpyMetricSink.html" class="struct"
+title="struct cadence::SpyMetricSink">SpyMetricSink</a>  
+`MetricSink` implementation that writes all metrics to the `Sender` half
+of a channel while callers are given ownership of the `Receiver` half.
+
+<a href="struct.StatsdClient.html" class="struct"
+title="struct cadence::StatsdClient">StatsdClient</a>  
+Client for Statsd that implements various traits to record metrics.
+
+<a href="struct.StatsdClientBuilder.html" class="struct"
+title="struct cadence::StatsdClientBuilder">StatsdClientBuilder</a>  
+Builder for creating and customizing `StatsdClient` instances.
+
+<a href="struct.Timer.html" class="struct"
+title="struct cadence::Timer">Timer</a>  
+Timers are a positive number of milliseconds between a start and end
+point.
+
+<a href="struct.UdpMetricSink.html" class="struct"
+title="struct cadence::UdpMetricSink">UdpMetricSink</a>  
+Implementation of a `MetricSink` that emits metrics over UDP.
+
+<a href="struct.UdpMetricSinkBuilder.html" class="struct"
+title="struct cadence::UdpMetricSinkBuilder">UdpMetricSinkBuilder</a>  
+Implementation of a builder pattern for `UdpMetricSink`.
+
+<a href="struct.UnixMetricSink.html" class="struct"
+title="struct cadence::UnixMetricSink">UnixMetricSink</a>  
+Implementation of a `MetricSink` that emits metrics over a Unix socket.
+
+# Enums<a href="#enums" class="anchor">§</a>
+
+<a href="enum.ErrorKind.html" class="enum"
+title="enum cadence::ErrorKind">ErrorKind</a>  
+Potential categories an error from this library falls into.
+
+# Constants<a href="#constants" class="anchor">§</a>
+
+<a href="constant.DEFAULT_PORT.html" class="constant"
+title="constant cadence::DEFAULT_PORT">DEFAULT_PORT</a>
+
+# Traits<a href="#traits" class="anchor">§</a>
+
+<a href="trait.Counted.html" class="trait"
+title="trait cadence::Counted">Counted</a>  
+Trait for incrementing and decrementing counters.
+
+<a href="trait.CountedExt.html" class="trait"
+title="trait cadence::CountedExt">CountedExt</a>  
+Trait for convenience methods for counters
+
+<a href="trait.Distributed.html" class="trait"
+title="trait cadence::Distributed">Distributed</a>  
+Trait for recording distribution values.
+
+<a href="trait.Gauged.html" class="trait"
+title="trait cadence::Gauged">Gauged</a>  
+Trait for recording gauge values.
+
+<a href="trait.Histogrammed.html" class="trait"
+title="trait cadence::Histogrammed">Histogrammed</a>  
+Trait for recording histogram values.
+
+<a href="trait.Metered.html" class="trait"
+title="trait cadence::Metered">Metered</a>  
+Trait for recording meter values.
+
+<a href="trait.Metric.html" class="trait"
+title="trait cadence::Metric">Metric</a>  
+Trait for metrics to expose Statsd metric string slice representation.
+
+<a href="trait.MetricClient.html" class="trait"
+title="trait cadence::MetricClient">MetricClient</a>  
+Trait that encompasses all other traits for sending metrics.
+
+<a href="trait.MetricSink.html" class="trait"
+title="trait cadence::MetricSink">MetricSink</a>  
+Trait for various backends that send Statsd metrics somewhere.
+
+<a href="trait.Setted.html" class="trait"
+title="trait cadence::Setted">Setted</a>  
+Trait for recording set values.
+
+<a href="trait.Timed.html" class="trait"
+title="trait cadence::Timed">Timed</a>  
+Trait for recording timings in milliseconds.
+
+# Type Aliases<a href="#types" class="anchor">§</a>
+
+<a href="type.MetricResult.html" class="type"
+title="type cadence::MetricResult">MetricResult</a>

@@ -52,30 +52,30 @@ cargo run --release -- tui
 
 Terminal interface with dashboard, peer list, message history, and compose — all in one screen.
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch tabs |
-| `i` | Compose message |
-| `q` | Quit |
+| Key   | Action          |
+| ----- | --------------- |
+| `Tab` | Switch tabs     |
+| `i`   | Compose message |
+| `q`   | Quit            |
 
 ## What Actually Works
 
-| Feature | Status |
-|---------|--------|
-| P2P mesh networking (libp2p) | ✅ Working |
-| End-to-end encryption (XChaCha20-Poly1305) | ✅ Working |
-| Key exchange (Ed25519 + X25519) | ✅ Working |
-| Forward secrecy (symmetric ratchet) | ✅ Working |
-| Message delivery ACKs/NACKs | ✅ Working |
-| HLC timestamps + message ordering | ✅ Working |
+| Feature                                     | Status     |
+| ------------------------------------------- | ---------- |
+| P2P mesh networking (libp2p)                | ✅ Working |
+| End-to-end encryption (XChaCha20-Poly1305)  | ✅ Working |
+| Key exchange (Ed25519 + X25519)             | ✅ Working |
+| Forward secrecy (vodozemac Double Ratchet)  | ✅ Working |
+| Message delivery ACKs/NACKs                 | ✅ Working |
+| HLC timestamps + message ordering           | ✅ Working |
 | Peer discovery (mDNS + DHT + peer exchange) | ✅ Working |
-| Decentralized bootstrap (seed nodes) | ✅ Working |
-| Anomaly detection (Isolation Forest) | ✅ Working |
-| AI routing (LightGBM + PRoPHET fallback) | ✅ Working |
-| Terminal UI (Ratatui) | ✅ Working |
-| Web API (Axum) | ✅ Working |
-| Stealth TCP transport | ✅ Working |
-| Shamir secret recovery | ✅ Working |
+| Decentralized bootstrap (seed nodes)        | ✅ Working |
+| Anomaly detection (Isolation Forest)        | ✅ Working |
+| AI routing (LightGBM + PRoPHET fallback)    | ✅ Working |
+| Terminal UI (Ratatui)                       | ✅ Working |
+| Web API (Axum)                              | ✅ Working |
+| Stealth TCP transport                       | ✅ Working |
+| Shamir secret recovery                      | ✅ Working |
 
 ## Architecture
 
@@ -91,7 +91,7 @@ Layer 4  Fallback         PRoPHET formula    <1ms
 ### Security Stack
 
 - **Encryption:** XChaCha20-Poly1305 with X25519 key exchange
-- **Forward Secrecy:** Symmetric ratchet with chain key aliasing
+- **Forward Secrecy:** vodozemac Olm/Megolm Double Ratchet (Signal protocol, Trail of Bits audited)
 - **Identity:** Ed25519 signing + X25519 encryption keypairs
 - **Recovery:** Shamir Secret Sharing with encrypted shares
 - **Threat Detection:** Isolation Forest anomaly scoring
@@ -110,9 +110,12 @@ src/
 │   ├── stealth_tcp.rs   — Obfuscated TCP transport
 │   ├── security_v2.rs   — Rate limiting, audit logging
 │   ├── hlc.rs           — Hybrid Logical Clocks
+│   ├── crypto_machine.rs — vodozemac Olm/Megolm Double Ratchet
+│   ├── crypto_processor.rs — Crypto I/O driver
+│   ├── routing/         — Sphinx, SKademlia, Private Routing
 │   └── wire_protocol.rs — Binary frame protocol
 ├── cli/                 — Command-line interface
-├── tui.rs               — Terminal user interface
+├── tui/                 — Terminal user interface
 └── web.rs               — Axum HTTP API
 ```
 
