@@ -37,13 +37,13 @@
 
 ```bash
 # 1. Check backend status
-curl -s http://127.0.0.1:8080/api/v2/profile | python3 -m json.tool
+curl -s http://127.0.0.1:9097/api/v2/profile | python3 -m json.tool
 
 # 2. Check discovered peers
-curl -s "http://127.0.0.1:8080/api/v2/peers?page=1&per_page=20" | python3 -m json.tool
+curl -s "http://127.0.0.1:9097/api/v2/peers?page=1&per_page=20" | python3 -m json.tool
 
 # 3. Check mesh health
-curl -s http://127.0.0.1:8080/api/v2/system/mesh-health | python3 -m json.tool
+curl -s http://127.0.0.1:9097/api/v2/system/mesh-health | python3 -m json.tool
 ```
 
 ### **On PC-B (stratsytem) - SSH and run:**
@@ -56,18 +56,18 @@ ssh root@100.105.58.61
 cd ~/ghostwire-live-test
 
 # 1. Check if backend running
-curl -s http://localhost:8080/api/v2/profile | python3 -m json.tool | head -10
+curl -s http://localhost:9097/api/v2/profile | python3 -m json.tool | head -10
 
 # 2. Check peers
-curl -s "http://localhost:8080/api/v2/peers?page=1&per_page=20" | python3 -m json.tool | head -20
+curl -s "http://localhost:9097/api/v2/peers?page=1&per_page=20" | python3 -m json.tool | head -20
 
 # 3. Connect to PC-A manually
-curl -X POST http://localhost:8080/api/v2/peers/connect \
+curl -X POST http://localhost:9097/api/v2/peers/connect \
   -H "Content-Type: application/json" \
   -d '{"peer_id": "88ef8419-e3b2-4d27-90f7-9d22db444a6b", "address": "/ip4/192.168.100.7/tcp/4001"}'
 
 # 4. Verify connection
-curl -s "http://localhost:8080/api/v2/peers?page=1&per_page=20" | python3 -c "
+curl -s "http://localhost:9097/api/v2/peers?page=1&per_page=20" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 print('Peers:', len(d['data']))
@@ -111,7 +111,7 @@ cd ~/ghostwire-live-test
 ./ghostwire --port 8080 --mesh &
 
 # Verify
-curl -s http://localhost:8080/api/v2/profile
+curl -s http://localhost:9097/api/v2/profile
 ```
 
 ### **If peers not discovered:**
@@ -160,26 +160,26 @@ Backend communication is working if:
 
 1. **PC-A:** Check status
    ```bash
-   curl -s http://127.0.0.1:8080/api/v2/profile | python3 -c "import sys,json; print('Node:', json.load(sys.stdin)['data']['id'][:20])"
+   curl -s http://127.0.0.1:9097/api/v2/profile | python3 -c "import sys,json; print('Node:', json.load(sys.stdin)['data']['id'][:20])"
    ```
 
 2. **PC-B:** Check status (via SSH)
    ```bash
-   ssh root@100.105.58.61 "curl -s http://localhost:8080/api/v2/profile | python3 -c 'import sys,json; print(\"Node:\", json.load(sys.stdin)[\"data\"][\"id\"][:20])'"
+   ssh root@100.105.58.61 "curl -s http://localhost:9097/api/v2/profile | python3 -c 'import sys,json; print(\"Node:\", json.load(sys.stdin)[\"data\"][\"id\"][:20])'"
    ```
 
 3. **PC-B:** Connect to PC-A
    ```bash
-   ssh root@100.105.58.61 "curl -X POST http://localhost:8080/api/v2/peers/connect -H 'Content-Type: application/json' -d '{\"peer_id\": \"88ef8419-e3b2-4d27-90f7-9d22db444a6b\", \"address\": \"/ip4/192.168.100.7/tcp/4001\"}'"
+   ssh root@100.105.58.61 "curl -X POST http://localhost:9097/api/v2/peers/connect -H 'Content-Type: application/json' -d '{\"peer_id\": \"88ef8419-e3b2-4d27-90f7-9d22db444a6b\", \"address\": \"/ip4/192.168.100.7/tcp/4001\"}'"
    ```
 
 4. **Both:** Check peer count
    ```bash
    # PC-A
-   curl -s "http://127.0.0.1:8080/api/v2/peers?page=1&per_page=20" | python3 -c "import sys,json; print('PC-A Peers:', len(json.load(sys.stdin)['data']))"
+   curl -s "http://127.0.0.1:9097/api/v2/peers?page=1&per_page=20" | python3 -c "import sys,json; print('PC-A Peers:', len(json.load(sys.stdin)['data']))"
    
    # PC-B
-   ssh root@100.105.58.61 "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20' | python3 -c 'import sys,json; print(\"PC-B Peers:\", len(json.load(sys.stdin)[\"data\"]))'"
+   ssh root@100.105.58.61 "curl -s 'http://localhost:9097/api/v2/peers?page=1&per_page=20' | python3 -c 'import sys,json; print(\"PC-B Peers:\", len(json.load(sys.stdin)[\"data\"]))'"
    ```
 
 ---

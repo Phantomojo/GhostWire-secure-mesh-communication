@@ -6,17 +6,17 @@ Comprehensive guide to testing the GhostWire API using CLI tools.
 
 ### Option 1: Simple HTTPie Tests (Recommended)
 ```bash
-./test-api.sh localhost:8080
+./test-api.sh localhost:9097
 ```
 
 ### Option 2: Newman (Postman CLI)
 ```bash
-./test-api-newman.sh localhost:8080
+./test-api-newman.sh localhost:9097
 ```
 
 ### Option 3: Manual cURL
 ```bash
-curl -v http://localhost:8080/api/status
+curl -v http://localhost:9097/api/status
 ```
 
 ---
@@ -81,7 +81,7 @@ cargo run -- web --port 8080
 
 ### Verify it's running
 ```bash
-curl http://localhost:8080/api/status
+curl http://localhost:9097/api/status
 ```
 
 Expected:
@@ -103,7 +103,7 @@ pip3 install httpie
 
 ### Basic Test
 ```bash
-http GET http://localhost:8080/api/status
+http GET http://localhost:9097/api/status
 ```
 
 Output:
@@ -119,7 +119,7 @@ Content-Type: application/json
 
 ### Run Full Suite
 ```bash
-./test-api.sh localhost:8080
+./test-api.sh localhost:9097
 ```
 
 This tests:
@@ -134,7 +134,7 @@ This tests:
 ### Sample Output
 ```
 [12:30:45] ℹ Testing: API Root
-[12:30:45] ℹ   GET http://localhost:8080/api/
+[12:30:45] ℹ   GET http://localhost:9097/api/
 [12:30:45] ✓ API Root - HTTP 200
 [12:30:46] ℹ Testing: System Status
 [12:30:46] ✓ System Status - HTTP 200
@@ -158,7 +158,7 @@ npm install -g newman
 
 ### Run Full Suite
 ```bash
-./test-api-newman.sh localhost:8080
+./test-api-newman.sh localhost:9097
 ```
 
 This creates:
@@ -189,31 +189,31 @@ Open `results/results-*.html` in a browser to see:
 
 ### Get Status
 ```bash
-curl http://localhost:8080/api/status
+curl http://localhost:9097/api/status
 ```
 
 ### Get Dev Token
 ```bash
-TOKEN=$(curl -s http://localhost:8080/api/dev/token | grep -oP '"data":"?\K[^"]+')
+TOKEN=$(curl -s http://localhost:9097/api/dev/token | grep -oP '"data":"?\K[^"]+')
 echo $TOKEN
 ```
 
 ### Use Token in Request
 ```bash
 curl -H "X-Ghost-Token: $TOKEN" \
-  http://localhost:8080/api/v2/profile
+  http://localhost:9097/api/v2/profile
 ```
 
 ### Create Profile
 ```bash
-curl -X POST http://localhost:8080/api/v2/profile \
+curl -X POST http://localhost:9097/api/v2/profile \
   -H "Content-Type: application/json" \
   -d '{"name": "test_profile"}'
 ```
 
 ### Send Message
 ```bash
-curl -X POST http://localhost:8080/api/broadcast \
+curl -X POST http://localhost:9097/api/broadcast \
   -H "X-Ghost-Token: $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"content": "Test message"}'
@@ -222,7 +222,7 @@ curl -X POST http://localhost:8080/api/broadcast \
 ### List Peers
 ```bash
 curl -H "X-Ghost-Token: $TOKEN" \
-  http://localhost:8080/api/v2/peers
+  http://localhost:9097/api/v2/peers
 ```
 
 ---
@@ -289,59 +289,59 @@ curl -H "X-Ghost-Token: $TOKEN" \
 ### Workflow 1: Bootstrap (No Auth Required)
 ```bash
 # 1. Check API status
-http GET http://localhost:8080/api/status
+http GET http://localhost:9097/api/status
 
 # 2. List existing profiles
-http GET http://localhost:8080/api/v2/profile
+http GET http://localhost:9097/api/v2/profile
 
 # 3. Create new profile
-http POST http://localhost:8080/api/v2/profile \
+http POST http://localhost:9097/api/v2/profile \
   name=alice_profile
 
 # 4. Get identity status
-http GET http://localhost:8080/api/v2/profile
+http GET http://localhost:9097/api/v2/profile
 ```
 
 ### Workflow 2: Get Token & Authenticate
 ```bash
 # 1. Get dev token
-TOKEN=$(http GET http://localhost:8080/api/dev/token | grep -oP '"data":"?\K[^"]+')
+TOKEN=$(http GET http://localhost:9097/api/dev/token | grep -oP '"data":"?\K[^"]+')
 
 # 2. Verify token works
-http GET http://localhost:8080/api/v2/profile \
+http GET http://localhost:9097/api/v2/profile \
   X-Ghost-Token:$TOKEN
 
 # 3. Get security dashboard
-http GET http://localhost:8080/api/v2/security/dashboard \
+http GET http://localhost:9097/api/v2/security/dashboard \
   X-Ghost-Token:$TOKEN
 ```
 
 ### Workflow 3: Send Messages
 ```bash
 # 1. Get token
-TOKEN=$(http GET http://localhost:8080/api/dev/token | grep -oP '"data":"?\K[^"]+')
+TOKEN=$(http GET http://localhost:9097/api/dev/token | grep -oP '"data":"?\K[^"]+')
 
 # 2. Get peer list
-http GET http://localhost:8080/api/v2/peers \
+http GET http://localhost:9097/api/v2/peers \
   X-Ghost-Token:$TOKEN
 
 # 3. Broadcast message
-http POST http://localhost:8080/api/broadcast \
+http POST http://localhost:9097/api/broadcast \
   X-Ghost-Token:$TOKEN \
   content='Hello from CLI test'
 
 # 4. Check messages
-http GET http://localhost:8080/api/v2/messages \
+http GET http://localhost:9097/api/v2/messages \
   X-Ghost-Token:$TOKEN
 ```
 
 ### Workflow 4: Full Automated Test
 ```bash
 # Run complete test suite
-./test-api.sh localhost:8080
+./test-api.sh localhost:9097
 
 # Or with Newman for reporting
-./test-api-newman.sh localhost:8080
+./test-api-newman.sh localhost:9097
 ```
 
 ---
@@ -377,7 +377,7 @@ cargo run -- web --port 8080
 #### "401 Unauthorized"
 ```bash
 # Get a new token
-TOKEN=$(curl -s http://localhost:8080/api/dev/token | grep -oP '"data":"?\K[^"]+')
+TOKEN=$(curl -s http://localhost:9097/api/dev/token | grep -oP '"data":"?\K[^"]+')
 echo $TOKEN
 ```
 
@@ -398,7 +398,7 @@ echo $TOKEN
 ```bash
 # Measure endpoint latency
 http --verbose --timeout=10 \
-  GET http://localhost:8080/api/v2/peers
+  GET http://localhost:9097/api/v2/peers
 ```
 
 ### Stress Testing
@@ -407,11 +407,11 @@ http --verbose --timeout=10 \
 apt-get install apache2-utils
 
 # Run 100 requests
-ab -n 100 -c 10 http://localhost:8080/api/status
+ab -n 100 -c 10 http://localhost:9097/api/status
 
 # Or use wrk
 brew install wrk
-wrk -t4 -c100 -d30s http://localhost:8080/api/status
+wrk -t4 -c100 -d30s http://localhost:9097/api/status
 ```
 
 ### Expected Performance
@@ -445,7 +445,7 @@ jobs:
         run: sleep 5
       
       - name: Run Tests
-        run: ./test-api.sh localhost:8080
+        run: ./test-api.sh localhost:9097
       
       - name: Upload Results
         uses: actions/upload-artifact@v2
@@ -462,10 +462,10 @@ jobs:
 ```bash
 # HTTPie verbose
 http --verbose --print=HhBb \
-  GET http://localhost:8080/api/status
+  GET http://localhost:9097/api/status
 
 # cURL verbose
-curl -v http://localhost:8080/api/status
+curl -v http://localhost:9097/api/status
 
 # Newman verbose
 newman run tests/api/GhostWire_API.postman_collection.json \
@@ -501,7 +501,7 @@ cargo run -- web --port 8080
 
 ✓ **Use environment variables**
 ```bash
-export API_HOST=localhost:8080
+export API_HOST=localhost:9097
 ./test-api.sh $API_HOST
 ```
 
@@ -517,7 +517,7 @@ export API_HOST=localhost:8080
 ✓ **Check error responses**
 ```bash
 curl -w "\nStatus: %{http_code}\n" \
-  http://localhost:8080/api/invalid
+  http://localhost:9097/api/invalid
 ```
 
 ---
@@ -536,7 +536,7 @@ curl -w "\nStatus: %{http_code}\n" \
 For issues or questions:
 1. Check `results/*.log` for error details
 2. Review API logs: `tail -f logs/ghostwire.log`
-3. Test with cURL: `curl -v http://localhost:8080/api/status`
+3. Test with cURL: `curl -v http://localhost:9097/api/status`
 4. Open GitHub issue with test results
 
 ---

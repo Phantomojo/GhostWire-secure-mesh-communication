@@ -324,7 +324,7 @@ cargo llvm-cov --html
 | GET | `/api/v2/messages/:id` | Get message | Yes |
 | DELETE | `/api/v2/messages/:id` | Delete message | Yes |
 
-**Full API Spec:** Access Swagger UI at `http://localhost:8080/swagger-ui` (after utoipa setup)
+**Full API Spec:** Access Swagger UI at `http://localhost:9097/swagger-ui` (after utoipa setup)
 
 ---
 
