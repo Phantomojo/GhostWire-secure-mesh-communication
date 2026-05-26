@@ -4,6 +4,14 @@
 
 ---
 
+## 📖 Getting Started
+
+| Document | Description |
+|----------|-------------|
+| **[Getting Started](GETTING_STARTED.md)** | Install, configure, run, and troubleshoot GhostWire in one guide |
+
+---
+
 ## Protocol Specifications
 
 Formal specifications that define the GhostWire Protocol — any implementation that follows these specs is protocol-compatible.
@@ -23,44 +31,15 @@ Formal specifications that define the GhostWire Protocol — any implementation 
 
 ---
 
-## Building on GhostWire
+## Architecture
 
-Guides for developers who want to build applications on the GhostWire Protocol.
-
-| Document | Description |
-|----------|-------------|
-| **[Overview](build/OVERVIEW.md)** | What you can build, protocol vs implementation distinction |
-| **[Quick Start](build/QUICKSTART.md)** | Add GhostWire to a Rust project, send your first mesh message |
-| **[Embedding Guide](build/EMBEDDING.md)** | Run GhostWire as a background service in your application |
-| **[Custom Transport](build/CUSTOM_TRANSPORT.md)** | Implement the Transport trait for new networking mediums |
-| **[Protocol Bridges](build/PROTOCOL_BRIDGES.md)** | Build bridges to Matrix, Meshtastic, Briar, Reticulum |
-| **[API Reference](build/API_REFERENCE.md)** | Complete REST API + WebSocket event reference |
-
----
-
-## Protocol Governance
+System design, interfaces, and component documentation.
 
 | Document | Description |
 |----------|-------------|
-| **[Governance](GOVERNANCE.md)** | GhostWire Implementation Proposals (GIPs), versioning, decision making |
-
----
-
-## Implementation Guides
-
-Documentation for the GhostWire reference implementation (Rust).
-
-| Document | Description |
-|----------|-------------|
-| **[Architecture](ARCHITECTURE.md)** | System internals, component diagram, message lifecycle |
-| **[Installation](INSTALL.md)** | Detailed setup for Linux, Docker, from source |
-| **[Quick Start](QUICK_START.md)** | Get running in 5 minutes |
-| **[How to Start](HOW_TO_START_GHOSTWIRE.md)** | Running GhostWire — CLI flags, configuration |
-| **[CLI](CLI.md)** | Command-line interface reference |
-| **[TUI](TUI.md)** | Terminal user interface guide |
-| **[Web UI](WEB_UI.md)** | Web interface documentation |
-| **[Testing](TESTING.md)** | Running tests, writing new tests |
-| **[Development](DEVELOPMENT.md)** | Development workflow, hot-reloading, debugging |
+| **[Architecture](architecture/ARCHITECTURE.md)** | System internals, component diagram, message lifecycle |
+| **[Architecture Research](architecture/RESEARCH.md)** | Design research and decisions |
+| _(CLI, TUI, and Web UI content is documented in the main README and ghostwire README)_ | |
 
 ---
 
@@ -68,29 +47,92 @@ Documentation for the GhostWire reference implementation (Rust).
 
 | Document | Description |
 |----------|-------------|
-| **[Security Policy](SECURITY.md)** | Vulnerability reporting, security model, best practices |
-| **[Security Audit](SECURITY_AUDIT.md)** | Full audit report — all critical issues resolved |
-| **[Audit Summary](AUDIT_SUMMARY.md)** | Executive summary of security audit findings |
+| **[Security Policy](security/SECURITY.md)** | Vulnerability reporting, security model, best practices |
+| **[Security Audit](security/SECURITY_AUDIT.md)** | Full audit report — all critical issues resolved |
+| **[Audit Summary](security/AUDIT_SUMMARY.md)** | Executive summary of security audit findings |
+| **[Audit Report 2026](security/SECURITY_AUDIT_REPORT_2026.md)** | Detailed security audit report |
+| **[API Security](security/API_SECURITY.md)** | API authentication and authorization patterns |
 
 ---
 
-## Protocol Knowledge
+## API Reference
+
+Full REST API and WebSocket documentation.
 
 | Document | Description |
 |----------|-------------|
-| **[Protocol Deep Dive](protocol-knowledge/PROTOCOL_DEEP_DIVE.md)** | libp2p stack, cryptography, stealth transport, mesh networking details |
+| **[API Reference](development/build/API_REFERENCE.md)** | Complete REST API + WebSocket event reference |
+| **[API Testing Guide](api/API_TESTING_GUIDE.md)** | Comprehensive curl examples for every endpoint |
+| **[API Quick Reference](api/API_QUICK_REFERENCE.md)** | Cheat-sheet of common API calls |
+| **[API Versioning](api/API_VERSIONING.md)** | Versioning policy and deprecation strategy |
+| **[Postman Guide](api/POSTMAN_API_GUIDE.md)** | Postman collection usage |
+| **[Backend Communication Test](api/BACKEND_COMMUNICATION_TEST.md)** | Multi-node test walkthrough |
+| **[API Deep Dive](api/DEEP_DIVE.md)** | Detailed API internals |
 
 ---
 
-## Project Information
+## Building on GhostWire
+
+Guides for developers building applications on top of the GhostWire Protocol.
 
 | Document | Description |
 |----------|-------------|
-| **[First Ping](FIRST_PING.md)** | First cross-machine mesh communication record (April 5, 2026) |
-| **[Changelog](CHANGELOG.md)** | Version history |
-| **[Roadmap](ROADMAP.md)** | Development roadmap |
-| **[Contributing](CONTRIBUTING.md)** | How to contribute to the project |
-| **[Code of Conduct](CODE_OF_CONDUCT.md)** | Community guidelines |
+| **[Overview](development/build/OVERVIEW.md)** | What you can build, protocol vs implementation distinction |
+| **[Quick Start](development/build/QUICKSTART.md)** | Add GhostWire to a Rust project, send your first mesh message |
+| **[Embedding Guide](development/build/EMBEDDING.md)** | Run GhostWire as a background service in your application |
+| **[Custom Transport](development/build/CUSTOM_TRANSPORT.md)** | Implement the Transport trait for new networking mediums |
+| **[Protocol Bridges](development/build/PROTOCOL_BRIDGES.md)** | Build bridges to Matrix, Meshtastic, Briar, Reticulum |
+
+---
+
+## Development
+
+Developer workflow, testing, and contribution guides.
+
+| Document | Description |
+|----------|-------------|
+| **[Contributing](development/CONTRIBUTING.md)** | How to contribute to the project |
+| **[Governance](development/GOVERNANCE.md)** | GIP process, versioning, decision making |
+| **[CLA](development/CLA.md)** | Contributor License Agreement |
+| **[Brand Guidelines](development/BRAND_GUIDELINES.md)** | Branding and identity guidelines |
+| **[Branding Integration](development/BRANDING_INTEGRATION.md)** | Brand implementation guide |
+| **[libp2p Connectivity](development/LIBP2P_NETWORK_CONNECTIVITY.md)** | Network connectivity reference |
+| **[Vibe Setup](development/VIBE_SETUP_GUIDE.md)** | Development environment setup |
+
+---
+
+## Knowledge Base
+
+Deep dives, reference materials, and project knowledge.
+
+| Document | Description |
+|----------|-------------|
+| **[Wiki](knowledge/wiki/index.md)** | Community wiki — getting started, FAQ, architecture, security |
+| **[GhostWire Codebase](knowledge/wiki/GhostWire_Codebase.md)** | 7000+ line generated codebase reference (LLM-optimized) |
+| **[Comprehensive Code Review](knowledge/COMPREHENSIVE_CODE_REVIEW.md)** | 1500+ line code review document |
+| **[Implementation Guide](knowledge/IMPLEMENTATION_GUIDE.md)** | Implementation journal and log |
+| **[Hardware BOM](knowledge/HARDWARE_SPEC_BOM.md)** | Hardware bill of materials |
+| **[30-Day libp2p Curriculum](knowledge/protocol-knowledge/30_DAY_LIBP2P_CURRICULUM.md)** | Structured libp2p learning path |
+| **[Protocol Deep Dive](knowledge/protocol-knowledge/PROTOCOL_DEEP_DIVE.md)** | libp2p stack, cryptography, stealth transport |
+| **[Global Knowledge Sources](knowledge/GLOBAL_KNOWLEDGE_SOURCES.md)** | External knowledge references |
+| **[GhostWire Manifesto](knowledge/GHOSTWIRE_MANIFESTO.md)** | Project vision and manifesto |
+| **[Manifesto Framework](knowledge/MANIFESTO_FRAMEWORK.md)** | Manifesto development framework |
+| **[Recommendations](knowledge/RECOMMENDATIONS.md)** | Project recommendations |
+| **[Review Summary](knowledge/REVIEW_SUMMARY.md)** | Code review summary |
+| **[First Ping](knowledge/FIRST_PING.md)** | First cross-machine mesh communication record |
+| **[Changelog](knowledge/CHANGELOG.md)** | Version history |
+
+---
+
+## Deployment
+
+Production deployment and operations.
+
+| Document | Description |
+|----------|-------------|
+| **[Multi-Node Deployment](api/BACKEND_COMMUNICATION_TEST.md)** | Multi-machine mesh deployment |
+| **[ML Pipeline](deployment/ML_PIPELINE.md)** | ML model deployment pipeline |
+| **[Installer Enhancements](deployment/INSTALLER_ENHANCEMENTS.md)** | Installer development notes |
 
 ---
 
@@ -117,5 +159,25 @@ Slide decks for talks and presentations about GhostWire.
 
 ---
 
-**Last Updated:** April 12, 2026
+## Legacy
+
+Historical documentation preserved for reference.
+
+| Directory | Contents |
+|-----------|----------|
+| **[legacy/](legacy/)** | 6 historical docs from earlier development phases |
+
+---
+
+## Archive
+
+Deprecated or superseded documentation.
+
+| Directory | Contents |
+|-----------|----------|
+| **[archive/](archive/)** | Merged, replaced, or out-of-date documents |
+
+---
+
+**Last Updated:** May 26, 2026
 **Maintained By:** Team GhostWire
