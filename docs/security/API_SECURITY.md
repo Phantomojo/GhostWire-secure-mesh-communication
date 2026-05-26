@@ -278,13 +278,13 @@ let app = Router::new()
 ```bash
 # Should succeed (5 requests)
 for i in {1..5}; do
-  curl -X POST http://localhost:8080/api/v2/profile/unlock \
+  curl -X POST http://localhost:9097/api/v2/profile/unlock \
     -H "Content-Type: application/json" \
     -d '{"password":"test"}'
 done
 
 # Should fail (429 Too Many Requests)
-curl -X POST http://localhost:8080/api/v2/profile/unlock \
+curl -X POST http://localhost:9097/api/v2/profile/unlock \
   -H "Content-Type: application/json" \
   -d '{"password":"test"}'
 ```
@@ -293,13 +293,13 @@ curl -X POST http://localhost:8080/api/v2/profile/unlock \
 ```bash
 # 5 failed attempts
 for i in {1..5}; do
-  curl -X POST http://localhost:8080/api/v2/profile/unlock \
+  curl -X POST http://localhost:9097/api/v2/profile/unlock \
     -H "Content-Type: application/json" \
     -d '{"password":"wrong"}'
 done
 
 # 6th attempt should return ACCOUNT_LOCKED
-curl -X POST http://localhost:8080/api/v2/profile/unlock \
+curl -X POST http://localhost:9097/api/v2/profile/unlock \
   -H "Content-Type: application/json" \
   -d '{"password":"test"}'
 ```
