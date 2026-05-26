@@ -1,4 +1,6 @@
-use crate::core::encryption::{EncryptionManager, EncryptedMessage, KeyType, MessageType as EncMessageType};
+use crate::core::encryption::{
+    EncryptedMessage, EncryptionManager, KeyType, MessageType as EncMessageType,
+};
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
@@ -27,7 +29,7 @@ use libp2p::{
 use libp2p_webrtc as webrtc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
@@ -76,6 +78,10 @@ pub enum MeshCommand {
     AddAddress {
         peer_id: PeerId,
         address: Multiaddr,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    DisconnectPeer {
+        peer_id: PeerId,
         reply: oneshot::Sender<Result<()>>,
     },
     Shutdown,
@@ -171,6 +177,9 @@ pub struct MeshTransport {
     pub bootstrap_nodes: Vec<Multiaddr>,
     username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+    crypto_processor: Arc<RwLock<Option<crate::core::crypto_processor::CryptoProcessor>>>,
+    /// Active connected peers with their real metadata synced from MeshDriver
+    active_peers: Arc<StdRwLock<HashMap<String, MeshNode>>>,
 }
 
 impl MeshTransport {
@@ -184,12 +193,14 @@ impl MeshTransport {
         username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         _handshake_secret: Option<Vec<u8>>, // Reserved for future stealth TCP integration
+        crypto_processor: Arc<RwLock<Option<crate::core::crypto_processor::CryptoProcessor>>>,
     ) -> Result<Self> {
         let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair().ok_or_else(|| {
             anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
         })?;
         let local_peer_id = PeerId::from(local_key.public());
+        tracing::info!("GhostWire node PeerId: {}", local_peer_id);
 
         // Initialize obfs4 for DPI evasion (always-on by default)
         // Note: Actual obfuscation integrated in transport stack in future releases
@@ -287,7 +298,8 @@ impl MeshTransport {
             .with_other_transport(|_| transport)?
             .with_behaviour(|_| behaviour)?
             .with_swarm_config(|c| {
-                c.with_idle_connection_timeout(std::time::Duration::from_secs(60))
+                // Feature 1: Extend idle connection timeout to 1 day for persistent mesh
+                c.with_idle_connection_timeout(std::time::Duration::from_secs(86400))
             })
             .build();
 
@@ -315,6 +327,8 @@ impl MeshTransport {
             bootstrap_nodes,
             username_discovery,
             event_bus,
+            crypto_processor,
+            active_peers: Arc::new(StdRwLock::new(HashMap::new())),
         })
     }
 
@@ -392,6 +406,8 @@ impl MeshTransport {
             message_store: self._message_store.clone(),
             core_messages: self._core_messages.clone(),
             seen_messages: std::collections::HashSet::new(),
+            crypto_processor: self.crypto_processor.clone(),
+            active_peers: self.active_peers.clone(),
         };
 
         tokio::spawn(driver.run());
@@ -438,6 +454,15 @@ impl MeshTransport {
             .send(MeshCommand::ConnectPeer { peer_id, reply: tx })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    pub async fn disconnect_peer(&self, peer_id: PeerId) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::DisconnectPeer { peer_id, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send disconnect command: {}", e))?;
         rx.await?
     }
 
@@ -540,8 +565,17 @@ impl MeshTransport {
     }
 
     pub fn get_topology(&self) -> MeshTopology {
+        // Read real peers directly from the synced map
+        let nodes = {
+            if let Ok(guard) = self.active_peers.read() {
+                guard.clone()
+            } else {
+                HashMap::new()
+            }
+        };
+
         MeshTopology {
-            nodes: HashMap::new(),
+            nodes,
             routes: HashMap::new(),
             local_node_id: self.node_id.clone(),
         }
@@ -577,6 +611,9 @@ struct MeshDriver {
     core_messages: Arc<RwLock<Vec<Message>>>,
     /// Seen message IDs for relay deduplication
     seen_messages: std::collections::HashSet<Uuid>,
+    crypto_processor: Arc<RwLock<Option<crate::core::crypto_processor::CryptoProcessor>>>,
+    /// Active connected peers mapped by PeerId
+    active_peers: Arc<StdRwLock<HashMap<String, MeshNode>>>,
 }
 
 impl MeshDriver {
@@ -719,13 +756,15 @@ impl MeshDriver {
                         EncMessageType::Text,
                     ) {
                         // Replace content with base64-encoded encrypted payload
-                        encrypted_msg.content =
-                            base64::engine::general_purpose::STANDARD.encode(&encrypted_content.ciphertext);
+                        encrypted_msg.content = base64::engine::general_purpose::STANDARD
+                            .encode(&encrypted_content.ciphertext);
                         encrypted_msg.encrypted = true;
                         encrypted_msg.encryption_status = "full".to_string();
                         // Store nonce and signature in message for decryption
-                        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
-                        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.signature);
+                        let nonce_b64 = base64::engine::general_purpose::STANDARD
+                            .encode(&encrypted_content.nonce);
+                        let sig_b64 = base64::engine::general_purpose::STANDARD
+                            .encode(&encrypted_content.signature);
                         encrypted_msg.message_type = format!("encrypted:{}:{}", nonce_b64, sig_b64);
                     } else {
                         tracing::warn!("Failed to encrypt DM to {}, sending plaintext", recipient);
@@ -736,8 +775,11 @@ impl MeshDriver {
                         .behaviour_mut()
                         .request_response
                         .send_request(&recipient, ChatRequest(encrypted_msg));
-                    
-                    tracing::info!("Sent direct message to peer {} via request_response", recipient);
+
+                    tracing::info!(
+                        "Sent direct message to peer {} via request_response",
+                        recipient
+                    );
                     Ok(())
                 })();
                 let _ = reply.send(res);
@@ -757,6 +799,14 @@ impl MeshDriver {
                     .add_address(&peer_id, address);
                 let _ = reply.send(Ok(()));
             }
+            MeshCommand::DisconnectPeer { peer_id, reply } => {
+                tracing::info!("Disconnecting peer {}", peer_id);
+                // Kademlia will evict stale entries; remove from active tracking only
+                if let Ok(mut peers) = self.active_peers.write() {
+                    peers.remove(&peer_id.to_string());
+                }
+                let _ = reply.send(Ok(()));
+            }
             MeshCommand::Shutdown => {
                 tracing::info!("Mesh driver received shutdown command.");
             }
@@ -765,23 +815,26 @@ impl MeshDriver {
 
     async fn handle_swarm_event(&mut self, event: SwarmEvent<MeshBehaviourEvent>) {
         // Handle mDNS discovery — auto-connect to discovered peers
-        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
-            libp2p::mdns::Event::Discovered(peers),
-        )) = &event
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(libp2p::mdns::Event::Discovered(
+            peers,
+        ))) = &event
         {
             for (peer_id, addr) in peers {
                 tracing::info!("mDNS discovered peer {} at {}", peer_id, addr);
                 // Add to Kademlia routing table
-                self.swarm.behaviour_mut().kad.add_address(peer_id, addr.clone());
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(peer_id, addr.clone());
                 // Attempt to connect
                 let _ = self.swarm.dial(addr.clone());
             }
             return;
         }
 
-        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
-            libp2p::mdns::Event::Expired(peers),
-        )) = &event
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(libp2p::mdns::Event::Expired(
+            peers,
+        ))) = &event
         {
             for (peer_id, _addr) in peers {
                 tracing::info!("mDNS peer expired: {}", peer_id);
@@ -796,34 +849,86 @@ impl MeshDriver {
             ..
         } = &event
         {
+            let info = self.swarm.network_info();
+            let real_count = info.num_peers();
+
+            // Insert placeholder node into active_peers (nickname will be updated upon receiving handshake)
+            if let Ok(mut peers) = self.active_peers.write() {
+                peers.insert(
+                    peer_id.to_string(),
+                    MeshNode {
+                        id: peer_id.to_string(),
+                        peer_id: *peer_id,
+                        last_seen_addresses: vec![],
+                        username: String::new(),
+                        public_key: vec![],
+                        is_online: true,
+                        last_seen: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        connection_quality: 1.0,
+                        threat_level: ThreatLevel::Low,
+                    },
+                );
+            }
+
             tracing::info!(
-                "Connection established with {} ({} total)",
-                peer_id, num_established
+                "Connection established with {} ({} total, {} unique peers)",
+                peer_id,
+                num_established,
+                real_count
             );
-            // Send handshake with our public key to establish encryption via request_response
+            // Send handshake with our public key and nickname via request_response
             let my_id = self._identity.id.clone();
-            let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
-                self.encryption_manager.get_public_key()
-            );
+            let my_pubkey = base64::engine::general_purpose::STANDARD
+                .encode(self.encryption_manager.get_public_key());
+            let my_nickname = self._identity.get_metadata().nickname;
+
+            let handshake_payload = serde_json::json!({
+                "pubkey": my_pubkey,
+                "nickname": my_nickname,
+            })
+            .to_string();
+
             // Create handshake message with message_type = "handshake"
-            let mut handshake = Message::new(my_id, peer_id.to_string(), my_pubkey);
+            let mut handshake = Message::new(my_id, peer_id.to_string(), handshake_payload);
             handshake.message_type = "handshake".to_string();
-            
+
             self.swarm
                 .behaviour_mut()
                 .request_response
                 .send_request(peer_id, ChatRequest(handshake));
-            
-            tracing::info!("Sent encryption handshake to {} via request_response", peer_id);
+
+            tracing::info!(
+                "Sent encryption handshake to {} via request_response",
+                peer_id
+            );
         }
 
-        if let SwarmEvent::ConnectionClosed {
-            peer_id,
-            cause: Some(ref e),
-            ..
-        } = &event
-        {
-            tracing::warn!("Connection closed with {}: {}", peer_id, e);
+        if let SwarmEvent::ConnectionClosed { peer_id, cause, .. } = &event {
+            let info = self.swarm.network_info();
+            let real_count = info.num_peers();
+
+            // Remove peer from active_peers
+            if let Ok(mut peers) = self.active_peers.write() {
+                peers.remove(&peer_id.to_string());
+            }
+
+            if let Some(ref e) = cause {
+                tracing::warn!(
+                    "Connection closed with {} ({} peers remaining): {}",
+                    peer_id,
+                    real_count,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Connection closed with {} ({} peers remaining)",
+                    peer_id,
+                    real_count
+                );
+            }
         }
 
         if let SwarmEvent::Behaviour(MeshBehaviourEvent::Kad(
@@ -873,7 +978,7 @@ impl MeshDriver {
                     request, channel, ..
                 } => {
                     let mut msg = request.0;
-                    
+
                     // Handle handshake requests specifically
                     if msg.message_type == "handshake" {
                         self.handle_handshake(peer, msg).await;
@@ -956,10 +1061,26 @@ impl MeshDriver {
     }
 
     async fn handle_handshake(&mut self, peer_id: PeerId, msg: Message) {
-        tracing::info!("🤝 Received Handshake from {} (sender_id: {})", peer_id, msg.sender);
-        if let Ok(pub_key_bytes) =
-            base64::engine::general_purpose::STANDARD.decode(&msg.content)
-        {
+        tracing::info!(
+            "🤝 Received Handshake from {} (sender_id: {})",
+            peer_id,
+            msg.sender
+        );
+
+        let mut pub_key_str = msg.content.clone();
+        let mut peer_nickname = String::new();
+
+        // Try to parse as JSON first (new format)
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&msg.content) {
+            if let Some(pk) = json.get("pubkey").and_then(|v| v.as_str()) {
+                pub_key_str = pk.to_string();
+            }
+            if let Some(nick) = json.get("nickname").and_then(|v| v.as_str()) {
+                peer_nickname = nick.to_string();
+            }
+        }
+
+        if let Ok(pub_key_bytes) = base64::engine::general_purpose::STANDARD.decode(&pub_key_str) {
             let key_len = pub_key_bytes.len();
             // Store key by BOTH PeerId and sender identity ID
             self.encryption_manager.add_peer_key(
@@ -972,12 +1093,27 @@ impl MeshDriver {
                 pub_key_bytes,
                 KeyType::Hybrid,
             );
-            tracing::info!("✅ Stored encryption key for peer {} (key: {} bytes)", peer_id, key_len);
+            tracing::info!(
+                "✅ Stored encryption key for peer {} (key: {} bytes)",
+                peer_id,
+                key_len
+            );
+
+            // Update nickname in active_peers
+            if !peer_nickname.is_empty() {
+                if let Ok(mut peers) = self.active_peers.write() {
+                    if let Some(node) = peers.get_mut(&peer_id.to_string()) {
+                        node.username = peer_nickname.clone();
+                        // For the UI, we overwrite id with the nickname (it expects nickname in n.id)
+                        node.id = peer_nickname;
+                    }
+                }
+            }
 
             // Send handshake back if this was an initial handshake (not a reply)
             // In request_response, the initiator sends a request, and we process it.
-            // If we haven't sent ours yet, we should. 
-            // Note: libp2p connection_established triggers on both sides, 
+            // If we haven't sent ours yet, we should.
+            // Note: libp2p connection_established triggers on both sides,
             // so usually both sides will send a request simultaneously.
         } else {
             tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
@@ -1055,7 +1191,11 @@ impl MeshDriver {
             }
         } else if msg.encryption_status == "decrypt_failed" {
             // Save plaintext even if decryption failed (for debugging)
-            tracing::warn!("Saving message with failed decryption from {}: {}", peer_id, msg.content);
+            tracing::warn!(
+                "Saving message with failed decryption from {}: {}",
+                peer_id,
+                msg.content
+            );
         }
 
         // Add to in-memory
@@ -1107,6 +1247,7 @@ impl MeshManager {
             username_discovery,
             event_bus,
             handshake_secret,
+            crypto_processor.clone(),
         )
         .await?;
 
@@ -1128,9 +1269,13 @@ impl MeshManager {
         if message.recipient == "broadcast" {
             self.transport.broadcast_message(message).await
         } else {
-            let recipient_peer_id = message.recipient.parse::<PeerId>()
+            let recipient_peer_id = message
+                .recipient
+                .parse::<PeerId>()
                 .map_err(|_| anyhow::anyhow!("Invalid recipient PeerId: {}", message.recipient))?;
-            self.transport.send_direct_message(recipient_peer_id, message.clone()).await
+            self.transport
+                .send_direct_message(recipient_peer_id, message.clone())
+                .await
         }
     }
 
@@ -1197,6 +1342,11 @@ impl MeshManager {
     /// Connect to a peer by ID
     pub async fn connect_peer(&mut self, peer_id: PeerId) -> Result<()> {
         self.transport.connect_peer(peer_id).await
+    }
+
+    /// Disconnect from a peer by ID
+    pub async fn disconnect_peer(&mut self, peer_id: PeerId) -> Result<()> {
+        self.transport.disconnect_peer(peer_id).await
     }
 
     /// Subscribe to a gossipsub topic (e.g., a peer's DM topic)
