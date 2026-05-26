@@ -119,7 +119,7 @@ Listening on:
   /ip4/0.0.0.0/tcp/8080
 ```
 
-**✅ Success!** Your API is now running on `http://localhost:8080`
+**✅ Success!** Your API is now running on `http://localhost:9097`
 
 ---
 
@@ -291,7 +291,7 @@ Error: Address already in use (os error 98)
 **A. Find Process Using Port:**
 ```bash
 # Check port 8080
-lsof -i :8080
+lsof -i :9097
 netstat -tulpn | grep 8080
 ```
 
@@ -384,7 +384,7 @@ cargo run -- web --port 8080
 **C. Update Web UI Config:**
 ```javascript
 // In browser console (F12)
-localStorage.setItem('ghostwire_backend_url', 'http://localhost:8080/api');
+localStorage.setItem('ghostwire_backend_url', 'http://localhost:9097/api');
 location.reload();
 ```
 
@@ -395,7 +395,7 @@ location.reload();
 ### Test 1: API Health Check
 
 ```bash
-curl http://localhost:8080/api/status
+curl http://localhost:9097/api/status
 ```
 
 **Expected:**
@@ -429,7 +429,7 @@ netstat -tulpn | grep ghostwire
 
 **Expected:**
 ```
-tcp  0  0 0.0.0.0:8080  0.0.0.0:*  LISTEN  12345/ghostwire
+tcp  0  0 0.0.0.0:9097  0.0.0.0:*  LISTEN  12345/ghostwire
 tcp  0  0 0.0.0.0:4001  0.0.0.0:*  LISTEN  12345/ghostwire
 ```
 
@@ -437,7 +437,7 @@ tcp  0  0 0.0.0.0:4001  0.0.0.0:*  LISTEN  12345/ghostwire
 
 ### Test 4: Web UI Access
 
-Open browser: `http://localhost:3001` or `http://localhost:8080`
+Open browser: `http://localhost:3001` or `http://localhost:9097`
 
 **Expected:**
 - GhostWire login screen loads
@@ -535,7 +535,7 @@ ps aux | grep ghostwire
 netstat -tulpn | grep -E ':(8080|3001|4001)'
 
 # Test API
-curl http://localhost:8080/api/status
+curl http://localhost:9097/api/status
 
 # View logs (debug mode)
 RUST_LOG=debug cargo run -- web --port 8080
