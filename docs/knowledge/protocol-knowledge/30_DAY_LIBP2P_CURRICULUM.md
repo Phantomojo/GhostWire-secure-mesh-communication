@@ -202,7 +202,7 @@ distance = xor_distance(peer_a, peer_b)
 **Exercise:**
 ```bash
 # Check routing table size
-curl "http://localhost:8080/api/v2/peers" | jq '.data | length'
+curl "http://localhost:9097/api/v2/peers" | jq '.data | length'
 ```
 
 **Duration:** 1.5 hours
@@ -297,7 +297,7 @@ skill: "libp2p-dht" --routing-table
 **Exercise:**
 ```bash
 # Monitor mesh peers
-curl "http://localhost:8080/api/v2/mesh/topics" | jq '.'
+curl "http://localhost:9097/api/v2/mesh/topics" | jq '.'
 ```
 
 **Duration:** 1.5 hours
@@ -336,7 +336,7 @@ curl "http://localhost:8080/api/v2/mesh/topics" | jq '.'
 **Exercise:**
 ```bash
 # List subscribed topics
-curl "http://localhost:8080/api/v2/mesh/topics"
+curl "http://localhost:9097/api/v2/mesh/topics"
 ```
 
 **Duration:** 1.5 hours
