@@ -77,3 +77,17 @@ cargo test crypto_machine -- --nocapture
 | `GHOSTWIRE_PROFILE` | Identity profile name to load |
 | `GHOSTWIRE_LOG` | Tracing filter, e.g. `ghostwire=debug,libp2p=warn` |
 
+## Kali Linux cross-machine builds
+
+Kali (glibc 2.42) and Omen/Arch (glibc 2.43) have incompatible glibc versions —
+binaries from one machine **will not run** on the other. Kali must always build
+from source.
+
+**After every commit that touches Rust source, rebuild on Kali:**
+
+```bash
+ssh kali "cd ~/GhostWire-secure-mesh-communication/ghostwire && \
+  git pull && \
+  cargo build --release --no-default-features --features cli,mesh,security,stealth"
+```
+
