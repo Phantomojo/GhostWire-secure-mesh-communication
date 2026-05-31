@@ -132,10 +132,10 @@ Follow the specifications in [`docs/spec/`](docs/spec/) to build your own implem
 
 | Crate | Description | Status |
 |-------|-------------|--------|
-| [**sphinx-rs**](ghostwire-libs/crates/sphinx-rs/) | Sphinx onion routing with SURBs | ✅ 0.1.0 on crates.io |
-| ghostwire-dtn | Delay-tolerant networking (PRoPHET) | 🚧 Next |
-| hlc-rs | Hybrid Logical Clocks | 🚧 Planned |
-| trust-store | Web of Trust + TOFU | 🚧 Planned |
+| [**sphinx-rs**](ghostwire-libs/crates/sphinx-rs/) | Sphinx onion routing with SURBs | ✅ Published — crates.io |
+| ghostwire-dtn | Delay-tolerant networking (PRoPHET) | 🔄 In progress |
+| hlc-rs | Hybrid Logical Clocks | 🔄 In progress |
+| trust-store | Web of Trust + TOFU key management | 🔄 In progress |
 
 ---
 
@@ -244,6 +244,7 @@ GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F)
 | **Institution** | Open University of Kenya |
 | **Theme** | AI for Society |
 | **SDG Alignment** | SDG 9 (Infrastructure), SDG 11 (Communities), SDG 17 (Partnerships) |
+| **Submission** | 2026 | Track: Higher Education — AI for Society |
 
 ---
 
@@ -268,6 +269,16 @@ We welcome contributors across all layers of the protocol:
 - 🌉 **Bridges** — Matrix, Meshtastic, Briar, Reticulum adapters
 
 **Guidelines:** [CONTRIBUTING.md](CONTRIBUTING.md) | [Code of Conduct](CODE_OF_CONDUCT.md)
+
+---
+
+## Citation
+
+If referencing GhostWire in academic work:
+
+> Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient Peer-to-Peer Communication. Open University of Kenya. https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+
+Milestone reference: First verified cross-machine mesh communication — April 5, 2026 (v0.2.0).
 
 ---
 
@@ -306,10 +317,6 @@ We welcome contributors across all layers of the protocol:
 | Name | Role | Contact |
 |------|------|---------|
 | **Michael Irungu Muriithi** | Team Lead, Protocol Architecture | mirungu015@proton.me |
-
-**Advisors & Contributors:**
-- Frank — Technical Advisor
-- Austin — Hardware Lead (Mechatronics)
 
 ---
 
