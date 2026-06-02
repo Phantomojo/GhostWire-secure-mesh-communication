@@ -50,6 +50,22 @@ ghostwire/data/advisory-db/
 *.log
 build_errors.txt
 
+# ML/AI Artifacts (Large Files)
+datasets/
+*.onnx
+ghostwire/models/
+ghostwire_ml_training_bundle*.zip
+ghostwire_tui_bundle.zip
+ghostwire/ghostwire-code.zip
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Sisyphus Tool State
+.sisyphus/
+
 # External SDKs & Large Blobs (Not Code)
 esp-idf/
 ghostwire-libs/
