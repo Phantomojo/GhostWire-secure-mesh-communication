@@ -73,7 +73,7 @@ clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json", "env-filter"] }
 hostname = { version = "0.3" }
-local-ip-address = { version = "0.5" }
+local-ip-address = { version = "0.6" }
 sled = "0.34"
 dirs = "6.0.0"
 # Bluetooth: bluer supports both central AND peripheral roles via BlueZ D-Bus
