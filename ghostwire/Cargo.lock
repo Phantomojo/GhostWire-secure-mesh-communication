@@ -2288,7 +2288,7 @@ dependencies = [
  "libp2p",
  "libp2p-webrtc",
  "local-ip-address",
- "lru 0.16.3",
+ "lru 0.16.4",
  "matrix-sdk",
  "mime_guess",
  "mockall",
@@ -2305,7 +2305,7 @@ dependencies = [
  "pqcrypto-traits",
  "proc-macro2",
  "qrcode-generator",
- "rand 0.8.5",
+ "rand 0.9.2",
  "rand_core 0.6.4",
  "rand_distr",
  "ratatui",
@@ -3364,16 +3364,17 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "9.2.0"
+version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c7ea04a7c5c055c175f189b6dc6ba036fd62306b58c66c9f6389036c503a3f4"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
+ "getrandom 0.2.16",
  "js-sys",
  "pem",
- "ring",
  "serde",
  "serde_json",
+ "signature",
  "simple_asn1",
 ]
 
@@ -4077,9 +4078,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
+checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
 dependencies = [
  "hashbrown 0.16.1",
 ]
