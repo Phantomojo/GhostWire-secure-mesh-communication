@@ -17,7 +17,7 @@ tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "auth"] 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 serde_bytes = "0.11"
-toml = { version = "0.9" }
+toml = { version = "1.0" }
 jsonwebtoken = { version = "=10.3.0" }
 libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
