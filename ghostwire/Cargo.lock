@@ -2255,7 +2255,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "axum-test",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bincode",
  "blake2b_simd",
  "blake3",
