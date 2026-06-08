@@ -13,7 +13,7 @@ categories = ["network-programming", "security", "asynchronous"]
 tokio = { version = "1.51", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4" }
-tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "auth"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "set-header", "auth"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 serde_bytes = "0.11"
