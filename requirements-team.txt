@@ -23,5 +23,5 @@ seaborn>=0.13.2
 pyarrow>=24.0.0  # For parquet files
 
 # Optional but useful
-jupyter>=1.0.0  # For notebooks
+jupyter>=1.1.1  # For notebooks
 ipywidgets>=8.0.0  # For interactive widgets
