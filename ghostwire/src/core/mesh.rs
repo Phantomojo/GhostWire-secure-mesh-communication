@@ -1,4 +1,4 @@
-use crate::core::encryption::{EncryptionManager, EncryptedMessage, KeyType, MessageType as EncMessageType};
+use crate::core::encryption::{EncryptionManager, KeyType, MessageType as EncMessageType};
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
@@ -15,7 +15,7 @@ use libp2p::kad::Behaviour as Kad;
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
-        Behaviour as Gossipsub, Config as GossipsubConfig, Message as GossipsubMessage,
+        Behaviour as Gossipsub, Message as GossipsubMessage,
         MessageAuthenticity, MessageId,
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
@@ -26,8 +26,9 @@ use libp2p::{
 };
 use libp2p_webrtc as webrtc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
@@ -35,6 +36,9 @@ use uuid::Uuid;
 
 /// Maximum hop count for multi-hop relay
 const MAX_HOPS: u8 = 5;
+
+/// Maximum number of message IDs to track for deduplication
+const SEEN_MSGS_MAX: usize = 10_000;
 
 pub enum MeshCommand {
     PutRecord {
@@ -63,6 +67,11 @@ pub enum MeshCommand {
     },
     BroadcastMessage {
         message: Message,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    PublishToTopic {
+        topic: String,
+        data: Vec<u8>,
         reply: oneshot::Sender<Result<()>>,
     },
     SendMessage {
@@ -171,6 +180,10 @@ pub struct MeshTransport {
     pub bootstrap_nodes: Vec<Multiaddr>,
     username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+    /// Live mesh topology — written by event loop, read by get_topology()
+    topology: Arc<RwLock<HashMap<String, MeshNode>>>,
+    peer_count_cache: Option<Arc<AtomicUsize>>,
+    dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
 }
 
 impl MeshTransport {
@@ -185,11 +198,12 @@ impl MeshTransport {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         _handshake_secret: Option<Vec<u8>>, // Reserved for future stealth TCP integration
     ) -> Result<Self> {
-        let node_id = Uuid::new_v4().to_string();
         let local_key = identity.keypair().ok_or_else(|| {
             anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
         })?;
         let local_peer_id = PeerId::from(local_key.public());
+        // Use PeerId string as node_id (stable, unique, matches network identity)
+        let node_id = local_peer_id.to_string();
 
         // Initialize obfs4 for DPI evasion (always-on by default)
         // Note: Actual obfuscation integrated in transport stack in future releases
@@ -315,6 +329,9 @@ impl MeshTransport {
             bootstrap_nodes,
             username_discovery,
             event_bus,
+            topology: Arc::new(RwLock::new(HashMap::new())),
+            peer_count_cache: None,
+            dtn_store: None,
         })
     }
 
@@ -396,7 +413,10 @@ impl MeshTransport {
             pending_get_queries: HashMap::new(),
             message_store: self._message_store.clone(),
             core_messages: self._core_messages.clone(),
-            seen_messages: std::collections::HashSet::new(),
+            seen_messages: VecDeque::new(),
+            topology: self.topology.clone(),
+            peer_count_cache: self.peer_count_cache.clone(),
+            dtn_store: self.dtn_store.clone(),
         };
 
         tokio::spawn(driver.run());
@@ -451,6 +471,21 @@ impl MeshTransport {
         self.command_tx
             .send(MeshCommand::SubscribeTopic {
                 topic: topic.to_string(),
+                reply: tx,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
+    /// Publish raw bytes to a Gossipsub topic.
+    /// Used by ChannelController for ghost channel messages.
+    pub async fn publish_to_topic(&self, topic: &str, data: Vec<u8>) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::PublishToTopic {
+                topic: topic.to_string(),
+                data,
                 reply: tx,
             })
             .await
@@ -544,9 +579,12 @@ impl MeshTransport {
         }
     }
 
-    pub fn get_topology(&self) -> MeshTopology {
+    pub async fn get_topology(&self) -> MeshTopology {
+        let topo = self.topology.read().await;
+        let nodes = topo.iter().map(|(id, node)| (id.clone(), node.clone())).collect();
+
         MeshTopology {
-            nodes: HashMap::new(),
+            nodes,
             routes: HashMap::new(),
             local_node_id: self.node_id.clone(),
         }
@@ -580,8 +618,10 @@ struct MeshDriver {
     pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
     message_store: Arc<crate::core::store::SecureMessageStore>,
     core_messages: Arc<RwLock<Vec<Message>>>,
-    /// Seen message IDs for relay deduplication
-    seen_messages: std::collections::HashSet<Uuid>,
+    seen_messages: VecDeque<Uuid>,
+    topology: Arc<RwLock<HashMap<String, MeshNode>>>,
+    peer_count_cache: Option<Arc<AtomicUsize>>,
+    dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
 }
 
 impl MeshDriver {
@@ -675,6 +715,17 @@ impl MeshDriver {
                     .map_err(|e| anyhow::anyhow!("Subscribe error: {}", e));
                 let _ = reply.send(res);
             }
+            MeshCommand::PublishToTopic { topic, data, reply } => {
+                let gossipsub_topic = IdentTopic::new(&topic);
+                let res = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(gossipsub_topic, data)
+                    .map(|_| ())
+                    .map_err(|e| anyhow::anyhow!("Publish error: {}", e));
+                let _ = reply.send(res);
+            }
             MeshCommand::PublishUsername { reply } => {
                 let res = (|| -> Result<()> {
                     let identity = self._identity.clone();
@@ -719,42 +770,67 @@ impl MeshDriver {
                 message,
                 reply,
             } => {
-                let res = (|| -> Result<()> {
-                    // Feature 1: Send direct message via gossipsub on per-peer DM topic
-                    // Topic format: ghostwire-dm-{recipient_peer_id}
-                    let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
+                // Feature 1: Send direct message via gossipsub on per-peer DM topic
+                // Topic format: ghostwire-dm-{recipient_peer_id}
+                let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
 
-                    // Feature 2: Encrypt message content before publishing
-                    let mut encrypted_msg = message.clone();
-                    if let Ok(encrypted_content) = self.encryption_manager.encrypt_message(
-                        &message.content,
-                        &message.recipient,
-                        EncMessageType::Text,
-                    ) {
-                        // Replace content with base64-encoded encrypted payload
-                        encrypted_msg.content =
-                            base64::engine::general_purpose::STANDARD.encode(&encrypted_content.ciphertext);
-                        encrypted_msg.encrypted = true;
-                        encrypted_msg.encryption_status = "full".to_string();
-                        // Store nonce and signature in message for decryption
-                        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
-                        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.signature);
-                        encrypted_msg.message_type = format!("encrypted:{}:{}", nonce_b64, sig_b64);
-                    } else {
-                        tracing::warn!("Failed to encrypt DM to {}, sending plaintext", recipient);
+                // Feature 2: Encrypt message content before publishing
+                let mut encrypted_msg = message.clone();
+                if let Ok(encrypted_content) = self.encryption_manager.encrypt_message(
+                    &message.content,
+                    &message.recipient,
+                    EncMessageType::Text,
+                ) {
+                    encrypted_msg.content =
+                        base64::engine::general_purpose::STANDARD.encode(&encrypted_content.ciphertext);
+                    encrypted_msg.encrypted = true;
+                    encrypted_msg.encryption_status = "full".to_string();
+                    let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
+                    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.signature);
+                    encrypted_msg.message_type = format!("encrypted:{}:{}", nonce_b64, sig_b64);
+                } else {
+                    tracing::warn!("Failed to encrypt DM to {}, dropping message (plaintext rejected)", recipient);
+                    let _ = reply.send(Err(anyhow::anyhow!("Encryption failed for DM to {}", recipient)));
+                    return;
+                }
+
+                use crate::core::wire_protocol::{Frame, FrameKind};
+                let frame = match Frame::encode(FrameKind::Message, &encrypted_msg) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        tracing::warn!("Failed to encode frame for {}: {}", recipient, e);
+                        let _ = reply.send(Err(e));
+                        return;
+                    }
+                };
+                let data = frame.to_bytes();
+
+                // Try direct gossipsub publish
+                if let Err(e) = self.swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic.clone(), data.clone())
+                {
+                    tracing::warn!("Gossipsub publish to {} failed: {}, trying DTN fallback", recipient, e);
+
+                    if let Some(ref dtn_store) = self.dtn_store {
+                        let destination = *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
+                        let bundle = crate::core::dtn::bundle::DtnBundle::new(data, destination);
+                        if dtn_store.store(bundle).await {
+                            tracing::info!("DTN fallback: message queued for epidemic delivery to {}", recipient);
+                            let _ = reply.send(Ok(()));
+                            return;
+                        } else {
+                            tracing::warn!("DTN store full or bundle expired, message dropped for {}", recipient);
+                        }
                     }
 
-                    use crate::core::wire_protocol::{Frame, FrameKind};
-                    let frame = Frame::encode(FrameKind::Message, &encrypted_msg)?;
-                    let data = frame.to_bytes();
-                    self.swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic.clone(), data)?;
-                    tracing::info!("Sent direct message to peer {} on topic {}", recipient, topic);
-                    Ok(())
-                })();
-                let _ = reply.send(res);
+                    let _ = reply.send(Err(anyhow::anyhow!("Direct send and DTN fallback both failed for {}: {}", recipient, e)));
+                    return;
+                }
+
+                tracing::info!("Sent direct message to peer {} on topic {}", recipient, topic);
+                let _ = reply.send(Ok(()));
             }
             MeshCommand::GetListeners { reply } => {
                 let listeners = self.swarm.listeners().cloned().collect();
@@ -837,6 +913,35 @@ impl MeshDriver {
                 let _ = self.swarm.behaviour_mut().gossipsub.publish(broadcast_topic, frame.to_bytes());
                 tracing::info!("Sent encryption handshake to {} (key: {} bytes)", peer_id, self.encryption_manager.get_public_key().len());
             }
+
+            {
+                let mut topo = self.topology.write().await;
+                topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
+                    id: peer_id.to_string(),
+                    peer_id: *peer_id,
+                    last_seen_addresses: Vec::new(),
+                    username: String::new(),
+                    public_key: Vec::new(),
+                    last_seen: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    connection_quality: 1.0,
+                    is_online: true,
+                    threat_level: ThreatLevel::Low,
+                }).is_online = true;
+                if let Some(node) = topo.get_mut(&peer_id.to_string()) {
+                    node.last_seen = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                }
+            }
+
+            if let Some(cache) = &self.peer_count_cache {
+                let count = self.topology.read().await.len() as usize;
+                cache.store(count, std::sync::atomic::Ordering::Relaxed);
+            }
         }
 
         if let SwarmEvent::ConnectionClosed {
@@ -846,25 +951,96 @@ impl MeshDriver {
         } = &event
         {
             tracing::warn!("Connection closed with {}: {}", peer_id, e);
+
+            {
+                let mut topo = self.topology.write().await;
+                if let Some(node) = topo.get_mut(&peer_id.to_string()) {
+                    node.is_online = false;
+                }
+            }
+
+            if let Some(cache) = &self.peer_count_cache {
+                let count = self.topology.read().await
+                    .values()
+                    .filter(|n| n.is_online)
+                    .count() as usize;
+                cache.store(count, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Identify(
+            libp2p::identify::Event::Received { peer_id, info, connection_id: _ },
+        )) = &event
+        {
+            tracing::info!(
+                "Identified peer {} as {} (protocols: {:?})",
+                peer_id,
+                info.agent_version,
+                info.protocols
+            );
+
+            let mut topo = self.topology.write().await;
+            let entry = topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
+                id: peer_id.to_string(),
+                peer_id: *peer_id,
+                last_seen_addresses: Vec::new(),
+                username: String::new(),
+                public_key: Vec::new(),
+                last_seen: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                connection_quality: 1.0,
+                is_online: true,
+                threat_level: ThreatLevel::Low,
+            });
+            entry.last_seen_addresses = info.listen_addrs.clone();
+            entry.username = info.agent_version.clone();
+            entry.last_seen = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
         }
 
         if let SwarmEvent::Behaviour(MeshBehaviourEvent::Kad(
             libp2p::kad::Event::OutboundQueryProgressed { id, result, .. },
         )) = event
         {
-            if let Some(reply) = self.pending_get_queries.remove(&id) {
-                match result {
-                    libp2p::kad::QueryResult::GetRecord(Ok(ok)) => {
-                        if let libp2p::kad::GetRecordOk::FoundRecord(record) = ok {
-                            let _ = reply.send(Ok(record.record.value));
-                        } else {
-                            let _ = reply.send(Err(anyhow::anyhow!("Record not found")));
+            match result {
+                libp2p::kad::QueryResult::GetRecord(Ok(
+                    libp2p::kad::GetRecordOk::FoundRecord(record),
+                )) => {
+                    if let Some(reply) = self.pending_get_queries.remove(&id) {
+                        let _ = reply.send(Ok(record.record.value.clone()));
+                    } else {
+                        // Not a pending query — try to interpret as a username record
+                        if let Ok(username_record) =
+                            crate::core::username_discovery::UsernameRecord::from_bytes(
+                                &record.record.value,
+                            )
+                        {
+                            if username_record.verify().is_ok() {
+                                tracing::info!(
+                                    "Discovered username '{}' -> PeerID {}",
+                                    username_record.username,
+                                    username_record.peer_id
+                                );
+                            }
                         }
                     }
-                    libp2p::kad::QueryResult::GetRecord(Err(e)) => {
+                }
+                libp2p::kad::QueryResult::GetRecord(Ok(_)) => {
+                    if let Some(reply) = self.pending_get_queries.remove(&id) {
+                        let _ = reply.send(Err(anyhow::anyhow!("Record not found")));
+                    }
+                }
+                libp2p::kad::QueryResult::GetRecord(Err(e)) => {
+                    if let Some(reply) = self.pending_get_queries.remove(&id) {
                         let _ = reply.send(Err(anyhow::anyhow!("GetRecord error: {:?}", e)));
                     }
-                    _ => {
+                }
+                _ => {
+                    if let Some(reply) = self.pending_get_queries.remove(&id) {
                         let _ = reply.send(Err(anyhow::anyhow!("Unexpected query result")));
                     }
                 }
@@ -964,7 +1140,11 @@ impl MeshDriver {
             debug!("Skipping already-seen message {}", msg.id);
             return Ok(());
         }
-        self.seen_messages.insert(msg.id);
+        // Evict oldest entries when at capacity
+        if self.seen_messages.len() >= SEEN_MSGS_MAX {
+            self.seen_messages.drain(..SEEN_MSGS_MAX / 2);
+        }
+        self.seen_messages.push_back(msg.id);
 
         // Feature 4: Multi-hop relay forwarding
         // If message is a DM not intended for us, and hops < MAX_HOPS, forward it
@@ -1180,7 +1360,7 @@ impl MeshManager {
     pub async fn get_stats(&self) -> MeshStats {
         let connection_stats = self.transport.get_connection_stats();
         let security_stats = self.transport.get_security_stats().await;
-        let topology = self.transport.get_topology();
+        let topology = self.transport.get_topology().await;
 
         MeshStats {
             total_nodes: topology.nodes.len(),
@@ -1200,8 +1380,16 @@ impl MeshManager {
         self.transport.add_address(peer_id, address).await
     }
 
-    pub fn get_topology(&self) -> MeshTopology {
-        self.transport.get_topology()
+    pub async fn get_topology(&self) -> MeshTopology {
+        self.transport.get_topology().await
+    }
+
+    pub fn set_peer_count_cache(&mut self, cache: Arc<AtomicUsize>) {
+        self.transport.peer_count_cache = Some(cache);
+    }
+
+    pub fn set_dtn_store(&mut self, store: Arc<crate::core::dtn::epidemic::DtnStore>) {
+        self.transport.dtn_store = Some(store);
     }
 
     pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
@@ -1229,6 +1417,10 @@ impl MeshManager {
     /// Subscribe to a gossipsub topic (e.g., a peer's DM topic)
     pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         self.transport.subscribe_topic(topic).await
+    }
+
+    pub async fn publish_to_topic(&self, topic: &str, message: &str) -> Result<()> {
+        self.transport.publish_to_topic(topic, message.as_bytes().to_vec()).await
     }
 
     /// Get all messages received by this node (in-memory history)
@@ -1260,7 +1452,7 @@ unsafe impl Send for MeshTransport {}
 mod tests {
     use super::*;
     use libp2p::PeerId;
-    use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
     #[test]
     fn test_mesh_node_serialization() {

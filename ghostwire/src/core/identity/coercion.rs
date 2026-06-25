@@ -15,9 +15,9 @@
 //! knowing which password they used. A clean decoy profile is indistinguishable
 //! from a real profile with no messages yet.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use argon2::{Argon2, Params, Version};
-use rand::RngCore;
+
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

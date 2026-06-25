@@ -20,10 +20,9 @@
 //!      prominent warning for production use).
 
 use anyhow::Result;
-use blake3;
 use crate::genesis_constants::{
     SPHINX_KDF_DOMAIN, SPHINX_MAC_DOMAIN, SPHINX_BLIND_DOMAIN,
-    SPHINX_ALPHA_DOMAIN, SPHINX_SHARED_DOMAIN, genesis_derive,
+    SPHINX_SHARED_DOMAIN, genesis_derive,
 };
 use chacha20poly1305::{
     aead::{Aead, KeyInit},

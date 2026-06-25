@@ -4,7 +4,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     XChaCha20Poly1305, XNonce,
 };
-use rand::Rng;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use shamir_secret_sharing::num_bigint::{BigInt, Sign};

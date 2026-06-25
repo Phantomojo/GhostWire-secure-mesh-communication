@@ -5,9 +5,8 @@
 
 use crate::core::Core;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, KeyCode},
     execute,
-    terminal,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout},

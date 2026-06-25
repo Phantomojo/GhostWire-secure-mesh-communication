@@ -65,7 +65,7 @@ pub struct LockedBuffer {
 
 impl LockedBuffer {
     pub fn new(size: usize) -> Self {
-        let mut data = vec![0u8; size];
+        let data = vec![0u8; size];
         lock_memory(data.as_ptr(), data.len()).ok();
         Self { data }
     }

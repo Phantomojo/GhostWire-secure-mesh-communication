@@ -8,11 +8,11 @@
 //!   3. FrameParser error handling: bad magic/unknown kind clear buffer
 //!      but return a non-fatal sentinel so callers can keep the connection.
 
-use crate::genesis_constants::{FRAME_MAGIC as GENESIS_FRAME_MAGIC, FRAME_VERSION as GENESIS_FRAME_VERSION, HANDSHAKE_DOMAIN, derive_with_domain};
+
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+
 
 /// Frame magic bytes — ceremony-derived, replaces b"GWF\x01"
 pub const FRAME_MAGIC: [u8; 4] = crate::genesis_constants::FRAME_MAGIC;

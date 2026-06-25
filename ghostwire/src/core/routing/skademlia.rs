@@ -366,7 +366,7 @@ pub fn hardened_gossipsub_config() -> libp2p::gossipsub::Config {
 /// Apply via `Gossipsub::new_with_subscription_filter_and_transform` or
 /// via `GossipsubConfigBuilder::with_peer_score`.
 pub fn hardened_peer_score_params() -> libp2p::gossipsub::PeerScoreParams {
-    use libp2p::gossipsub::{PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
+    use libp2p::gossipsub::PeerScoreParams;
     use std::time::Duration;
 
     let mut params = PeerScoreParams::default();
