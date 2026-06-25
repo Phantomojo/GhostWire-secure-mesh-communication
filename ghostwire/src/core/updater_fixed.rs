@@ -17,7 +17,7 @@
 //! ALSO: Fixed store.rs clear() — see bottom of this file.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::{info, warn};
 
 /// The public key used to sign Ghostwire release manifests.
@@ -152,7 +152,7 @@ fn verify_manifest_signature(manifest: &UpdateManifest) -> bool {
     );
 
     // Verify Ed25519 signature
-    use ring::signature::{self, UnparsedPublicKey, ED25519};
+    use ring::signature::{UnparsedPublicKey, ED25519};
     let pub_key = UnparsedPublicKey::new(&ED25519, RELEASE_SIGNING_KEY);
     pub_key.verify(payload.as_bytes(), &sig_bytes).is_ok()
 }

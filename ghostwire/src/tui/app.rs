@@ -70,6 +70,7 @@ pub struct TuiApp {
     network_mode: String,
     /// Encryption type
     encryption_type: String,
+    ai_status: String,
 }
 
 impl TuiApp {
@@ -91,6 +92,7 @@ impl TuiApp {
             total_unread: 0,
             network_mode: String::from("Mesh P2P"),
             encryption_type: String::from("XChaCha20-Poly1305"),
+            ai_status: String::from("Checking..."),
         }
     }
 
@@ -173,8 +175,19 @@ impl TuiApp {
     // ═══════════════════════════════════════════════════
 
     async fn refresh_data(&mut self) {
-        // Fetch identity
-        if let Some(identity) = self.client.get_identity().await {
+        let identity_fut = self.client.get_identity();
+        let contacts_fut = self.client.get_contacts();
+        let net_fut = self.client.get_network_status();
+        let ai_fut = self.client.get_ai_status_summary();
+
+        let (identity, contacts, net, ai_status) = tokio::join!(
+            identity_fut,
+            contacts_fut,
+            net_fut,
+            ai_fut
+        );
+
+        if let Some(identity) = identity {
             self.my_name = if identity.nickname.is_empty() {
                 identity.id
             } else {
@@ -182,17 +195,15 @@ impl TuiApp {
             };
         }
 
-        // Fetch contacts/peers
-        self.contacts = self.client.get_contacts().await;
+        self.contacts = contacts;
         self.total_unread = self.contacts.iter().map(|c| c.unread_count).sum();
 
-        // Fetch network status
-        let net = self.client.get_network_status().await;
         self.peer_count = net.peer_count;
         self.network_mode = net.mode;
         self.encryption_type = net.encryption;
 
-        // If no contacts yet, show a placeholder
+        self.ai_status = ai_status;
+
         if self.contacts.is_empty() {
             self.contacts.push(DaemonContact {
                 display_name: "Waiting for mesh peers...".to_string(),
@@ -202,6 +213,15 @@ impl TuiApp {
                 unread_count: 0,
                 last_seen_secs: 0,
             });
+        }
+
+        if let Some(idx) = self.selected_contact {
+            if idx < self.contacts.len() {
+                let peer_id = self.contacts[idx].peer_id.clone();
+                if !peer_id.is_empty() {
+                    self.messages = self.client.get_messages(&peer_id).await;
+                }
+            }
         }
     }
 
@@ -257,7 +277,6 @@ impl TuiApp {
                 }
             }
             KeyCode::Enter => {
-                // Open selected conversation
                 if let Some(idx) = self.selected_contact {
                     if idx < self.contacts.len() {
                         let contact = &self.contacts[idx];
@@ -265,6 +284,13 @@ impl TuiApp {
                             self.selected_contact = Some(idx);
                             self.input_mode = true;
                             self.cursor_pos = self.input.len();
+                            let peer_id = contact.peer_id.clone();
+                            let client = self.client.clone_for_send();
+                            let rt = tokio::runtime::Handle::current();
+                            let messages = rt.block_on(async {
+                                client.get_messages(&peer_id).await
+                            });
+                            self.messages = messages;
                         }
                     }
                 }
@@ -718,7 +744,7 @@ impl TuiApp {
             ]),
             Line::from(vec![
                 Span::styled("AI Layer:  ", theme::muted_style()),
-                Span::styled("L1 Active (91μs)", theme::text_style()),
+                Span::styled(&self.ai_status, theme::text_style()),
             ]),
         ])
         .block(theme::themed_block("Network"));

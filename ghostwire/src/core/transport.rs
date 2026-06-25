@@ -10,6 +10,7 @@ pub enum TransportKind {
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
     Dummy, // No-op transport for tests/default
     StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
+    #[cfg(feature = "bluetooth")]
     Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
     Simulated(Arc<tokio::sync::RwLock<crate::core::sim_transport::SimTransport>>),
 }
@@ -21,6 +22,7 @@ impl TransportKind {
             TransportKind::Mesh(_) => "mesh",
             TransportKind::Dummy => "dummy",
             TransportKind::StealthTCP(_) => "stealth_tcp",
+            #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "bluetooth",
             TransportKind::Simulated(_) => "simulated",
         }
@@ -31,6 +33,7 @@ impl TransportKind {
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (no-op)",
             TransportKind::StealthTCP(_) => "Stealth TCP with Traffic Morphing",
+            #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
             TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
         }
@@ -54,6 +57,7 @@ impl TransportKind {
                 // In future: Resolve ID -> IP and provider.connect(ip).await
                 Ok(())
             }
+            #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
                 let transport = transport.read().await;
                 transport
@@ -79,6 +83,7 @@ impl TransportKind {
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
             TransportKind::StealthTCP(_) => Ok(None),
+            #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),
             TransportKind::Simulated(transport) => {
                 let transport = transport.read().await;

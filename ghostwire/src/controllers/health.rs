@@ -13,18 +13,40 @@ pub struct HealthResponse {
     pub version: String,
     pub message: String,
     pub timestamp: String,
+    #[cfg(feature = "mesh")]
+    pub mesh_enabled: bool,
+    #[cfg(feature = "mesh")]
+    pub mesh_status: String,
 }
 
 pub struct HealthController;
 
 impl HealthController {
-    /// GET /api/v2/health - Simplified health check endpoint
-    pub async fn health(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        let response = HealthResponse {
+    pub async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+
+        #[cfg(feature = "mesh")]
+        let (mesh_enabled, mesh_status) = match &core.mesh_manager {
+            Some(_) => (true, "initialized".to_string()),
+            None => {
+                let identity_locked = core.identity.read().await.keypair().is_none();
+                if identity_locked {
+                    (false, "blocked: identity is locked — unlock via POST /api/v2/profile/unlock".to_string())
+                } else {
+                    (false, "not initialized".to_string())
+                }
+            }
+        };
+
+        let mut response = HealthResponse {
             status: "healthy".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             message: "GhostWire API is running".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            #[cfg(feature = "mesh")]
+            mesh_enabled,
+            #[cfg(feature = "mesh")]
+            mesh_status,
         };
 
         (StatusCode::OK, Json(ApiV2Response::success(response))).into_response()

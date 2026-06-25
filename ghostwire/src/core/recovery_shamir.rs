@@ -18,9 +18,6 @@
 //!   5. Re-encrypt reconstructed key with new password, save as new identity
 
 use crate::genesis_constants::{RECOVERY_KDF_DOMAIN, derive_with_domain};
-use shamir_secret_sharing::num_bigint::BigInt;
-use num_traits::ToPrimitive;
-use base64::Engine;
 
 use anyhow::{Context, Result};
 use chacha20poly1305::{

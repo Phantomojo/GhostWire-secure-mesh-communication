@@ -18,7 +18,6 @@ on:
     types: [published]
   workflow_dispatch:
 
-permissions: {}
 jobs:
   build:
     name: 🐳 Build Docker Image

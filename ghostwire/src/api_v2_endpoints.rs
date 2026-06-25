@@ -278,7 +278,7 @@ pub async fn get_peers_v2(
 
     #[cfg(feature = "mesh")]
     if let Some(mesh_manager) = &state.core.read().await.mesh_manager.clone() {
-        let topology = mesh_manager.read().await.get_topology();
+        let topology = mesh_manager.read().await.get_topology().await;
         for (id, node) in topology.nodes {
             all_peers.push(PeerResponse {
                 id,

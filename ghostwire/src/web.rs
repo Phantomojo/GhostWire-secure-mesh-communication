@@ -32,7 +32,7 @@ use tower_http::cors::CorsLayer;
 
 use lazy_static::lazy_static;
 use local_ip_address;
-use rand::Rng;
+
 use std::fs;
 // use std::sync::Mutex;
 // use std::time::{SystemTime, UNIX_EPOCH};
@@ -190,9 +190,6 @@ pub async fn auth_middleware(
         || path.starts_with("/api/profile")
         || path.starts_with("/api/identity")
         || path.starts_with("/api/v2/profile")
-        || path == "/api/send"
-        || path == "/api/send_message"
-        || path == "/api/broadcast"
         || path.starts_with("/api/ble")  // BLE transport endpoints
     {
         return Ok(next.run(req).await);
@@ -394,18 +391,15 @@ pub async fn start_web_server(
         // .route("/identity/status", get(IdentityController::get_profile)) // Handled by nested route
         // .route("/public-key", get(IdentityController::get_public_key)) // Handled by nested route
         .route("/messages", get(MessagingController::get_messages))
-        // TODO: Fix handler signatures for broadcast/send routes
-        // .route("/broadcast", post(MessagingController::broadcast))
-        // .route("/send", post(MessagingController::send_message))
-        // .route("/send_message", post(MessagingController::send_message))
+        .route("/broadcast", post(MessagingController::broadcast))
+        .route("/send_message", post(MessagingController::send_message))
         .route("/peers", get(PeerController::list))
         .route("/connect_peer", post(PeerController::request_connect))
         .route("/disconnect_peer", post(PeerController::disconnect))
         .route("/ping_peer", post(PeerController::ping))
-        // BLE Transport endpoints
-        .route("/ble/status", get(crate::controllers::ble_controller::BleController::status))
-        .route("/ble/connect", post(crate::controllers::ble_controller::BleController::connect))
-        // TODO: /ble/send blocked by axum Handler trait issue with non-Send future
+        // BLE Transport endpoints — DISABLED: ble_controller module not implemented yet
+        // .route("/ble/status", get(crate::controllers::ble_controller::BleController::status))
+        // .route("/ble/connect", post(crate::controllers::ble_controller::BleController::connect))
         // .route("/ble/send", post(crate::controllers::ble_controller::BleController::ble_send))
         .route("/settings", get(SystemController::get_settings))
         .route("/settings", put(SystemController::update_settings))
@@ -435,6 +429,7 @@ pub async fn start_web_server(
         )
         .route("/v2/peers", get(PeerController::list))
         .route("/v2/messages", get(MessagingController::get_messages))
+        .route("/v2/messages/send", post(MessagingController::send_message))
         .route("/report_error", post(report_error))
         .route("/help/tutorial", get(get_tutorial))
         // ── Wave 2-6 routes ──────────────────────────────────────────────
@@ -586,7 +581,7 @@ pub async fn start_web_server(
     let app: Router = Router::new()
         // All API routes with default rate limiting (auth already has stricter limits)
         .nest("/api", api_routes.layer(default_rate_limiter))
-        .route("/ws", get(ws_handler))
+        .route("/ws", get(crate::controllers::ws_handler::ws_handler))
         // Security headers middleware (HSTS, X-Frame-Options, CSP, etc.)
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             header::STRICT_TRANSPORT_SECURITY,
@@ -623,48 +618,6 @@ pub async fn start_web_server(
     )
     .await?;
     Ok(())
-}
-
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
-}
-
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
-    use axum::extract::ws::Message;
-    use futures_util::{SinkExt, StreamExt};
-
-    // Split socket into send/recv halves
-    let (mut sender, mut receiver) = socket.split();
-
-    // Subscribe to core event bus
-    let mut event_rx = state.core.read().await.event_bus.subscribe();
-
-    // Task 1: Forward CoreEvents to WebSocket
-    let send_task = tokio::spawn(async move {
-        while let Ok(event) = event_rx.recv().await {
-            // Serialize CoreEvent to JSON
-            let json = serde_json::to_string(&event).unwrap_or_default();
-            if sender.send(Message::Text(json)).await.is_err() {
-                break; // Client disconnected
-            }
-        }
-    });
-
-    // Task 2: Handle incoming messages (echo for now, can be extended)
-    let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
-            if let Message::Text(text) = msg {
-                // Could handle incoming commands here
-                tracing::debug!("WebSocket received: {}", text);
-            }
-        }
-    });
-
-    // Wait for either task to complete
-    tokio::select! {
-        _ = send_task => {},
-        _ = recv_task => {},
-    }
 }
 
 pub async fn report_error(Json(req): Json<ErrorReportRequest>) -> impl IntoResponse {

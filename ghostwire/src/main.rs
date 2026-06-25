@@ -92,6 +92,10 @@ struct Args {
     /// Tailscale bootstrap node (format: <tailscale-ip>/<peer-id>)
     #[arg(long)]
     tailscale_bootstrap: Vec<String>,
+
+    /// Mesh network size: small (2-5 peers), medium (6-20), large (20+)
+    #[arg(long, default_value = "small")]
+    mesh_size: String,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -108,6 +112,7 @@ struct Args {
     profile: Option<String>,
     daemon: bool,
     tailscale_bootstrap: Vec<String>,
+    mesh_size: String,
 }
 
 #[cfg(feature = "cli")]
@@ -176,6 +181,7 @@ async fn main() -> Result<()> {
         profile: None,
         daemon: false,
         tailscale_bootstrap: Vec::new(),
+        mesh_size: "small".to_string(),
     };
 
     // Handle daemon management commands (don't need Core — they talk to the daemon)
@@ -183,12 +189,23 @@ async fn main() -> Result<()> {
     {
         match &args.command {
             Some(Commands::Start) => {
-                match daemon::start_daemon(Some(args.port)) {
+                let extra = daemon::DaemonArgs {
+                    tailscale_bootstrap: args.tailscale_bootstrap.clone(),
+                    bootstrap: args.bootstrap.clone(),
+                    mesh_port: args.mesh_port,
+                };
+                match daemon::start_daemon(Some(args.port), Some(extra)) {
                     Ok(pid) => {
                         println!("✅ GhostWire daemon started (PID {})", pid);
                         println!("   Port: {}", args.port);
                         println!("   API:  http://127.0.0.1:{}", args.port);
                         println!("   Logs: {}", daemon::daemon_log_path().display());
+                        if !args.tailscale_bootstrap.is_empty() {
+                            println!("   Tailscale bootstrap: {}", args.tailscale_bootstrap.join(", "));
+                        }
+                        if args.mesh_port > 0 {
+                            println!("   Mesh port: {}", args.mesh_port);
+                        }
                         println!();
                         println!("Run 'ghostwire tui' to open the terminal interface.");
                     }
@@ -216,24 +233,20 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
             Some(Commands::Tui) => {
-                // TUI connects to the daemon — ensure it's running
                 let port = args.port;
                 if !daemon::is_daemon_running() {
                     eprintln!("⚫ Daemon not running — starting it automatically...");
-                    match daemon::start_daemon(Some(port)) {
+                    match daemon::start_daemon(Some(port), None) {
                         Ok(pid) => {
                             eprintln!("✅ Daemon started (PID {})", pid);
-                            // Give it a moment to initialize
                             std::thread::sleep(std::time::Duration::from_secs(2));
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to auto-start daemon: {}", e);
-                            eprintln!("   Try running 'ghostwire start' manually.");
                             return Err(e);
                         }
                     }
                 }
-
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
                 ghostwire::tui::run_tui(port).await
                     .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
@@ -255,47 +268,6 @@ async fn main() -> Result<()> {
     } else {
         Config::load().unwrap_or_else(|_| Config::default())
     };
-
-    // Handle daemon management commands (don't need Core)
-    #[cfg(feature = "cli")]
-    {
-        match &args.command {
-            Some(Commands::Start) => {
-                match daemon::start_daemon(Some(args.port)) {
-                    Ok(pid) => {
-                        println!("✅ GhostWire daemon started (PID {})", pid);
-                        println!("   Port: {}", args.port);
-                        println!("   API:  http://127.0.0.1:{}", args.port);
-                        println!("   Logs: {}", daemon::daemon_log_path().display());
-                        println!();
-                        println!("Run 'ghostwire tui' to open the terminal interface.");
-                    }
-                    Err(e) => {
-                        eprintln!("❌ {}", e);
-                        return Err(e);
-                    }
-                }
-                return Ok(());
-            }
-            Some(Commands::Stop) => {
-                match daemon::stop_daemon() {
-                    Ok(()) => {
-                        println!("✅ GhostWire daemon stopped");
-                    }
-                    Err(e) => {
-                        eprintln!("❌ {}", e);
-                        return Err(e);
-                    }
-                }
-                return Ok(());
-            }
-            Some(Commands::Status) => {
-                println!("{}", daemon::daemon_status());
-                return Ok(());
-            }
-            _ => {}
-        }
-    }
 
     // Auto-update check (skip for daemon mode — it runs forever)
     if !args.daemon && config.server.auto_update
@@ -341,6 +313,9 @@ async fn main() -> Result<()> {
     if std::env::var("TAILSCALE").unwrap_or_default() == "1" {
         tracing::info!("TAILSCALE=1 detected — scanning 100.64.0.0/10 for GhostWire peers");
     }
+
+    // Set mesh size for gossipsub config (read by hardened_gossipsub_config)
+    std::env::set_var("GHOSTWIRE_MESH_SIZE", &args.mesh_size);
 
     // Initialize core components
     let core = Core::new(

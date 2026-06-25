@@ -44,29 +44,71 @@ struct PeerSummary {
 impl PeerController {
     /// GET /api/v2/peers — All known peers with their connection states
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        use crate::core::social::social_graph::PeerFilter;
+
         let core = state.core.read().await;
+        let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
+        let connected = core.social_graph.connected_peers().await;
+        let pending_inbound = core.social_graph.pending_inbound().await;
         let peer_count = core.get_peer_count();
 
-        // Pull from SocialGraph if available
-        // For now: return real count + structure ready for social_graph integration
+        let peers_json: Vec<serde_json::Value> = all_peers
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "node_id": p.node_id,
+                    "did": p.did,
+                    "nickname": p.nickname,
+                    "avatar_cid": p.avatar_cid,
+                    "connection_state": format!("{:?}", p.connection_state),
+                    "is_online": p.is_online,
+                    "signal": p.signal,
+                    "discovered_via": format!("{:?}", p.discovered_via),
+                    "last_seen": p.last_seen,
+                })
+            })
+            .collect();
+
+        tracing::debug!(
+            target: "peers",
+            total = peer_count,
+            connected = connected.len(),
+            pending = pending_inbound.len(),
+            "Peer list requested"
+        );
+
         Json(ApiV2Response::success(serde_json::json!({
             "count": peer_count,
-            "peers": [],
-            "pending_requests": 0,
-            "connected": 0,
-            "note": "Wire social_graph.connected_peers() here after Wave 5 integration"
+            "peers": peers_json,
+            "pending_requests": pending_inbound.len(),
+            "connected": connected.len(),
         })))
     }
 
     /// GET /api/v2/peers/nearby — mDNS-discovered local peers (the "scanner" view)
     pub async fn nearby(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        use crate::core::social::social_graph::PeerFilter;
+
         let core = state.core.read().await;
-        // Pull mDNS peers from mesh manager
-        // For now returns structure; wire mesh_manager.get_mdns_peers() here
+        let nearby_peers = core.social_graph.list_peers(PeerFilter::Nearby).await;
+
+        let peers_json: Vec<serde_json::Value> = nearby_peers
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "node_id": p.node_id,
+                    "nickname": p.nickname,
+                    "avatar_cid": p.avatar_cid,
+                    "signal": p.signal,
+                    "is_online": p.is_online,
+                    "last_seen": p.last_seen,
+                })
+            })
+            .collect();
+
         Json(ApiV2Response::success(serde_json::json!({
-            "nearby": [],
-            "scan_time_ms": 0,
-            "note": "Wire mDNS peer list from mesh_manager here"
+            "nearby": peers_json,
+            "count": peers_json.len(),
         })))
     }
 
@@ -97,10 +139,31 @@ impl PeerController {
 
     /// GET /api/v2/peers/requests — Pending inbound connection requests
     pub async fn list_requests(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        // Wire: core.social_graph.pending_inbound().await
+        let core = state.core.read().await;
+        let requests = core.social_graph.pending_inbound().await;
+
+        let requests_json: Vec<serde_json::Value> = requests
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "request_id": r.request_id,
+                    "from_node_id": r.from_node_id,
+                    "from_did": r.from_did,
+                    "from_nickname": r.from_nickname,
+                    "message": r.message,
+                    "timestamp": r.timestamp,
+                })
+            })
+            .collect();
+
+        tracing::debug!(
+            target: "social",
+            count = requests.len(),
+            "Pending connection requests"
+        );
+
         Json(ApiV2Response::success(serde_json::json!({
-            "requests": [],
-            "note": "Wire social_graph.pending_inbound() here"
+            "requests": requests_json,
         })))
     }
 
