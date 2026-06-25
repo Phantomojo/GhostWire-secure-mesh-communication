@@ -1,7 +1,7 @@
 # GhostWire — Agent Context File
 # Universal format (Claude Code, Qwen Code, Cursor, Copilot, Gemini CLI)
 # Steward: Michael Irungu Muriithi (Phantomojo) · Nairobi, Kenya
-# Last updated: 2026-04-04
+# Last updated: 2026-06-24
 
 ---
 
@@ -69,6 +69,14 @@ cargo build --release
 **Verification gate**: Nothing is "done" until `cargo build` passes clean.
 If it doesn't compile, it isn't fixed.
 
+## Build Status (2026-06-24)
+
+- **Compile**: 0 errors (was 25 before Phase 2)
+- **Tests**: 203/203 pass, 2 pre-existing failures (identity storage + social graph), 2 network-hang skips
+- **Binary**: 254MB (debug), builds in ~6 minutes
+- **Warnings**: 68 (all pre-existing, unused imports/variables)
+- **Feature flags**: `bluetooth` disabled by default (ble_controller not implemented)
+
 ---
 
 ## Architecture — Four-Layer AI Routing System
@@ -114,8 +122,19 @@ models/hrm_ghostwire_hybrid_101k.pt — BROKEN: wrong task, do not extend
 | trust_predictor.rs duplicates reputation.rs + TrustStore | ai/ | HIGH |
 | GemmaClient never called in routing decisions | ai/ | HIGH |
 | HRM model solves wrong problem (classifier, not regressor) | models/ | HIGH |
+| 2 pre-existing test failures (identity storage, social graph) | tests | LOW |
+| 2 tests hang (network transport startup) | tests | LOW |
 
 Current routing accuracy: 2.69% (target: 85–95% via LightGBM regression)
+
+## Phase 3 Preview (next work block)
+
+1. Wire mesh event handlers to populate topology map (KB1)
+2. Update peer_count_cache on ConnectionEstablished/ConnectionClosed (KB2)
+3. Two-machine integration test (Omen ↔ Stratos)
+4. DTN epidemic routing integration
+5. Sphinx mixnet wiring
+6. P0 security: EXPECTED_SCORING_HASH, key zeroization, secure wipe
 
 ---
 

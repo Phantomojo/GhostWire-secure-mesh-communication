@@ -297,8 +297,8 @@ impl BlockStore {
     }
 
     /// Purge blocks older than `max_age` that no local manifest references
-    pub async fn gc_unreferenced_blocks(&self, max_age_secs: u64) -> usize {
-        let now = now_secs();
+    pub async fn gc_unreferenced_blocks(&self, _max_age_secs: u64) -> usize {
+        let _now = now_secs();
         let manifests = self.manifests.read().await;
 
         // Collect all referenced CIDs

@@ -47,6 +47,7 @@ pub mod username_discovery; // DHT-based username discovery // Background and st
 // AI/ML Module
 pub mod ai;
 
+#[cfg(feature = "bluetooth")]
 pub mod bluetooth;
 #[cfg(feature = "briar")]
 pub mod briar;
@@ -678,7 +679,10 @@ impl Core {
                 }
             },
             // Load GNN routing model (Layer 3 — Graph Attention Network)
-            gnn_router: match ai::GnnRouter::new("models/ghostwire_gnn_routing.onnx") {
+            gnn_router: match ai::GnnRouter::new(
+                "models/scoring_head.onnx",
+                "models/gnn_routing/node_embeddings.json",
+            ) {
                 Ok(router) => {
                     tracing::info!("✅ GNN routing system loaded (GAT, Guifi.net trained)");
                     Some(Arc::new(router))
@@ -706,7 +710,7 @@ impl Core {
         their_node_id: &[u8; 32],
         their_bloom: &dtn::epidemic::SyncBloom,
         their_delivery_scores: &[([u8; 32], f32)],
-    ) -> Vec<dtn::epidemic::DtnBundle> {
+    ) -> Vec<dtn::bundle::DtnBundle> {
         // If GNN router is available, try GNN-enhanced forwarding
         if let Some(gnn) = &self.gnn_router {
             // Build topology from current mesh peer state
@@ -821,7 +825,7 @@ impl Core {
 
     /// Collect peer features from current mesh state
     async fn collect_mesh_peer_features(&self) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
-        let mut features = std::collections::HashMap::new();
+        let features = std::collections::HashMap::new();
         // In production, collect from mesh manager. For now, return empty.
         // This would query mesh_manager for connected peers and their link quality.
         features
@@ -1369,6 +1373,7 @@ impl Core {
         let secret = crate::core::identity::RecoveryManager::recover_identity_secret(
             shares,
             recovery_password,
+            threshold,
         )?;
 
         // Create matching identity
@@ -1412,7 +1417,7 @@ impl Core {
     pub async fn get_network_topology(&self) -> Result<String> {
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = &self.mesh_manager {
-            let topology = mesh_manager.read().await.get_topology();
+            let topology = mesh_manager.read().await.get_topology().await;
             return serde_json::to_string_pretty(&topology)
                 .map_err(|e| anyhow::anyhow!("Topology serialization failed: {}", e));
         }
@@ -1456,6 +1461,9 @@ impl Core {
                     self.handshake_secret.clone(),
                 )
                 .await?;
+                let mut mesh_manager = mesh_manager;
+                mesh_manager.set_peer_count_cache(self.mesh_peer_count_cache.clone());
+                mesh_manager.set_dtn_store(self.dtn_store.clone());
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
                 tracing::info!("Mesh network initialized");
             }

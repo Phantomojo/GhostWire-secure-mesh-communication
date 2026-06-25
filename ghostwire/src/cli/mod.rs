@@ -261,7 +261,7 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -
 
 pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Result<()> {
     use crate::core::Message;
-    use std::time::{SystemTime, UNIX_EPOCH};
+
 
     let mut final_recipient = recipient.to_string();
 

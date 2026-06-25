@@ -137,7 +137,6 @@ pub async fn ws_handler(
 async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
     use ring::hkdf::{Salt, HKDF_SHA256};
     use ring::rand::SecureRandom;
-    use base64::Engine;
 
     // Get identity key material (or fallback to a random key if identity not yet set)
     let ikm = {
@@ -153,9 +152,10 @@ async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
     // Derive 32-byte session key via HKDF
     let salt = Salt::new(HKDF_SHA256, &salt_bytes);
     let prk = salt.extract(&ikm);
-    let mut okm = [0u8; 32];
-    prk.expand(b"ghostwire-ws-session-v2").unwrap().fill(&mut okm).unwrap();
-    okm
+    let okm: ring::hkdf::Okm<ring::hkdf::Algorithm> = prk.expand(&[b"ghostwire-ws-session-v2"], HKDF_SHA256).unwrap();
+    let mut okm_bytes = [0u8; 32];
+    okm.fill(&mut okm_bytes).unwrap();
+    okm_bytes
 }
 
 pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
@@ -245,7 +245,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     tracing::debug!("WebSocket session ended for node {}", &node_id[..8.min(node_id.len())]);
 }
 
-async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str, session_key: &[u8; 32]) {
+async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str, _session_key: &[u8; 32]) {
     let cmd: WsCommand = match serde_json::from_str(text) {
         Ok(c) => c,
         Err(_) => {

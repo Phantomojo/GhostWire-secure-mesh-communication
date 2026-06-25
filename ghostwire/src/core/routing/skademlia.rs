@@ -339,25 +339,29 @@ pub fn validate_peer_node_id(
 ///
 /// INTEGRATION: Replace `GossipsubConfig::default()` in mesh.rs with this.
 pub fn hardened_gossipsub_config() -> libp2p::gossipsub::Config {
+    let size = std::env::var("GHOSTWIRE_MESH_SIZE").unwrap_or_else(|_| "small".into());
+    hardened_gossipsub_config_with_size(&size)
+}
+
+pub fn hardened_gossipsub_config_with_size(size: &str) -> libp2p::gossipsub::Config {
     use libp2p::gossipsub::{ConfigBuilder, ValidationMode};
     use std::time::Duration;
 
+    let (mesh_n, mesh_n_low, mesh_n_high, mesh_outbound_min) = match size {
+        "large" => (12, 8, 20, 4),
+        "medium" => (8, 4, 12, 3),
+        _ => (2, 1, 4, 1),
+    };
+
     ConfigBuilder::default()
-        // Require message signing — anonymous messages rejected
         .validation_mode(ValidationMode::Strict)
-        // Mesh target: 6–12 peers (tighter than default, harder to saturate)
-        .mesh_n(8)
-        .mesh_n_low(6)
-        .mesh_n_high(12)
-        // Minimum outbound peers in mesh (prevents inbound-only sybil dominance)
-        .mesh_outbound_min(4)
-        // Heartbeat more frequently to detect and eject bad peers faster
+        .mesh_n(mesh_n)
+        .mesh_n_low(mesh_n_low)
+        .mesh_n_high(mesh_n_high)
+        .mesh_outbound_min(mesh_outbound_min)
         .heartbeat_interval(Duration::from_secs(1))
-        // History window for message deduplication
         .history_length(10)
         .history_gossip(4)
-        // Slow peer scoring — prevents rapid score farming
-        // Note: decay_interval and decay_to_zero moved to PeerScoreParams in libp2p 0.56
         .build()
         .expect("Hardened gossipsub config is valid")
 }
@@ -366,7 +370,7 @@ pub fn hardened_gossipsub_config() -> libp2p::gossipsub::Config {
 /// Apply via `Gossipsub::new_with_subscription_filter_and_transform` or
 /// via `GossipsubConfigBuilder::with_peer_score`.
 pub fn hardened_peer_score_params() -> libp2p::gossipsub::PeerScoreParams {
-    use libp2p::gossipsub::{PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
+    use libp2p::gossipsub::PeerScoreParams;
     use std::time::Duration;
 
     let mut params = PeerScoreParams::default();

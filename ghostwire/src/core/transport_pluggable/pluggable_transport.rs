@@ -27,12 +27,12 @@
 
 use anyhow::Result;
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

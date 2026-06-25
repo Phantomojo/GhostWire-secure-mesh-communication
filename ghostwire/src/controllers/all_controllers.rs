@@ -245,9 +245,16 @@ impl ChannelController {
                         let mgr = mesh_manager.read().await;
                         let topic = format!("ghostwire-channel-{}", hex::encode(topic_id));
                         let content = serde_json::to_string(&msg).unwrap_or_default();
-                        // Publish to gossipsub topic
-                        let _ = mgr.publish_to_topic(&topic, &content).await;
-                        tracing::info!("Published channel message to topic {}", topic);
+                        if let Err(e) = mgr.publish_to_topic(&topic, &content).await {
+                            tracing::error!(
+                                target: "channel",
+                                "Failed to publish to {}: {}",
+                                topic,
+                                e
+                            );
+                        } else {
+                            tracing::info!(target: "channel", "Published channel message to topic {}", topic);
+                        }
                     }
                 }
                 Json(ApiV2Response::success(serde_json::json!({
@@ -374,6 +381,7 @@ impl NetworkController {
             "latency_ms": metrics.latency_ms,
             "packet_loss_pct": metrics.packet_loss_ratio * 100.0,
             "active_peers": metrics.active_peers,
+            "peer_count": metrics.active_peers,
             "last_update": metrics.last_update,
             "transport_mode": transport_mode,
             "network_state": network_state,

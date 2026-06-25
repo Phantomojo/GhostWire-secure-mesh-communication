@@ -8,13 +8,41 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::Duration;
-
-use super::theme;
 
 /// Base URL for the daemon API
 fn api_base(port: u16) -> String {
     format!("http://127.0.0.1:{}", port)
+}
+
+/// Where the daemon writes the auth token
+fn token_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ghostwire")
+        .join("token")
+}
+
+/// Read the auth token from disk (same file the daemon writes)
+fn read_auth_token() -> Option<String> {
+    let path = token_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let trimmed = content.trim().to_string();
+            if trimmed.is_empty() {
+                tracing::debug!(target: "tui", "Token file empty: {}", path.display());
+                None
+            } else {
+                tracing::debug!(target: "tui", "Loaded auth token from {}", path.display());
+                Some(trimmed)
+            }
+        }
+        Err(e) => {
+            tracing::debug!(target: "tui", "No token file: {}", e);
+            None
+        }
+    }
 }
 
 /// Contact entry from the daemon
@@ -68,6 +96,8 @@ pub struct DaemonClient {
     http: Client,
     base_url: String,
     port: u16,
+    /// Auth token for X-Ghost-Token header
+    auth_token: Option<String>,
 }
 
 impl DaemonClient {
@@ -80,6 +110,7 @@ impl DaemonClient {
                 .expect("failed to build HTTP client"),
             base_url: api_base(port),
             port,
+            auth_token: read_auth_token(),
         }
     }
 
@@ -94,6 +125,7 @@ impl DaemonClient {
             http: self.http.clone(),
             base_url: self.base_url.clone(),
             port: self.port,
+            auth_token: self.auth_token.clone(),
         }
     }
 
@@ -107,20 +139,34 @@ impl DaemonClient {
             .unwrap_or(false)
     }
 
+    fn authenticated_get(&self, path: &str) -> reqwest::RequestBuilder {
+        let req = self.http.get(format!("{}{}", self.base_url, path));
+        if let Some(ref token) = self.auth_token {
+            req.header("X-Ghost-Token", token)
+        } else {
+            req
+        }
+    }
+
+    fn authenticated_post(&self, path: &str) -> reqwest::RequestBuilder {
+        let req = self.http.post(format!("{}{}", self.base_url, path));
+        if let Some(ref token) = self.auth_token {
+            req.header("X-Ghost-Token", token)
+        } else {
+            req
+        }
+    }
+
     /// Get my identity info
     pub async fn get_identity(&self) -> Option<DaemonIdentity> {
-        // Try the API v2 identity endpoint
         match self
-            .http
-            .get(format!("{}/api/v2/identity", self.base_url))
+            .authenticated_get("/api/v2/identity")
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                // Parse the response — adapt to actual API format
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
-                        // Extract from API response wrapper
                         let data = val.get("data").unwrap_or(&val);
                         Some(DaemonIdentity {
                             id: data.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
@@ -133,19 +179,27 @@ impl DaemonClient {
                             is_locked: data.get("is_locked").and_then(|v| v.as_bool()).unwrap_or(false),
                         })
                     }
-                    Err(_) => None,
+                    Err(e) => {
+                        tracing::warn!(target: "tui", "Failed to parse identity response: {}", e);
+                        None
+                    }
                 }
             }
-            _ => None,
+            Ok(resp) => {
+                tracing::warn!(target: "tui", "Identity endpoint returned {}", resp.status());
+                None
+            }
+            Err(e) => {
+                tracing::warn!(target: "tui", "Failed to reach identity endpoint: {}", e);
+                None
+            }
         }
     }
 
     /// Get the list of contacts/peers
     pub async fn get_contacts(&self) -> Vec<DaemonContact> {
-        // Try to get peers from the mesh
         match self
-            .http
-            .get(format!("{}/api/v2/peers", self.base_url))
+            .authenticated_get("/api/v2/peers")
             .send()
             .await
         {
@@ -178,7 +232,7 @@ impl DaemonClient {
                                         .get("trust_score")
                                         .and_then(|v| v.as_f64())
                                         .unwrap_or(0.5),
-                                    unread_count: 0, // TODO: wire to mailbox
+                                    unread_count: 0,
                                     last_seen_secs: p
                                         .get("last_seen_secs")
                                         .and_then(|v| v.as_u64())
@@ -189,18 +243,27 @@ impl DaemonClient {
                             Vec::new()
                         }
                     }
-                    Err(_) => Vec::new(),
+                    Err(e) => {
+                        tracing::warn!(target: "tui", "Failed to parse contacts response: {}", e);
+                        Vec::new()
+                    }
                 }
             }
-            _ => Vec::new(),
+            Ok(resp) => {
+                tracing::warn!(target: "tui", "Contacts endpoint returned {}", resp.status());
+                Vec::new()
+            }
+            Err(e) => {
+                tracing::warn!(target: "tui", "Failed to reach contacts endpoint: {}", e);
+                Vec::new()
+            }
         }
     }
 
     /// Get network status
     pub async fn get_network_status(&self) -> DaemonNetworkStatus {
         match self
-            .http
-            .get(format!("{}/api/v2/network/status", self.base_url))
+            .authenticated_get("/api/v2/network/status")
             .send()
             .await
         {
@@ -211,10 +274,12 @@ impl DaemonClient {
                         DaemonNetworkStatus {
                             peer_count: data
                                 .get("peer_count")
+                                .or_else(|| data.get("active_peers"))
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as usize,
                             mode: data
-                                .get("mode")
+                                .get("transport_mode")
+                                .or_else(|| data.get("mode"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("Mesh P2P")
                                 .to_string(),
@@ -225,18 +290,32 @@ impl DaemonClient {
                                 .to_string(),
                         }
                     }
-                    Err(_) => DaemonNetworkStatus {
-                        peer_count: 0,
-                        mode: "Mesh P2P".to_string(),
-                        encryption: "XChaCha20-Poly1305".to_string(),
-                    },
+                    Err(e) => {
+                        tracing::warn!(target: "tui", "Failed to parse network status: {}", e);
+                        DaemonNetworkStatus {
+                            peer_count: 0,
+                            mode: "Mesh P2P".to_string(),
+                            encryption: "XChaCha20-Poly1305".to_string(),
+                        }
+                    }
                 }
             }
-            _ => DaemonNetworkStatus {
-                peer_count: 0,
-                mode: "Mesh P2P".to_string(),
-                encryption: "XChaCha20-Poly1305".to_string(),
-            },
+            Ok(resp) => {
+                tracing::warn!(target: "tui", "Network status endpoint returned {}", resp.status());
+                DaemonNetworkStatus {
+                    peer_count: 0,
+                    mode: "Mesh P2P".to_string(),
+                    encryption: "XChaCha20-Poly1305".to_string(),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(target: "tui", "Failed to reach network status endpoint: {}", e);
+                DaemonNetworkStatus {
+                    peer_count: 0,
+                    mode: "Mesh P2P".to_string(),
+                    encryption: "XChaCha20-Poly1305".to_string(),
+                }
+            }
         }
     }
 
@@ -248,22 +327,137 @@ impl DaemonClient {
         });
 
         match self
-            .http
-            .post(format!("{}/api/v2/messages/send", self.base_url))
+            .authenticated_post("/api/v2/messages/send")
             .json(&body)
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => Ok(()),
-            Ok(resp) => Err(format!("Server error: {}", resp.status())),
-            Err(e) => Err(format!("Connection failed: {}", e)),
+            Ok(resp) => {
+                let status = resp.status();
+                let body_text = resp.text().await.unwrap_or_default();
+                tracing::error!(target: "tui", "Send failed: {} — {}", status, body_text);
+                Err(format!("Server error: {}", status))
+            }
+            Err(e) => {
+                tracing::error!(target: "tui", "Send connection failed: {}", e);
+                Err(format!("Connection failed: {}", e))
+            }
         }
     }
 
-    /// Get message history with a peer
-    pub async fn get_messages(&self, _peer_id: &str) -> Vec<DaemonMessage> {
-        // TODO: wire to actual message history endpoint
-        // For now, return empty — messages are shown optimistically in the TUI
-        Vec::new()
+    pub async fn get_messages(&self, peer_id: &str) -> Vec<DaemonMessage> {
+        if peer_id.is_empty() {
+            return Vec::new();
+        }
+
+        let url = format!(
+            "/api/v2/messages?peer_id={}&limit=50",
+            peer_id,
+        );
+
+        match self.authenticated_get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(val) => {
+                        let data = val.get("data").unwrap_or(&val);
+                        let msgs = data
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                data.get("messages")
+                                    .and_then(|v| v.as_array())
+                                    .cloned()
+                                    .unwrap_or_default()
+                            });
+
+                        let result: Vec<DaemonMessage> = msgs
+                            .iter()
+                            .filter_map(|m| {
+                                let sender = m.get("sender")
+                                    .or_else(|| m.get("sender_id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+
+                                let content = m.get("content")
+                                    .or_else(|| m.get("message"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+
+                                let timestamp = m.get("timestamp")
+                                    .or_else(|| m.get("created_at"))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+
+                                Some(DaemonMessage {
+                                    sender,
+                                    content,
+                                    timestamp,
+                                    is_mine: false,
+                                })
+                            })
+                            .collect();
+
+                        tracing::debug!(
+                            target: "tui",
+                            "Loaded {} messages for peer {}",
+                            result.len(),
+                            peer_id
+                        );
+                        result
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "tui", "Failed to parse messages: {}", e);
+                        Vec::new()
+                    }
+                }
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    target: "tui",
+                    "Messages endpoint returned {} for peer {}",
+                    resp.status(),
+                    peer_id
+                );
+                Vec::new()
+            }
+            Err(e) => {
+                tracing::warn!(target: "tui", "Failed to reach messages endpoint: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    pub async fn get_ai_status_summary(&self) -> String {
+        match self
+            .http
+            .get(format!("{}/api/v2/ai/status", self.base_url))
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(val) => {
+                        let data = val.get("data").unwrap_or(&val);
+                        let active = data.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let layer = data.get("active_layer").and_then(|v| v.as_str()).unwrap_or("none");
+                        let latency = data.get("latency_us").and_then(|v| v.as_u64());
+                        if active {
+                            match latency {
+                                Some(us) => format!("{} Active ({}μs)", layer, us),
+                                None => format!("{} Active", layer),
+                            }
+                        } else {
+                            "Inactive".to_string()
+                        }
+                    }
+                    Err(_) => "parse error".to_string(),
+                }
+            }
+            _ => "not available".to_string(),
+        }
     }
 }

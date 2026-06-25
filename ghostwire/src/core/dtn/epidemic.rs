@@ -219,7 +219,7 @@ impl DtnStore {
     }
 
     /// CIDs we need (we don't have them, they might)
-    pub async fn cids_we_need(&self, their_bloom: &SyncBloom) -> Vec<[u8; 32]> {
+    pub async fn cids_we_need(&self, _their_bloom: &SyncBloom) -> Vec<[u8; 32]> {
         // We can't enumerate what they have from a bloom filter alone —
         // but we can tell them our bloom and they compute what to send.
         // This function is a placeholder for the protocol exchange.

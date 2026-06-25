@@ -52,8 +52,9 @@ cargo build --release --features "meshtastic"
 
 ## Known build notes
 
+- `rand` crate pinned to 0.8.x — 0.9 breaks rand_core 0.6 compat with argon2/x25519-dalek/libp2p-webrtc
 - `obfs4` crate is commented out — the 0.1.0-alpha.1 is non-functional. Wire in when stable.
-- `btleplug` compiles but Bluetooth is not yet connected to the mesh. Wave 7.
+- `btleplug` compiles but Bluetooth is not yet connected to the mesh. Feature-gated: `--features bluetooth`.
 - `libp2p-webrtc` is alpha — if it causes issues, remove from Cargo.toml (not used in main path).
 
 ## Running tests

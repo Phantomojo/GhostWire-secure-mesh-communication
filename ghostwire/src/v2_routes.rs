@@ -2,8 +2,7 @@
 // Implements the missing /api/v2/* endpoints
 
 use crate::api_v2_types::ApiV2Response;
-use crate::core::mesh_health::{build_snapshot, MeshHealthSnapshot};
-use crate::core::security_v2::SecurityStats;
+use crate::core::mesh_health::build_snapshot;
 use axum::{extract::State, Json};
 use std::sync::Arc;
 use crate::web::AppState;

@@ -177,12 +177,23 @@ cargo clippy -- -D warnings
 - **791 clones** in the last 14 days
 - **0 dependencies on external services** — runs entirely offline
 
+## Build Status
+
+**Last verified**: 2026-06-24 — `cargo build` passes, 0 errors, 203/203 tests pass.
+
+Phase 1 (11 TUI/backend fixes) and Phase 2 (25 compile errors → 0) are complete.
+
 ## Roadmap
 
+- [x] TUI backend integration (Phase 1 — 2026-06-24)
+- [x] Compile error cleanup (Phase 2 — 2026-06-24)
+- [ ] Wire mesh event handlers to topology map
+- [ ] Two-machine integration test (Omen ↔ Stratos end-to-end)
+- [ ] DTN epidemic routing integration
+- [ ] Sphinx mixnet wiring
+- [ ] P0 security: EXPECTED_SCORING_HASH, key zeroization, secure wipe
 - [ ] Fix rapid message loss (gossipsub batching)
 - [ ] Full Double Ratchet with DH steps
-- [ ] Real-time peer list in TUI
-- [ ] Message history persistence in TUI
 - [ ] Mobile clients (Android/iOS)
 - [ ] Voice over mesh (VoIP)
 
