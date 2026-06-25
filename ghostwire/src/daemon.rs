@@ -81,8 +81,25 @@ pub fn get_daemon_pid() -> Option<i32> {
     pid_str.trim().parse().ok()
 }
 
+/// Extra args to forward to the daemon child process
+pub struct DaemonArgs {
+    pub tailscale_bootstrap: Vec<String>,
+    pub bootstrap: Vec<String>,
+    pub mesh_port: u16,
+}
+
+impl Default for DaemonArgs {
+    fn default() -> Self {
+        Self {
+            tailscale_bootstrap: Vec::new(),
+            bootstrap: Vec::new(),
+            mesh_port: 0,
+        }
+    }
+}
+
 /// Start the daemon in the background
-pub fn start_daemon(port: Option<u16>) -> Result<i32> {
+pub fn start_daemon(port: Option<u16>, extra_args: Option<DaemonArgs>) -> Result<i32> {
     if is_daemon_running() {
         let pid = get_daemon_pid().unwrap_or(-1);
         return Err(anyhow!("Daemon is already running (PID {})", pid));
@@ -96,6 +113,7 @@ pub fn start_daemon(port: Option<u16>) -> Result<i32> {
     let exe = std::env::current_exe()?;
 
     let daemon_port = port.unwrap_or(DEFAULT_DAEMON_PORT);
+    let extra = extra_args.unwrap_or_default();
 
     // Spawn the daemon process
     let log_path = daemon_log_path();
@@ -106,10 +124,22 @@ pub fn start_daemon(port: Option<u16>) -> Result<i32> {
 
     let stderr = log_file.try_clone()?;
 
-    let mut child = Command::new(&exe)
-        .arg("--daemon")
+    let mut cmd = Command::new(&exe);
+    cmd.arg("--daemon")
         .arg("--port")
         .arg(daemon_port.to_string())
+        .arg("--mesh-port")
+        .arg(extra.mesh_port.to_string());
+
+    for ts in &extra.tailscale_bootstrap {
+        cmd.arg("--tailscale-bootstrap").arg(ts);
+    }
+
+    for b in &extra.bootstrap {
+        cmd.arg("--bootstrap").arg(b);
+    }
+
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(log_file)
         .stderr(stderr)
@@ -215,6 +245,6 @@ pub fn ensure_daemon(port: Option<u16>) -> Result<i32> {
     if is_daemon_running() {
         Ok(get_daemon_pid().unwrap_or(-1))
     } else {
-        start_daemon(port)
+        start_daemon(port, None)
     }
 }

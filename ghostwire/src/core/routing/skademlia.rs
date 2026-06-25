@@ -339,26 +339,29 @@ pub fn validate_peer_node_id(
 ///
 /// INTEGRATION: Replace `GossipsubConfig::default()` in mesh.rs with this.
 pub fn hardened_gossipsub_config() -> libp2p::gossipsub::Config {
+    let size = std::env::var("GHOSTWIRE_MESH_SIZE").unwrap_or_else(|_| "small".into());
+    hardened_gossipsub_config_with_size(&size)
+}
+
+pub fn hardened_gossipsub_config_with_size(size: &str) -> libp2p::gossipsub::Config {
     use libp2p::gossipsub::{ConfigBuilder, ValidationMode};
     use std::time::Duration;
 
+    let (mesh_n, mesh_n_low, mesh_n_high, mesh_outbound_min) = match size {
+        "large" => (12, 8, 20, 4),
+        "medium" => (8, 4, 12, 3),
+        _ => (2, 1, 4, 1),
+    };
+
     ConfigBuilder::default()
-        // Require message signing — anonymous messages rejected
         .validation_mode(ValidationMode::Strict)
-        // Mesh target: 2–4 peers (scaled for small networks / dual-machine testing)
-        // TODO: Make configurable based on network size — raise for production mesh
-        .mesh_n(2)
-        .mesh_n_low(1)
-        .mesh_n_high(4)
-        // Minimum outbound peers in mesh (prevents inbound-only sybil dominance)
-        .mesh_outbound_min(1)
-        // Heartbeat more frequently to detect and eject bad peers faster
+        .mesh_n(mesh_n)
+        .mesh_n_low(mesh_n_low)
+        .mesh_n_high(mesh_n_high)
+        .mesh_outbound_min(mesh_outbound_min)
         .heartbeat_interval(Duration::from_secs(1))
-        // History window for message deduplication
         .history_length(10)
         .history_gossip(4)
-        // Slow peer scoring — prevents rapid score farming
-        // Note: decay_interval and decay_to_zero moved to PeerScoreParams in libp2p 0.56
         .build()
         .expect("Hardened gossipsub config is valid")
 }
