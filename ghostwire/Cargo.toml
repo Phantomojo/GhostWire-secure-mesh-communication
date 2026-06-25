@@ -22,7 +22,7 @@ jsonwebtoken = { version = "=10.3.0" }
 libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-governor = "0.6"
+governor = "0.10"
 tower_governor = { version = "0.4" }
 ring = { version = "0.17.12" }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
