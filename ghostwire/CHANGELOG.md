@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Phase 1: TUI & Backend Integration Fixes** (11 fixes, 2026-06-24)
+  - Wired TUI `get_messages()` to real `/api/v2/messages` endpoint (daemon_client.rs)
+  - Added auth token support with `authenticated_get`/`authenticated_post` (daemon_client.rs)
+  - Fixed `peer_count` field name mismatch with `active_peers` fallback (daemon_client.rs)
+  - PeerController now returns real peer data from mesh (peer_controller.rs)
+  - Added `peer_count` alias to NetworkController (all_controllers.rs)
+  - Removed `/api/send` from auth whitelist — now requires authentication (web.rs)
+  - Uncommented v2 send/broadcast routes (web.rs)
+  - Messages load on contact Enter key in TUI (app.rs)
+  - Added structured `tracing::warn!` to all TUI daemon error paths (daemon_client.rs)
+  - Made `refresh_data()` concurrent with `tokio::join!` (app.rs)
+  - Replaced hardcoded AI status with live `get_ai_status_summary()` (app.rs, daemon_client.rs)
+- **Phase 2: Compile Error Cleanup** (25 errors → 0, 2026-06-24)
+  - Downgraded `rand` from 0.9 to 0.8 (fixed 14 errors: rand + Distribution compat)
+  - Commented out BLE routes + gated bluetooth module with `#[cfg(feature = "bluetooth")]`
+  - Added `anyhow!` macro import in `coercion.rs`
+  - Fixed `DtnBundle` import path (`dtn::epidemic` → `dtn::bundle`)
+  - Fixed `ring::hkdf::Prk::expand` API for ring 0.17 (info slice + HKDF_SHA256 len)
+  - Replaced `publish_to_topic` (nonexistent) with `tracing::warn!` stub
+  - Added missing `threshold` argument to `recover_identity_secret` call
 - Comprehensive documentation suite
 - Security policy and code of conduct
 - Development roadmap and changelog
@@ -33,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced documentation and guides
 
 ### Fixed
+- **25 compile errors eliminated** (Phase 2): rand compatibility, missing imports, wrong module paths, API changes in ring 0.17, missing function arguments, nonexistent method calls
 - Various documentation and formatting issues
 
 ## [0.1.0] - 2024-01-15

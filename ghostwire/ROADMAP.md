@@ -63,6 +63,16 @@ GhostWire aims to become the most secure, private, and reliable decentralized co
   - [ ] Security audit logging
 
 #### Technical Improvements
+- [x] **Compile Error Cleanup**: Fixed 25 pre-existing compile errors (Phase 2 — 2026-06-24)
+  - Downgraded rand 0.9→0.8 for dependency compatibility
+  - Gated bluetooth module behind feature flag
+  - Fixed ring 0.17 HKDF API, DtnBundle import path, anyhow macro
+- [x] **TUI Backend Integration**: Wired 11 TUI fixes (Phase 1 — 2026-06-24)
+  - get_messages() → real /api/v2/messages endpoint
+  - Auth token + authenticated HTTP methods
+  - peer_count with active_peers fallback
+  - PeerController returns real peer data
+  - Concurrent refresh_data() with tokio::join!
 - [ ] **Performance Optimization**: Improve network performance
 - [ ] **Memory Management**: Optimize memory usage and garbage collection
 - [ ] **Error Recovery**: Robust error recovery mechanisms

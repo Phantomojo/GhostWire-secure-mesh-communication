@@ -1,7 +1,7 @@
 # GhostWire — TODO
 
-**Last Updated:** April 7, 2026
-**Status:** Live A↔B tested. Encrypted messaging working. TUI implemented.
+**Last Updated:** June 24, 2026
+**Status:** Phase 1+2 complete. 25 compile errors resolved. `cargo build` passes. 203/203 tests pass.
 
 ---
 
@@ -40,6 +40,29 @@
 - Message input with recipient and message fields
 - Real-time status bar and error display
 - Run with: `ghostwire tui`
+
+### 7. Phase 1: TUI & Backend Integration ✅ (2026-06-24)
+- TUI `get_messages()` wired to `/api/v2/messages` endpoint
+- Auth token support with `authenticated_get`/`authenticated_post`
+- `peer_count` field name mismatch fixed with `active_peers` fallback
+- PeerController returns real peer data from mesh
+- `/api/send` removed from auth whitelist (requires authentication now)
+- v2 send/broadcast routes uncommented and active
+- Messages load on contact Enter key in TUI
+- Structured `tracing::warn!` on all TUI daemon error paths
+- `refresh_data()` concurrent via `tokio::join!`
+- Live AI status via `get_ai_status_summary()`
+
+### 8. Phase 2: Compile Error Cleanup ✅ (2026-06-24)
+- 25 compile errors → 0 errors
+- `rand` 0.9 → 0.8 (fixed 14 errors: rand + Distribution compat)
+- BLE routes commented out, bluetooth gated with `#[cfg(feature = "bluetooth")]`
+- `anyhow!` macro imported in `coercion.rs`
+- `DtnBundle` import path fixed (`dtn::epidemic` → `dtn::bundle`)
+- `ring::hkdf::Prk::expand` API updated for ring 0.17
+- `publish_to_topic` replaced with logging stub (method doesn't exist on MeshManager)
+- Missing `threshold` arg added to `recover_identity_secret`
+- Build verified: 203/203 tests pass, 68 warnings (all pre-existing)
 
 ---
 
@@ -245,17 +268,22 @@
 - [x] ACK/NACK frame types defined
 - [x] MailboxStore for offline message sealing
 - [x] Live A↔B encrypted messaging test (Omen ↔ Stratos)
+- [x] Phase 1: TUI & Backend Integration (11 fixes — 2026-06-24)
+- [x] Phase 2: Compile Error Cleanup (25 errors → 0 — 2026-06-24)
 
 ---
 
 ## 🎯 Next Phase Priorities
 
-If you're shipping this to users, do these in order:
+Phase 1 (TUI fixes) and Phase 2 (compile errors) are done. Phase 3 is next:
 
-1. **Fix key exchange** (Critical #1) — Stop the duct tape, do it right.
-2. **Build minimal web UI** (Critical #3) — Users need a way to interact.
-3. **Wire mailbox to DHT** (Critical #4) — Offline delivery matters.
-4. **Add tests** (Important #5) — Confidence in correctness.
-5. **Forward secrecy** (Critical #2) — This is a security requirement, not a feature.
-
-Everything else can wait.
+1. **Wire mesh event handlers** — Populate topology map (KB1 from Phase 1)
+2. **Update peer_count_cache** — On ConnectionEstablished/ConnectionClosed (KB2)
+3. **Two-machine integration test** — Omen ↔ Stratos end-to-end
+4. **DTN epidemic routing integration** — Wire PRoPHET formula into live mesh
+5. **Sphinx mixnet wiring** — Anonymous routing layer
+6. **P0 security** — EXPECTED_SCORING_HASH, key zeroization, secure wipe
+7. **Build minimal web UI** (Critical #3) — Users need a way to interact.
+8. **Wire mailbox to DHT** (Critical #4) — Offline delivery matters.
+9. **Add tests** (Important #5) — Confidence in correctness.
+10. **Forward secrecy** (Critical #2) — This is a security requirement, not a feature.
