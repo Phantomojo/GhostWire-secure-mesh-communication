@@ -937,6 +937,35 @@ impl MeshDriver {
                 let count = self.topology.read().await.len() as usize;
                 cache.store(count, std::sync::atomic::Ordering::Relaxed);
             }
+
+            {
+                let mut topo = self.topology.write().await;
+                topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
+                    id: peer_id.to_string(),
+                    peer_id: *peer_id,
+                    last_seen_addresses: Vec::new(),
+                    username: String::new(),
+                    public_key: Vec::new(),
+                    last_seen: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    connection_quality: 1.0,
+                    is_online: true,
+                    threat_level: ThreatLevel::Low,
+                }).is_online = true;
+                if let Some(node) = topo.get_mut(&peer_id.to_string()) {
+                    node.last_seen = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                }
+            }
+
+            if let Some(cache) = &self.peer_count_cache {
+                let count = self.topology.read().await.len() as usize;
+                cache.store(count, std::sync::atomic::Ordering::Relaxed);
+            }
         }
 
         if let SwarmEvent::ConnectionClosed {
