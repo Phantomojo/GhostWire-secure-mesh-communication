@@ -345,12 +345,13 @@ pub fn hardened_gossipsub_config() -> libp2p::gossipsub::Config {
     ConfigBuilder::default()
         // Require message signing — anonymous messages rejected
         .validation_mode(ValidationMode::Strict)
-        // Mesh target: 6–12 peers (tighter than default, harder to saturate)
-        .mesh_n(8)
-        .mesh_n_low(6)
-        .mesh_n_high(12)
+        // Mesh target: 2–4 peers (scaled for small networks / dual-machine testing)
+        // TODO: Make configurable based on network size — raise for production mesh
+        .mesh_n(2)
+        .mesh_n_low(1)
+        .mesh_n_high(4)
         // Minimum outbound peers in mesh (prevents inbound-only sybil dominance)
-        .mesh_outbound_min(4)
+        .mesh_outbound_min(1)
         // Heartbeat more frequently to detect and eject bad peers faster
         .heartbeat_interval(Duration::from_secs(1))
         // History window for message deduplication
