@@ -54,7 +54,7 @@ dashmap = "5.5"
 # AI/ML - ONNX Runtime for model inference
 ort = { version = "2.0.0-rc.4", features = ["download-binaries", "tls-rustls", "std"], default-features = false }
 ndarray = "0.15"
-ndarray-stats = "0.5"
+ndarray-stats = "0.7"
 half = { version = "2.4", features = ["num-traits"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 hkdf = "0.12"
