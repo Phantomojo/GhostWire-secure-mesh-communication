@@ -40,7 +40,7 @@ pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
 getrandom = "0.2"
 shamir_secret_sharing = "0.1.1"
-vodozemac = { version = "0.7" }
+vodozemac = { version = "0.9" }
 argon2 = "0.5.3"
 cryptify = "3.2.1"
 num-traits = "0.2"
