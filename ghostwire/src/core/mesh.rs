@@ -986,7 +986,10 @@ impl MeshDriver {
             }
 
             if let Some(cache) = &self.peer_count_cache {
-                let count = self.topology.read().await.len() as usize;
+                let count = self.topology.read().await
+                    .values()
+                    .filter(|n| n.is_online)
+                    .count() as usize;
                 cache.store(count, std::sync::atomic::Ordering::Relaxed);
             }
         }
