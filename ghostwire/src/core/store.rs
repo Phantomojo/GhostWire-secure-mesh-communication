@@ -14,7 +14,7 @@ use crate::core::persistence_manager::PersistenceManager;
 use crate::core::encryption::{EncryptionManager, EncryptedMessage, MessageType};
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{debug, info};
 
 /// Sovereign storage for encrypted message history.
 /// Uses the PersistenceManager (Sled) for high-performance, encrypted storage.
@@ -98,13 +98,15 @@ impl SecureMessageStore {
                         message_type: format!("{:?}", encrypted.message_type),
                         encryption_status: "full".to_string(),
                         hops: 0,
+                        ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
+                        vector_clock: crate::core::vector_clock::VectorClock::new(),
                     });
                 }
                 Err(e) => {
-                    error!(
+                    debug!(
                         error = %e,
                         sender_id = %encrypted.sender_id,
-                        "Failed to decrypt message - possible key rotation or corruption"
+                        "Skipping message — peer key not available (may be from previous session)"
                     );
                 }
             }
@@ -137,7 +139,7 @@ impl SecureMessageStore {
                     .collect()
             }
             Err(e) => {
-                error!(
+                debug!(
                     error = %e,
                     context = "loading message history from DB",
                     "Failed to load message history"

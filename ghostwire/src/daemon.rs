@@ -19,6 +19,42 @@ use std::process::{Command, Stdio};
 /// Default daemon port
 pub const DEFAULT_DAEMON_PORT: u16 = 9097;
 
+fn daemon_args_path() -> PathBuf {
+    ghostwire_home().join("daemon-args.json")
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SavedDaemonArgs {
+    pub tailscale_bootstrap: Vec<String>,
+    pub bootstrap: Vec<String>,
+    pub mesh_port: u16,
+}
+
+pub fn save_daemon_args(args: &DaemonArgs) -> Result<()> {
+    let saved = SavedDaemonArgs {
+        tailscale_bootstrap: args.tailscale_bootstrap.clone(),
+        bootstrap: args.bootstrap.clone(),
+        mesh_port: args.mesh_port,
+    };
+    let json = serde_json::to_string_pretty(&saved)?;
+    fs::write(daemon_args_path(), json)?;
+    Ok(())
+}
+
+pub fn load_saved_args() -> Option<DaemonArgs> {
+    let path = daemon_args_path();
+    if !path.exists() {
+        return None;
+    }
+    let json = fs::read_to_string(&path).ok()?;
+    let saved: SavedDaemonArgs = serde_json::from_str(&json).ok()?;
+    Some(DaemonArgs {
+        tailscale_bootstrap: saved.tailscale_bootstrap,
+        bootstrap: saved.bootstrap,
+        mesh_port: saved.mesh_port,
+    })
+}
+
 /// Get the GhostWire home directory
 fn ghostwire_home() -> PathBuf {
     if let Ok(home) = std::env::var("GHOSTWIRE_HOME") {
@@ -114,6 +150,8 @@ pub fn start_daemon(port: Option<u16>, extra_args: Option<DaemonArgs>) -> Result
 
     let daemon_port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let extra = extra_args.unwrap_or_default();
+
+    let _ = save_daemon_args(&extra);
 
     // Spawn the daemon process
     let log_path = daemon_log_path();

@@ -8,6 +8,8 @@
 //! - ✅ Timing attacks: Constant-time signature verification
 
 use crate::core::armor::TrafficArmor;
+use crate::core::crl;
+use crate::core::double_ratchet;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -71,7 +73,7 @@ pub struct GhostKeyPair {
     pub key_type: KeyType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize)]
 pub enum KeyType {
     Ed25519,
     X25519,
@@ -118,6 +120,8 @@ pub struct EncryptionManager {
     key_rotation_interval: u64,
     last_key_rotation: u64,
     pub traffic_armor: Option<Arc<TrafficArmor>>,
+    pub crl: Arc<crl::CrlStore>,
+    pub ratchet_sessions: Arc<double_ratchet::RatchetSessionManager>,
 }
 
 #[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
@@ -201,6 +205,8 @@ impl EncryptionManager {
                 .unwrap()
                 .as_secs(),
             traffic_armor: None,
+            crl: Arc::new(crl::CrlStore::new()),
+            ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
     }
 
@@ -232,6 +238,8 @@ impl EncryptionManager {
             key_rotation_interval: persisted.key_rotation_interval,
             last_key_rotation: persisted.last_key_rotation,
             traffic_armor: None,
+            crl: Arc::new(crl::CrlStore::new()),
+            ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
     }
 
@@ -350,17 +358,15 @@ impl EncryptionManager {
         let x25519_private_bytes = *x25519_secret.as_bytes();
 
         // Generate ML-KEM (Kyber768) key pair for post-quantum hardening
-        /* Temporarily disabled due to Illegal Instruction on Android
         use pqcrypto_mlkem::mlkem768;
         use pqcrypto_traits::kem::{PublicKey as _, SecretKey as _};
         let (pq_pk, pq_sk) = mlkem768::keypair();
-        */
 
         // Combine keys into a serialized binary format
         // Public part: [Ed25519 (32)] [X25519 (32)] [Kyber PK (1184 for 768)]
         let mut public_key = ed25519_key_pair.public_key().as_ref().to_vec();
         public_key.extend_from_slice(&x25519_public_bytes);
-        // public_key.extend_from_slice(pq_pk.as_bytes()); // Disabled
+        public_key.extend_from_slice(pq_pk.as_bytes());
 
         // Private part: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 (32)] [Kyber SK (2400 for 768)]
         let ed_pkcs8 = ed25519_pkcs8_key_pair.as_ref();
@@ -368,7 +374,7 @@ impl EncryptionManager {
         let mut private_key = ed_len.to_le_bytes().to_vec();
         private_key.extend_from_slice(ed_pkcs8);
         private_key.extend_from_slice(&x25519_private_bytes);
-        // private_key.extend_from_slice(pq_sk.as_bytes()); // Disabled
+        private_key.extend_from_slice(pq_sk.as_bytes());
 
         let key_pair = GhostKeyPair {
             public_key,
@@ -386,7 +392,7 @@ impl EncryptionManager {
                     + 86400 * 30,
             ), // 30 days
             usage_count: 0,
-            key_type: KeyType::Hybrid,
+            key_type: KeyType::Ultimate,
         };
 
         Ok(key_pair)
@@ -433,6 +439,11 @@ impl EncryptionManager {
         recipient_id: &str,
         message_type: MessageType,
     ) -> Result<EncryptedMessage, Box<dyn std::error::Error>> {
+        // Reject if recipient key is revoked
+        if self.crl.is_revoked(recipient_id) {
+            return Err(format!("Recipient key {} is revoked", recipient_id).into());
+        }
+
         let peer_keys = self.peer_keys.lock().unwrap();
         let peer_key = peer_keys.get(recipient_id).ok_or("Recipient not found")?;
 
@@ -494,6 +505,11 @@ impl EncryptionManager {
         &self,
         encrypted_msg: &EncryptedMessage,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        // Reject if sender key is revoked
+        if self.crl.is_revoked(&encrypted_msg.sender_id) {
+            return Err(format!("Sender key {} is revoked", encrypted_msg.sender_id).into());
+        }
+
         // Get peer public key for verification
         let peer_keys = self.peer_keys.lock().unwrap();
         let peer_key = peer_keys
@@ -684,6 +700,13 @@ impl EncryptionManager {
         // Compute Shared Secret using X25519
         let shared_secret = our_x_secret.diffie_hellman(&peer_x_pub);
 
+        // 🛡️ CVE-2025-62514 defense: reject all-zero shared secret (small-order point attack)
+        // An attacker sending a small-order point (e.g., the zero point) would produce
+        // an all-zero DH output, bypassing encryption entirely.
+        if shared_secret.as_bytes() == &[0u8; 32] {
+            return Err("X25519 shared secret is all zeros — small-order point attack detected".into());
+        }
+
         // Derive session key using HKDF-SHA256 (Robust way)
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"GhostWire-Salt-v1");
         let prk = salt.extract(shared_secret.as_bytes());
@@ -863,6 +886,173 @@ impl EncryptionManager {
         }
         Ok(())
     }
+
+    pub fn revoke_key(&self, key_id: &str) -> crl::RevocationEntry {
+        let key_id_owned = key_id.to_string();
+        let signer_id = self.key_pair.key_id.clone();
+        self.crl.revoke(&key_id_owned, &signer_id, &|payload| {
+            self.sign_message(payload).unwrap_or_default()
+        })
+    }
+
+    pub fn merge_crl_entry(&self, entry: &crl::RevocationEntry) -> crl::MergeResult {
+        self.crl.merge(entry, &|payload, signature, signer_id| {
+            if let Some(peer) = self.peer_keys.lock().unwrap().get(signer_id) {
+                self.verify_signature(payload, signature, &peer.public_key)
+                    .is_ok()
+            } else {
+                false
+            }
+        })
+    }
+
+    pub fn gc_crl(&self) -> usize {
+        self.crl.gc()
+    }
+
+    pub fn create_crl_gossip_payload(&self) -> Vec<crl::CrlGossipPayload> {
+        self.crl
+            .entries()
+            .into_iter()
+            .enumerate()
+            .map(|(i, entry)| crl::CrlGossipPayload {
+                entry,
+                version: (i as u64) + 1,
+            })
+            .collect()
+    }
+
+    pub fn handle_crl_gossip(&self, payloads: &[crl::CrlGossipPayload]) -> (usize, usize, usize) {
+        let mut accepted = 0;
+        let mut duplicates = 0;
+        let mut rejected = 0;
+
+        for payload in payloads {
+            match self.merge_crl_entry(&payload.entry) {
+                crl::MergeResult::Accepted => accepted += 1,
+                crl::MergeResult::Duplicate => duplicates += 1,
+                _ => rejected += 1,
+            }
+        }
+
+        (accepted, duplicates, rejected)
+    }
+
+    pub fn init_ratchet_session(
+        &self,
+        peer_id: &str,
+        bob_public_key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let session_key = self.derive_session_key(peer_id, &[
+            self.key_pair.public_key[32..64].to_vec(),
+        ].concat())?;
+
+        let mut shared_secret = [0u8; 32];
+        shared_secret.copy_from_slice(&session_key);
+
+        self.ratchet_sessions.init_alice(peer_id, &shared_secret, bob_public_key);
+        Ok(())
+    }
+
+    pub fn init_ratchet_session_as_bob(
+        &self,
+        peer_id: &str,
+        alice_public_key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let session_key = self.derive_session_key(peer_id, &[
+            self.key_pair.public_key[32..64].to_vec(),
+        ].concat())?;
+
+        let mut shared_secret = [0u8; 32];
+        shared_secret.copy_from_slice(&session_key);
+
+        // Extract X25519 private key from hybrid key: [ed_len_u16][ed25519_pkcs8][x25519_32]
+        let priv_key_bytes = &self.key_pair.private_key;
+        if priv_key_bytes.len() < 36 {
+            return Err("Private key too short for X25519 extraction".into());
+        }
+        let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
+        let x25519_start = 2 + ed_len;
+        if priv_key_bytes.len() < x25519_start + 32 {
+            return Err("Private key missing X25519 secret".into());
+        }
+        let mut bob_secret = [0u8; 32];
+        bob_secret.copy_from_slice(&priv_key_bytes[x25519_start..x25519_start + 32]);
+
+        self.ratchet_sessions.init_bob(peer_id, &shared_secret, &bob_secret);
+        Ok(())
+    }
+
+    pub fn encrypt_message_ratchet(
+        &self,
+        message: &str,
+        peer_id: &str,
+        message_type: MessageType,
+    ) -> Result<EncryptedMessage, Box<dyn std::error::Error>> {
+        if self.crl.is_revoked(peer_id) {
+            return Err(format!("Peer key {} is revoked", peer_id).into());
+        }
+
+        let ratchet_msg = self.ratchet_sessions.encrypt(peer_id, message.as_bytes())
+            .map_err(|e| format!("Ratchet encrypt failed: {}", e))?;
+
+        let signature = self.sign_message(&ratchet_msg.ciphertext)?;
+
+        let header_json = serde_json::to_vec(&ratchet_msg.header)?;
+
+        self.increment_key_usage();
+
+        Ok(EncryptedMessage {
+            ciphertext: ratchet_msg.ciphertext,
+            nonce: ratchet_msg.nonce,
+            signature,
+            sender_id: self.key_pair.key_id.clone(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            key_id: format!("ratchet:{}", peer_id),
+            message_type,
+            version: 0x04,
+            pq_key: Some(header_json),
+        })
+    }
+
+    pub fn decrypt_message_ratchet(
+        &self,
+        encrypted_msg: &EncryptedMessage,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        if self.crl.is_revoked(&encrypted_msg.sender_id) {
+            return Err(format!("Sender key {} is revoked", encrypted_msg.sender_id).into());
+        }
+
+        if encrypted_msg.version != 0x04 {
+            return Err("Expected ratchet message (v4)".into());
+        }
+
+        let header_json = encrypted_msg.pq_key.as_ref()
+            .ok_or("Missing ratchet header")?;
+        let header: double_ratchet::RatchetHeader = serde_json::from_slice(header_json)
+            .map_err(|e| format!("Invalid ratchet header: {}", e))?;
+
+        let ratchet_msg = double_ratchet::RatchetMessage {
+            header,
+            ciphertext: encrypted_msg.ciphertext.clone(),
+            nonce: encrypted_msg.nonce.clone(),
+        };
+
+        let peer_id = encrypted_msg.key_id.strip_prefix("ratchet:")
+            .unwrap_or(&encrypted_msg.sender_id);
+
+        let plaintext = self.ratchet_sessions.decrypt(peer_id, &ratchet_msg)
+            .map_err(|e| format!("Ratchet decrypt failed: {}", e))?;
+
+        String::from_utf8(plaintext).map_err(|e| e.into())
+    }
+
+    pub fn has_ratchet_session(&self, peer_id: &str) -> bool {
+        self.ratchet_sessions.has_session(peer_id)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -937,12 +1127,48 @@ mod tests {
         let rng = SystemRandom::new();
         let key_pair = EncryptionManager::generate_hybrid_key_pair(&rng).unwrap();
 
-        assert_eq!(key_pair.public_key.len(), 64); // 32 Ed25519 + 32 X25519
+        // 32 Ed25519 + 32 X25519 + 1184 Kyber ML-KEM-768 = 1248
+        assert_eq!(key_pair.public_key.len(), 1248);
         assert!(key_pair.private_key.len() > 34);
         // Header length prefix should be there
         let ed_len =
             u16::from_le_bytes([key_pair.private_key[0], key_pair.private_key[1]]) as usize;
         assert!(ed_len > 0);
+        // Kyber secret key should be at the end: 2400 bytes for ML-KEM-768
+        let pq_sk_start = 2 + ed_len + 32;
+        assert_eq!(key_pair.private_key.len(), pq_sk_start + 2400);
+        assert_eq!(key_pair.key_type, KeyType::Ultimate);
+    }
+
+    #[test]
+    fn test_pq_hybrid_encrypt_decrypt() {
+        let alice = EncryptionManager::create_new().unwrap();
+        let bob = EncryptionManager::create_new().unwrap();
+
+        assert_eq!(alice.key_pair.key_type, KeyType::Ultimate);
+        assert_eq!(alice.key_pair.public_key.len(), 1248);
+
+        alice.add_peer_key(
+            bob.get_key_id(),
+            bob.get_public_key().to_vec(),
+            KeyType::Ultimate,
+        );
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Ultimate,
+        );
+
+        let message = "PQ-hybrid encryption works!";
+        let encrypted = alice
+            .encrypt_message(message, &bob.get_key_id(), MessageType::Text)
+            .unwrap();
+
+        assert!(encrypted.pq_key.is_some(), "Kyber path not taken");
+        assert_eq!(encrypted.pq_key.as_ref().unwrap().len(), 1088);
+
+        let decrypted = bob.decrypt_message(&encrypted).unwrap();
+        assert_eq!(message, decrypted);
     }
 
     #[test]

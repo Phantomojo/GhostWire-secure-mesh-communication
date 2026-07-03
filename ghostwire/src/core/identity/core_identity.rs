@@ -91,73 +91,60 @@ impl Identity {
     pub fn load_or_create(profile: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
         let storage_path = Self::get_storage_path(profile.clone())?;
 
-        tracing::info!(
-            target: "identity",
-            msg = "📂 Loading or creating identity",
-            profile = ?profile,
-            storage_path = ?storage_path,
-            exists = storage_path.exists(),
-        );
-
         if storage_path.exists() {
             match Self::load_from_disk(&storage_path) {
                 Ok(mut identity) => {
-                    tracing::info!("🔑 Loaded persistent identity: {}", identity.id);
-                    // Inject profile
                     identity.profile = profile;
 
-                    // CRITICAL FIX: Auto-unlock using keyfile on restart
-                    // When identity loads in locked state, try to auto-unlock using
-                    // the stored keyfile password. This allows nodes to restart cleanly
-                    // without manual intervention.
                     if identity.is_locked() {
                         if let Ok(password) = Self::load_keyfile_password(&storage_path) {
                             match identity.unlock(&password) {
                                 Ok(()) => {
-                                    tracing::info!("🔓 Identity auto-unlocked via keyfile on restart");
+                                    tracing::info!("Identity {} loaded (auto-unlocked via keyfile)", &identity.id[..8]);
                                 }
                                 Err(e) => {
-                                    tracing::warn!(
-                                        "⚠️ Keyfile auto-unlock failed (keyfile may be stale): {}. \
-                                         Identity remains locked.",
+                                    tracing::debug!(
+                                        "Keyfile auto-unlock failed: {}. Identity remains locked.",
                                         e
                                     );
                                 }
                             }
                         } else {
-                            tracing::debug!("No keyfile found for auto-unlock. Identity remains locked.");
+                            tracing::debug!("No keyfile found. Identity remains locked.");
                         }
+                    } else {
+                        tracing::info!("Identity {} loaded (unlocked)", &identity.id[..8]);
                     }
 
                     return Ok(identity);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "⚠️ Failed to load identity (corrupt or old format): {}. Creating new one.",
+                    tracing::debug!(
+                        "Failed to load identity ({}), creating new one.",
                         e
                     );
-                    // On load failure we create fresh identity; migration/backup can be added later
                 }
             }
         }
 
-        tracing::info!("🆕 Creating new persistent identity...");
+        tracing::info!("Creating new identity...");
         let identity = Self::create_new(profile)?;
-        // SECURITY FIX: Generate a cryptographically random initial password
-        // instead of using a hardcoded default. The user sees this in logs
-        // and MUST change it via the setup flow.
         let initial_password = Self::generate_initial_password()?;
-        tracing::warn!(
-            "🔑 Identity created with auto-generated password. \
-             You MUST change this via the setup flow. \
-             Initial password (one-time use): {}",
-            initial_password
-        );
         identity.save_to_disk(&initial_password)?;
 
-        // CRITICAL FIX: Save the initial password to a keyfile for auto-unlock on restart
+        let keyfile_path = Self::get_storage_path(None)?.with_file_name(".initial-password");
+        std::fs::write(&keyfile_path, &initial_password)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&keyfile_path)?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&keyfile_path, perms)?;
+        }
+        tracing::info!("New identity created. See ~/.ghostwire/.initial-password for your password.");
+
         if let Err(e) = Self::save_keyfile_password(&storage_path, &initial_password) {
-            tracing::warn!("⚠️ Failed to save keyfile (auto-unlock won't work on restart): {}", e);
+            tracing::warn!("Failed to save keyfile (auto-unlock won't work on restart): {}", e);
         }
 
         Ok(identity)
@@ -377,50 +364,20 @@ impl Identity {
         profile: Option<String>,
     ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
         let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
-            tracing::info!(
-                target: "identity",
-                msg = "🏠 Using GHOSTWIRE_HOME environment variable",
-                ghost_home = %ghost_home
-            );
             std::path::PathBuf::from(ghost_home)
         } else {
             let home = dirs::home_dir().ok_or("Could not find home directory")?;
-            tracing::info!(
-                target: "identity",
-                msg = "🏠 Using default home directory",
-                home = ?home
-            );
             home.join(".ghostwire")
         };
 
-        tracing::info!(
-            target: "identity",
-            msg = "📂 Checking ghostwire directory",
-            directory = ?ghost_dir,
-            exists = ghost_dir.exists(),
-            is_dir = ghost_dir.is_dir(),
-        );
-
         if !ghost_dir.exists() {
-            tracing::info!(
-                target: "identity",
-                msg = "🔨 Creating ghostwire directory",
-                directory = ?ghost_dir
-            );
             std::fs::create_dir_all(&ghost_dir)?;
         }
         let filename = match profile {
             Some(p) => format!("identity_{}.json", p),
             None => "identity.json".to_string(),
         };
-        let full_path = ghost_dir.join(&filename);
-        tracing::info!(
-            target: "identity",
-            msg = "📁 Identity file path determined",
-            filename = %filename,
-            full_path = ?full_path,
-        );
-        Ok(full_path)
+        Ok(ghost_dir.join(&filename))
     }
 
     fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
