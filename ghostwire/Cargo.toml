@@ -11,7 +11,7 @@ categories = ["network-programming", "security", "asynchronous"]
 
 [dependencies]
 tokio = { version = "1.51", features = ["full"] }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 tower = { version = "0.5" }
 tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "auth"] }
 serde = { version = "1.0", features = ["derive"] }
