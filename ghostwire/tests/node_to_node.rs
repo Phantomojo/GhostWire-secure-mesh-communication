@@ -12,6 +12,7 @@ use ghostwire::core::store::SecureMessageStore;
 use ghostwire::core::username_discovery::UsernameDiscovery;
 use ghostwire::core::persistence_manager::PersistenceManager;
 use ghostwire::core::encryption::Encryption;
+use ghostwire::core::reliability::ReliabilityLayer;
 use libp2p::PeerId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -68,6 +69,7 @@ async fn build_test_mesh_manager(
         username_discovery,
         None,   // no event bus
         None,   // no handshake secret
+        Arc::new(ReliabilityLayer::with_defaults()),
     )
     .await?;
 
@@ -163,4 +165,58 @@ async fn test_node_to_node_connectivity() {
     let _ = node_b.stop().await;
 
     println!("Test passed: node-to-node message delivery verified");
+}
+
+#[tokio::test]
+async fn test_ping_pong_same_machine() {
+    let (mut node_a, peer_id_a, addr_a) =
+        build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
+            .await
+            .expect("node A");
+    let (node_b, peer_id_b, addr_b) =
+        build_test_mesh_manager(19011, Some("ping_test_b".to_string()))
+            .await
+            .expect("node B");
+
+    println!("A={peer_id_a} on {addr_a}");
+    println!("B={peer_id_b} on {addr_b}");
+
+    node_a
+        .add_address(peer_id_b, addr_b.clone())
+        .await
+        .expect("add_address");
+
+    let dm_topic_b = format!("ghostwire-dm-{peer_id_b}");
+    node_b.subscribe_topic(&dm_topic_b).await.expect("sub B");
+    let dm_topic_a = format!("ghostwire-dm-{peer_id_a}");
+    node_a.subscribe_topic(&dm_topic_a).await.expect("sub A");
+
+    node_a.connect_peer(peer_id_b).await.expect("connect");
+
+    // Wait for connection + gossipsub mesh + at least one ping interval (2s) + round-trip margin
+    sleep(Duration::from_secs(6)).await;
+
+    let peer_b_str = peer_id_b.to_string();
+    let health = node_a.peer_health().get_peer_health(&peer_b_str).await;
+
+    match health {
+        Some(h) => {
+            println!(
+                "Peer B health: pings_sent={}, pongs_received={}, avg_rtt={:.1}ms, alive={}",
+                h.pings_sent, h.pongs_received, h.avg_rtt_ms, h.is_alive
+            );
+            assert!(h.pings_sent > 0, "expected pings sent to B");
+            assert!(h.pongs_received > 0, "expected pongs received from B");
+            assert!(h.avg_rtt_ms > 0.0, "expected positive RTT");
+            assert!(h.is_alive, "peer B should be alive");
+        }
+        None => {
+            panic!("No health record for peer B — ping/pong never fired");
+        }
+    }
+
+    let _ = node_a.stop().await;
+    let _ = node_b.stop().await;
+
+    println!("Test passed: ping/pong RTT tracking verified");
 }

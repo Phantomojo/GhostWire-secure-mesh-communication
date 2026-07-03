@@ -299,8 +299,11 @@ impl Default for FrameParser {
     fn default() -> Self { Self::new() }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct WirePing { ts: u32 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WirePing { pub ts: u32 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WirePong { pub ts: u32 }
 
 #[cfg(test)]
 mod tests {

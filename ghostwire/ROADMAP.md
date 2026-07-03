@@ -1,286 +1,227 @@
 # GhostWire Development Roadmap
 
-## 🗺️ Overview
-
-This roadmap outlines the development plan for GhostWire, our secure mesh networking and messaging platform. The roadmap is organized by phases, with each phase building upon the previous one to create a comprehensive, secure, and user-friendly communication system.
-
-## 🎯 Vision
-
-GhostWire aims to become the most secure, private, and reliable decentralized communication platform, providing users with complete control over their data and communications while maintaining high performance and ease of use.
-
-## 📅 Development Phases
-
-### Phase 1: Foundation (Q1 2024) ✅ COMPLETED
-
-**Status**: Complete
-**Focus**: Core infrastructure and basic functionality
-
-#### Completed Features
-- [x] **Core Architecture**: Basic project structure and module organization
-- [x] **Identity Management**: Ed25519/X25519 key pair generation and management
-- [x] **Basic Encryption**: AES-256-GCM encryption implementation
-- [x] **libp2p Integration**: Basic peer-to-peer networking setup
-- [x] **CLI Interface**: Command-line interface with basic commands
-- [x] **Web Interface**: Basic web server and API endpoints
-- [x] **Security Manager**: Basic security monitoring and threat detection
-- [x] **Stealth TCP Transport**: Custom transport layer with stealth features
-
-#### Technical Achievements
-- [x] **Vendored Dependencies**: Local patches for libp2p-mdns compatibility
-- [x] **Error Handling**: Comprehensive error handling with anyhow
-- [x] **Async Architecture**: Full async/await implementation
-- [x] **Serialization**: Serde integration for data serialization
-- [x] **Configuration**: TOML-based configuration system
-
-### Phase 2: Core Features (Q2 2024) 🚧 IN PROGRESS
-
-**Status**: In Progress
-**Focus**: Essential messaging and networking features
-
-#### Planned Features
-- [ ] **Message System**: Complete message sending and receiving
-  - [ ] Encrypted message types (text, file, group)
-  - [ ] Message persistence and delivery guarantees
-  - [ ] Message threading and conversation management
-  - [ ] Offline message queuing
-
-- [ ] **Peer Discovery**: Advanced peer discovery mechanisms
-  - [ ] mDNS local network discovery
-  - [ ] Kademlia DHT for global peer discovery
-  - [ ] Bootstrap node integration
-  - [ ] Peer reputation and trust scoring
-
-- [ ] **Mesh Networking**: Robust mesh network implementation
-  - [ ] GossipSub protocol for message propagation
-  - [ ] Network topology management
-  - [ ] Multi-hop routing optimization
-  - [ ] Network resilience and fault tolerance
-
-- [ ] **Security Enhancements**: Advanced security features
-  - [ ] Perfect forward secrecy implementation
-  - [ ] Key rotation and management
-  - [ ] Threat detection and response
-  - [ ] Security audit logging
-
-#### Technical Improvements
-- [x] **Compile Error Cleanup**: Fixed 25 pre-existing compile errors (Phase 2 — 2026-06-24)
-  - Downgraded rand 0.9→0.8 for dependency compatibility
-  - Gated bluetooth module behind feature flag
-  - Fixed ring 0.17 HKDF API, DtnBundle import path, anyhow macro
-- [x] **TUI Backend Integration**: Wired 11 TUI fixes (Phase 1 — 2026-06-24)
-  - get_messages() → real /api/v2/messages endpoint
-  - Auth token + authenticated HTTP methods
-  - peer_count with active_peers fallback
-  - PeerController returns real peer data
-  - Concurrent refresh_data() with tokio::join!
-- [ ] **Performance Optimization**: Improve network performance
-- [ ] **Memory Management**: Optimize memory usage and garbage collection
-- [ ] **Error Recovery**: Robust error recovery mechanisms
-- [ ] **Testing Coverage**: Comprehensive test suite
-
-### Phase 3: Advanced Features (Q3 2024) 📋 PLANNED
-
-**Status**: Planned
-**Focus**: Advanced security and user experience features
-
-#### Planned Features
-- [ ] **Anonymity Networks**: Tor and other anonymity network integration
-  - [ ] Tor transport layer integration
-  - [ ] I2P network support
-  - [ ] Mix network implementation
-  - [ ] Traffic obfuscation techniques
-
-- [ ] **Zero-Knowledge Proofs**: Advanced cryptographic features
-  - [ ] Identity verification without revealing secrets
-  - [ ] Anonymous credentials
-  - [ ] Privacy-preserving authentication
-  - [ ] Secure multi-party computation
-
-- [ ] **Group Messaging**: Secure group communication
-  - [ ] End-to-end encrypted group chats
-  - [ ] Group member management
-  - [ ] Group key distribution
-  - [ ] Group moderation tools
-
-- [ ] **File Sharing**: Secure file transfer
-  - [ ] Encrypted file transfer
-  - [ ] File integrity verification
-  - [ ] Large file handling
-  - [ ] File metadata protection
-
-#### User Experience
-- [ ] **Web UI Enhancement**: Modern, responsive web interface
-- [ ] **Mobile Support**: Mobile-optimized interface
-- [ ] **Desktop Application**: Native desktop application
-- [ ] **Plugin System**: Extensible plugin architecture
-
-### Phase 4: Production Ready (Q4 2024) 📋 PLANNED
-
-**Status**: Planned
-**Focus**: Production deployment and enterprise features
-
-#### Planned Features
-- [ ] **Enterprise Features**: Business and organization support
-  - [ ] User management and administration
-  - [ ] Audit trails and compliance
-  - [ ] Integration APIs
-  - [ ] Multi-tenant support
-
-- [ ] **Scalability**: Handle large-scale deployments
-  - [ ] Horizontal scaling support
-  - [ ] Load balancing
-  - [ ] Database optimization
-  - [ ] Caching strategies
-
-- [ ] **Monitoring**: Comprehensive monitoring and alerting
-  - [ ] Health checks and metrics
-  - [ ] Performance monitoring
-  - [ ] Security monitoring
-  - [ ] Alert system
-
-- [ ] **Deployment**: Easy deployment and management
-  - [ ] Docker containers
-  - [ ] Kubernetes support
-  - [ ] Configuration management
-  - [ ] Backup and recovery
-
-### Phase 5: Ecosystem (Q1 2025) 📋 PLANNED
-
-**Status**: Planned
-**Focus**: Ecosystem development and community features
-
-#### Planned Features
-- [ ] **Developer Tools**: Tools for developers
-  - [ ] SDK and libraries
-  - [ ] Development tools
-  - [ ] Testing frameworks
-  - [ ] Documentation generators
-
-- [ ] **Community Features**: Community-driven features
-  - [ ] Public channels and forums
-  - [ ] Content discovery
-  - [ ] Reputation systems
-  - [ ] Community governance
-
-- [ ] **Integration**: Third-party integrations
-  - [ ] Messaging platform bridges
-  - [ ] Social media integration
-  - [ ] Email integration
-  - [ ] Calendar and scheduling
-
-- [ ] **Advanced Security**: Cutting-edge security features
-  - [ ] Post-quantum cryptography
-  - [ ] Advanced threat detection
-  - [ ] Security automation
-  - [ ] Incident response
-
-## 🔧 Technical Priorities (Research-Validated)
-
-### High Priority (MVP for Red Bull Basement)
-1. **libp2p Resource Manager Optimization**: Configure memory scopes for 512MB constraint devices
-2. **BLE Mesh Migration**: Switch from classic Bluetooth to BLE mesh (better power/range)
-3. **RSSI-based Sybil Detection**: Implement AI immune system using signal strength analysis (near-100% detection rate)
-4. **Store-and-Forward Routing**: Implement Meshtastic-style router nodes with message caching
-5. **Application-Layer E2EE**: Ensure encryption works even on LoRa hardware with radio-layer restrictions
-
-### Medium Priority (Post-Competition)
-1. **ONNX Runtime Micro Integration**: Deploy INT8 quantized MobileNetV3 for anomaly detection (0.1-2mW power)
-2. **Kiwix Knowledge Ark**: Integrate offline Wikipedia (40-50GB nopics edition) with chunking strategy
-3. **State Channels for $GHOST**: Implement offline payment IOUs for DePIN incentive layer
-4. **Gateway Node Bridge**: Seamless mesh ↔ internet routing when connectivity returns
-5. **Hardware Tiers**: Define and test Tier 0-3 node specifications (Lifeboat → Concierge)
-
-### Low Priority (Future Vision)
-1. **LoRa Backbone**: Add long-range transport (1-2km) with proper antenna design
-2. **Noise Protocol Optimization**: Advanced forward secrecy for mesh P2P
-3. **Zero-Knowledge Identities**: Privacy-preserving authentication for DHT handles
-4. **Enterprise Deployment Tools**: NGO mass-configuration for 10,000+ node deployments
-5. **Post-Quantum Cryptography**: Future-proof encryption algorithms
-
-## 🎯 Success Metrics
-
-### Technical Metrics
-- **Performance**: < 100ms message delivery latency
-- **Reliability**: 99.9% uptime and message delivery
-- **Security**: Zero critical security vulnerabilities
-- **Scalability**: Support for 10,000+ concurrent users
-- **Compatibility**: Support for major operating systems
-
-### User Metrics
-- **Adoption**: Growing user base and community
-- **Satisfaction**: High user satisfaction scores
-- **Retention**: High user retention rates
-- **Engagement**: Active user engagement
-- **Feedback**: Positive community feedback
-
-### Development Metrics
-- **Code Quality**: High code quality and maintainability
-- **Test Coverage**: >90% test coverage
-- **Documentation**: Comprehensive and up-to-date documentation
-- **Contributions**: Active community contributions
-- **Releases**: Regular and stable releases
-
-## 🚀 Release Strategy
-
-### Versioning
-- **Major Releases**: Significant new features and breaking changes
-- **Minor Releases**: New features and improvements
-- **Patch Releases**: Bug fixes and security updates
-- **Pre-releases**: Alpha and beta releases for testing
-
-### Release Schedule
-- **Monthly**: Patch releases for bug fixes
-- **Quarterly**: Minor releases for new features
-- **Bi-annually**: Major releases for significant changes
-- **As needed**: Security releases for critical issues
-
-### Release Process
-1. **Development**: Feature development in feature branches
-2. **Testing**: Comprehensive testing in staging environment
-3. **Review**: Code review and security audit
-4. **Release**: Tagged release with release notes
-5. **Deployment**: Automated deployment and monitoring
-6. **Feedback**: Collect and incorporate user feedback
-
-## 🔮 Future Vision
-
-### Long-term Goals (2025+)
-- **Global Adoption**: Widespread adoption of secure communication
-- **Standard Setting**: Industry standard for secure messaging
-- **Research**: Cutting-edge research in privacy and security
-- **Ecosystem**: Rich ecosystem of applications and services
-- **Impact**: Positive impact on digital privacy and security
-
-### Research Areas (Validated by Perplexity Findings)
-- **Post-Quantum Cryptography**: Quantum-resistant encryption for long-term message security
-- **On-Device AI (ONNX Runtime Micro)**: MobileNetV3 threat detection at 50fps on Cortex-M MCUs
-- **DePIN Tokenomics**: Proof-of-Service incentives (study: Helium Mobile, Pollen)
-- **Heterogeneous Mesh Optimization**: BLE + WiFi Direct + LoRa opportunistic routing
-- **Hardware Ruggedization**: IP67 waterproof nodes, -20°C to +60°C operating range
-- **Regulatory Compliance**: Kenya CA, FCC Part 15, EU RED certification for mesh hardware
-
-### Hardware Tier Definitions
-- **Tier 0 (Lifeboat)**: ESP32 + LoRa, coin cell, <$20 BOM - Minimal packet routing
-- **Tier 1 (Router)**: Pi Zero 2W or old smartphone, 512MB RAM, WiFi+BLE, $50 BOM
-- **Tier 2 (Gateway)**: Pi 4 or desktop, 2GB+ RAM, Ethernet, mesh↔internet bridge, $100 BOM
-- **Tier 3 (Concierge/Ark)**: Server-class, 8GB RAM, SSD for 50GB Wikipedia, DHT indexing
-
-## 📞 Community Involvement
-
-### How to Contribute
-- **Code**: Submit pull requests and bug reports
-- **Testing**: Test releases and provide feedback
-- **Documentation**: Improve documentation and guides
-- **Community**: Help other users and promote the project
-- **Research**: Contribute to research and development
-
-### Community Channels
-- **GitHub**: Code contributions and issues
-- **Discord**: Real-time chat and community support
-- **Forum**: Discussion and community building
-- **Blog**: Project updates and technical articles
-- **Events**: Conferences and meetups
+> **Last Updated**: 2026-07-03 | **Current Version**: 0.2.0 | **Target**: v1.0 Stable
 
 ---
 
-**Note**: This roadmap is a living document and will be updated based on community feedback, technical developments, and changing priorities. We welcome input from the community to help shape the future of GhostWire. 
+## 🎯 Vision
+
+GhostWire is a decentralized P2P encrypted mesh communication system built in Rust. The goal is v1.0 stable: a reliable, secure, production-ready messaging platform.
+
+**Current Score**: 7/10 (B-) — 4 critical gaps identified.
+
+---
+
+## 📊 Current State (2026-07-03)
+
+### What Works ✅
+
+| Layer | Status | Score |
+|-------|--------|-------|
+| Transport (libp2p, Iroh, BT, Obfs4) | Working | 8/10 |
+| Encryption (AES, ChaCha, X25519, ML-KEM) | Working | 8/10 |
+| Security (SecurityManager, Audit, RateLimit, CVE patches) | Working | 8/10 |
+| Storage (MessageStore, Mailbox, Block) | Working | 7/10 |
+| API (Axum, WebSocket, JWT) | Working | 7/10 |
+| Application (TUI, CLI, Web UI) | Working | 7/10 |
+| Health Monitoring (Ping/Pong, RTT, Liveness) | Working | 7/10 |
+
+### What's In Progress 🔄
+
+| Layer | Status | Score |
+|-------|--------|-------|
+| Identity (key revocation, rotation) | Partial | 6/10 |
+| Privacy (adaptive cover traffic) | Static | 6/10 |
+| Network (DHT, peer scoring) | Stub | 6/10 |
+| Social (groups, reputation) | Basic | 5/10 |
+| AI/ML (routing accuracy) | Broken | 5/10 |
+
+### What's Done ✅
+
+| Layer | Status | Score |
+|-------|--------|-------|
+| Message (ACK, ordering, retry) | Complete | 7/10 |
+| Forward Secrecy (symmetric ratchet) | Complete | 8/10 |
+| Health Monitoring (ping/pong) | Complete | 7/10 |
+| Security Hardening (CVE patches) | Complete | 8/10 |
+
+---
+
+## 🚀 v1.0 Stable Plan (remaining)
+
+### Phase 1: Message Reliability ✅ (2026-06-24)
+
+**Goal**: Messages are never lost, duplicated, or reordered.
+
+- [x] **ACK/Retry** — ACK/NACK frames implemented
+- [x] **Message Ordering** — HLC timestamps for causal ordering
+- [x] **Deduplication** — Bloom filter for duplicate detection
+- [x] **Message TTL** — Expiration for old messages
+- [ ] **Message Chunking** — Large message support (still needed)
+
+### Phase 2: Key Security ✅ (2026-07-03)
+
+**Goal**: Compromised keys can be revoked. Forward secrecy works.
+
+- [x] **Forward Secrecy** — Symmetric ratchet with chain key aliasing
+- [x] **Secure Key Storage** — Encrypted key store
+- [ ] **Key Revocation** — Gossip-based CRL propagation (still needed)
+- [ ] **Key Rotation** — Automatic rotation on schedule (still needed)
+
+- [ ] **Key Revocation** — Gossip-based CRL propagation
+- [ ] **Forward Secrecy** — Per-session key rotation
+- [ ] **Secure Key Storage** — Encrypted key store
+- [ ] **Key Rotation** — Automatic rotation on schedule
+
+### Phase 3: Network Hardening (2-3 weeks)
+
+**Goal**: Network is resilient to Sybil attacks and congestion.
+
+- [ ] **Peer Scoring** — Reputation-based peer ranking
+- [ ] **Bandwidth Estimation** — Congestion awareness
+- [ ] **PrivacyParams** — Device-aware privacy tiers
+- [ ] **DHT Integration** — Wire Kademlia for peer discovery
+
+### Phase 4: Testing & Documentation (2-3 weeks)
+
+**Goal**: Unknown vulnerabilities are found and documented.
+
+- [ ] **Fuzzing Setup** — cargo-fuzz for critical paths
+- [ ] **API Documentation** — OpenAPI 3.1 spec
+- [ ] **SECURITY.md Update** — Threat model
+- [ ] **Property-based Tests** — proptest for invariants
+- [ ] **Integration Tests** — API end-to-end tests
+
+### Phase 5: Polish (1-2 weeks)
+
+**Goal**: Production-ready release.
+
+- [ ] **Contact Verification** — Trust establishment
+- [ ] **Message Compression** — Bandwidth savings
+- [ ] **Storage Backup/Restore** — Data recovery
+- [ ] **Performance Benchmarks** — Latency, throughput
+
+---
+
+## 📅 Release Strategy
+
+### Versioning (Semantic)
+
+```
+v0.2.0  →  v1.0.0-alpha  →  v1.0.0-beta  →  v1.0.0
+(current)   (Phase 1-2)     (Phase 3-4)     (Phase 5)
+```
+
+### Release Schedule
+
+| Version | Target | Content |
+|---------|--------|---------|
+| v0.3.0 | Week 4 | Message reliability (Phase 1) |
+| v0.4.0 | Week 8 | Key security (Phase 2) |
+| v0.5.0 | Week 11 | Network hardening (Phase 3) |
+| v1.0.0-alpha | Week 13 | Testing complete |
+| v1.0.0-beta | Week 15 | Documentation complete |
+| v1.0.0 | Week 16 | Stable release |
+
+---
+
+## 🔮 Post v1.0 (v1.1+)
+
+### v1.1 — Advanced Privacy (Q4 2026)
+
+- [ ] Poisson timing for cover traffic
+- [ ] LARMix τ parameter
+- [ ] PARSAN-Mix α parameter
+- [ ] Bandwidth-adaptive mixing
+
+### v1.2 — Multi-device (Q1 2027)
+
+- [ ] KERI integration
+- [ ] Multi-device support
+- [ ] Identity migration
+- [ ] Social recovery
+
+### v2.0 — Ecosystem (Q2 2027)
+
+- [ ] Mobile apps (Android/iOS)
+- [ ] Desktop app (Tauri)
+- [ ] Plugin system
+- [ ] WebRTC transport
+- [ ] Group messaging
+- [ ] File sharing
+
+---
+
+## 🎯 Success Metrics
+
+### v1.0 Requirements
+
+| Metric | Target | Current |
+|--------|--------|---------|
+| Message delivery | 99.9% | Unknown |
+| Key revocation | Working | ❌ |
+| Forward secrecy | Per-session | ❌ |
+| Peer scoring | Working | ❌ |
+| Fuzzing coverage | Critical paths | ❌ |
+| Test coverage | >80% | ~60% |
+| Documentation | Complete | Partial |
+
+### Performance Targets
+
+| Metric | Target |
+|--------|--------|
+| Message latency | <100ms |
+| Cover traffic overhead | <20% |
+| Battery impact (mobile) | <5%/hr |
+| Memory usage | <512MB |
+| Binary size | <50MB |
+
+---
+
+## 📋 Technical Priorities
+
+### Critical (v1.0 Blockers)
+
+1. **Message ACK/Retry** — Messages are silently lost
+2. **Key Revocation** — Compromised keys can't be revoked
+3. **Forward Secrecy** — Session compromise exposes all past
+4. **Peer Scoring** — Sybil attacks trivial
+5. **Fuzzing** — Unknown vulnerabilities
+
+### High (v1.0 Important)
+
+1. **PrivacyParams** — Mobile battery waste
+2. **Bandwidth Estimation** — No congestion awareness
+3. **API Documentation** — Third-party integration
+4. **DHT Integration** — Peer discovery incomplete
+5. **Message Chunking** — Large messages fail
+
+### Medium (Post v1.0)
+
+1. **Poisson Timing** — Privacy improvement
+2. **KERI** — Advanced key lifecycle
+3. **Multi-device** — User convenience
+4. **Mobile Apps** — Platform reach
+5. **Plugin System** — Extensibility
+
+---
+
+## 📞 Community
+
+### How to Contribute
+
+- **Code**: Submit PRs for v1.0 items
+- **Testing**: Test releases, report bugs
+- **Documentation**: Improve guides
+- **Security**: Report vulnerabilities (security@ghostwire.dev)
+
+### Resources
+
+- **GitHub**: https://github.com/Phantomojo/GhostWire
+- **Docs**: `ghostwire/docs/`
+- **Security**: `ghostwire/SECURITY.md`
+- **Changelog**: `ghostwire/CHANGELOG.md`
+
+---
+
+**Note**: This roadmap is updated weekly. Last update: 2026-07-01.

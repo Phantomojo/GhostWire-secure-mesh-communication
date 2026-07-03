@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Security Hardening** (2026-07-03):
+  - Pinned minimum safe versions: curve25519-dalek >=4.1.3 (CVE-2024-58262), aes-gcm >=0.10.3 (CVE-2023-42811), reqwest >=0.11.23 (CVE-2025-0805)
+  - X25519 small-order point defense: all-zero DH output check after key exchange (CVE-2025-62514)
+  - USBGuard: permanently allowed CASUE USB KB (2a7a:959f)
+  - SECURITY.md: documented open findings (pqcrypto-mlkem unmaintained, no CI cargo-audit)
+- **Peer Health Monitoring** (2026-07-03):
+  - `PeerHealthTracker`: ping/pong with RTT measurement, rolling 60-sample window
+  - `PendingPings`: timestamp-keyed ping tracking with stale cleanup
+  - Periodic pings every 2s in MeshDriver event loop
+  - Incoming Ping → respond with Pong; incoming Pong → resolve RTT
+  - `mesh_health.rs` module with health metrics
+  - `peer_health()` accessor on MeshManager
+- **Documentation Overhaul** (2026-07-03):
+  - New: INSTALL.md, CONFIGURATION.md, DEPLOYMENT.md, TROUBLESHOOTING.md, DESIGN_DECISIONS.md
+  - Rewritten: README.md, ARCHITECTURE.md, DOCUMENTATION_INDEX.md
+  - Updated: SECURITY.md, THREAT_MODEL.md, KEY_MANAGEMENT.md
+  - Archived notebookllm/ (38 files) to docs/archive/notebookllm/; 3 unique files extracted to docs/
 - **Phase 1: TUI & Backend Integration Fixes** (11 fixes, 2026-06-24)
   - Wired TUI `get_messages()` to real `/api/v2/messages` endpoint (daemon_client.rs)
   - Added auth token support with `authenticated_get`/`authenticated_post` (daemon_client.rs)

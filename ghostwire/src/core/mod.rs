@@ -7,7 +7,9 @@ pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
 pub mod constants;
+pub mod crl;
 pub mod db;
+pub mod double_ratchet;
 pub mod dht_signatures;
 pub mod disaster;
 pub mod dtn;
@@ -27,6 +29,7 @@ pub mod oem_battery_guide;
 pub mod persistence_manager;
 pub mod recovery_shamir;
 pub mod reputation;
+pub mod reliability;
 pub mod routing;
 pub mod security_v2;
 pub mod social;
@@ -35,7 +38,9 @@ pub mod transport_ext;
 pub mod transport_pluggable;
 pub mod typed_crypto;
 pub mod updater_fixed;
+pub mod vector_clock;
 pub mod wire_protocol;
+pub mod peer_health;
 pub use security_v2 as security;
 pub mod store;
 pub mod transport;
@@ -377,6 +382,8 @@ pub struct Core {
     pub dtn_store: Arc<crate::core::dtn::epidemic::DtnStore>,
     // Wave 7: Device pairing
     pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
+    // P0: Reliability layer (ACK/retry/TTL)
+    pub reliability: Arc<reliability::ReliabilityLayer>,
 
     // AI/ML Components (Gemma 4 + ONNX)
     pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
@@ -501,6 +508,8 @@ impl Core {
                 }
             });
 
+        let reliability = Arc::new(crate::core::reliability::ReliabilityLayer::with_defaults());
+
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
             if let Some(kp) = identity.keypair() {
@@ -521,6 +530,7 @@ impl Core {
                         username_discovery,
                         Some(event_bus.clone()),
                         handshake_secret.clone(),
+                        reliability.clone(),
                     )
                     .await?,
                 )))
@@ -542,7 +552,7 @@ impl Core {
         // Clone identity Arc for use in multiple field initializations
         let identity_for_fields = identity.clone();
 
-        Ok(Self {
+        let core = Self {
             config,
             identity: Arc::new(RwLock::new(identity)),
             encryption,
@@ -659,7 +669,7 @@ impl Core {
                         Some(Arc::new(model))
                     }
                     Err(e) => {
-                        tracing::warn!("⚠️ No anomaly detector model loaded: {}", e);
+                        tracing::debug!("No anomaly detector model: {}", e);
                         None
                     }
                 },
@@ -671,8 +681,8 @@ impl Core {
                     Some(Arc::new(router))
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "⚠️ AI routing system not loaded (will use PRoPHET fallback): {}",
+                    tracing::debug!(
+                        "AI routing not loaded (PRoPHET fallback): {}",
                         e
                     );
                     None
@@ -688,8 +698,8 @@ impl Core {
                     Some(Arc::new(router))
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "⚠️ GNN routing system not loaded (will use PRoPHET fallback): {}",
+                    tracing::debug!(
+                        "GNN routing not loaded (PRoPHET fallback): {}",
                         e
                     );
                     None
@@ -697,7 +707,10 @@ impl Core {
             },
             // Feature extractor for L1 anomaly detection
             feature_extractor: Arc::new(RwLock::new(ai::FeatureExtractor::new())),
-        })
+            reliability,
+        };
+
+        Ok(core)
     }
 
     /// Process a DTN encounter with GNN-enhanced routing
@@ -1088,6 +1101,8 @@ impl Core {
             ));
         }
 
+        self.reliability.on_message_sent(message.id);
+
         // Persist message to encrypted storage (skip for broadcast — no recipient key)
         if message.recipient == "broadcast" {
             // Store broadcast messages as plaintext (they're public anyway)
@@ -1141,9 +1156,14 @@ impl Core {
             ));
         }
 
-        // Persist message to encrypted storage
+        self.reliability.on_message_sent(message.id);
+
+        // Persist message to encrypted storage (fall back to plain if recipient key unknown)
         if let Err(e) = self.message_store.save_message(message) {
-            tracing::error!("⚠️ Persistence failure: {}", e);
+            tracing::debug!("Encrypted persistence failed ({}), using plain storage", e);
+            if let Err(e2) = self.message_store.save_message_plain(message) {
+                tracing::error!("⚠️ Persistence failure: {}", e2);
+            }
         }
 
         // Add to in-memory history
@@ -1459,6 +1479,7 @@ impl Core {
                     username_discovery,
                     Some(self.event_bus.clone()),
                     self.handshake_secret.clone(),
+                    self.reliability.clone(),
                 )
                 .await?;
                 let mut mesh_manager = mesh_manager;

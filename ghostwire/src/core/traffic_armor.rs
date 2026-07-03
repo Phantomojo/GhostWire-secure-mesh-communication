@@ -12,6 +12,7 @@
 //! Veilid lesson: their research paper (IEEE CSR 2024) flagged that Veilid
 //! still leaks timing and size information. We implement what they haven't yet.
 
+use crate::core::armor::DeviceTier;
 use anyhow::Result;
 use rand::Rng;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -22,16 +23,8 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use zeroize::Zeroize;
 
-/// All messages are padded to a multiple of this block size before encryption.
-/// 512 bytes balances overhead vs. granularity for typical chat messages.
 pub const PAD_BLOCK_SIZE: usize = 512;
-
-/// Maximum padded message size (64 KiB)
 pub const MAX_PADDED_SIZE: usize = 65_536;
-
-/// Cover traffic interval range (randomised to avoid timing fingerprinting)
-const COVER_MIN_MS: u64 = 3_000;
-const COVER_MAX_MS: u64 = 12_000;
 
 /// A padded, typed message frame. The `is_cover` flag is encrypted — the
 /// receiver discards cover frames silently; observers see identical frames.
@@ -135,14 +128,16 @@ pub struct CoverTrafficScheduler {
     tx: mpsc::Sender<PaddedFrame>,
     enabled: Arc<RwLock<bool>>,
     rng: SystemRandom,
+    tier: DeviceTier,
 }
 
 impl CoverTrafficScheduler {
-    pub fn new(tx: mpsc::Sender<PaddedFrame>) -> Self {
+    pub fn new(tx: mpsc::Sender<PaddedFrame>, tier: DeviceTier) -> Self {
         Self {
             tx,
             enabled: Arc::new(RwLock::new(true)),
             rng: SystemRandom::new(),
+            tier,
         }
     }
 
@@ -156,12 +151,12 @@ impl CoverTrafficScheduler {
 
     /// Spawn the cover traffic loop. Call once per session.
     pub fn start(self: Arc<Self>) {
+        let (_, _, _, cover_min_ms, cover_max_ms) = DeviceTier::params(self.tier);
         tokio::spawn(async move {
             let mut sequence: u32 = 0;
             loop {
-                // Randomised inter-packet delay
                 let delay_ms = rand::thread_rng()
-                    .gen_range(COVER_MIN_MS..=COVER_MAX_MS);
+                    .gen_range(cover_min_ms..=cover_max_ms);
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
                 if !*self.enabled.read().await {
@@ -196,9 +191,9 @@ pub struct TrafficArmor {
 }
 
 impl TrafficArmor {
-    pub fn new(cover_tx: Option<mpsc::Sender<PaddedFrame>>) -> Self {
+    pub fn new(cover_tx: Option<mpsc::Sender<PaddedFrame>>, tier: DeviceTier) -> Self {
         let cover_scheduler = cover_tx.map(|tx| {
-            let s = Arc::new(CoverTrafficScheduler::new(tx));
+            let s = Arc::new(CoverTrafficScheduler::new(tx, tier));
             s.clone().start();
             s
         });
@@ -283,9 +278,19 @@ mod tests {
         assert!(frame.is_cover);
     }
 
+    #[test]
+    fn device_tier_params_ordering() {
+        let (h_min, h_max, _, h_cover_min, h_cover_max) = DeviceTier::High.params();
+        let (m_min, m_max, _, m_cover_min, m_cover_max) = DeviceTier::Medium.params();
+        let (l_min, l_max, _, l_cover_min, l_cover_max) = DeviceTier::Low.params();
+        assert!(h_min > m_min && m_min > l_min);
+        assert!(h_cover_min > m_cover_min && m_cover_min > l_cover_min);
+        assert!(h_cover_max > m_cover_max && m_cover_max > l_cover_max);
+    }
+
     #[tokio::test]
     async fn traffic_armor_roundtrip() {
-        let armor = TrafficArmor::new(None);
+        let armor = TrafficArmor::new(None, DeviceTier::Medium);
         let msg = b"Ubuntu - I am because we are";
         let frame = armor.wrap(msg).await.unwrap();
         let recovered = armor.unwrap(&frame).unwrap().unwrap();
@@ -294,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn cover_frame_returns_none() {
-        let armor = TrafficArmor::new(None);
+        let armor = TrafficArmor::new(None, DeviceTier::Medium);
         let rng = SystemRandom::new();
         let cover = generate_cover_frame(&rng, 0).unwrap();
         let result = armor.unwrap(&cover).unwrap();

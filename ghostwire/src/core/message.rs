@@ -223,9 +223,16 @@ pub struct Message {
     /// Hop count for multi-hop relay
     /// 
     /// **Purpose:** Track how many hops this message has traversed
-    /// **Security:** Prevents infinite loops (max 5 hops)
+    /// **Security:** Prevents infinite loops (max 8 hops via reliability::MAX_HOPS)
     /// **Default:** 0 (originating node)
     pub hops: u8,
+
+    /// Time-to-live in seconds
+    ///
+    /// Messages are dropped when TTL reaches 0. Decremented on each relay hop.
+    pub ttl: u64,
+
+    pub vector_clock: crate::core::vector_clock::VectorClock,
 }
 
 impl Message {
@@ -279,6 +286,8 @@ impl Message {
             message_type: "text".to_string(),
             encryption_status: "none".to_string(),
             hops: 0,
+            ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
+            vector_clock: crate::core::vector_clock::VectorClock::new(),
         }
     }
     
@@ -324,6 +333,8 @@ impl Message {
             message_type: format!("{:?}", message_type),
             encryption_status: "none".to_string(),
             hops: 0,
+            ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
+            vector_clock: crate::core::vector_clock::VectorClock::new(),
         }
     }
     
