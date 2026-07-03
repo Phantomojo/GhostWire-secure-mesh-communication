@@ -247,4 +247,41 @@ Please provide the following information:
 
 ---
 
-**Remember**: Security is everyone's responsibility. If you see something, say something! 
+## 🔴 Open Security Findings (2026-07-03 Audit)
+
+### Fixed This Session
+- ✅ **CVE-2024-58262**: curve25519-dalek timing attack — pinned `>=4.1.3`
+- ✅ **CVE-2023-42811**: aes-gcm plaintext exposure — pinned `>=0.10.3`
+- ✅ **CVE-2025-0805**: reqwest HTTP request smuggling — pinned `>=0.11.23`
+- ✅ **CVE-2025-62514**: X25519 small-order point attack — added all-zero DH output check in `encryption.rs:703`
+- ✅ **USBGuard**: CASUE USB KB (2a7a:959f) permanently allowed
+
+### Open: P1 — pqcrypto-mlkem 0.1.1 Unmaintained
+
+**Severity**: P1 (HIGH)
+**Advisory**: RUSTSEC-2026-0161
+**Status**: Open — requires migration
+
+`pqcrypto-mlkem` 0.1.1 depends on PQClean which was archived July 2026. The crate will not receive security patches.
+
+**Remediation**: Migrate to [`ml-kem`](https://crates.io/crates/ml-kem) (maintained successor, ML-KEM-768 compatible API). The change is confined to `encryption.rs` (lines 361-363, 458-476, 538-562) and `pqcrypto-traits` can be removed.
+
+**Risk if deferred**: No immediate CVE, but future PQClean-targeting attacks will go unpatched. Acceptable for development; must fix before production.
+
+### Open: P2 — No CI Dependency Audit
+
+**Severity**: P2 (MEDIUM)
+**Status**: Open — requires CI config
+
+`cargo-audit` is not installed and there is no CI pipeline running automated dependency vulnerability checks. Regressions possible on `cargo update`.
+
+**Remediation**: Add `cargo audit` to CI (GitHub Actions or pre-commit hook). Minimum viable:
+```yaml
+- run: cargo install cargo-audit && cargo audit
+```
+
+**Risk if deferred**: New CVEs in dependencies won't be caught automatically. Manual audits are sporadic.
+
+---
+
+**Remember**: Security is everyone's responsibility. If you see something, say something!

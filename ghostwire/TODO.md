@@ -1,7 +1,7 @@
 # GhostWire — TODO
 
-**Last Updated:** June 24, 2026
-**Status:** Phase 1+2 complete. 25 compile errors resolved. `cargo build` passes. 203/203 tests pass.
+**Last Updated:** July 3, 2026
+**Status:** Phase 1+2 complete. Security hardening done. Peer health monitoring wired. `cargo check` passes clean.
 
 ---
 
@@ -64,36 +64,39 @@
 - Missing `threshold` arg added to `recover_identity_secret`
 - Build verified: 203/203 tests pass, 68 warnings (all pre-existing)
 
+### 9. Security Hardening ✅ (2026-07-03)
+- Pinned minimum safe versions in Cargo.toml (curve25519-dalek, aes-gcm, reqwest)
+- X25519 small-order point defense (all-zero DH output check)
+- USBGuard: permanently allowed CASUE USB KB
+- SECURITY.md updated with open findings
+
+### 10. Peer Health Monitoring ✅ (2026-07-03)
+- PeerHealthTracker with ping/pong, RTT measurement, liveness detection
+- PendingPings for tracking outstanding pings
+- Periodic pings every 2s in MeshDriver event loop
+- Incoming Ping → respond with Pong; incoming Pong → resolve RTT
+
+### 11. Documentation Overhaul ✅ (2026-07-03)
+- New: INSTALL.md, CONFIGURATION.md, DEPLOYMENT.md, TROUBLESHOOTING.md, DESIGN_DECISIONS.md
+- Rewritten: README.md, ARCHITECTURE.md, DOCUMENTATION_INDEX.md
+- Updated: SECURITY.md, THREAT_MODEL.md, KEY_MANAGEMENT.md
+
 ---
 
 ## 🔴 Critical (Must Do Before Public Release)
 
-### 1. Fix Key Exchange Protocol
-**Problem:** Encryption keys are smuggled in the libp2p Identify agent version string. It works but it's ugly and fragile.
+### 1. Two-Machine Integration Test
+**Problem:** Same-machine ping/pong test compiles but doesn't fire (topology map not populating). Need real Omen ↔ Stratos test.
 
 **What needs to happen:**
-- Design a proper key exchange message type (FrameKind::KeyExchange)
-- Send encryption public keys as a dedicated frame on connection established
-- Remove the `+enc:` hack from the Identify agent version
-- Verify that both nodes can still exchange encrypted messages after the change
+- Fix topology population on connection establishment
+- Run live two-machine test
+- Verify end-to-end: discovery → connect → key exchange → encrypted DM → ping/pong → health record
 
-**Estimated effort:** 2-3 days  
-**Files:** `src/core/mesh.rs`, `src/core/wire_protocol.rs`
+**Estimated effort:** 1-2 days
+**Files:** `tests/node_to_node.rs`, `src/core/mesh.rs`
 
-### 2. Implement Forward Secrecy
-**Problem:** Static X25519 keys mean that if a node's private key is compromised, all past messages can be decrypted.
-
-**What needs to happen:**
-- Implement the Double Ratchet protocol (or a simplified variant)
-- Generate ephemeral X25519 keypairs per message batch
-- Store ratchet state in the encryption manager
-- Handle out-of-order message delivery (messages arrive before earlier ones)
-
-**Estimated effort:** 1-2 weeks  
-**Files:** `src/core/encryption.rs`, `src/core/message.rs`  
-**Reference:** Signal Protocol specification, https://signal.org/docs/specifications/doubleratchet/
-
-### 3. Build a Minimal Web UI
+### 2. Build a Minimal Web UI
 **Problem:** The API works but there's no frontend. Users need a way to interact with GhostWire without curl.
 
 **What needs to happen:**
@@ -103,11 +106,11 @@
 - Handle authentication (token input on first load)
 - Keep it minimal — one page, no routing, no state management library
 
-**Estimated effort:** 1 week  
-**Files:** `webui/` (currently empty)  
+**Estimated effort:** 1 week
+**Files:** `webui/` (currently empty)
 **Tech:** React + Bootstrap (or vanilla JS if you want to keep it simple)
 
-### 4. Wire MailboxStore to DHT for Offline Delivery
+### 3. Wire MailboxStore to DHT for Offline Delivery
 **Problem:** Messages for offline peers are sealed locally but not published to the DHT. If both nodes are offline simultaneously, messages don't queue.
 
 **What needs to happen:**
@@ -116,7 +119,7 @@
 - Add message expiry (TTL) to prevent DHT bloat
 - Handle DHT record conflicts (multiple nodes publishing for the same recipient)
 
-**Estimated effort:** 3-5 days  
+**Estimated effort:** 3-5 days
 **Files:** `src/core/mailbox.rs`, `src/core/mesh.rs`, `src/core/mod.rs`
 
 ---

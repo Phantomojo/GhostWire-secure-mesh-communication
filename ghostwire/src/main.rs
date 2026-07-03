@@ -16,8 +16,7 @@ use ghostwire::core::Core;
 use ghostwire::daemon;
 
 /// Initialize logging with structured JSON output for production
-fn init_logging() {
-    // Production: JSON format for log aggregation
+fn init_logging(filter: &str) {
     #[cfg(not(debug_assertions))]
     {
         tracing_subscriber::fmt()
@@ -25,11 +24,10 @@ fn init_logging() {
             .with_target(true)
             .with_thread_ids(true)
             .with_thread_names(true)
+            .with_env_filter(filter)
             .init();
-        info!(target: "ghostwire", "Structured JSON logging initialized");
     }
 
-    // Development: Pretty format for readability
     #[cfg(debug_assertions)]
     {
         tracing_subscriber::fmt()
@@ -37,8 +35,8 @@ fn init_logging() {
             .with_target(true)
             .with_thread_ids(true)
             .with_thread_names(true)
+            .with_env_filter(filter)
             .init();
-        info!(target: "ghostwire", "Pretty logging initialized");
     }
 }
 
@@ -96,6 +94,14 @@ struct Args {
     /// Mesh network size: small (2-5 peers), medium (6-20), large (20+)
     #[arg(long, default_value = "small")]
     mesh_size: String,
+
+    /// Verbose output (debug level logging)
+    #[arg(long, short, global = true)]
+    verbose: bool,
+
+    /// Quiet output (warn level logging only)
+    #[arg(long, short, global = true)]
+    quiet: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -119,7 +125,20 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the GhostWire daemon in the background
-    Start,
+    Start {
+        /// Mesh network port (0 = random)
+        #[arg(long, default_value_t = 0)]
+        mesh_port: u16,
+        /// Tailscale bootstrap node (format: <tailscale-ip>/<peer-id>)
+        #[arg(long)]
+        tailscale_bootstrap: Vec<String>,
+        /// Bootstrap multiaddr
+        #[arg(long)]
+        bootstrap: Vec<String>,
+        /// Mesh network size: small (2-5 peers), medium (6-20), large (20+)
+        #[arg(long, default_value = "small")]
+        mesh_size: String,
+    },
     /// Stop the running GhostWire daemon
     Stop,
     /// Check if the GhostWire daemon is running
@@ -149,6 +168,8 @@ enum Commands {
     },
     /// Interactive terminal user interface (connects to daemon)
     Tui,
+    /// Interactive first-run setup (nickname, password, bio)
+    Setup,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -159,12 +180,6 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize structured logging
-    init_logging();
-
-    info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
-    info!("🔒 Security features: End-to-end encryption, threat detection, anonymity");
-
     #[cfg(feature = "cli")]
     let args = Args::parse();
     #[cfg(not(feature = "cli"))]
@@ -182,17 +197,30 @@ async fn main() -> Result<()> {
         daemon: false,
         tailscale_bootstrap: Vec::new(),
         mesh_size: "small".to_string(),
+        verbose: false,
+        quiet: false,
     };
+
+    let log_filter = if args.quiet {
+        "ghostwire=warn"
+    } else if args.verbose {
+        "ghostwire=debug,libp2p_gossipsub=debug"
+    } else {
+        "ghostwire=info"
+    };
+    init_logging(log_filter);
+
+    info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
 
     // Handle daemon management commands (don't need Core — they talk to the daemon)
     #[cfg(feature = "cli")]
     {
         match &args.command {
-            Some(Commands::Start) => {
+            Some(Commands::Start { mesh_port, tailscale_bootstrap, bootstrap, mesh_size }) => {
                 let extra = daemon::DaemonArgs {
-                    tailscale_bootstrap: args.tailscale_bootstrap.clone(),
-                    bootstrap: args.bootstrap.clone(),
-                    mesh_port: args.mesh_port,
+                    tailscale_bootstrap: tailscale_bootstrap.clone(),
+                    bootstrap: bootstrap.clone(),
+                    mesh_port: *mesh_port,
                 };
                 match daemon::start_daemon(Some(args.port), Some(extra)) {
                     Ok(pid) => {
@@ -200,11 +228,14 @@ async fn main() -> Result<()> {
                         println!("   Port: {}", args.port);
                         println!("   API:  http://127.0.0.1:{}", args.port);
                         println!("   Logs: {}", daemon::daemon_log_path().display());
-                        if !args.tailscale_bootstrap.is_empty() {
-                            println!("   Tailscale bootstrap: {}", args.tailscale_bootstrap.join(", "));
+                        if !tailscale_bootstrap.is_empty() {
+                            println!("   Tailscale bootstrap: {}", tailscale_bootstrap.join(", "));
                         }
-                        if args.mesh_port > 0 {
-                            println!("   Mesh port: {}", args.mesh_port);
+                        if *mesh_port > 0 {
+                            println!("   Mesh port: {}", mesh_port);
+                        }
+                        if mesh_size != "small" {
+                            println!("   Mesh size: {}", mesh_size);
                         }
                         println!();
                         println!("Run 'ghostwire tui' to open the terminal interface.");
@@ -235,8 +266,11 @@ async fn main() -> Result<()> {
             Some(Commands::Tui) => {
                 let port = args.port;
                 if !daemon::is_daemon_running() {
-                    eprintln!("⚫ Daemon not running — starting it automatically...");
-                    match daemon::start_daemon(Some(port), None) {
+                    let extra = daemon::load_saved_args().unwrap_or_else(|| daemon::DaemonArgs {
+                        mesh_port: 4001,
+                        ..Default::default()
+                    });
+                    match daemon::start_daemon(Some(port), Some(extra)) {
                         Ok(pid) => {
                             eprintln!("✅ Daemon started (PID {})", pid);
                             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -250,6 +284,69 @@ async fn main() -> Result<()> {
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
                 ghostwire::tui::run_tui(port).await
                     .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
+                return Ok(());
+            }
+            Some(Commands::Setup) => {
+                use ghostwire::core::identity::core_identity::Identity;
+                let storage_path = std::env::var("GHOSTWIRE_HOME")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".ghostwire"))
+                    .join("identity.json");
+
+                if storage_path.exists() {
+                    let identity = Identity::load_or_create(None)
+                        .map_err(|e| anyhow::anyhow!("Failed to load identity: {}", e))?;
+                    let meta = identity.get_metadata();
+                    println!("Identity already exists ({})", &identity.id[..8]);
+                    if identity.is_locked() {
+                        println!("It is currently locked. Unlock via POST /api/v2/profile/unlock first.");
+                        return Ok(());
+                    }
+                    println!("It is currently unlocked.\n");
+
+                    print!("Nickname [{}]: ", meta.nickname);
+                    use std::io::Write;
+                    std::io::stdout().flush()?;
+                    let mut nickname = String::new();
+                    std::io::stdin().read_line(&mut nickname)?;
+                    let nickname = nickname.trim();
+                    let nickname = if nickname.is_empty() { meta.nickname.clone() } else { nickname.to_string() };
+
+                    print!("Bio [{}]: ", meta.bio);
+                    std::io::stdout().flush()?;
+                    let mut bio = String::new();
+                    std::io::stdin().read_line(&mut bio)?;
+                    let bio = bio.trim();
+                    let bio = if bio.is_empty() { meta.bio.clone() } else { bio.to_string() };
+
+                    identity.update_metadata(Some(nickname.clone()), Some(bio), None, Some(true));
+
+                    print!("Password to save: ");
+                    std::io::stdout().flush()?;
+                    let mut password = String::new();
+                    std::io::stdin().read_line(&mut password)?;
+                    let password = password.trim().to_string();
+
+                    if password.is_empty() {
+                        eprintln!("❌ Password required to save identity");
+                        return Ok(());
+                    }
+
+                    identity.save_to_disk(&password)
+                        .map_err(|e| anyhow::anyhow!("Failed to save: {}", e))?;
+
+                    let _ = std::fs::remove_file(
+                        storage_path.with_file_name(".initial-password")
+                    );
+
+                    println!("\n✅ Identity updated");
+                    println!("   Nickname: {}", nickname);
+                    println!("   DID: {}", identity.did);
+                    println!("   API: http://127.0.0.1:{}", args.port);
+                    println!("\nRun 'ghostwire start' to begin.");
+                } else {
+                    println!("No identity found. Run 'ghostwire start' to create one.");
+                }
                 return Ok(());
             }
             _ => {}
@@ -355,7 +452,7 @@ async fn main() -> Result<()> {
             ).await.map_err(|e| anyhow::anyhow!(e))?;
         }
         #[cfg(feature = "cli")]
-        Some(Commands::Start) | Some(Commands::Stop) | Some(Commands::Status) | Some(Commands::Tui) => {
+        Some(Commands::Start { .. }) | Some(Commands::Stop) | Some(Commands::Status) | Some(Commands::Tui) | Some(Commands::Setup) => {
             // Already handled above (before Core creation)
             unreachable!()
         }
