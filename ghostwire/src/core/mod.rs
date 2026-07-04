@@ -784,11 +784,29 @@ impl Core {
                                     // Get candidates (our neighbors in topology)
                                     if let Some(neighbors) = topology.adjacency.get(&src_idx) {
                                         if !neighbors.is_empty() {
+                                            let all_health = if let Some(mesh) = &self.mesh_manager {
+                                                let mesh = mesh.read().await;
+                                                Some(mesh.peer_health().get_all_health().await)
+                                            } else {
+                                                None
+                                            };
                                             let mut peer_features =
                                                 std::collections::HashMap::new();
                                             for &cand in neighbors {
-                                                peer_features
-                                                    .insert(cand, ai::RoutingFeatures::default());
+                                                let features = all_health
+                                                    .as_ref()
+                                                    .and_then(|hl| {
+                                                        let peer_id = mapper.get_peer(cand)?;
+                                                        let peer_str = peer_id.to_string();
+                                                        hl.iter().find(|h| h.peer_id == peer_str).map(|h| ai::RoutingFeatures {
+                                                            latency_ms: h.avg_rtt_ms as u64,
+                                                            packet_loss: h.packet_loss_ratio() as f32,
+                                                            trust_score: if h.is_alive { 1.0 } else { 0.0 },
+                                                            ..Default::default()
+                                                        })
+                                                    })
+                                                    .unwrap_or_default();
+                                                peer_features.insert(cand, features);
                                             }
 
                                             match gnn
