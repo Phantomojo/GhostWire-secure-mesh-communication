@@ -77,7 +77,7 @@ jobs:
           python-version: "3.11"
           cache: "pip"
       - name: Install dependencies
-        run: pip install numpy scikit-learn lightgbm onnx onnxruntime
+        run: pip install numpy scikit-learn lightgbm onnx onnxruntime onnxmltools
       - name: LightGBM training smoke test
         run: |
           python -c "

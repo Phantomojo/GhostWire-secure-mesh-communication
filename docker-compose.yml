@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
       args:
         # Pin Rust version for reproducible builds
-        RUST_VERSION: "1.82"
+        RUST_VERSION: "1.88"
     container_name: ghostwire
     restart: unless-stopped
     ports:
