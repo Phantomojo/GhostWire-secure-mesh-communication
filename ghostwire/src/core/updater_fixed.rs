@@ -26,8 +26,7 @@ use tracing::{info, warn};
 const RELEASE_SIGNING_KEY: &[u8; 32] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PLACEHOLDER
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Replace before release
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
 /// Update manifest published at MANIFEST_URL
@@ -65,7 +64,10 @@ pub async fn check_for_update() -> Option<UpdateManifest> {
     }
 
     if is_newer(&manifest.version, CURRENT_VERSION) {
-        info!("Update available: {} → {}", CURRENT_VERSION, manifest.version);
+        info!(
+            "Update available: {} → {}",
+            CURRENT_VERSION, manifest.version
+        );
         Some(manifest)
     } else {
         info!("Up to date ({})", CURRENT_VERSION);
@@ -85,7 +87,9 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Download failed: {}", e))?;
 
-    let bytes = response.bytes().await
+    let bytes = response
+        .bytes()
+        .await
         .map_err(|e| anyhow::anyhow!("Download read failed: {}", e))?;
 
     // Verify BLAKE3 hash before writing
@@ -101,8 +105,7 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
     info!("Hash verified. Installing...");
 
     // Write to temp
-    std::fs::write(&temp_path, &bytes)
-        .map_err(|e| anyhow::anyhow!("Write temp failed: {}", e))?;
+    std::fs::write(&temp_path, &bytes).map_err(|e| anyhow::anyhow!("Write temp failed: {}", e))?;
 
     // Make executable on Unix
     #[cfg(unix)]
@@ -112,8 +115,8 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
     }
 
     // Atomic rename to current binary path
-    let current_exe = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("Cannot find current exe: {}", e))?;
+    let current_exe =
+        std::env::current_exe().map_err(|e| anyhow::anyhow!("Cannot find current exe: {}", e))?;
 
     // Backup current binary
     let backup_path = current_exe.with_extension("bak");
@@ -166,7 +169,8 @@ async fn fetch_manifest() -> Result<UpdateManifest> {
     .map_err(|_| anyhow::anyhow!("Manifest fetch timed out"))?
     .map_err(|e| anyhow::anyhow!("Manifest fetch failed: {}", e))?;
 
-    let manifest: UpdateManifest = resp.json()
+    let manifest: UpdateManifest = resp
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!("Manifest parse failed: {}", e))?;
     Ok(manifest)
@@ -175,10 +179,7 @@ async fn fetch_manifest() -> Result<UpdateManifest> {
 fn is_newer(candidate: &str, current: &str) -> bool {
     // Simple semver comparison: parse "X.Y.Z"
     fn parse(s: &str) -> (u32, u32, u32) {
-        let parts: Vec<u32> = s
-            .split('.')
-            .filter_map(|p| p.parse().ok())
-            .collect();
+        let parts: Vec<u32> = s.split('.').filter_map(|p| p.parse().ok()).collect();
         (
             parts.first().copied().unwrap_or(0),
             parts.get(1).copied().unwrap_or(0),

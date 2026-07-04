@@ -9,9 +9,9 @@ pub mod channels;
 pub mod constants;
 pub mod crl;
 pub mod db;
-pub mod double_ratchet;
 pub mod dht_signatures;
 pub mod disaster;
+pub mod double_ratchet;
 pub mod dtn;
 pub mod encrypted_store;
 pub mod encryption;
@@ -26,10 +26,11 @@ pub mod monitor;
 pub mod network;
 pub mod obfs4_transport;
 pub mod oem_battery_guide;
+pub mod peer_health;
 pub mod persistence_manager;
 pub mod recovery_shamir;
-pub mod reputation;
 pub mod reliability;
+pub mod reputation;
 pub mod routing;
 pub mod security_v2;
 pub mod social;
@@ -40,7 +41,6 @@ pub mod typed_crypto;
 pub mod updater_fixed;
 pub mod vector_clock;
 pub mod wire_protocol;
-pub mod peer_health;
 pub use security_v2 as security;
 pub mod store;
 pub mod transport;
@@ -658,9 +658,8 @@ impl Core {
                     );
                     Some(Arc::new(model))
                 }
-                Err(_) => match ai::IsolationForestModel::from_file(
-                    "models/anomaly_detector.json",
-                ) {
+                Err(_) => match ai::IsolationForestModel::from_file("models/anomaly_detector.json")
+                {
                     Ok(model) => {
                         tracing::warn!(
                             "⚠️ Using legacy NSL-KDD anomaly detector ({} features) — retrain on mesh data",
@@ -681,10 +680,7 @@ impl Core {
                     Some(Arc::new(router))
                 }
                 Err(e) => {
-                    tracing::debug!(
-                        "AI routing not loaded (PRoPHET fallback): {}",
-                        e
-                    );
+                    tracing::debug!("AI routing not loaded (PRoPHET fallback): {}", e);
                     None
                 }
             },
@@ -698,10 +694,7 @@ impl Core {
                     Some(Arc::new(router))
                 }
                 Err(e) => {
-                    tracing::debug!(
-                        "GNN routing not loaded (PRoPHET fallback): {}",
-                        e
-                    );
+                    tracing::debug!("GNN routing not loaded (PRoPHET fallback): {}", e);
                     None
                 }
             },
@@ -748,7 +741,8 @@ impl Core {
                 let bytes = our_id_str.as_bytes();
                 our_id_bytes[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
 
-                let destinations: Vec<[u8; 32]> = bundles.values()
+                let destinations: Vec<[u8; 32]> = bundles
+                    .values()
                     .filter(|b| !b.is_expired() && b.destination != our_id_bytes)
                     .map(|b| b.destination)
                     .collect();
@@ -758,55 +752,88 @@ impl Core {
                 for dest in &destinations {
                     // Find src node (us) in topology
                     let mapper = gnn.mapper.read().await;
-                    let our_peer = mapper.peers().iter().find(|p| {
-                        let mut buf = [0u8; 32];
-                        let id_bytes = p.to_bytes();
-                        let len = id_bytes.len().min(32);
-                        buf[..len].copy_from_slice(&id_bytes[..len]);
-                        buf == our_id_bytes
-                    }).cloned();
+                    let our_peer = mapper
+                        .peers()
+                        .iter()
+                        .find(|p| {
+                            let mut buf = [0u8; 32];
+                            let id_bytes = p.to_bytes();
+                            let len = id_bytes.len().min(32);
+                            buf[..len].copy_from_slice(&id_bytes[..len]);
+                            buf == our_id_bytes
+                        })
+                        .cloned();
 
                     if let Some(our_peer) = our_peer {
                         if let Some(&src_idx) = mapper.peer_to_index.get(&our_peer) {
                             // Find dest in mapper
-                            let dest_peer = mapper.peers().iter().find(|p| {
-                                let mut buf = [0u8; 32];
-                                let id_bytes = p.to_bytes();
-                                let len = id_bytes.len().min(32);
-                                buf[..len].copy_from_slice(&id_bytes[..len]);
-                                &buf == dest
-                            }).cloned();
+                            let dest_peer = mapper
+                                .peers()
+                                .iter()
+                                .find(|p| {
+                                    let mut buf = [0u8; 32];
+                                    let id_bytes = p.to_bytes();
+                                    let len = id_bytes.len().min(32);
+                                    buf[..len].copy_from_slice(&id_bytes[..len]);
+                                    &buf == dest
+                                })
+                                .cloned();
 
                             if let Some(dest_peer) = dest_peer {
                                 if let Some(&dst_idx) = mapper.peer_to_index.get(&dest_peer) {
                                     // Get candidates (our neighbors in topology)
                                     if let Some(neighbors) = topology.adjacency.get(&src_idx) {
                                         if !neighbors.is_empty() {
-                                            let mut peer_features = std::collections::HashMap::new();
+                                            let mut peer_features =
+                                                std::collections::HashMap::new();
                                             for &cand in neighbors {
-                                                peer_features.insert(cand, ai::RoutingFeatures::default());
+                                                peer_features
+                                                    .insert(cand, ai::RoutingFeatures::default());
                                             }
 
-                                            match gnn.select_next_hop(
-                                                &topology, src_idx, dst_idx, neighbors, &peer_features
-                                            ).await {
+                                            match gnn
+                                                .select_next_hop(
+                                                    &topology,
+                                                    src_idx,
+                                                    dst_idx,
+                                                    neighbors,
+                                                    &peer_features,
+                                                )
+                                                .await
+                                            {
                                                 Ok(decision) => {
                                                     // Check if encountered peer is the recommended next-hop
-                                                    let their_peer = mapper.peers().iter().find(|p| {
-                                                        let mut buf = [0u8; 32];
-                                                        let id_bytes = p.to_bytes();
-                                                        let len = id_bytes.len().min(32);
-                                                        buf[..len].copy_from_slice(&id_bytes[..len]);
-                                                        &buf == their_node_id
-                                                    }).cloned();
+                                                    let their_peer = mapper
+                                                        .peers()
+                                                        .iter()
+                                                        .find(|p| {
+                                                            let mut buf = [0u8; 32];
+                                                            let id_bytes = p.to_bytes();
+                                                            let len = id_bytes.len().min(32);
+                                                            buf[..len]
+                                                                .copy_from_slice(&id_bytes[..len]);
+                                                            &buf == their_node_id
+                                                        })
+                                                        .cloned();
 
                                                     if let Some(their_peer) = their_peer {
-                                                        let their_idx = mapper.get_index(&their_peer);
-                                                        let should_forward = their_idx.map(|idx| {
-                                                            decision.scored_candidates.iter()
-                                                                .any(|(p, _)| mapper.get_index(p) == Some(idx))
-                                                        }).unwrap_or(false);
-                                                        gnn_decisions.insert(*dest, (should_forward, decision.confidence));
+                                                        let their_idx =
+                                                            mapper.get_index(&their_peer);
+                                                        let should_forward = their_idx
+                                                            .map(|idx| {
+                                                                decision
+                                                                    .scored_candidates
+                                                                    .iter()
+                                                                    .any(|(p, _)| {
+                                                                        mapper.get_index(p)
+                                                                            == Some(idx)
+                                                                    })
+                                                            })
+                                                            .unwrap_or(false);
+                                                        gnn_decisions.insert(
+                                                            *dest,
+                                                            (should_forward, decision.confidence),
+                                                        );
                                                     }
                                                 }
                                                 Err(_) => {}
@@ -821,23 +848,34 @@ impl Core {
 
                 // Use GNN-enhanced encounter if we got decisions
                 if !gnn_decisions.is_empty() {
-                    tracing::debug!("GNN-enhanced DTN encounter: {} decisions", gnn_decisions.len());
-                    return self.dtn_store.on_encounter_with_gnn(
-                        their_node_id, their_bloom, their_delivery_scores, &gnn_decisions
-                    ).await;
+                    tracing::debug!(
+                        "GNN-enhanced DTN encounter: {} decisions",
+                        gnn_decisions.len()
+                    );
+                    return self
+                        .dtn_store
+                        .on_encounter_with_gnn(
+                            their_node_id,
+                            their_bloom,
+                            their_delivery_scores,
+                            &gnn_decisions,
+                        )
+                        .await;
                 }
             }
         }
 
         // Fallback to standard PRoPHET encounter
         tracing::debug!("Standard PRoPHET DTN encounter (GNN unavailable or no decisions)");
-        self.dtn_store.on_encounter(
-            their_node_id, their_bloom, their_delivery_scores
-        ).await
+        self.dtn_store
+            .on_encounter(their_node_id, their_bloom, their_delivery_scores)
+            .await
     }
 
     /// Collect peer features from current mesh state
-    async fn collect_mesh_peer_features(&self) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
+    async fn collect_mesh_peer_features(
+        &self,
+    ) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
         let features = std::collections::HashMap::new();
         // In production, collect from mesh manager. For now, return empty.
         // This would query mesh_manager for connected peers and their link quality.
@@ -845,12 +883,19 @@ impl Core {
     }
 
     /// Collect routing table from mesh state
-    async fn collect_routing_table(&self) -> std::collections::HashMap<libp2p::PeerId, std::collections::HashMap<libp2p::PeerId, libp2p::PeerId>> {
+    async fn collect_routing_table(
+        &self,
+    ) -> std::collections::HashMap<
+        libp2p::PeerId,
+        std::collections::HashMap<libp2p::PeerId, libp2p::PeerId>,
+    > {
         std::collections::HashMap::new()
     }
 
     /// Collect link metrics from mesh state
-    async fn collect_link_metrics(&self) -> std::collections::HashMap<(libp2p::PeerId, libp2p::PeerId), f32> {
+    async fn collect_link_metrics(
+        &self,
+    ) -> std::collections::HashMap<(libp2p::PeerId, libp2p::PeerId), f32> {
         std::collections::HashMap::new()
     }
 
@@ -1233,16 +1278,18 @@ impl Core {
     /// Get messages from both in-memory buffer and encrypted store
     /// This ensures incoming mesh messages are visible via the API even if
     /// they haven't been persisted to the encrypted store yet.
-    pub async fn get_messages(&self, peer_id: &str, limit: usize) -> Vec<crate::core::message::Message> {
+    pub async fn get_messages(
+        &self,
+        peer_id: &str,
+        limit: usize,
+    ) -> Vec<crate::core::message::Message> {
         use crate::core::message::Message;
 
         // Start with in-memory messages (includes incoming mesh messages)
         let mut messages: Vec<Message> = {
             let mem = self.messages.read().await;
             mem.iter()
-                .filter(|m| {
-                    m.recipient == peer_id || m.sender == peer_id || peer_id == "all"
-                })
+                .filter(|m| m.recipient == peer_id || m.sender == peer_id || peer_id == "all")
                 .cloned()
                 .collect()
         };
@@ -1278,13 +1325,8 @@ impl Core {
 
     /// Save a display name to the identity profile
     pub async fn save_profile(&self, display_name: &str) -> Result<()> {
-        self.update_metadata(
-            Some(display_name.to_string()),
-            None,
-            None,
-            Some(true),
-        )
-        .await;
+        self.update_metadata(Some(display_name.to_string()), None, None, Some(true))
+            .await;
         // Persist to disk (empty password — identity is already unlocked)
         if let Err(e) = self.identity.read().await.save_to_disk("") {
             tracing::warn!("Profile metadata saved, but disk persistence failed: {}", e);

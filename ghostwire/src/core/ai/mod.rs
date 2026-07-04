@@ -14,20 +14,20 @@
 //   FeatureExtractor — live mesh telemetry to 2,387-dim vectors
 //   GnnRouter — GAT-based next-hop routing from real Guifi.net data
 
-pub mod routing_classifier;
-pub mod gemma_client;
-pub mod onnx_inference;
 pub mod anomaly_detector;
 pub mod feature_extractor;
 pub mod function_calling;
-pub mod litert_backend;
+pub mod gemma_client;
 pub mod gnn_router;
+pub mod litert_backend;
+pub mod onnx_inference;
+pub mod routing_classifier;
 
-pub use routing_classifier::*;
-pub use gemma_client::*;
-pub use onnx_inference::*;
 pub use anomaly_detector::*;
 pub use feature_extractor::*;
 pub use function_calling::*;
-pub use litert_backend::*;
+pub use gemma_client::*;
 pub use gnn_router::*;
+pub use litert_backend::*;
+pub use onnx_inference::*;
+pub use routing_classifier::*;

@@ -229,13 +229,14 @@ impl IdentityController {
             .as_secs();
 
         let core = state.core.read().await;
-        
+
         // Check if already locked
         if core.is_locked().await {
             return Json(ApiV2Response::success(serde_json::json!({
                 "status": "already_locked",
                 "timestamp": now
-            }))).into_response();
+            })))
+            .into_response();
         }
 
         // Lock the profile
@@ -251,13 +252,14 @@ impl IdentityController {
                     description: "Profile locked successfully".to_string(),
                 };
                 core.audit_logger.log_event(&record);
-                
+
                 tracing::info!(target: "profile_lock", "✅ Profile locked for user: {}", core.get_identity_id().await);
-                
+
                 Json(ApiV2Response::success(serde_json::json!({
                     "status": "locked",
                     "timestamp": now
-                }))).into_response()
+                })))
+                .into_response()
             }
             Err(e) => {
                 // Audit log the failed lock
@@ -270,16 +272,17 @@ impl IdentityController {
                     description: format!("Profile lock failed: {}", e),
                 };
                 core.audit_logger.log_event(&record);
-                
+
                 tracing::error!(target: "profile_lock", "❌ Profile lock failed: {}", e);
-                
+
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiV2Response::<()>::error(
                         StandardErrorCode::InternalError.as_str(),
                         format!("Failed to lock profile: {}", e),
                     )),
-                ).into_response()
+                )
+                    .into_response()
             }
         }
     }
@@ -298,7 +301,11 @@ impl IdentityController {
         let identity_id = core.get_identity_id().await;
 
         // Check rate limiting - is this key locked out?
-        if core.failed_attempt_tracker.is_locked_out(&identity_id).await {
+        if core
+            .failed_attempt_tracker
+            .is_locked_out(&identity_id)
+            .await
+        {
             // Audit log the lockout attempt
             let record = crate::core::security_v2::SecurityAuditRecord {
                 event_type: "PROFILE_UNLOCK_LOCKOUT".to_string(),
@@ -309,16 +316,17 @@ impl IdentityController {
                 description: "Account locked due to too many failed attempts".to_string(),
             };
             core.audit_logger.log_event(&record);
-            
+
             tracing::warn!(target: "profile_unlock", "⚠️ Account locked out due to failed attempts: {}", identity_id);
-            
+
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(ApiV2Response::<()>::error(
                     StandardErrorCode::RateLimited.as_str(),
                     "Too many failed attempts. Account temporarily locked.",
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
 
         // Attempt to unlock
@@ -326,7 +334,7 @@ impl IdentityController {
             Ok(_) => {
                 // Reset failed attempts on successful unlock
                 core.failed_attempt_tracker.reset(&identity_id).await;
-                
+
                 // Audit log the successful unlock
                 let record = crate::core::security_v2::SecurityAuditRecord {
                     event_type: "PROFILE_UNLOCK".to_string(),
@@ -337,18 +345,21 @@ impl IdentityController {
                     description: "Profile unlocked successfully".to_string(),
                 };
                 core.audit_logger.log_event(&record);
-                
+
                 tracing::info!(target: "profile_unlock", "✅ Profile unlocked for user: {}", identity_id);
-                
+
                 Json(ApiV2Response::success(serde_json::json!({
                     "status": "unlocked",
                     "timestamp": now
-                }))).into_response()
+                })))
+                .into_response()
             }
             Err(e) => {
                 // Record failed attempt
-                core.failed_attempt_tracker.record_failure(&identity_id).await;
-                
+                core.failed_attempt_tracker
+                    .record_failure(&identity_id)
+                    .await;
+
                 // Audit log the failed unlock
                 let record = crate::core::security_v2::SecurityAuditRecord {
                     event_type: "PROFILE_UNLOCK_FAILED".to_string(),
@@ -359,16 +370,17 @@ impl IdentityController {
                     description: format!("Profile unlock failed: {}", e),
                 };
                 core.audit_logger.log_event(&record);
-                
+
                 tracing::warn!(target: "profile_unlock", "❌ Profile unlock failed for {}: {}", identity_id, e);
-                
+
                 (
                     StatusCode::UNAUTHORIZED,
                     Json(ApiV2Response::<()>::error(
                         StandardErrorCode::InvalidCredentials.as_str(),
                         "Invalid password",
                     )),
-                ).into_response()
+                )
+                    .into_response()
             }
         }
     }

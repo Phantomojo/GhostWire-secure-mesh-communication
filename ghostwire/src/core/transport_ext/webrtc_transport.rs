@@ -97,9 +97,7 @@ impl TransportTier {
 
 /// Probes connectivity to determine which tier to use.
 /// Called by AutoTransportSwitcher every 10 minutes and on connection failure.
-pub async fn probe_and_select_tier(
-    target_peers: &[String],
-) -> TransportTier {
+pub async fn probe_and_select_tier(target_peers: &[String]) -> TransportTier {
     // Probe tier 1: stealth TCP
     if probe_stealth_tcp(target_peers).await {
         tracing::debug!("Transport probe: Tier 1 (stealth TCP) available");
@@ -116,7 +114,9 @@ pub async fn probe_and_select_tier(
 
     // Probe tier 4: HTTPS fronting
     if probe_https_fronting().await {
-        tracing::warn!("Transport probe: Tier 4 (HTTPS fronting) active — deep censorship detected");
+        tracing::warn!(
+            "Transport probe: Tier 4 (HTTPS fronting) active — deep censorship detected"
+        );
         return TransportTier::HttpsFronting;
     }
 
@@ -133,8 +133,11 @@ async fn probe_stealth_tcp(peers: &[String]) -> bool {
         let addr = format!("{}:8080", peer);
         if tokio::time::timeout(
             Duration::from_secs(5),
-            tokio::net::TcpStream::connect(&addr)
-        ).await.is_ok() {
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await
+        .is_ok()
+        {
             return true;
         }
     }
@@ -153,10 +156,7 @@ async fn probe_webrtc_data_channel() -> bool {
             let target = "74.125.250.129:19302"; // stun.l.google.com
             if sock.send_to(&stun_request, target).await.is_ok() {
                 let mut buf = [0u8; 512];
-                match tokio::time::timeout(
-                    Duration::from_secs(5),
-                    sock.recv_from(&mut buf)
-                ).await {
+                match tokio::time::timeout(Duration::from_secs(5), sock.recv_from(&mut buf)).await {
                     Ok(Ok((n, _))) if n >= 20 => {
                         // Check STUN magic cookie (0x2112A442) at bytes 4-8
                         n >= 8 && buf[4..8] == [0x21, 0x12, 0xA4, 0x42]
@@ -177,8 +177,10 @@ async fn probe_https_fronting() -> bool {
     // For now: check basic HTTPS connectivity
     match tokio::time::timeout(
         Duration::from_secs(10),
-        reqwest::get("https://www.cloudflare.com/cdn-cgi/trace")
-    ).await {
+        reqwest::get("https://www.cloudflare.com/cdn-cgi/trace"),
+    )
+    .await
+    {
         Ok(Ok(resp)) => resp.status().is_success(),
         _ => false,
     }
@@ -193,8 +195,7 @@ fn build_stun_binding_request() -> Vec<u8> {
     ];
     // Transaction ID: 12 random bytes
     req.extend_from_slice(&[
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-        0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
     ]);
     req
 }
@@ -207,7 +208,9 @@ pub struct WebRtcFragmenter {
 }
 
 impl WebRtcFragmenter {
-    pub fn new(max_chunk: usize) -> Self { Self { max_chunk } }
+    pub fn new(max_chunk: usize) -> Self {
+        Self { max_chunk }
+    }
 
     /// Split a large frame into chunks with a sequence header
     pub fn fragment(&self, frame: &[u8], stream_id: u32) -> Vec<Vec<u8>> {
@@ -245,7 +248,9 @@ impl WebRtcFragmenter {
         chunks: &mut std::collections::HashMap<u32, Vec<Option<Vec<u8>>>>,
         chunk: &[u8],
     ) -> Option<Vec<u8>> {
-        if chunk.len() < 9 { return None; }
+        if chunk.len() < 9 {
+            return None;
+        }
         let stream_id = u32::from_be_bytes(chunk[0..4].try_into().ok()?);
         let total = u16::from_be_bytes(chunk[4..6].try_into().ok()?) as usize;
         let idx = u16::from_be_bytes(chunk[6..8].try_into().ok()?) as usize;
@@ -257,7 +262,8 @@ impl WebRtcFragmenter {
         }
 
         if entry.iter().all(|c| c.is_some()) {
-            let frame: Vec<u8> = entry.iter()
+            let frame: Vec<u8> = entry
+                .iter()
                 .filter_map(|c| c.as_ref())
                 .flat_map(|c| c.iter().cloned())
                 .collect();

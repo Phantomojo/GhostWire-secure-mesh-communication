@@ -46,9 +46,7 @@ pub const HIGHLIGHT_BG: Color = Color::DarkGray;
 // ═══════════════════════════════════════════════════════════
 
 pub fn primary_bold() -> Style {
-    Style::default()
-        .fg(PRIMARY)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(PRIMARY).add_modifier(Modifier::BOLD)
 }
 
 pub fn text_style() -> Style {
@@ -72,9 +70,7 @@ pub fn offline_style() -> Style {
 }
 
 pub fn error_style() -> Style {
-    Style::default()
-        .fg(ERROR)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(ERROR).add_modifier(Modifier::BOLD)
 }
 
 pub fn sent_style() -> Style {

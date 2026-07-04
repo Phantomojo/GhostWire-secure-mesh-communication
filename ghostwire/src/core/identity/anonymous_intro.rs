@@ -26,7 +26,7 @@ use anyhow::Result;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::genesis_constants::{RENDEZVOUS_DOMAIN, genesis_derive};
+use crate::genesis_constants::{genesis_derive, RENDEZVOUS_DOMAIN};
 
 /// The invite prefix for anonymous introductions
 pub const ANON_INVITE_PREFIX: &str = "gwi:";
@@ -49,19 +49,24 @@ pub struct AnonymousInvite {
 impl AnonymousInvite {
     /// Encode to a shareable string: "gwi:<base58(serialised_invite)>"
     pub fn to_invite_string(&self) -> Result<String> {
-        let bytes = bincode::serialize(self)
-            .map_err(|e| anyhow::anyhow!("Invite serialise: {}", e))?;
-        Ok(format!("{}{}", ANON_INVITE_PREFIX, bs58::encode(bytes).into_string()))
+        let bytes =
+            bincode::serialize(self).map_err(|e| anyhow::anyhow!("Invite serialise: {}", e))?;
+        Ok(format!(
+            "{}{}",
+            ANON_INVITE_PREFIX,
+            bs58::encode(bytes).into_string()
+        ))
     }
 
     /// Decode from an invite string
     pub fn from_invite_string(s: &str) -> Result<Self> {
-        let stripped = s.strip_prefix(ANON_INVITE_PREFIX)
+        let stripped = s
+            .strip_prefix(ANON_INVITE_PREFIX)
             .ok_or_else(|| anyhow::anyhow!("Not a Ghostwire anonymous invite"))?;
-        let bytes = bs58::decode(stripped).into_vec()
+        let bytes = bs58::decode(stripped)
+            .into_vec()
             .map_err(|e| anyhow::anyhow!("Base58 decode: {}", e))?;
-        bincode::deserialize(&bytes)
-            .map_err(|e| anyhow::anyhow!("Invite deserialise: {}", e))
+        bincode::deserialize(&bytes).map_err(|e| anyhow::anyhow!("Invite deserialise: {}", e))
     }
 
     /// Whether this invite has expired (48-hour window)
@@ -111,8 +116,8 @@ pub fn generate_intro_invite(
 
     let rng = SystemRandom::new();
     let surb = create_surb(route_keys, route_ids, &rng)?;
-    let surb_bytes = bincode::serialize(&surb)
-        .map_err(|e| anyhow::anyhow!("SURB serialise: {}", e))?;
+    let surb_bytes =
+        bincode::serialize(&surb).map_err(|e| anyhow::anyhow!("SURB serialise: {}", e))?;
 
     Ok(AnonymousInvite {
         ed25519_pub: our_ed25519_pub,
@@ -131,7 +136,7 @@ pub fn send_introduction(
     our_x25519_pub: [u8; 32],
     our_nickname: Option<String>,
 ) -> Result<(Vec<u8>, String)> {
-    use crate::core::routing::sphinx::{Surb, use_surb};
+    use crate::core::routing::sphinx::{use_surb, Surb};
 
     if invite.is_expired() {
         anyhow::bail!("Invite has expired (> 48 hours old)");
@@ -153,14 +158,14 @@ pub fn send_introduction(
         created_at: now_secs(),
     };
 
-    let intro_bytes = bincode::serialize(&intro)
-        .map_err(|e| anyhow::anyhow!("Intro serialise: {}", e))?;
+    let intro_bytes =
+        bincode::serialize(&intro).map_err(|e| anyhow::anyhow!("Intro serialise: {}", e))?;
 
     // Encrypt introduction to Alice's X25519 key (ECIES)
     // so only Alice can read it even if a relay peeks
     let sealed = ecies_seal(&invite.x25519_pub, &intro_bytes)?;
-    let sealed_bytes = bincode::serialize(&sealed)
-        .map_err(|e| anyhow::anyhow!("Sealed serialise: {}", e))?;
+    let sealed_bytes =
+        bincode::serialize(&sealed).map_err(|e| anyhow::anyhow!("Sealed serialise: {}", e))?;
 
     let rng = SystemRandom::new();
     let sphinx_packet = use_surb(&surb, &sealed_bytes, &rng)?;
@@ -176,8 +181,8 @@ pub fn receive_introduction(
     our_x25519_secret: &x25519_dalek::StaticSecret,
 ) -> Result<IntroductionPayload> {
     // Decrypt the ECIES sealed payload
-    let sealed: EciesSealedPayload = bincode::deserialize(payload)
-        .map_err(|e| anyhow::anyhow!("Sealed deserialise: {}", e))?;
+    let sealed: EciesSealedPayload =
+        bincode::deserialize(payload).map_err(|e| anyhow::anyhow!("Sealed deserialise: {}", e))?;
 
     let intro_bytes = ecies_unseal(&sealed, our_x25519_secret)?;
 
@@ -223,14 +228,19 @@ struct EciesSealedPayload {
 }
 
 fn ecies_seal(recipient_x25519_pub: &[u8; 32], plaintext: &[u8]) -> Result<EciesSealedPayload> {
-    use chacha20poly1305::{aead::{Aead, KeyInit}, ChaCha20Poly1305, Key, Nonce};
-    use crate::genesis_constants::{SEALED_KDF_DOMAIN, derive_with_domain};
+    use crate::genesis_constants::{derive_with_domain, SEALED_KDF_DOMAIN};
+    use chacha20poly1305::{
+        aead::{Aead, KeyInit},
+        ChaCha20Poly1305, Key, Nonce,
+    };
 
     let mut ephemeral_bytes = [0u8; 32];
     ring::rand::SystemRandom::new()
         .fill(&mut ephemeral_bytes)
         .map_err(|_| anyhow::anyhow!("RNG failure"))?;
-    ephemeral_bytes[0] &= 248; ephemeral_bytes[31] &= 127; ephemeral_bytes[31] |= 64;
+    ephemeral_bytes[0] &= 248;
+    ephemeral_bytes[31] &= 127;
+    ephemeral_bytes[31] |= 64;
 
     let ephemeral_secret = x25519_dalek::StaticSecret::from(ephemeral_bytes);
     let ephemeral_pub = x25519_dalek::PublicKey::from(&ephemeral_secret);
@@ -246,7 +256,8 @@ fn ecies_seal(recipient_x25519_pub: &[u8; 32], plaintext: &[u8]) -> Result<Ecies
         .map_err(|_| anyhow::anyhow!("RNG failure"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, plaintext)
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
         .map_err(|_| anyhow::anyhow!("ECIES encrypt failed"))?;
 
     Ok(EciesSealedPayload {
@@ -260,8 +271,11 @@ fn ecies_unseal(
     sealed: &EciesSealedPayload,
     our_secret: &x25519_dalek::StaticSecret,
 ) -> Result<Vec<u8>> {
-    use chacha20poly1305::{aead::{Aead, KeyInit}, ChaCha20Poly1305, Key, Nonce};
-    use crate::genesis_constants::{SEALED_KDF_DOMAIN, derive_with_domain};
+    use crate::genesis_constants::{derive_with_domain, SEALED_KDF_DOMAIN};
+    use chacha20poly1305::{
+        aead::{Aead, KeyInit},
+        ChaCha20Poly1305, Key, Nonce,
+    };
 
     let sender_pub = x25519_dalek::PublicKey::from(sealed.ephemeral_pub);
     let shared = our_secret.diffie_hellman(&sender_pub);
@@ -270,14 +284,16 @@ fn ecies_unseal(
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&sym_key));
     let nonce = Nonce::from_slice(&sealed.nonce);
 
-    cipher.decrypt(nonce, sealed.ciphertext.as_slice())
+    cipher
+        .decrypt(nonce, sealed.ciphertext.as_slice())
         .map_err(|_| anyhow::anyhow!("ECIES decrypt failed — wrong key or tampered"))
 }
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs()
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -304,7 +320,9 @@ mod tests {
     fn ecies_roundtrip() {
         let mut secret_bytes = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut secret_bytes);
-        secret_bytes[0] &= 248; secret_bytes[31] &= 127; secret_bytes[31] |= 64;
+        secret_bytes[0] &= 248;
+        secret_bytes[31] &= 127;
+        secret_bytes[31] |= 64;
         let secret = x25519_dalek::StaticSecret::from(secret_bytes);
         let pubkey = x25519_dalek::PublicKey::from(&secret);
 

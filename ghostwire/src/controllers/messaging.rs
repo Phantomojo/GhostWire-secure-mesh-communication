@@ -38,12 +38,7 @@ impl MessagingController {
         let limit = limit.min(1000);
 
         // Read from both in-memory buffer (incoming mesh messages) and encrypted store
-        let messages = state
-            .core
-            .read()
-            .await
-            .get_messages(&peer_id, limit)
-            .await;
+        let messages = state.core.read().await.get_messages(&peer_id, limit).await;
 
         Json(ApiV2Response::success(messages).with_links("/api/v2/messages".to_string()))
     }

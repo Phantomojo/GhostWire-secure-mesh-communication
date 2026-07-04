@@ -17,7 +17,7 @@
 //!   4. To recover: contact M peers, collect their shares, reconstruct key
 //!   5. Re-encrypt reconstructed key with new password, save as new identity
 
-use crate::genesis_constants::{RECOVERY_KDF_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, RECOVERY_KDF_DOMAIN};
 
 use anyhow::{Context, Result};
 use chacha20poly1305::{
@@ -78,27 +78,39 @@ pub fn create_recovery_shares(
         anyhow::bail!("Threshold must be at least 2");
     }
     if total < threshold {
-        anyhow::bail!("Total shares ({}) must be >= threshold ({})", total, threshold);
+        anyhow::bail!(
+            "Total shares ({}) must be >= threshold ({})",
+            total,
+            threshold
+        );
     }
     if guardians.len() != total as usize {
-        anyhow::bail!("Guardian count ({}) must equal total shares ({})", guardians.len(), total);
+        anyhow::bail!(
+            "Guardian count ({}) must equal total shares ({})",
+            guardians.len(),
+            total
+        );
     }
     if master_key.len() < 16 {
         anyhow::bail!("Master key too short: {} bytes", master_key.len());
     }
 
     // Generate raw shares
-    let shares = shamir_split(master_key, threshold, total)
-        .context("Shamir split failed")?;
+    let shares = shamir_split(master_key, threshold, total).context("Shamir split failed")?;
 
     let rng = SystemRandom::new();
     let master_hash = blake3::hash(master_key).to_hex().to_string();
     let mut encrypted_shares = Vec::with_capacity(total as usize);
 
-    for (i, ((peer_id, name, pub_key), raw_share)) in guardians.iter().zip(shares.iter()).enumerate() {
+    for (i, ((peer_id, name, pub_key), raw_share)) in
+        guardians.iter().zip(shares.iter()).enumerate()
+    {
         let share_hash = blake3::hash(raw_share).to_hex().to_string();
-        let encrypted = encrypt_share_for_guardian(raw_share, pub_key, &rng)
-            .context(format!("Failed to encrypt share {} for {}", i + 1, name))?;
+        let encrypted = encrypt_share_for_guardian(raw_share, pub_key, &rng).context(format!(
+            "Failed to encrypt share {} for {}",
+            i + 1,
+            name
+        ))?;
 
         encrypted_shares.push(EncryptedShare {
             share_index: (i + 1) as u8,
@@ -232,8 +244,11 @@ fn shamir_split(secret: &[u8], threshold: u8, total: u8) -> Result<Vec<Vec<u8>>>
     use shamir_secret_sharing::ShamirSecretSharing;
 
     // Use the secp256k1 prime (standard in crypto)
-    let prime = BigInt::parse_bytes(b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16)
-        .unwrap();
+    let prime = BigInt::parse_bytes(
+        b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+        16,
+    )
+    .unwrap();
 
     let sss = ShamirSecretSharing {
         threshold: threshold as usize,
@@ -264,8 +279,11 @@ fn shamir_combine(shares: &[(u8, Vec<u8>)]) -> Result<Vec<u8>> {
     use shamir_secret_sharing::ShamirSecretSharing;
 
     // Use the same prime as shamir_split
-    let prime = BigInt::parse_bytes(b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16)
-        .unwrap();
+    let prime = BigInt::parse_bytes(
+        b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+        16,
+    )
+    .unwrap();
 
     // Threshold is the number of shares we have
     let threshold = shares.len();

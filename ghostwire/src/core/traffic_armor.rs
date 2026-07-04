@@ -84,7 +84,11 @@ pub fn unpad_message(padded: &[u8]) -> Result<Vec<u8>> {
     let content_len = lo | (hi << 8);
 
     if content_len + 3 > padded.len() {
-        anyhow::bail!("Corrupt padded message: claimed length {} > buffer {}", content_len, padded.len());
+        anyhow::bail!(
+            "Corrupt padded message: claimed length {} > buffer {}",
+            content_len,
+            padded.len()
+        );
     }
 
     // Verify marker byte
@@ -155,8 +159,7 @@ impl CoverTrafficScheduler {
         tokio::spawn(async move {
             let mut sequence: u32 = 0;
             loop {
-                let delay_ms = rand::thread_rng()
-                    .gen_range(cover_min_ms..=cover_max_ms);
+                let delay_ms = rand::thread_rng().gen_range(cover_min_ms..=cover_max_ms);
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
                 if !*self.enabled.read().await {
@@ -266,7 +269,12 @@ mod tests {
             let padded = pad_message(original, &rng).unwrap();
             assert_eq!(padded.len() % PAD_BLOCK_SIZE, 0, "Not block-aligned");
             let recovered = unpad_message(&padded).unwrap();
-            assert_eq!(recovered, original, "Roundtrip failed for len={}", original.len());
+            assert_eq!(
+                recovered,
+                original,
+                "Roundtrip failed for len={}",
+                original.len()
+            );
         }
     }
 

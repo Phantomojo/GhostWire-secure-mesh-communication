@@ -162,10 +162,7 @@ enum Commands {
     /// List known peers
     Peers,
     /// Send a message: send <recipient_id> <content>
-    Send {
-        recipient: String,
-        content: String,
-    },
+    Send { recipient: String, content: String },
     /// Interactive terminal user interface (connects to daemon)
     Tui,
     /// Interactive first-run setup (nickname, password, bio)
@@ -216,7 +213,12 @@ async fn main() -> Result<()> {
     #[cfg(feature = "cli")]
     {
         match &args.command {
-            Some(Commands::Start { mesh_port, tailscale_bootstrap, bootstrap, mesh_size }) => {
+            Some(Commands::Start {
+                mesh_port,
+                tailscale_bootstrap,
+                bootstrap,
+                mesh_size,
+            }) => {
                 let extra = daemon::DaemonArgs {
                     tailscale_bootstrap: tailscale_bootstrap.clone(),
                     bootstrap: bootstrap.clone(),
@@ -282,7 +284,8 @@ async fn main() -> Result<()> {
                     }
                 }
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
-                ghostwire::tui::run_tui(port).await
+                ghostwire::tui::run_tui(port)
+                    .await
                     .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
                 return Ok(());
             }
@@ -299,7 +302,9 @@ async fn main() -> Result<()> {
                     let meta = identity.get_metadata();
                     println!("Identity already exists ({})", &identity.id[..8]);
                     if identity.is_locked() {
-                        println!("It is currently locked. Unlock via POST /api/v2/profile/unlock first.");
+                        println!(
+                            "It is currently locked. Unlock via POST /api/v2/profile/unlock first."
+                        );
                         return Ok(());
                     }
                     println!("It is currently unlocked.\n");
@@ -310,14 +315,22 @@ async fn main() -> Result<()> {
                     let mut nickname = String::new();
                     std::io::stdin().read_line(&mut nickname)?;
                     let nickname = nickname.trim();
-                    let nickname = if nickname.is_empty() { meta.nickname.clone() } else { nickname.to_string() };
+                    let nickname = if nickname.is_empty() {
+                        meta.nickname.clone()
+                    } else {
+                        nickname.to_string()
+                    };
 
                     print!("Bio [{}]: ", meta.bio);
                     std::io::stdout().flush()?;
                     let mut bio = String::new();
                     std::io::stdin().read_line(&mut bio)?;
                     let bio = bio.trim();
-                    let bio = if bio.is_empty() { meta.bio.clone() } else { bio.to_string() };
+                    let bio = if bio.is_empty() {
+                        meta.bio.clone()
+                    } else {
+                        bio.to_string()
+                    };
 
                     identity.update_metadata(Some(nickname.clone()), Some(bio), None, Some(true));
 
@@ -332,12 +345,11 @@ async fn main() -> Result<()> {
                         return Ok(());
                     }
 
-                    identity.save_to_disk(&password)
+                    identity
+                        .save_to_disk(&password)
                         .map_err(|e| anyhow::anyhow!("Failed to save: {}", e))?;
 
-                    let _ = std::fs::remove_file(
-                        storage_path.with_file_name(".initial-password")
-                    );
+                    let _ = std::fs::remove_file(storage_path.with_file_name(".initial-password"));
 
                     println!("\n✅ Identity updated");
                     println!("   Nickname: {}", nickname);
@@ -367,13 +379,12 @@ async fn main() -> Result<()> {
     };
 
     // Auto-update check (skip for daemon mode — it runs forever)
-    if !args.daemon && config.server.auto_update
-        && updater::is_update_available() {
-            info!("✨ Applying automatic update...");
-            if let Err(e) = updater::apply_update() {
-                error!("❌ Automatic update failed: {}", e);
-            }
+    if !args.daemon && config.server.auto_update && updater::is_update_available() {
+        info!("✨ Applying automatic update...");
+        if let Err(e) = updater::apply_update() {
+            error!("❌ Automatic update failed: {}", e);
         }
+    }
 
     // Parse bootstrap nodes
     let mut bootstrap_multiaddrs = Vec::new();
@@ -392,7 +403,11 @@ async fn main() -> Result<()> {
                 let addr_str = format!("/ip4/{}/tcp/4001", ip);
                 if let Ok(ma) = addr_str.parse::<libp2p::Multiaddr>() {
                     let full_addr = ma.with(libp2p::multiaddr::Protocol::P2p(peer_id));
-                    tracing::info!("Adding Tailscale bootstrap node: {} ({})", peer_id, full_addr);
+                    tracing::info!(
+                        "Adding Tailscale bootstrap node: {} ({})",
+                        peer_id,
+                        full_addr
+                    );
                     bootstrap_multiaddrs.push(full_addr);
                 }
             } else {
@@ -440,19 +455,42 @@ async fn main() -> Result<()> {
             ghostwire::cli::send_message(&core_arc, &recipient, &content).await?;
         }
         #[cfg(feature = "cli")]
-        Some(Commands::Web { api_host, mesh_host, port, bootstrap }) => {
+        Some(Commands::Web {
+            api_host,
+            mesh_host,
+            port,
+            bootstrap,
+        }) => {
             info!("Starting web server via CLI on {}:{}", api_host, port);
             let mut bs = bootstrap_multiaddrs.clone();
             for b in &bootstrap {
-                if let Ok(ma) = b.parse::<libp2p::Multiaddr>() { bs.push(ma); }
+                if let Ok(ma) = b.parse::<libp2p::Multiaddr>() {
+                    bs.push(ma);
+                }
             }
-            core_arc.clone().start_nervous_system(mesh_host.clone(), 0).await;
+            core_arc
+                .clone()
+                .start_nervous_system(mesh_host.clone(), 0)
+                .await;
             ghostwire::web::start_web_server(
-                Some(core_arc), api_host, port, bs, None, mesh_host, 0, config.clone(),
-            ).await.map_err(|e| anyhow::anyhow!(e))?;
+                Some(core_arc),
+                api_host,
+                port,
+                bs,
+                None,
+                mesh_host,
+                0,
+                config.clone(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
         }
         #[cfg(feature = "cli")]
-        Some(Commands::Start { .. }) | Some(Commands::Stop) | Some(Commands::Status) | Some(Commands::Tui) | Some(Commands::Setup) => {
+        Some(Commands::Start { .. })
+        | Some(Commands::Stop)
+        | Some(Commands::Status)
+        | Some(Commands::Tui)
+        | Some(Commands::Setup) => {
             // Already handled above (before Core creation)
             unreachable!()
         }

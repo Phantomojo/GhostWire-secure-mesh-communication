@@ -48,7 +48,10 @@ pub struct SyncBloom {
 
 impl SyncBloom {
     pub fn new() -> Self {
-        Self { bits: vec![0u64; BLOOM_BITS / 64], count: 0 }
+        Self {
+            bits: vec![0u64; BLOOM_BITS / 64],
+            count: 0,
+        }
     }
 
     fn hash_positions(cid: &[u8; 32]) -> [usize; 3] {
@@ -67,15 +70,21 @@ impl SyncBloom {
     }
 
     pub fn contains(&self, cid: &[u8; 32]) -> bool {
-        Self::hash_positions(cid).iter().all(|&pos| {
-            self.bits[pos / 64] & (1u64 << (pos % 64)) != 0
-        })
+        Self::hash_positions(cid)
+            .iter()
+            .all(|&pos| self.bits[pos / 64] & (1u64 << (pos % 64)) != 0)
     }
 
-    pub fn count(&self) -> u32 { self.count }
+    pub fn count(&self) -> u32 {
+        self.count
+    }
 }
 
-impl Default for SyncBloom { fn default() -> Self { Self::new() } }
+impl Default for SyncBloom {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ── Delivery predictability table ────────────────────────────────────────────
 
@@ -104,7 +113,9 @@ impl DeliveryTable {
             *score *= GAMMA.powf(hours_elapsed);
         }
         let now = now_secs();
-        for v in self.last_updated.values_mut() { *v = now; }
+        for v in self.last_updated.values_mut() {
+            *v = now;
+        }
     }
 
     /// Update score on encounter with `encountered_node` heading to `destination`
@@ -132,7 +143,11 @@ impl DeliveryTable {
     }
 }
 
-impl Default for DeliveryTable { fn default() -> Self { Self::new() } }
+impl Default for DeliveryTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ── DTN store ────────────────────────────────────────────────────────────────
 
@@ -160,7 +175,9 @@ impl DtnStore {
 
     /// Store a bundle for forwarding. Returns false if buffer is full.
     pub async fn store(&self, bundle: DtnBundle) -> bool {
-        if bundle.is_expired() { return false; }
+        if bundle.is_expired() {
+            return false;
+        }
 
         let size = bundle.size_bytes();
         let mut total = self.buffer_bytes.write().await;
@@ -212,7 +229,8 @@ impl DtnStore {
     /// (their bloom doesn't contain the CID)
     pub async fn bundles_they_need(&self, their_bloom: &SyncBloom) -> Vec<DtnBundle> {
         let bundles = self.bundles.read().await;
-        bundles.values()
+        bundles
+            .values()
             .filter(|b| !b.is_expired() && !their_bloom.contains(&b.cid))
             .cloned()
             .collect()
@@ -251,10 +269,14 @@ impl DtnStore {
         let mut to_send: Vec<DtnBundle> = Vec::new();
 
         for bundle in bundles.values() {
-            if bundle.is_expired() { continue; }
+            if bundle.is_expired() {
+                continue;
+            }
 
             // If we ARE the destination — don't forward, deliver locally
-            if bundle.destination == self.our_node_id { continue; }
+            if bundle.destination == self.our_node_id {
+                continue;
+            }
 
             // If they ARE the destination — always send (deliver!)
             if &bundle.destination == their_node_id {
@@ -267,7 +289,8 @@ impl DtnStore {
             // Spray phase: share copies if they have better delivery probability
             if bundle.copies_remaining > 1 {
                 let our_prob = table.get(&bundle.destination);
-                let their_prob = their_delivery_scores.iter()
+                let their_prob = their_delivery_scores
+                    .iter()
                     .find(|(d, _)| d == &bundle.destination)
                     .map(|(_, p)| *p)
                     .unwrap_or(0.0);
@@ -311,10 +334,14 @@ impl DtnStore {
         let mut to_send: Vec<DtnBundle> = Vec::new();
 
         for bundle in bundles.values() {
-            if bundle.is_expired() { continue; }
+            if bundle.is_expired() {
+                continue;
+            }
 
             // If we ARE the destination — don't forward, deliver locally
-            if bundle.destination == self.our_node_id { continue; }
+            if bundle.destination == self.our_node_id {
+                continue;
+            }
 
             // If they ARE the destination — always send (deliver!)
             if &bundle.destination == their_node_id {
@@ -327,7 +354,8 @@ impl DtnStore {
             // GNN-enhanced forwarding decision
             if bundle.copies_remaining > 1 {
                 // Check if GNN has a decision for this destination
-                if let Some(&(should_forward, confidence)) = gnn_decisions.get(&bundle.destination) {
+                if let Some(&(should_forward, confidence)) = gnn_decisions.get(&bundle.destination)
+                {
                     // GNN says forward AND confidence is reasonable
                     if should_forward && confidence >= 0.3 && !their_bloom.contains(&bundle.cid) {
                         to_send.push(bundle.clone());
@@ -337,7 +365,8 @@ impl DtnStore {
 
                 // Fallback to PRoPHET if no GNN decision or GNN said no
                 let our_prob = table.get(&bundle.destination);
-                let their_prob = their_delivery_scores.iter()
+                let their_prob = their_delivery_scores
+                    .iter()
                     .find(|(d, _)| d == &bundle.destination)
                     .map(|(_, p)| *p)
                     .unwrap_or(0.0);
@@ -374,14 +403,17 @@ impl DtnStore {
         let table = self.delivery_table.read().await;
 
         // Sort by delivery probability (ascending — evict least likely first)
-        let mut scored: Vec<([u8; 32], f32, usize)> = bundles.iter()
+        let mut scored: Vec<([u8; 32], f32, usize)> = bundles
+            .iter()
             .map(|(cid, b)| (*cid, table.get(&b.destination), b.size_bytes()))
             .collect();
         scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut freed = 0;
         for (cid, _, size) in scored {
-            if freed >= needed { break; }
+            if freed >= needed {
+                break;
+            }
             bundles.remove(&cid);
             freed += size;
         }
@@ -429,7 +461,10 @@ impl DtnSyncHandshake {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -452,8 +487,16 @@ mod tests {
         assert_eq!(table.get(&dest), 0.0);
         table.on_encounter(&dest);
         let score = table.get(&dest);
-        assert!(score > 0.0 && score <= 1.0, "Score should be in (0,1): {}", score);
-        assert!((score - P_INIT).abs() < 0.001, "First encounter = P_INIT: {}", score);
+        assert!(
+            score > 0.0 && score <= 1.0,
+            "Score should be in (0,1): {}",
+            score
+        );
+        assert!(
+            (score - P_INIT).abs() < 0.001,
+            "First encounter = P_INIT: {}",
+            score
+        );
     }
 
     #[tokio::test]

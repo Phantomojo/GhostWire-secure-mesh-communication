@@ -6,9 +6,9 @@ pub mod config;
 pub mod core;
 pub mod daemon;
 pub mod genesis_constants;
+pub mod tui;
 #[cfg(feature = "web")]
 pub mod web;
-pub mod tui;
 
 // API v2
 pub mod api_v2_endpoints;

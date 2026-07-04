@@ -118,11 +118,20 @@ release/
 
 # Python cache
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 .venv/
 venv/
+
+# Release-plz: untracked generated files
+ghostwire/scripts/__pycache__/
+docs/QUICK_START.md
+launch-kit/
+scripts/
+systemd/
+tests/api/
 
 # Rust profiling
 *.profraw

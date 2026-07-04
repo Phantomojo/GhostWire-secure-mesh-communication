@@ -10,7 +10,7 @@
 //!   3. When recipient comes online, they poll their mailbox key and drain it
 //!   4. Local sled cache holds undelivered outgoing messages until confirmed
 
-use crate::genesis_constants::{MAILBOX_KDF_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, MAILBOX_KDF_DOMAIN};
 use base64::Engine;
 
 use anyhow::Result;
@@ -82,7 +82,11 @@ impl MailboxStore {
         plaintext: &[u8],
     ) -> Result<MailboxEnvelope> {
         if plaintext.len() > MAX_MESSAGE_BYTES {
-            anyhow::bail!("Message too large: {} > {} bytes", plaintext.len(), MAX_MESSAGE_BYTES);
+            anyhow::bail!(
+                "Message too large: {} > {} bytes",
+                plaintext.len(),
+                MAX_MESSAGE_BYTES
+            );
         }
 
         // Generate ephemeral X25519 keypair
@@ -116,7 +120,8 @@ impl MailboxStore {
         let message_id = uuid::Uuid::new_v4().to_string();
         let envelope = MailboxEnvelope {
             recipient_id: recipient_id.to_string(),
-            ephemeral_pub: base64::engine::general_purpose::STANDARD.encode(ephemeral_pub.as_bytes()),
+            ephemeral_pub: base64::engine::general_purpose::STANDARD
+                .encode(ephemeral_pub.as_bytes()),
             ciphertext,
             nonce: base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
             created_at: now_secs(),
@@ -241,11 +246,7 @@ impl MailboxStore {
         let now = now_secs();
         let prefix = MAILBOX_PREFIX.as_bytes();
         let mut removed = 0;
-        let keys: Vec<_> = self
-            .db
-            .scan_prefix(prefix)
-            .filter_map(|r| r.ok())
-            .collect();
+        let keys: Vec<_> = self.db.scan_prefix(prefix).filter_map(|r| r.ok()).collect();
 
         for (key, val) in keys {
             if let Ok(envelope) = bincode::deserialize::<MailboxEnvelope>(&val) {
@@ -303,7 +304,9 @@ mod tests {
         let pub_key: x25519_dalek::PublicKey = (&secret).into();
 
         for _ in 0..MAX_MAILBOX_SIZE + 10 {
-            let env = store.seal_for_peer("peer", pub_key.as_bytes(), b"msg").unwrap();
+            let env = store
+                .seal_for_peer("peer", pub_key.as_bytes(), b"msg")
+                .unwrap();
             store.store_incoming(&env).unwrap();
         }
 
@@ -325,7 +328,9 @@ impl MailboxStore {
 impl Default for MailboxStore {
     fn default() -> Self {
         // In-memory fallback: use a temporary sled database
-        let db = sled::Config::new().temporary(true).open()
+        let db = sled::Config::new()
+            .temporary(true)
+            .open()
             .expect("temp sled db");
         Self::open(Arc::new(db)).expect("MailboxStore default")
     }

@@ -37,7 +37,8 @@ impl ProfilesController {
         if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
             std::path::PathBuf::from(ghost_home)
         } else {
-            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".ghostwire")
         }
     }
@@ -182,7 +183,7 @@ impl ProfilesController {
             format!("identity_{}.json", req.name)
         };
         let path = ghost_dir.join(&id_filename);
-        
+
         tracing::info!(
             target: "profile_creation",
             msg = "🔍 Checking if profile exists",
@@ -449,7 +450,9 @@ impl ProfilesController {
                 let mesh_port = state.config.mesh_port;
                 let core_for_tasks = core_arc.clone();
                 tokio::spawn(async move {
-                    core_for_tasks.start_nervous_system(mesh_host, mesh_port).await;
+                    core_for_tasks
+                        .start_nervous_system(mesh_host, mesh_port)
+                        .await;
                 });
 
                 Json(ApiV2Response::success(serde_json::json!({

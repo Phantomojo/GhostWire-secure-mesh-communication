@@ -31,7 +31,11 @@ impl HealthController {
             None => {
                 let identity_locked = core.identity.read().await.keypair().is_none();
                 if identity_locked {
-                    (false, "blocked: identity is locked — unlock via POST /api/v2/profile/unlock".to_string())
+                    (
+                        false,
+                        "blocked: identity is locked — unlock via POST /api/v2/profile/unlock"
+                            .to_string(),
+                    )
                 } else {
                     (false, "not initialized".to_string())
                 }

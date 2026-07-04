@@ -49,7 +49,8 @@ impl Default for PanicConfig {
         Self {
             alert_text: "ALERT: This device may be compromised. \
                          Do not trust messages from this identity. \
-                         Keys have been wiped.".to_string(),
+                         Keys have been wiped."
+                .to_string(),
             alert_channel_ids: Vec::new(),
             wipe_messages: true,
             wipe_ark: false, // Ark content is less sensitive than messages
@@ -116,11 +117,7 @@ impl PanicManager {
 
     /// Execute a full panic wipe sequence
     /// alert_sender: async closure that broadcasts text to Ghost Channels
-    pub async fn execute_panic<F, Fut>(
-        &self,
-        reason: &str,
-        alert_sender: F,
-    ) -> Result<()>
+    pub async fn execute_panic<F, Fut>(&self, reason: &str, alert_sender: F) -> Result<()>
     where
         F: Fn(String, Vec<[u8; 32]>) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
@@ -138,11 +135,10 @@ impl PanicManager {
         let config = self.config.read().await.clone();
 
         // STEP 1: Send alert FIRST before any wiping
-        let channel_ids: Vec<[u8; 32]> = config.alert_channel_ids
+        let channel_ids: Vec<[u8; 32]> = config
+            .alert_channel_ids
             .iter()
-            .filter_map(|hex| {
-                hex::decode(hex).ok().and_then(|b| b.try_into().ok())
-            })
+            .filter_map(|hex| hex::decode(hex).ok().and_then(|b| b.try_into().ok()))
             .collect();
 
         if !channel_ids.is_empty() {
@@ -166,10 +162,7 @@ impl PanicManager {
     }
 
     /// The dead man's switch background loop
-    async fn dead_mans_loop(
-        self: Arc<Self>,
-        mut shutdown: tokio::sync::oneshot::Receiver<()>,
-    ) {
+    async fn dead_mans_loop(self: Arc<Self>, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
         let check_interval = Duration::from_secs(300); // Check every 5 minutes
         let mut ticker = interval(check_interval);
 
@@ -241,10 +234,7 @@ pub async fn secure_delete(path: &std::path::Path) -> Result<()> {
 
     // Overwrite with zeros
     let zeros = vec![0u8; len.min(4096)];
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .await?;
+    let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
 
     use tokio::io::AsyncWriteExt;
     let mut written = 0;
@@ -291,13 +281,15 @@ mod tests {
         let alert_fired = Arc::new(Mutex::new(false));
         let alert_fired_clone = alert_fired.clone();
 
-        let result = mgr.execute_panic("test", move |_text, _channels| {
-            let flag = alert_fired_clone.clone();
-            async move {
-                *flag.lock().await = true;
-                Ok(())
-            }
-        }).await;
+        let result = mgr
+            .execute_panic("test", move |_text, _channels| {
+                let flag = alert_fired_clone.clone();
+                async move {
+                    *flag.lock().await = true;
+                    Ok(())
+                }
+            })
+            .await;
 
         assert!(result.is_ok());
         // Alert fires even with empty channels list in config

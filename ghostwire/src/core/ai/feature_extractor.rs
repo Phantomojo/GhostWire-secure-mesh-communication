@@ -20,7 +20,7 @@
 // All features are StandardScaler normalized (zero mean, unit variance).
 // For features we cannot collect live, we emit 0.0 (the scaler mean).
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -81,9 +81,9 @@ pub const BASE_FEATURE_NAMES: [&str; BASE_FEATURES] = [
 /// Node IDs from the Guifisants dataset (in column order)
 /// These are the actual node IDs from the Guifi.net Guifisants node
 pub const NODE_IDS: [u16; NUM_NODES] = [
-    0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-    27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
-    50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+    0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+    28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
 ];
 
 /// Column indices that are MISSING from the original dataset (7 columns)
@@ -243,8 +243,8 @@ impl FeatureExtractor {
     pub async fn load_scaler(&mut self, path: &str) -> Result<()> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read scaler file: {}", path))?;
-        let params: ScalerParams = serde_json::from_str(&content)
-            .with_context(|| "Failed to parse scaler JSON")?;
+        let params: ScalerParams =
+            serde_json::from_str(&content).with_context(|| "Failed to parse scaler JSON")?;
 
         if params.mean.len() != FEATURE_DIM || params.std.len() != FEATURE_DIM {
             anyhow::bail!(
@@ -304,8 +304,11 @@ impl FeatureExtractor {
 
         // Verify total
         let total: usize = map.values().map(|v| v.len()).sum();
-        debug_assert_eq!(total, FEATURE_DIM,
-            "Column map should cover exactly {} features, got {}", FEATURE_DIM, total);
+        debug_assert_eq!(
+            total, FEATURE_DIM,
+            "Column map should cover exactly {} features, got {}",
+            FEATURE_DIM, total
+        );
 
         map
     }
@@ -428,7 +431,10 @@ impl FeatureExtractor {
                     metrics.eth_rxp_rate += rx_packets as f32;
                     metrics.eth_txb_rate += tx_bytes as f32;
                     metrics.eth_txp_rate += tx_packets as f32;
-                } else if iface.starts_with("wlan") || iface.starts_with("wl") || iface.starts_with("wifi") {
+                } else if iface.starts_with("wlan")
+                    || iface.starts_with("wl")
+                    || iface.starts_with("wifi")
+                {
                     metrics.wifi_rxb_rate += rx_bytes as f32;
                     metrics.wifi_rxp_rate += rx_packets as f32;
                     metrics.wifi_txb_rate += tx_bytes as f32;
@@ -587,9 +593,9 @@ mod tests {
         let mut features = vec![0.0, 12.0, 110.0];
         params.transform(&mut features);
 
-        assert!((features[0] - 0.0).abs() < 0.001);  // (0-0)/1 = 0
-        assert!((features[1] - 1.0).abs() < 0.001);  // (12-10)/2 = 1
-        assert!((features[2] - 1.0).abs() < 0.001);  // (110-100)/10 = 1
+        assert!((features[0] - 0.0).abs() < 0.001); // (0-0)/1 = 0
+        assert!((features[1] - 1.0).abs() < 0.001); // (12-10)/2 = 1
+        assert!((features[2] - 1.0).abs() < 0.001); // (110-100)/10 = 1
     }
 
     #[test]
@@ -613,17 +619,26 @@ mod tests {
         // Node 23 is at index 21 in NODE_IDS (0-indexed)
         // Its features start at approximately 21*38 = 798
         // (exact position depends on missing columns)
-        assert!(features.iter().any(|&v| v != 0.0), "Should have some non-zero features");
+        assert!(
+            features.iter().any(|&v| v != 0.0),
+            "Should have some non-zero features"
+        );
     }
 
     #[test]
     fn test_collect_local_system_metrics() {
         let result = FeatureExtractor::collect_local_system_metrics();
-        assert!(result.is_ok(), "Should be able to collect system metrics on Linux");
+        assert!(
+            result.is_ok(),
+            "Should be able to collect system metrics on Linux"
+        );
 
         let metrics = result.unwrap();
         assert!(metrics.idle_rate > 0.0, "Idle rate should be positive");
         assert!(metrics.processes > 0.0, "Process count should be positive");
-        assert!(metrics.ctxt_rate > 0.0, "Context switch rate should be positive");
+        assert!(
+            metrics.ctxt_rate > 0.0,
+            "Context switch rate should be positive"
+        );
     }
 }

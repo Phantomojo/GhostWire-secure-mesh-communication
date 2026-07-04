@@ -8,11 +8,8 @@
 //!   3. FrameParser error handling: bad magic/unknown kind clear buffer
 //!      but return a non-fatal sentinel so callers can keep the connection.
 
-
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-
 
 /// Frame magic bytes — ceremony-derived, replaces b"GWF\x01"
 pub const FRAME_MAGIC: [u8; 4] = crate::genesis_constants::FRAME_MAGIC;
@@ -24,19 +21,19 @@ pub const MAX_FRAME_SIZE: usize = 65_536;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, num_derive::FromPrimitive)]
 #[repr(u16)]
 pub enum FrameKind {
-    Message       = 0x0001,
-    Announce      = 0x0002,
-    DhtPut        = 0x0003,
-    DhtGet        = 0x0004,
-    DhtValue      = 0x0005,
-    RouteSetup    = 0x0010,
+    Message = 0x0001,
+    Announce = 0x0002,
+    DhtPut = 0x0003,
+    DhtGet = 0x0004,
+    DhtValue = 0x0005,
+    RouteSetup = 0x0010,
     RoutedPayload = 0x0011,
-    MailboxDeposit= 0x0020,
-    MailboxDrain  = 0x0021,
-    CoverTraffic  = 0x0030,  // NEW: dummy frames for traffic analysis resistance
-    Ping          = 0x00F0,
-    Pong          = 0x00F1,
-    Handshake     = 0x00FF,
+    MailboxDeposit = 0x0020,
+    MailboxDrain = 0x0021,
+    CoverTraffic = 0x0030, // NEW: dummy frames for traffic analysis resistance
+    Ping = 0x00F0,
+    Pong = 0x00F1,
+    Handshake = 0x00FF,
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +48,14 @@ impl Frame {
     }
 
     pub fn encode<T: Serialize>(kind: FrameKind, msg: &T) -> Result<Self> {
-        let payload = bincode::serialize(msg)
-            .map_err(|e| anyhow::anyhow!("Bincode encode failed: {}", e))?;
+        let payload =
+            bincode::serialize(msg).map_err(|e| anyhow::anyhow!("Bincode encode failed: {}", e))?;
         if payload.len() > MAX_FRAME_SIZE {
-            anyhow::bail!("Encoded payload {} bytes exceeds MAX_FRAME_SIZE {}", payload.len(), MAX_FRAME_SIZE);
+            anyhow::bail!(
+                "Encoded payload {} bytes exceeds MAX_FRAME_SIZE {}",
+                payload.len(),
+                MAX_FRAME_SIZE
+            );
         }
         Ok(Self { kind, payload })
     }
@@ -95,11 +96,16 @@ impl Frame {
         if payload_len > MAX_FRAME_SIZE {
             anyhow::bail!(
                 "Frame payload {} bytes exceeds MAX_FRAME_SIZE {} — possible OOM attack",
-                payload_len, MAX_FRAME_SIZE
+                payload_len,
+                MAX_FRAME_SIZE
             );
         }
         if buf.len() < HEADER_LEN + payload_len {
-            anyhow::bail!("Buffer too short for payload: need {}, have {}", HEADER_LEN + payload_len, buf.len());
+            anyhow::bail!(
+                "Buffer too short for payload: need {}, have {}",
+                HEADER_LEN + payload_len,
+                buf.len()
+            );
         }
 
         let payload = buf[HEADER_LEN..HEADER_LEN + payload_len].to_vec();
@@ -111,8 +117,12 @@ impl Frame {
     pub fn cover_traffic(rng: &ring::rand::SystemRandom) -> Result<Self> {
         use ring::rand::SecureRandom;
         let mut payload = vec![0u8; 256];
-        rng.fill(&mut payload).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        Ok(Self { kind: FrameKind::CoverTraffic, payload })
+        rng.fill(&mut payload)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        Ok(Self {
+            kind: FrameKind::CoverTraffic,
+            payload,
+        })
     }
 }
 
@@ -177,7 +187,8 @@ impl WireHandshake {
         if self.version < Self::MIN_ACCEPTABLE_VERSION {
             anyhow::bail!(
                 "Remote protocol version {} is below our minimum {}",
-                self.version, Self::MIN_ACCEPTABLE_VERSION
+                self.version,
+                Self::MIN_ACCEPTABLE_VERSION
             );
         }
         if self.node_id.is_empty() {
@@ -209,7 +220,10 @@ pub struct ReplayWindow {
 
 impl ReplayWindow {
     pub fn new() -> Self {
-        Self { highest_seq: 0, window: 0 }
+        Self {
+            highest_seq: 0,
+            window: 0,
+        }
     }
 
     /// Returns true if this seq should be accepted (not a replay).
@@ -242,7 +256,9 @@ impl ReplayWindow {
 }
 
 impl Default for ReplayWindow {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Frame stream parser ───────────────────────────────────────────────────────
@@ -253,7 +269,9 @@ pub struct FrameParser {
 
 impl FrameParser {
     pub fn new() -> Self {
-        Self { buf: Vec::with_capacity(4096) }
+        Self {
+            buf: Vec::with_capacity(4096),
+        }
     }
 
     /// Feed new bytes. Returns complete frames.
@@ -296,14 +314,20 @@ impl FrameParser {
 }
 
 impl Default for FrameParser {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WirePing { pub ts: u32 }
+pub struct WirePing {
+    pub ts: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WirePong { pub ts: u32 }
+pub struct WirePong {
+    pub ts: u32,
+}
 
 #[cfg(test)]
 mod tests {
@@ -336,13 +360,13 @@ mod tests {
     #[test]
     fn replay_window_rejects_duplicate() {
         let mut w = ReplayWindow::new();
-        assert!(w.check_and_advance(10));     // new, accept
-        assert!(!w.check_and_advance(10));    // duplicate, reject
-        assert!(w.check_and_advance(11));     // new, accept
-        // seq 9 is old but hasn't been seen yet — replay window accepts it (reordering)
-        assert!(w.check_and_advance(9));      // not seen before, accept
-        assert!(!w.check_and_advance(9));     // now it's a duplicate, reject
-        assert!(!w.check_and_advance(10));    // still a duplicate, reject
+        assert!(w.check_and_advance(10)); // new, accept
+        assert!(!w.check_and_advance(10)); // duplicate, reject
+        assert!(w.check_and_advance(11)); // new, accept
+                                          // seq 9 is old but hasn't been seen yet — replay window accepts it (reordering)
+        assert!(w.check_and_advance(9)); // not seen before, accept
+        assert!(!w.check_and_advance(9)); // now it's a duplicate, reject
+        assert!(!w.check_and_advance(10)); // still a duplicate, reject
     }
 
     #[test]
@@ -379,15 +403,22 @@ mod tests {
     fn wire_size_comparison() {
         use crate::core::wire_protocol::WireMessage;
         let msg = WireMessage {
-            from: vec![0xAA; 32], to: vec![0xBB; 32],
-            payload: vec![0xCC; 512], id: vec![0xDD; 16],
-            ts: 1_700_000_000u32, seq: 42,
+            from: vec![0xAA; 32],
+            to: vec![0xBB; 32],
+            payload: vec![0xCC; 512],
+            id: vec![0xDD; 16],
+            ts: 1_700_000_000u32,
+            seq: 42,
         };
         let json_size = serde_json::to_vec(&msg).unwrap().len();
         let frame = Frame::encode(FrameKind::Message, &msg).unwrap();
         let wire_size = frame.to_bytes().len();
-        println!("JSON: {} bytes, MsgPack+frame: {} bytes, savings: {:.1}%",
-            json_size, wire_size, (1.0 - wire_size as f64 / json_size as f64) * 100.0);
+        println!(
+            "JSON: {} bytes, MsgPack+frame: {} bytes, savings: {:.1}%",
+            json_size,
+            wire_size,
+            (1.0 - wire_size as f64 / json_size as f64) * 100.0
+        );
         assert!(wire_size < json_size);
     }
 }

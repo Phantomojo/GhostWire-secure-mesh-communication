@@ -23,7 +23,6 @@
 //!   [features]
 //!   iroh = ["dep:iroh", "dep:iroh-bytes", "dep:iroh-docs"]
 
-
 // ── Why Iroh specifically ─────────────────────────────────────────────────────
 //
 // Compared to alternatives:

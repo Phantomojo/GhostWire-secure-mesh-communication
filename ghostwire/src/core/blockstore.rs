@@ -241,11 +241,7 @@ impl BlockStore {
 
     /// Strategy: which peers should we request blocks from?
     /// Prioritises peers with good debt ratios.
-    pub async fn strategy_select_peers(
-        &self,
-        cid_hex: &str,
-        max_peers: usize,
-    ) -> Vec<String> {
+    pub async fn strategy_select_peers(&self, cid_hex: &str, max_peers: usize) -> Vec<String> {
         let providers = self.providers.read().await;
         let ledger = self.ledger.read().await;
 
@@ -288,7 +284,12 @@ impl BlockStore {
 
     /// Get ledger stats for a peer
     pub async fn peer_stats(&self, peer_id: &str) -> PeerLedgerEntry {
-        self.ledger.read().await.get(peer_id).cloned().unwrap_or_default()
+        self.ledger
+            .read()
+            .await
+            .get(peer_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// How many blocks we have locally
@@ -337,7 +338,9 @@ struct Wantlist {
 
 impl Wantlist {
     fn new() -> Self {
-        Self { entries: HashMap::new() }
+        Self {
+            entries: HashMap::new(),
+        }
     }
 
     fn add(&mut self, cid_hex: String, priority: u32) {
@@ -390,25 +393,33 @@ struct Ledger {
 
 impl Ledger {
     fn new() -> Self {
-        Self { entries: HashMap::new() }
+        Self {
+            entries: HashMap::new(),
+        }
     }
 
     fn record_sent(&mut self, peer_id: &str, bytes: u64) {
-        let entry = self.entries.entry(peer_id.to_string()).or_insert(PeerLedgerEntry {
-            peer_id: peer_id.to_string(),
-            first_seen: now_secs(),
-            ..Default::default()
-        });
+        let entry = self
+            .entries
+            .entry(peer_id.to_string())
+            .or_insert(PeerLedgerEntry {
+                peer_id: peer_id.to_string(),
+                first_seen: now_secs(),
+                ..Default::default()
+            });
         entry.bytes_sent += bytes;
         entry.last_exchange = now_secs();
     }
 
     fn record_received(&mut self, peer_id: &str, bytes: u64) {
-        let entry = self.entries.entry(peer_id.to_string()).or_insert(PeerLedgerEntry {
-            peer_id: peer_id.to_string(),
-            first_seen: now_secs(),
-            ..Default::default()
-        });
+        let entry = self
+            .entries
+            .entry(peer_id.to_string())
+            .or_insert(PeerLedgerEntry {
+                peer_id: peer_id.to_string(),
+                first_seen: now_secs(),
+                ..Default::default()
+            });
         entry.bytes_received += bytes;
         entry.last_exchange = now_secs();
     }
@@ -479,7 +490,10 @@ mod tests {
     async fn store_and_retrieve_file() {
         let store = BlockStore::new(1024); // 1 KiB blocks for test
         let data = b"Hello from Nairobi! ".repeat(200); // ~4 KiB
-        let manifest = store.store_file(&data, Some("test.txt".to_string())).await.unwrap();
+        let manifest = store
+            .store_file(&data, Some("test.txt".to_string()))
+            .await
+            .unwrap();
 
         assert!(manifest.block_cids.len() >= 4);
         let retrieved = store.retrieve_file(&manifest).await.unwrap().unwrap();
@@ -498,11 +512,17 @@ mod tests {
     async fn wantlist_tracks_missing() {
         let store = BlockStore::new(1024);
         // Use unique data: each byte is different based on position
-        let data: Vec<u8> = (0..3000).map(|i| ((i * 31 + i / 256 * 17 + 7) % 256) as u8).collect();
+        let data: Vec<u8> = (0..3000)
+            .map(|i| ((i * 31 + i / 256 * 17 + 7) % 256) as u8)
+            .collect();
         let manifest = store.store_file(&data, None).await.unwrap();
 
         // Verify we have 3 unique blocks
-        assert_eq!(manifest.block_cids.len(), 3, "Should have 3 blocks for 3000 bytes");
+        assert_eq!(
+            manifest.block_cids.len(),
+            3,
+            "Should have 3 blocks for 3000 bytes"
+        );
 
         // Verify all CIDs are unique
         let unique_cids: std::collections::HashSet<_> = manifest.block_cids.iter().collect();

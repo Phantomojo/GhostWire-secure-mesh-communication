@@ -2,8 +2,11 @@
 // Core infrastructure for running AI models in GhostWire
 // Uses ort 2.0 API (rc.12)
 
-use ort::{session::Session, value::{Tensor, ValueType}};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use ort::{
+    session::Session,
+    value::{Tensor, ValueType},
+};
 use std::sync::Mutex;
 
 /// Main ONNX inference engine for GhostWire
@@ -19,8 +22,7 @@ impl OnnxInferenceEngine {
     /// Load an ONNX model from file
     pub fn new(model_path: &str, model_name: &str) -> Result<Self> {
         // Build session and commit from file (ort 2.0 API)
-        let mut builder = Session::builder()
-            .context("Failed to create ONNX session builder")?;
+        let mut builder = Session::builder().context("Failed to create ONNX session builder")?;
 
         // Enable max optimization — ignore error since this isn't available in minimal builds
         builder = builder
@@ -41,9 +43,10 @@ impl OnnxInferenceEngine {
     pub fn run_inference(&self, input_features: Vec<f32>) -> Result<Vec<f32>> {
         // Get input/output names first
         let (input_name, output_name) = {
-            let session = self.session.lock().map_err(|e| {
-                anyhow::anyhow!("ONNX session mutex poisoned: {}", e)
-            })?;
+            let session = self
+                .session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("ONNX session mutex poisoned: {}", e))?;
             let input_name = session
                 .inputs()
                 .first()
@@ -61,13 +64,14 @@ impl OnnxInferenceEngine {
 
         // Create tensor from input features — ort 2.0 uses Tensor::from_array
         let shape = vec![1i64, input_features.len() as i64];
-        let input_tensor = Tensor::from_array((shape, input_features))
-            .context("Failed to create input tensor")?;
+        let input_tensor =
+            Tensor::from_array((shape, input_features)).context("Failed to create input tensor")?;
 
         // Run inference (mutable borrow via Mutex guard)
-        let mut session = self.session.lock().map_err(|e| {
-            anyhow::anyhow!("ONNX session mutex poisoned: {}", e)
-        })?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| anyhow::anyhow!("ONNX session mutex poisoned: {}", e))?;
         let outputs = session
             .run(ort::inputs![input_name => input_tensor])
             .context("ONNX inference failed")?;
@@ -93,9 +97,10 @@ impl OnnxInferenceEngine {
 
     /// Get input shape expected by this model
     pub fn input_shape(&self) -> Result<Vec<i64>> {
-        let session = self.session.lock().map_err(|e| {
-            anyhow::anyhow!("ONNX session mutex poisoned: {}", e)
-        })?;
+        let session = self
+            .session
+            .lock()
+            .map_err(|e| anyhow::anyhow!("ONNX session mutex poisoned: {}", e))?;
         let input = session
             .inputs()
             .first()
@@ -211,13 +216,13 @@ impl OnnxRouter {
 /// For production use, use the 2,387-feature Guifi.net model via OnnxRouter::predict().
 #[derive(Clone, Debug)]
 pub struct LinkFeatures {
-    pub rssi: f32,                  // Signal strength (-100 to 0 dBm)
-    pub latency_ms: f32,            // Round-trip latency (1-500 ms)
-    pub packet_loss: f32,           // Packet loss rate (0.0-1.0)
-    pub battery_level: f32,         // Node battery (0.0-1.0)
-    pub hop_count: f32,             // Hops to destination (1-15)
-    pub encounter_frequency: f32,   // Encounters/hour (0.0-10.0)
-    pub time_since_last_seen: f32,  // Seconds since last contact (0-3600)
+    pub rssi: f32,                 // Signal strength (-100 to 0 dBm)
+    pub latency_ms: f32,           // Round-trip latency (1-500 ms)
+    pub packet_loss: f32,          // Packet loss rate (0.0-1.0)
+    pub battery_level: f32,        // Node battery (0.0-1.0)
+    pub hop_count: f32,            // Hops to destination (1-15)
+    pub encounter_frequency: f32,  // Encounters/hour (0.0-10.0)
+    pub time_since_last_seen: f32, // Seconds since last contact (0-3600)
 }
 
 impl LinkFeatures {

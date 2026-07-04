@@ -65,7 +65,9 @@ pub struct IdentityCache {
 
 impl IdentityCache {
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(None)) }
+        Self {
+            inner: Arc::new(RwLock::new(None)),
+        }
     }
 
     /// Update the snapshot (called on identity change / unlock)
@@ -197,7 +199,9 @@ impl MessageDeduplicator {
     /// Returns true if this message has been seen before (duplicate).
     /// Automatically inserts unseen messages.
     pub fn is_duplicate(&self, message_id: &str) -> bool {
-        let count = self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let count = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if count % self.gc_interval == 0 {
             self.gc();
         }
@@ -401,7 +405,7 @@ mod tests {
     fn deduplicator_catches_duplicates() {
         let dedup = MessageDeduplicator::new(Duration::from_secs(60));
         assert!(!dedup.is_duplicate("msg_001")); // First time: not duplicate
-        assert!(dedup.is_duplicate("msg_001"));  // Second time: duplicate
+        assert!(dedup.is_duplicate("msg_001")); // Second time: duplicate
         assert!(!dedup.is_duplicate("msg_002")); // Different ID: not duplicate
     }
 

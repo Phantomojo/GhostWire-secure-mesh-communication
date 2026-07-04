@@ -30,7 +30,7 @@ pub struct CreateEntryRequest {
     pub body: String,
     pub collection: String,
     pub tags: Option<Vec<String>>,
-    pub kind: Option<String>, // "note" | "article" | "code" | "reference"
+    pub kind: Option<String>,   // "note" | "article" | "code" | "reference"
     pub access: Option<String>, // "private" | "trusted" | "public"
 }
 
@@ -55,15 +55,20 @@ impl ArkController {
         State(state): State<Arc<AppState>>,
         Json(req): Json<CreateEntryRequest>,
     ) -> impl IntoResponse {
-        use crate::core::knowledge::knowledge_ark::{ArkEntry, EntryKind, AccessLevel};
+        use crate::core::knowledge::knowledge_ark::{AccessLevel, ArkEntry, EntryKind};
 
         let core = state.core.read().await;
         let author = core.get_identity_id().await;
 
         let kind = match req.kind.as_deref().unwrap_or("note") {
             "article" => EntryKind::Article,
-            "code" => EntryKind::Code { language: "unknown".into() },
-            "reference" => EntryKind::Reference { url: String::new(), archived_cid: None },
+            "code" => EntryKind::Code {
+                language: "unknown".into(),
+            },
+            "reference" => EntryKind::Reference {
+                url: String::new(),
+                archived_cid: None,
+            },
             _ => EntryKind::Note,
         };
 
@@ -78,11 +83,14 @@ impl ArkController {
             .with_access(access);
 
         match core.knowledge_ark.add_entry(entry).await {
-            Ok(cid) => Json(ApiV2Response::success(serde_json::json!({ "cid": cid }))).into_response(),
+            Ok(cid) => {
+                Json(ApiV2Response::success(serde_json::json!({ "cid": cid }))).into_response()
+            }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiV2Response::<()>::error("ARK_ERROR", &e.to_string())),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 
@@ -96,7 +104,8 @@ impl ArkController {
             None => (
                 StatusCode::NOT_FOUND,
                 Json(ApiV2Response::<()>::error("NOT_FOUND", "Entry not found")),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 
@@ -106,11 +115,15 @@ impl ArkController {
     ) -> impl IntoResponse {
         let core = state.core.read().await;
         match core.knowledge_ark.delete_entry(&cid).await {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({ "deleted": cid }))).into_response(),
+            Ok(_) => Json(ApiV2Response::success(
+                serde_json::json!({ "deleted": cid }),
+            ))
+            .into_response(),
             Err(e) => (
                 StatusCode::NOT_FOUND,
                 Json(ApiV2Response::<()>::error("DELETE_ERROR", &e.to_string())),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 
@@ -120,7 +133,8 @@ impl ArkController {
     ) -> impl IntoResponse {
         let q = params.get("q").map(|s| s.as_str()).unwrap_or("");
         if q.is_empty() {
-            return Json(ApiV2Response::success(serde_json::json!({ "results": [] }))).into_response();
+            return Json(ApiV2Response::success(serde_json::json!({ "results": [] })))
+                .into_response();
         }
         let core = state.core.read().await;
         let results = core.knowledge_ark.search(q).await;
@@ -171,10 +185,13 @@ impl ChannelController {
                 "channel": ch,
                 "invite": ch.invite_string(),
                 "topic": ch.gossipsub_topic(),
-            }))).into_response(),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", &e.to_string()))
-            ).into_response(),
+            })))
+            .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -186,9 +203,11 @@ impl ChannelController {
         let core = state.core.read().await;
         match core.ghost_channels.join(invite).await {
             Ok(ch) => Json(ApiV2Response::success(ch)).into_response(),
-            Err(e) => (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_INVITE", &e.to_string()))
-            ).into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("INVALID_INVITE", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -213,26 +232,36 @@ impl ChannelController {
     ) -> impl IntoResponse {
         let text = req["text"].as_str().unwrap_or("");
         if text.is_empty() {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("EMPTY", "text is required"))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("EMPTY", "text is required")),
+            )
+                .into_response();
         }
 
-        let topic_id: Option<[u8; 32]> = hex::decode(&id).ok().and_then(|b| {
-            b.try_into().ok()
-        });
+        let topic_id: Option<[u8; 32]> = hex::decode(&id).ok().and_then(|b| b.try_into().ok());
 
         let Some(topic_id) = topic_id else {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_ID", "invalid channel id"))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_ID",
+                    "invalid channel id",
+                )),
+            )
+                .into_response();
         };
 
         let core = state.core.read().await;
         let Some(channel) = core.ghost_channels.get(&topic_id).await else {
-            return (StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("NOT_FOUND", "Channel not joined"))
-            ).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiV2Response::<()>::error(
+                    "NOT_FOUND",
+                    "Channel not joined",
+                )),
+            )
+                .into_response();
         };
 
         // Prepare message (PoW solving — use spawn_blocking in production)
@@ -261,11 +290,14 @@ impl ChannelController {
                     "status": "published",
                     "msg_id": hex::encode(msg.msg_id),
                     "pow_nonce": msg.pow_nonce,
-                }))).into_response()
+                })))
+                .into_response()
             }
-            Err(e) => (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string()))
-            ).into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -275,9 +307,14 @@ impl ChannelController {
     ) -> impl IntoResponse {
         let topic_id: Option<[u8; 32]> = hex::decode(&id).ok().and_then(|b| b.try_into().ok());
         let Some(topic_id) = topic_id else {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_ID", "invalid channel id"))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_ID",
+                    "invalid channel id",
+                )),
+            )
+                .into_response();
         };
         let core = state.core.read().await;
         let messages = core.ghost_channels.get_messages(&topic_id).await;
@@ -314,16 +351,28 @@ impl TrustController {
         let key_hex = req["public_key"].as_str().unwrap_or("");
         let pub_key = match hex::decode(key_hex) {
             Ok(k) => k,
-            Err(_) => return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_KEY", "public_key must be hex"))
-            ).into_response(),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiV2Response::<()>::error(
+                        "INVALID_KEY",
+                        "public_key must be hex",
+                    )),
+                )
+                    .into_response()
+            }
         };
         let core = state.core.read().await;
         match core.trust_store.mark_verified(&peer_id, &pub_key).await {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({ "verified": peer_id }))).into_response(),
-            Err(e) => (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("VERIFY_ERROR", &e.to_string()))
-            ).into_response(),
+            Ok(_) => Json(ApiV2Response::success(
+                serde_json::json!({ "verified": peer_id }),
+            ))
+            .into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("VERIFY_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -333,7 +382,9 @@ impl TrustController {
     ) -> impl IntoResponse {
         let core = state.core.read().await;
         core.trust_store.block(&peer_id).await;
-        Json(ApiV2Response::success(serde_json::json!({ "blocked": peer_id })))
+        Json(ApiV2Response::success(
+            serde_json::json!({ "blocked": peer_id }),
+        ))
     }
 
     pub async fn list_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -357,7 +408,11 @@ impl NetworkController {
         // CRITICAL FIX: Wire actual transport mode and network state
         let transport_mode = {
             let guard = core.active_transport.read().await;
-            guard.as_ref().map(|t| t.name()).unwrap_or("none").to_string()
+            guard
+                .as_ref()
+                .map(|t| t.name())
+                .unwrap_or("none")
+                .to_string()
         };
 
         let network_state = {
@@ -411,7 +466,9 @@ impl NetworkController {
         };
 
         // CRITICAL FIX: Wire multiaddrs from mesh listeners
-        let multiaddrs = core.get_mesh_listeners().await
+        let multiaddrs = core
+            .get_mesh_listeners()
+            .await
             .iter()
             .map(|a| a.to_string())
             .collect();
@@ -430,7 +487,8 @@ impl NetworkController {
         // CRITICAL FIX: Sign the contact card with identity keypair
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
         let identity = core.identity.read().await;
-        let signature = identity.keypair()
+        let signature = identity
+            .keypair()
             .map(|kp| kp.sign(&card_bytes).unwrap_or_default())
             .unwrap_or_default();
         card.signature = signature;
@@ -440,10 +498,13 @@ impl NetworkController {
                 "qr_string": qr,
                 "node_id": node_id,
                 "rendezvous": card.rendezvous_address,
-            }))).into_response(),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("QR_ERROR", &e.to_string()))
-            ).into_response(),
+            })))
+            .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error("QR_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -455,9 +516,11 @@ impl NetworkController {
         use crate::core::identity::device_pairing::ContactCard;
         match ContactCard::from_qr_string(qr_string) {
             Ok(card) => Json(ApiV2Response::success(card)).into_response(),
-            Err(e) => (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", &e.to_string()))
-            ).into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 }
@@ -477,10 +540,13 @@ impl PairingController {
                 "safety_number": code.safety_number(),
                 "session_id": session.session_id,
                 "expires_in_secs": 600,
-            }))).into_response(),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("PAIR_ERROR", &e.to_string()))
-            ).into_response(),
+            })))
+            .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error("PAIR_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -525,10 +591,14 @@ impl RecoveryController {
         Json(req): Json<SetupRecoveryRequest>,
     ) -> impl IntoResponse {
         if req.threshold < 2 || req.total < req.threshold {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_PARAMS",
-                    "threshold must be >= 2 and <= total"))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_PARAMS",
+                    "threshold must be >= 2 and <= total",
+                )),
+            )
+                .into_response();
         }
 
         // Build guardian list
@@ -540,10 +610,16 @@ impl RecoveryController {
                     arr.copy_from_slice(&b);
                     arr
                 }
-                _ => return (StatusCode::BAD_REQUEST,
-                    Json(ApiV2Response::<()>::error("INVALID_KEY",
-                        &format!("Invalid X25519 key for guardian {}", g.name)))
-                ).into_response(),
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(ApiV2Response::<()>::error(
+                            "INVALID_KEY",
+                            &format!("Invalid X25519 key for guardian {}", g.name),
+                        )),
+                    )
+                        .into_response()
+                }
             };
             guardians.push((g.peer_id.clone(), g.name.clone(), pub_bytes));
         }
@@ -551,9 +627,11 @@ impl RecoveryController {
         // Get master key from identity (only works when unlocked)
         let core = state.core.read().await;
         if core.is_locked().await {
-            return (StatusCode::UNAUTHORIZED,
-                Json(ApiV2Response::<()>::error("LOCKED", "Unlock profile first"))
-            ).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiV2Response::<()>::error("LOCKED", "Unlock profile first")),
+            )
+                .into_response();
         }
 
         // Derive master key from identity's Ed25519 public key (32 bytes)
@@ -563,21 +641,34 @@ impl RecoveryController {
             Some(pk) => match pk.try_into_ed25519() {
                 Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
                 Err(_) => {
-                    return (StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiV2Response::<()>::error("RECOVERY_ERROR", "Identity key type not supported"))
-                    ).into_response();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiV2Response::<()>::error(
+                            "RECOVERY_ERROR",
+                            "Identity key type not supported",
+                        )),
+                    )
+                        .into_response();
                 }
             },
             None => {
-                return (StatusCode::UNAUTHORIZED,
-                    Json(ApiV2Response::<()>::error("LOCKED", "Identity not unlocked"))
-                ).into_response();
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiV2Response::<()>::error(
+                        "LOCKED",
+                        "Identity not unlocked",
+                    )),
+                )
+                    .into_response();
             }
         };
         drop(identity_guard);
 
         match crate::core::recovery_shamir::create_recovery_shares(
-            &master_key, req.threshold, req.total, &guardians
+            &master_key,
+            req.threshold,
+            req.total,
+            &guardians,
         ) {
             Ok((shares, metadata)) => {
                 // CRITICAL FIX: Send each share to its guardian via messaging
@@ -593,7 +684,9 @@ impl RecoveryController {
                             format!("RECOVERY_SHARE:{}", share_json),
                         );
                         // Best-effort send
-                        let _ = core.send_direct_message(guardian_peer_id.clone(), &msg).await;
+                        let _ = core
+                            .send_direct_message(guardian_peer_id.clone(), &msg)
+                            .await;
                         sent_count += 1;
                     }
                 }
@@ -602,11 +695,14 @@ impl RecoveryController {
                     "metadata": metadata,
                     "share_count": shares.len(),
                     "sent_to_guardians": sent_count,
-                }))).into_response()
+                })))
+                .into_response()
             }
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", &e.to_string()))
-            ).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", &e.to_string())),
+            )
+                .into_response(),
         }
     }
 
@@ -638,9 +734,14 @@ impl RecoveryController {
         let threshold = req["threshold"].as_u64().unwrap_or(2) as u8;
 
         let Some(shares_arr) = shares_raw else {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_PARAMS", "shares array required"))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_PARAMS",
+                    "shares array required",
+                )),
+            )
+                .into_response();
         };
 
         // Parse shares with indices
@@ -648,17 +749,21 @@ impl RecoveryController {
             .iter()
             .enumerate()
             .filter_map(|(i, s)| {
-                s["share_data"].as_str().and_then(|hex| {
-                    hex::decode(hex).ok().map(|data| (i as u8 + 1, data))
-                })
+                s["share_data"]
+                    .as_str()
+                    .and_then(|hex| hex::decode(hex).ok().map(|data| (i as u8 + 1, data)))
             })
             .collect();
 
         if raw_shares.len() < threshold as usize {
-            return (StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INSUFFICIENT_SHARES",
-                    &format!("Need {} shares, got {}", threshold, raw_shares.len())))
-            ).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INSUFFICIENT_SHARES",
+                    &format!("Need {} shares, got {}", threshold, raw_shares.len()),
+                )),
+            )
+                .into_response();
         }
 
         // Reconstruct key
@@ -668,10 +773,16 @@ impl RecoveryController {
                 // SECURITY FIX: Require explicit non-empty new_password (no hardcoded default)
                 let new_password = match req["new_password"].as_str() {
                     Some(pw) if !pw.is_empty() => pw,
-                    _ => return (StatusCode::BAD_REQUEST,
-                        Json(ApiV2Response::<()>::error("INVALID_PARAMS",
-                            "new_password is required and must not be empty"))
-                    ).into_response(),
+                    _ => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(ApiV2Response::<()>::error(
+                                "INVALID_PARAMS",
+                                "new_password is required and must not be empty",
+                            )),
+                        )
+                            .into_response()
+                    }
                 };
 
                 // CRITICAL FIX: Re-encrypt identity with recovered key
@@ -679,25 +790,33 @@ impl RecoveryController {
 
                 // Create new identity from recovered key
                 match crate::core::identity::core_identity::Identity::from_seed(&recovered_key.0) {
-                    Ok(new_identity) => {
-                        match new_identity.save_to_disk(new_password) {
-                            Ok(_) => Json(ApiV2Response::success(serde_json::json!({
-                                "status": "key_reconstructed_and_identity_restored",
-                                "new_identity_id": new_identity.id,
-                            }))).into_response(),
-                            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ApiV2Response::<()>::error("SAVE_ERROR", &e.to_string()))
-                            ).into_response(),
-                        }
-                    }
-                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", &e.to_string()))
-                    ).into_response(),
+                    Ok(new_identity) => match new_identity.save_to_disk(new_password) {
+                        Ok(_) => Json(ApiV2Response::success(serde_json::json!({
+                            "status": "key_reconstructed_and_identity_restored",
+                            "new_identity_id": new_identity.id,
+                        })))
+                        .into_response(),
+                        Err(e) => (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiV2Response::<()>::error("SAVE_ERROR", &e.to_string())),
+                        )
+                            .into_response(),
+                    },
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", &e.to_string())),
+                    )
+                        .into_response(),
                 }
             }
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("RECONSTRUCTION_ERROR", &e.to_string()))
-            ).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error(
+                    "RECONSTRUCTION_ERROR",
+                    &e.to_string(),
+                )),
+            )
+                .into_response(),
         }
     }
 }

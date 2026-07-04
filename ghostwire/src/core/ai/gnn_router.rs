@@ -210,7 +210,10 @@ impl Default for GnnModelInfo {
 
 fn verify_blake2b(model_path: &str, expected_hash: &str) -> Result<()> {
     if expected_hash.is_empty() {
-        tracing::warn!("No BLAKE2b hash configured for {}, skipping verification", model_path);
+        tracing::warn!(
+            "No BLAKE2b hash configured for {}, skipping verification",
+            model_path
+        );
         return Ok(());
     }
     let data = std::fs::read(model_path)
@@ -241,8 +244,8 @@ impl GnnRouter {
     pub fn new(model_path: &str, embedding_path: &str) -> Result<Self> {
         verify_blake2b(model_path, EXPECTED_SCORING_HASH)?;
 
-        let mut builder = Session::builder()
-            .context("Failed to create ONNX session builder for scoring head")?;
+        let mut builder =
+            Session::builder().context("Failed to create ONNX session builder for scoring head")?;
         builder = builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .unwrap_or_else(|e| e.recover());
@@ -294,10 +297,11 @@ impl GnnRouter {
             tracing::debug!("Embedding file not found: {}", path.display());
             return Ok(());
         }
-        let content = tokio::fs::read_to_string(path).await
+        let content = tokio::fs::read_to_string(path)
+            .await
             .with_context(|| format!("Failed to read embeddings from {}", path.display()))?;
-        let data: NodeEmbeddingData = serde_json::from_str(&content)
-            .with_context(|| "Failed to parse embedding JSON")?;
+        let data: NodeEmbeddingData =
+            serde_json::from_str(&content).with_context(|| "Failed to parse embedding JSON")?;
 
         if data.num_nodes > TRAINED_NODE_COUNT {
             tracing::warn!(
@@ -374,10 +378,7 @@ impl GnnRouter {
         match self.embedding_state().await {
             EmbeddingState::Fresh => {}
             EmbeddingState::Stale { age_secs } => {
-                tracing::debug!(
-                    "Embeddings stale ({}s old), attempting refresh",
-                    age_secs
-                );
+                tracing::debug!("Embeddings stale ({}s old), attempting refresh", age_secs);
                 if let Err(e) = self.refresh_embeddings().await {
                     tracing::warn!("Embedding refresh failed: {}", e);
                 }
@@ -390,7 +391,10 @@ impl GnnRouter {
             }
         }
 
-        match self.run_scoring_inference(topology, src, dst, candidates).await {
+        match self
+            .run_scoring_inference(topology, src, dst, candidates)
+            .await
+        {
             Ok((scores, candidate_peers)) => {
                 let mut scored: Vec<(PeerId, f32)> = candidate_peers
                     .iter()
@@ -398,10 +402,7 @@ impl GnnRouter {
                     .map(|(peer, &score)| (peer.clone(), score))
                     .collect();
 
-                scored.sort_by(|a, b| {
-                    b.1.partial_cmp(&a.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let best_confidence = scored.first().map(|(_, s)| *s).unwrap_or(0.0);
 
@@ -428,17 +429,19 @@ impl GnnRouter {
 
         let mut candidates_with_features = Vec::new();
         for &cand_idx in candidates {
-            let features = peer_features.get(&cand_idx).cloned().unwrap_or_else(|| {
-                RoutingFeatures {
-                    rssi: -70,
-                    latency_ms: 100,
-                    packet_loss: 0.1,
-                    trust_score: 0.5,
-                    hop_count: 1,
-                    battery_level: 1.0,
-                    time_of_day: 12,
-                }
-            });
+            let features =
+                peer_features
+                    .get(&cand_idx)
+                    .cloned()
+                    .unwrap_or_else(|| RoutingFeatures {
+                        rssi: -70,
+                        latency_ms: 100,
+                        packet_loss: 0.1,
+                        trust_score: 0.5,
+                        hop_count: 1,
+                        battery_level: 1.0,
+                        time_of_day: 12,
+                    });
             let mapper = self.mapper.read().await;
             if let Some(peer) = mapper.get_peer(cand_idx) {
                 candidates_with_features.push((peer, features));
@@ -456,10 +459,7 @@ impl GnnRouter {
             scored.push((peer.clone(), score));
         }
 
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let (selected_peer, confidence) = scored.first().cloned().unwrap_or_else(|| {
             (
@@ -582,9 +582,7 @@ fn apply_softmax(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return vec![];
     }
-    let max_score = scores
-        .iter()
-        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let max_score = scores.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
     let exps: Vec<f32> = scores.iter().map(|&s| (s - max_score).exp()).collect();
     let sum: f32 = exps.iter().sum();
     if sum < 1e-8 {
@@ -613,10 +611,7 @@ pub fn build_topology_from_mesh(
 
     for (peer, features) in peers {
         let idx = peer_to_idx[peer];
-        let out_degree = routing_table
-            .get(peer)
-            .map(|rt| rt.len())
-            .unwrap_or(0);
+        let out_degree = routing_table.get(peer).map(|rt| rt.len()).unwrap_or(0);
         let in_degree = routing_table
             .values()
             .filter(|rt| rt.values().any(|next_hop| next_hop == peer))
@@ -701,7 +696,11 @@ mod tests {
         let probs = apply_softmax(&scores);
         assert_eq!(probs.len(), 3);
         let sum: f32 = probs.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "Softmax should sum to 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "Softmax should sum to 1.0, got {}",
+            sum
+        );
         assert!(probs[2] > probs[1] && probs[1] > probs[0]);
     }
 

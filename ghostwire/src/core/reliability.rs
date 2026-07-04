@@ -134,7 +134,8 @@ impl AckTracker {
         // Don't exceed max pending — drop oldest if needed
         if self.pending.len() >= self.config.max_pending_acks {
             // Find and remove the oldest entry
-            if let Some(oldest_id) = self.pending
+            if let Some(oldest_id) = self
+                .pending
                 .iter()
                 .min_by_key(|entry| entry.sent_at)
                 .map(|entry| *entry.key())
