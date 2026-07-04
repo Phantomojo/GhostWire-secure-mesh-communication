@@ -20,7 +20,7 @@
 //! INTEGRATION: Wrap the forward() call in SphinxPacket::process_at_hop()
 //! with `mixing_delay::sample_delay().await` before sending the next hop.
 
-use crate::genesis_constants::{MIXING_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, MIXING_DOMAIN};
 
 use rand::distributions::Distribution;
 use rand::rngs::StdRng;
@@ -292,9 +292,7 @@ mod tests {
             max_ms: 50,
         };
         let queue = std::sync::Arc::new(MixingQueue::new(config));
-        queue
-            .enqueue("peer1".to_string(), vec![0u8; 64])
-            .await;
+        queue.enqueue("peer1".to_string(), vec![0u8; 64]).await;
 
         // Before delay: nothing ready
         let ready = queue.drain_ready().await;

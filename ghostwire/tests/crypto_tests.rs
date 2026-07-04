@@ -135,7 +135,10 @@ fn test_large_data_encryption() {
     let encrypted = mgr.encrypt(&plaintext);
     let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
 
-    assert_eq!(decrypted, plaintext, "Large data should round-trip correctly");
+    assert_eq!(
+        decrypted, plaintext,
+        "Large data should round-trip correctly"
+    );
 }
 
 /// Test peer key management

@@ -126,7 +126,7 @@ impl FirstRunWizard {
             .direction(Direction::Vertical)
             .margin(2)
             .constraints([
-                Constraint::Min(8),  // Logo + content
+                Constraint::Min(8),    // Logo + content
                 Constraint::Length(3), // Help bar
             ])
             .split(f.area());
@@ -142,10 +142,7 @@ impl FirstRunWizard {
         // Help bar
         let help = match self.phase {
             0 => theme::help_bar(&[("Any key", "Continue")]),
-            1 => theme::help_bar(&[
-                ("Type", "Your name"),
-                ("Enter", "Continue"),
-            ]),
+            1 => theme::help_bar(&[("Type", "Your name"), ("Enter", "Continue")]),
             2 => theme::help_bar(&[]),
             3 => theme::help_bar(&[("Any key", "Enter GhostWire")]),
             _ => theme::help_bar(&[]),
@@ -155,8 +152,7 @@ impl FirstRunWizard {
 
     fn render_welcome(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let logo_lines = theme::splash_logo_lines();
-        let logo = Paragraph::new(logo_lines)
-            .block(Block::default().borders(Borders::NONE));
+        let logo = Paragraph::new(logo_lines).block(Block::default().borders(Borders::NONE));
         f.render_widget(logo, area);
     }
 
@@ -191,12 +187,10 @@ impl FirstRunWizard {
         // Prompt
         let prompt = Paragraph::new(vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "Choose how others will see you on the mesh:",
-                    Style::default().fg(Color::White),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "Choose how others will see you on the mesh:",
+                Style::default().fg(Color::White),
+            )]),
         ]);
         f.render_widget(prompt, chunks[1]);
 
@@ -247,10 +241,7 @@ impl FirstRunWizard {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
-            .constraints([
-                Constraint::Length(6),
-                Constraint::Min(1),
-            ])
+            .constraints([Constraint::Length(6), Constraint::Min(1)])
             .split(area);
 
         let logo = Paragraph::new(vec![
@@ -292,10 +283,7 @@ impl FirstRunWizard {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
-            .constraints([
-                Constraint::Length(6),
-                Constraint::Min(1),
-            ])
+            .constraints([Constraint::Length(6), Constraint::Min(1)])
             .split(area);
 
         let logo = Paragraph::new(vec![

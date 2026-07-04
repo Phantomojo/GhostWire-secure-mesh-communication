@@ -190,7 +190,8 @@ pub async fn auth_middleware(
         || path.starts_with("/api/profile")
         || path.starts_with("/api/identity")
         || path.starts_with("/api/v2/profile")
-        || path.starts_with("/api/ble")  // BLE transport endpoints
+        || path.starts_with("/api/ble")
+    // BLE transport endpoints
     {
         return Ok(next.run(req).await);
     }

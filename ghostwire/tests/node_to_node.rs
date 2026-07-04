@@ -3,16 +3,16 @@
 //! Spins up two MeshManagers on localhost, connects them, sends a message,
 //! and verifies the recipient received it.
 
+use ghostwire::core::encryption::Encryption;
 use ghostwire::core::encryption::EncryptionManager;
 use ghostwire::core::identity::Identity;
 use ghostwire::core::mesh::MeshManager;
 use ghostwire::core::message::Message;
+use ghostwire::core::persistence_manager::PersistenceManager;
+use ghostwire::core::reliability::ReliabilityLayer;
 use ghostwire::core::security::{SecurityConfig, SecurityManager};
 use ghostwire::core::store::SecureMessageStore;
 use ghostwire::core::username_discovery::UsernameDiscovery;
-use ghostwire::core::persistence_manager::PersistenceManager;
-use ghostwire::core::encryption::Encryption;
-use ghostwire::core::reliability::ReliabilityLayer;
 use libp2p::PeerId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -25,13 +25,13 @@ async fn build_test_mesh_manager(
     profile: Option<String>,
 ) -> anyhow::Result<(MeshManager, PeerId, libp2p::Multiaddr)> {
     // Use a unique temp directory for each node to avoid DB lock conflicts
-    let temp_dir = std::env::temp_dir().join(format!("ghostwire_test_{}_{}", port, std::process::id()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("ghostwire_test_{}_{}", port, std::process::id()));
     let _ = std::fs::create_dir_all(&temp_dir);
     std::env::set_var("GHOSTWIRE_HOME", temp_dir.to_str().unwrap());
 
     let identity = Arc::new(
-        Identity::new(profile)
-            .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
+        Identity::new(profile).map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
     );
     let keypair = identity
         .keypair()
@@ -48,8 +48,7 @@ async fn build_test_mesh_manager(
 
     let persistence = Arc::new(PersistenceManager::new(None)?);
     let encryption = Arc::new(
-        Encryption::new()
-            .map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
+        Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
     );
     let message_store = Arc::new(SecureMessageStore::new(persistence, encryption));
 
@@ -67,8 +66,8 @@ async fn build_test_mesh_manager(
         message_store,
         vec![], // no bootstrap nodes -- we'll dial directly
         username_discovery,
-        None,   // no event bus
-        None,   // no handshake secret
+        None, // no event bus
+        None, // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
     )
     .await?;
@@ -133,7 +132,11 @@ async fn test_node_to_node_connectivity() {
     // Create a message from A to B
     let peer_id_a_str = peer_id_a.to_string();
     let peer_id_b_str = peer_id_b.to_string();
-    let message = Message::new(peer_id_a_str, peer_id_b_str, "Hello from Node A!".to_string());
+    let message = Message::new(
+        peer_id_a_str,
+        peer_id_b_str,
+        "Hello from Node A!".to_string(),
+    );
 
     println!("Sending message: {:?}", message);
 

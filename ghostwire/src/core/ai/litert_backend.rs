@@ -434,8 +434,9 @@ pub trait InferenceEngine: Send + Sync {
     fn generate(
         &self,
         request: InferenceRequest,
-    ) -> impl std::future::Future<Output = Result<InferenceResponse, Box<dyn std::error::Error + Send + Sync>>>
-           + Send;
+    ) -> impl std::future::Future<
+        Output = Result<InferenceResponse, Box<dyn std::error::Error + Send + Sync>>,
+    > + Send;
 
     /// Check if the engine is healthy/reachable
     fn health_check(&self) -> impl std::future::Future<Output = bool> + Send;
@@ -605,22 +606,10 @@ mod tests {
 
     #[test]
     fn test_select_for_ram() {
-        assert_eq!(
-            Gemma4Variant::select_for_ram(4096),
-            Gemma4Variant::E2B
-        );
-        assert_eq!(
-            Gemma4Variant::select_for_ram(6144),
-            Gemma4Variant::E2B
-        );
-        assert_eq!(
-            Gemma4Variant::select_for_ram(8192),
-            Gemma4Variant::E4B
-        );
-        assert_eq!(
-            Gemma4Variant::select_for_ram(16384),
-            Gemma4Variant::MoE26B
-        );
+        assert_eq!(Gemma4Variant::select_for_ram(4096), Gemma4Variant::E2B);
+        assert_eq!(Gemma4Variant::select_for_ram(6144), Gemma4Variant::E2B);
+        assert_eq!(Gemma4Variant::select_for_ram(8192), Gemma4Variant::E4B);
+        assert_eq!(Gemma4Variant::select_for_ram(16384), Gemma4Variant::MoE26B);
         assert_eq!(
             Gemma4Variant::select_for_ram(65536),
             Gemma4Variant::Dense31B
@@ -629,22 +618,10 @@ mod tests {
 
     #[test]
     fn test_parse_model_tag() {
-        assert_eq!(
-            parse_model_tag("gemma4:e2b"),
-            Some(Gemma4Variant::E2B)
-        );
-        assert_eq!(
-            parse_model_tag("gemma4:e4b"),
-            Some(Gemma4Variant::E4B)
-        );
-        assert_eq!(
-            parse_model_tag("gemma4:26b"),
-            Some(Gemma4Variant::MoE26B)
-        );
-        assert_eq!(
-            parse_model_tag("gemma4:31b"),
-            Some(Gemma4Variant::Dense31B)
-        );
+        assert_eq!(parse_model_tag("gemma4:e2b"), Some(Gemma4Variant::E2B));
+        assert_eq!(parse_model_tag("gemma4:e4b"), Some(Gemma4Variant::E4B));
+        assert_eq!(parse_model_tag("gemma4:26b"), Some(Gemma4Variant::MoE26B));
+        assert_eq!(parse_model_tag("gemma4:31b"), Some(Gemma4Variant::Dense31B));
         assert_eq!(parse_model_tag("functiongemma:270m"), None);
         assert_eq!(parse_model_tag("llama3.1:8b"), None);
     }
@@ -681,26 +658,11 @@ mod tests {
 
     #[test]
     fn test_gemma4_variant_from_str() {
-        assert_eq!(
-            Gemma4Variant::from_str("e2b"),
-            Some(Gemma4Variant::E2B)
-        );
-        assert_eq!(
-            Gemma4Variant::from_str("2.3b"),
-            Some(Gemma4Variant::E2B)
-        );
-        assert_eq!(
-            Gemma4Variant::from_str("e4b"),
-            Some(Gemma4Variant::E4B)
-        );
-        assert_eq!(
-            Gemma4Variant::from_str("26b"),
-            Some(Gemma4Variant::MoE26B)
-        );
-        assert_eq!(
-            Gemma4Variant::from_str("moe"),
-            Some(Gemma4Variant::MoE26B)
-        );
+        assert_eq!(Gemma4Variant::from_str("e2b"), Some(Gemma4Variant::E2B));
+        assert_eq!(Gemma4Variant::from_str("2.3b"), Some(Gemma4Variant::E2B));
+        assert_eq!(Gemma4Variant::from_str("e4b"), Some(Gemma4Variant::E4B));
+        assert_eq!(Gemma4Variant::from_str("26b"), Some(Gemma4Variant::MoE26B));
+        assert_eq!(Gemma4Variant::from_str("moe"), Some(Gemma4Variant::MoE26B));
         assert_eq!(
             Gemma4Variant::from_str("31b"),
             Some(Gemma4Variant::Dense31B)

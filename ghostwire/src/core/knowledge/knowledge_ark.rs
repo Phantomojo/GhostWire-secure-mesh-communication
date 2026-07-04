@@ -274,10 +274,7 @@ impl KnowledgeArk {
         let body_words = tokenize(&entry.body);
 
         // Store entry
-        self.entries_by_cid
-            .write()
-            .await
-            .insert(cid.clone(), entry);
+        self.entries_by_cid.write().await.insert(cid.clone(), entry);
 
         // Update collection index
         self.collection_index
@@ -442,8 +439,13 @@ impl KnowledgeArk {
             .map_err(|e| anyhow::anyhow!("Deserialize failed: {}", e))?;
 
         // Verify CID integrity
-        let expected_cid =
-            ArkEntry::compute_cid(&entry.id, &entry.title, &entry.body, &entry.author, entry.created_at);
+        let expected_cid = ArkEntry::compute_cid(
+            &entry.id,
+            &entry.title,
+            &entry.body,
+            &entry.author,
+            entry.created_at,
+        );
         if entry.cid != expected_cid {
             anyhow::bail!(
                 "Entry CID mismatch — possible tampering (got {}, expected {})",
@@ -535,13 +537,7 @@ mod tests {
     #[tokio::test]
     async fn cid_integrity_check_on_import() {
         let ark = KnowledgeArk::new("node_xyz");
-        let mut entry = ArkEntry::new(
-            "Test",
-            "Content",
-            EntryKind::Note,
-            "node_abc",
-            "col1",
-        );
+        let mut entry = ArkEntry::new("Test", "Content", EntryKind::Note, "node_abc", "col1");
         entry.access = AccessLevel::Public;
 
         // Tamper with body after CID computed
@@ -557,7 +553,13 @@ mod tests {
         let ark = KnowledgeArk::new("node_abc");
         let col = ark.create_collection("Docs").await;
 
-        let v1 = ArkEntry::new("Doc", "Version 1", EntryKind::Note, "node_abc", col.id.clone());
+        let v1 = ArkEntry::new(
+            "Doc",
+            "Version 1",
+            EntryKind::Note,
+            "node_abc",
+            col.id.clone(),
+        );
         let v1_cid = v1.cid.clone();
         ark.add_entry(v1.clone()).await.unwrap();
 

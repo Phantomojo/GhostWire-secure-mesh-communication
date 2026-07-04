@@ -6,7 +6,7 @@
 //! - L4: PRoPHET fallback for routing
 
 use ghostwire::core::ai::{
-    RoutingClassifier, RoutingFeatures, fallback, FeatureExtractor, NodeMetrics,
+    fallback, FeatureExtractor, NodeMetrics, RoutingClassifier, RoutingFeatures,
 };
 use libp2p::PeerId;
 
@@ -31,15 +31,23 @@ fn test_fallback_routing_scores() {
     );
 
     let poor_score = fallback::calculate_delivery_predictivity(
-        -80,  // Poor signal
-        300,  // High latency
-        0.3,  // High packet loss
-        0.5,  // Medium trust
+        -80, // Poor signal
+        300, // High latency
+        0.3, // High packet loss
+        0.5, // Medium trust
     );
 
     assert!(good_score > poor_score, "Good link should score higher");
-    assert!(good_score > 0.7, "Good link should be > 0.7, got {}", good_score);
-    assert!(poor_score < 0.5, "Poor link should be < 0.5, got {}", poor_score);
+    assert!(
+        good_score > 0.7,
+        "Good link should be > 0.7, got {}",
+        good_score
+    );
+    assert!(
+        poor_score < 0.5,
+        "Poor link should be < 0.5, got {}",
+        poor_score
+    );
 }
 
 /// Test PRoPHET selects best peer correctly
@@ -95,7 +103,10 @@ fn test_column_map_coverage() {
         .values()
         .map(|v| v.len())
         .sum();
-    assert_eq!(total, 2387, "Column map should cover exactly 2,387 features");
+    assert_eq!(
+        total, 2387,
+        "Column map should cover exactly 2,387 features"
+    );
 }
 
 /// Test local system metrics collection works on Linux
@@ -107,7 +118,10 @@ fn test_collect_system_metrics() {
     let metrics = result.unwrap();
     assert!(metrics.idle_rate > 0.0, "Idle rate should be positive");
     assert!(metrics.processes > 0.0, "Process count should be positive");
-    assert!(metrics.ctxt_rate > 0.0, "Context switch rate should be positive");
+    assert!(
+        metrics.ctxt_rate > 0.0,
+        "Context switch rate should be positive"
+    );
 }
 
 /// Test feature vector building with partial node data
@@ -128,5 +142,8 @@ fn test_build_feature_vector_partial() {
 
     let features = extractor.build_feature_vector(&node_map);
     assert_eq!(features.len(), 2387);
-    assert!(features.iter().any(|&v| v != 0.0), "Should have non-zero features");
+    assert!(
+        features.iter().any(|&v| v != 0.0),
+        "Should have non-zero features"
+    );
 }

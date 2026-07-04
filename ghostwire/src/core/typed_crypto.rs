@@ -75,11 +75,17 @@ pub struct TypedPublicKey {
 
 impl TypedPublicKey {
     pub fn new_gw0_ed25519(bytes: Vec<u8>) -> Self {
-        Self { kind: CryptoKind::GW0, key: bytes }
+        Self {
+            kind: CryptoKind::GW0,
+            key: bytes,
+        }
     }
 
     pub fn new_gw0_x25519(bytes: Vec<u8>) -> Self {
-        Self { kind: CryptoKind::GW0, key: bytes }
+        Self {
+            kind: CryptoKind::GW0,
+            key: bytes,
+        }
     }
 
     /// Encode as wire format: [4-byte tag][4-byte len LE][key bytes]
@@ -164,10 +170,16 @@ impl NodeId {
 
     /// DID representation: did:ghost:<kind>:<hex>
     pub fn to_did(&self) -> String {
-        format!("did:ghost:{}:{}", self.kind.as_tag().iter()
-            .map(|b| *b as char)
-            .collect::<String>()
-            .to_lowercase(), self.to_hex())
+        format!(
+            "did:ghost:{}:{}",
+            self.kind
+                .as_tag()
+                .iter()
+                .map(|b| *b as char)
+                .collect::<String>()
+                .to_lowercase(),
+            self.to_hex()
+        )
     }
 
     /// XOR distance to another node (for Kademlia-style routing)
@@ -197,8 +209,14 @@ impl NodeId {
 
 impl fmt::Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", 
-            self.kind.as_tag().iter().map(|b| *b as char).collect::<String>(),
+        write!(
+            f,
+            "{}:{}",
+            self.kind
+                .as_tag()
+                .iter()
+                .map(|b| *b as char)
+                .collect::<String>(),
             &self.to_hex()[..16]
         )
     }
@@ -209,8 +227,8 @@ impl fmt::Display for NodeId {
 pub struct KeyBundle {
     pub kind: CryptoKind,
     pub node_id: NodeId,
-    pub ed25519_pub: TypedPublicKey,  // For signing
-    pub x25519_pub: TypedPublicKey,   // For encryption / DH
+    pub ed25519_pub: TypedPublicKey, // For signing
+    pub x25519_pub: TypedPublicKey,  // For encryption / DH
     /// Optional ML-KEM public key for post-quantum hybrid
     pub mlkem_pub: Option<TypedPublicKey>,
     pub created_at: u64,

@@ -132,12 +132,21 @@ pub async fn run_cli_with_args_and_core(args: Vec<OsString>, core_arc: Arc<Core>
 }
 
 /// Dispatch a CLI command to the appropriate handler
-async fn dispatch_cli_command(command: Commands, core_arc: &Arc<Core>, _config: &crate::config::Config) -> Result<()> {
+async fn dispatch_cli_command(
+    command: Commands,
+    core_arc: &Arc<Core>,
+    _config: &crate::config::Config,
+) -> Result<()> {
     match command {
         Commands::Init { username } => {
             init_identity(core_arc, username).await?;
         }
-        Commands::Start { host, port, mesh_port, web } => {
+        Commands::Start {
+            host,
+            port,
+            mesh_port,
+            web,
+        } => {
             if web {
                 start_web_server(core_arc, host, port, mesh_port).await?;
             } else {
@@ -262,7 +271,6 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -
 pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> Result<()> {
     use crate::core::Message;
 
-
     let mut final_recipient = recipient.to_string();
 
     // Resolve @username if provided
@@ -293,9 +301,15 @@ pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> R
     );
 
     // Use send_direct_message for proper routing (mailbox fallback, peer health)
-    match core.send_direct_message(final_recipient.clone(), &msg).await {
+    match core
+        .send_direct_message(final_recipient.clone(), &msg)
+        .await
+    {
         Ok(_) => {
-            println!("✅ Message sent successfully to {} (id={})", recipient, msg.id);
+            println!(
+                "✅ Message sent successfully to {} (id={})",
+                recipient, msg.id
+            );
         }
         Err(e) => {
             error!("Failed to send message: {}", e);
@@ -461,7 +475,9 @@ async fn decrypt_message(core: &Arc<Core>, encrypted: &str) -> Result<()> {
     let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encrypted)
         .map_err(|e| anyhow::anyhow!("Invalid base64: {}", e))?;
 
-    let decrypted = core.encryption.decrypt(&decoded)
+    let decrypted = core
+        .encryption
+        .decrypt(&decoded)
         .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
     let message =
         String::from_utf8(decrypted).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))?;

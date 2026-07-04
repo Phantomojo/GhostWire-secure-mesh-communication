@@ -85,28 +85,28 @@ pub struct FeatureFlags {
     pub cli: bool,
     pub api: bool,
     // AI/ML Features
-    pub gemma_2b: bool,      // Gemma 4 E2B (2.3B params, edge-optimized)
-    pub gemma_4b: bool,      // Gemma 4 E4B (4B params, balanced)
-    pub gemma_26b: bool,     // Gemma 4 MoE (26B total, 4B active)
-    pub gemma_31b: bool,     // Gemma 4 Dense (31B, max quality)
-    pub ai_routing: bool,    // Enable AI-powered routing decisions
-    pub ai_threat_detection: bool,  // Enable AI threat analysis
+    pub gemma_2b: bool,            // Gemma 4 E2B (2.3B params, edge-optimized)
+    pub gemma_4b: bool,            // Gemma 4 E4B (4B params, balanced)
+    pub gemma_26b: bool,           // Gemma 4 MoE (26B total, 4B active)
+    pub gemma_31b: bool,           // Gemma 4 Dense (31B, max quality)
+    pub ai_routing: bool,          // Enable AI-powered routing decisions
+    pub ai_threat_detection: bool, // Enable AI threat analysis
     // Gemma 4 Configuration
-    pub gemma_version: String,          // "3", "3n", or "4" (default: "4")
-    pub inference_backend: String,      // "ollama", "litert", or "local" (default: "ollama")
-    pub gemma_model_variant: String,    // "e2b", "e4b", "26b", "31b" (auto-detected if empty)
-    pub ollama_url: String,             // Ollama server URL (default: "http://localhost:11434")
-    pub litert_model_path: String,      // Path to LiteRT-LM .tflite model file
-    pub litert_num_threads: usize,      // CPU threads for LiteRT-LM inference
-    pub litert_use_gpu: bool,           // Use GPU delegate for LiteRT-LM
+    pub gemma_version: String,       // "3", "3n", or "4" (default: "4")
+    pub inference_backend: String,   // "ollama", "litert", or "local" (default: "ollama")
+    pub gemma_model_variant: String, // "e2b", "e4b", "26b", "31b" (auto-detected if empty)
+    pub ollama_url: String,          // Ollama server URL (default: "http://localhost:11434")
+    pub litert_model_path: String,   // Path to LiteRT-LM .tflite model file
+    pub litert_num_threads: usize,   // CPU threads for LiteRT-LM inference
+    pub litert_use_gpu: bool,        // Use GPU delegate for LiteRT-LM
     // FunctionGemma Configuration
-    pub function_gemma_enabled: bool,   // Enable FunctionGemma tool calling
-    pub function_gemma_model: String,   // FunctionGemma model tag (default: "functiongemma:270m")
-    pub function_gemma_url: String,     // FunctionGemma backend URL
+    pub function_gemma_enabled: bool, // Enable FunctionGemma tool calling
+    pub function_gemma_model: String, // FunctionGemma model tag (default: "functiongemma:270m")
+    pub function_gemma_url: String,   // FunctionGemma backend URL
     // Edge Device Detection
-    pub auto_detect_device: bool,       // Auto-detect device class and select model
-    pub device_class: String,           // "phone", "tablet", "raspberry_pi", "laptop", "server"
-    pub available_ram_mb: u64,          // Available RAM in MB (0 = auto-detect)
+    pub auto_detect_device: bool, // Auto-detect device class and select model
+    pub device_class: String,     // "phone", "tablet", "raspberry_pi", "laptop", "server"
+    pub available_ram_mb: u64,    // Available RAM in MB (0 = auto-detect)
 }
 
 impl Default for Config {
@@ -136,8 +136,8 @@ impl Default for Config {
                 max_peers: 50,
                 connection_timeout_secs: 30,
                 stealth_handshake_secret: None,
-                obfs4_enabled: true,  // Always-on obfuscation by default
-                obfs4_secret_key: None,  // Generated randomly if not provided
+                obfs4_enabled: true,    // Always-on obfuscation by default
+                obfs4_secret_key: None, // Generated randomly if not provided
             },
             encryption: EncryptionConfig {
                 algorithm: "AES-256-GCM".to_string(),
@@ -172,7 +172,7 @@ impl Default for Config {
                 // Edge Device Detection
                 auto_detect_device: true,
                 device_class: String::new(), // Auto-detect
-                available_ram_mb: 0, // Auto-detect
+                available_ram_mb: 0,         // Auto-detect
             },
         }
     }

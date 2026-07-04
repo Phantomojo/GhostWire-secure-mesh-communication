@@ -32,11 +32,14 @@ struct EncryptedWsMessage {
 }
 
 /// Encrypt data using XChaCha20-Poly1305
-fn encrypt_ws_message(plaintext: &[u8], session_key: &[u8; 32]) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
-    use chacha20poly1305::aead::Aead;
-    use rand::RngCore;
+fn encrypt_ws_message(
+    plaintext: &[u8],
+    session_key: &[u8; 32],
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     use base64::Engine;
+    use chacha20poly1305::aead::Aead;
+    use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
+    use rand::RngCore;
 
     // Generate random 24-byte nonce
     let mut nonce_bytes = [0u8; 24];
@@ -46,7 +49,8 @@ fn encrypt_ws_message(plaintext: &[u8], session_key: &[u8; 32]) -> Result<String
     let key = Key::from_slice(session_key);
     let cipher = XChaCha20Poly1305::new(key);
 
-    let ciphertext = cipher.encrypt(&nonce, plaintext)
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext)
         .map_err(|e| format!("WS encryption failed: {}", e))?;
 
     // Encode as JSON
@@ -59,10 +63,13 @@ fn encrypt_ws_message(plaintext: &[u8], session_key: &[u8; 32]) -> Result<String
 }
 
 /// Decrypt data using XChaCha20-Poly1305
-fn decrypt_ws_message(encrypted_json: &str, session_key: &[u8; 32]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
-    use chacha20poly1305::aead::Aead;
+fn decrypt_ws_message(
+    encrypted_json: &str,
+    session_key: &[u8; 32],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     use base64::Engine;
+    use chacha20poly1305::aead::Aead;
+    use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
 
     let enc_msg: EncryptedWsMessage = serde_json::from_str(encrypted_json)?;
 
@@ -73,7 +80,8 @@ fn decrypt_ws_message(encrypted_json: &str, session_key: &[u8; 32]) -> Result<Ve
     let cipher = XChaCha20Poly1305::new(key);
     let nonce = XNonce::from_slice(&nonce_bytes);
 
-    cipher.decrypt(nonce, ciphertext.as_ref())
+    cipher
+        .decrypt(nonce, ciphertext.as_ref())
         .map_err(|e| format!("WS decryption failed: {}", e).into())
 }
 
@@ -98,7 +106,10 @@ pub enum WsEvent {
     /// A CoreEvent relayed to the frontend
     CoreEvent { payload: serde_json::Value },
     /// Response to GetPeers
-    PeerList { peers: Vec<serde_json::Value>, count: usize },
+    PeerList {
+        peers: Vec<serde_json::Value>,
+        count: usize,
+    },
     /// Pong response
     Pong { timestamp: u64 },
     /// Connection established confirmation
@@ -152,7 +163,9 @@ async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
     // Derive 32-byte session key via HKDF
     let salt = Salt::new(HKDF_SHA256, &salt_bytes);
     let prk = salt.extract(&ikm);
-    let okm: ring::hkdf::Okm<ring::hkdf::Algorithm> = prk.expand(&[b"ghostwire-ws-session-v2"], HKDF_SHA256).unwrap();
+    let okm: ring::hkdf::Okm<ring::hkdf::Algorithm> = prk
+        .expand(&[b"ghostwire-ws-session-v2"], HKDF_SHA256)
+        .unwrap();
     let mut okm_bytes = [0u8; 32];
     okm.fill(&mut okm_bytes).unwrap();
     okm_bytes
@@ -242,17 +255,26 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    tracing::debug!("WebSocket session ended for node {}", &node_id[..8.min(node_id.len())]);
+    tracing::debug!(
+        "WebSocket session ended for node {}",
+        &node_id[..8.min(node_id.len())]
+    );
 }
 
-async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str, _session_key: &[u8; 32]) {
+async fn handle_ws_command(
+    socket: &mut WebSocket,
+    state: &Arc<AppState>,
+    text: &str,
+    _session_key: &[u8; 32],
+) {
     let cmd: WsCommand = match serde_json::from_str(text) {
         Ok(c) => c,
         Err(_) => {
             let err = serde_json::to_string(&WsEvent::Error {
                 code: "PARSE_ERROR".into(),
                 message: "Invalid command JSON".into(),
-            }).unwrap_or_default();
+            })
+            .unwrap_or_default();
             let _ = socket.send(Message::Text(err)).await;
             return;
         }
@@ -260,8 +282,10 @@ async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: 
 
     match cmd {
         WsCommand::Ping => {
-            let pong = serde_json::to_string(&WsEvent::Pong { timestamp: now_secs() })
-                .unwrap_or_default();
+            let pong = serde_json::to_string(&WsEvent::Pong {
+                timestamp: now_secs(),
+            })
+            .unwrap_or_default();
             let _ = socket.send(Message::Text(pong)).await;
         }
 
@@ -270,7 +294,8 @@ async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: 
             let resp = serde_json::to_string(&WsEvent::PeerList {
                 peers: vec![],
                 count,
-            }).unwrap_or_default();
+            })
+            .unwrap_or_default();
             let _ = socket.send(Message::Text(resp)).await;
         }
 

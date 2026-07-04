@@ -1,12 +1,12 @@
+use parking_lot::RwLock;
+use rand::rngs::OsRng;
+use rand::{Rng, RngCore};
 use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tracing::debug;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
-use rand::rngs::OsRng;
-use rand::{Rng, RngCore};
 
 const MAX_SKIP: u32 = 200;
 const KEY_LEN: usize = 32;
@@ -29,7 +29,10 @@ fn kdf_chain(chain_key: &[u8; KEY_LEN], input: &[u8]) -> KdfOutput {
     let mut message_key = [0u8; KEY_LEN];
     message_key.copy_from_slice(tag_msg.as_ref());
 
-    KdfOutput { chain_key: next_chain_key, message_key }
+    KdfOutput {
+        chain_key: next_chain_key,
+        message_key,
+    }
 }
 
 fn kdf_rk(root_key: &[u8; KEY_LEN], dh_output: &[u8]) -> ([u8; KEY_LEN], [u8; KEY_LEN]) {
@@ -153,7 +156,10 @@ impl RatchetState {
 
         let chain_input = self.sending_message_number.to_le_bytes();
         let output = kdf_chain(
-            self.sending_chain_key.as_slice().try_into().map_err(|_| "Invalid chain key len")?,
+            self.sending_chain_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| "Invalid chain key len")?,
             &chain_input,
         );
 
@@ -180,7 +186,11 @@ impl RatchetState {
         self.sending_message_number += 1;
 
         debug!(msg_num = header.message_number, "Encrypted message");
-        Ok(RatchetMessage { header, ciphertext, nonce: nonce.to_vec() })
+        Ok(RatchetMessage {
+            header,
+            ciphertext,
+            nonce: nonce.to_vec(),
+        })
     }
 
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>, String> {
@@ -192,7 +202,10 @@ impl RatchetState {
 
         let chain_input = msg.header.message_number.to_le_bytes();
         let output = kdf_chain(
-            self.receiving_chain_key.as_slice().try_into().map_err(|_| "Invalid receiving chain key")?,
+            self.receiving_chain_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| "Invalid receiving chain key")?,
             &chain_input,
         );
 
@@ -278,7 +291,8 @@ impl RatchetState {
                 ));
             }
 
-            let mut chain_key: [u8; KEY_LEN] = self.receiving_chain_key
+            let mut chain_key: [u8; KEY_LEN] = self
+                .receiving_chain_key
                 .as_slice()
                 .try_into()
                 .map_err(|_| "Invalid chain key")?;
@@ -300,9 +314,10 @@ impl RatchetState {
         }
 
         if msg_num < self.receiving_message_number {
-            let already_skipped = self.skipped_message_keys.iter().any(|sk|
-                sk.message_number == msg_num && sk.dh_public == msg.header.dh_public
-            );
+            let already_skipped = self
+                .skipped_message_keys
+                .iter()
+                .any(|sk| sk.message_number == msg_num && sk.dh_public == msg.header.dh_public);
             if already_skipped {
                 return Err("Duplicate message (already decrypted)".into());
             }
@@ -375,7 +390,9 @@ impl RatchetSessionManager {
 
     pub fn export_state(&self, peer_id: &str) -> Option<String> {
         let sessions = self.sessions.read();
-        sessions.get(peer_id).and_then(|s| serde_json::to_string(s).ok())
+        sessions
+            .get(peer_id)
+            .and_then(|s| serde_json::to_string(s).ok())
     }
 
     pub fn import_state(&self, peer_id: &str, state_json: &str) -> Result<(), String> {

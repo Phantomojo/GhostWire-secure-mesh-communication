@@ -98,8 +98,7 @@ pub async fn apply_connect_jitter(config: &PresenceConfig) {
         return;
     }
 
-    let jitter_ms = rand::thread_rng()
-        .gen_range(0..=config.connect_jitter_max_secs * 1000);
+    let jitter_ms = rand::thread_rng().gen_range(0..=config.connect_jitter_max_secs * 1000);
 
     if jitter_ms > 0 {
         tracing::debug!("Presence jitter: waiting {}ms before announcing", jitter_ms);
@@ -160,12 +159,16 @@ pub fn generate_dummy_activity() -> DummyActivity {
         1 => {
             let mut cid = [0u8; 32];
             rng.fill(&mut cid);
-            DummyActivity::FakeHave { cid_hex: hex::encode(cid) }
+            DummyActivity::FakeHave {
+                cid_hex: hex::encode(cid),
+            }
         }
         _ => {
             let mut cid = [0u8; 32];
             rng.fill(&mut cid);
-            DummyActivity::FakeWant { cid_hex: hex::encode(cid) }
+            DummyActivity::FakeWant {
+                cid_hex: hex::encode(cid),
+            }
         }
     }
 }
@@ -233,14 +236,10 @@ impl Default for KeepaliveConfig {
 }
 
 /// Spawn a keepalive loop.
-pub fn start_keepalive_loop(
-    config: KeepaliveConfig,
-    tx: tokio::sync::mpsc::Sender<()>,
-) {
+pub fn start_keepalive_loop(config: KeepaliveConfig, tx: tokio::sync::mpsc::Sender<()>) {
     tokio::spawn(async move {
         loop {
-            let jitter_ms = rand::thread_rng()
-                .gen_range(0..=config.jitter_secs * 1000);
+            let jitter_ms = rand::thread_rng().gen_range(0..=config.jitter_secs * 1000);
             let interval_ms = config.interval_secs * 1000 + jitter_ms;
             sleep(Duration::from_millis(interval_ms)).await;
             let _ = tx.try_send(());

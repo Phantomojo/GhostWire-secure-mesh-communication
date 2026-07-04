@@ -130,7 +130,10 @@ impl PeerHealthTracker {
         let mut map = self.peers.write().await;
         if let Some(health) = map.get_mut(peer_id) {
             health.record_rtt(rtt_ms);
-            debug!("Peer {} pong: RTT={:.1}ms, avg={:.1}ms", peer_id, rtt_ms, health.avg_rtt_ms);
+            debug!(
+                "Peer {} pong: RTT={:.1}ms, avg={:.1}ms",
+                peer_id, rtt_ms, health.avg_rtt_ms
+            );
         }
     }
 
@@ -205,7 +208,8 @@ impl PendingPings {
     /// Clean up stale pings older than timeout_ms
     pub fn cleanup_stale(&mut self, timeout_ms: u32) {
         let now_ms = now_ms_u32();
-        self.pings.retain(|ts, _| now_ms.saturating_sub(*ts) < timeout_ms);
+        self.pings
+            .retain(|ts, _| now_ms.saturating_sub(*ts) < timeout_ms);
     }
 }
 

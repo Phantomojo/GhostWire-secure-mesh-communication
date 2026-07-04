@@ -19,17 +19,16 @@
 //!      requires ≥ 3 hops; we enforce ≥ 2 for testability, with a
 //!      prominent warning for production use).
 
-use anyhow::Result;
 use crate::genesis_constants::{
-    SPHINX_KDF_DOMAIN, SPHINX_MAC_DOMAIN, SPHINX_BLIND_DOMAIN,
-    SPHINX_SHARED_DOMAIN, genesis_derive,
+    genesis_derive, SPHINX_BLIND_DOMAIN, SPHINX_KDF_DOMAIN, SPHINX_MAC_DOMAIN, SPHINX_SHARED_DOMAIN,
 };
+use anyhow::Result;
+use chacha20::cipher::{KeyIvInit, StreamCipher};
+use chacha20::ChaCha20;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use chacha20::ChaCha20;
-use chacha20::cipher::{KeyIvInit, StreamCipher};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -55,7 +54,9 @@ pub enum SphinxProcessResult {
         next_hop: String,
         packet: SphinxPacket,
     },
-    Deliver { payload: Vec<u8> },
+    Deliver {
+        payload: Vec<u8>,
+    },
     Invalid,
 }
 
@@ -149,7 +150,8 @@ pub fn create_sphinx_packet(
         anyhow::bail!(
             "Route length {} is below minimum {} hops required for anonymity. \
              For production: use ≥ 3 hops.",
-            n, SPHINX_MIN_HOPS
+            n,
+            SPHINX_MIN_HOPS
         );
     }
     if n > SPHINX_MAX_HOPS {
@@ -161,8 +163,11 @@ pub fn create_sphinx_packet(
     // Generate ephemeral X25519 keypair for α₀
     let ephemeral_bytes = {
         let mut b = [0u8; 32];
-        rng.fill(&mut b).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        b[0] &= 248; b[31] &= 127; b[31] |= 64; // clamp
+        rng.fill(&mut b)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        b[0] &= 248;
+        b[31] &= 127;
+        b[31] |= 64; // clamp
         b
     };
     let ephemeral_secret = x25519_dalek::StaticSecret::from(ephemeral_bytes);
@@ -269,7 +274,12 @@ pub fn create_sphinx_packet(
         cipher.apply_keystream(&mut current_payload);
     }
 
-    let gamma = compute_mac(&shared_secrets[0], &alphas[0], &current_header, &current_payload);
+    let gamma = compute_mac(
+        &shared_secrets[0],
+        &alphas[0],
+        &current_header,
+        &current_payload,
+    );
 
     Ok(SphinxPacket {
         alpha: alphas[0],
@@ -321,7 +331,11 @@ pub fn process_sphinx_packet(
     cipher.apply_keystream(&mut header_pt);
 
     // Debug output
-    eprintln!("PROCESS hop {}: header_pt[0:8] = {:?}", our_peer_id, &header_pt[..8]);
+    eprintln!(
+        "PROCESS hop {}: header_pt[0:8] = {:?}",
+        our_peer_id,
+        &header_pt[..8]
+    );
 
     if header_pt.starts_with(b"DELIVER\x00") {
         // Final hop — decrypt the payload using ChaCha20 stream cipher
@@ -340,7 +354,12 @@ pub fn process_sphinx_packet(
         }
     } else if header_pt.len() >= 2 {
         let id_len = header_pt[0] as usize;
-        eprintln!("PROCESS hop {}: id_len={}, header_pt.len()={}", our_peer_id, id_len, header_pt.len());
+        eprintln!(
+            "PROCESS hop {}: id_len={}, header_pt.len()={}",
+            our_peer_id,
+            id_len,
+            header_pt.len()
+        );
         if header_pt.len() < 1 + id_len {
             return SphinxProcessResult::Invalid;
         }
@@ -348,7 +367,7 @@ pub fn process_sphinx_packet(
             Ok(s) => {
                 eprintln!("PROCESS hop {}: next_hop={}", our_peer_id, s);
                 s
-            },
+            }
             Err(_) => return SphinxProcessResult::Invalid,
         };
 
@@ -371,7 +390,10 @@ pub fn process_sphinx_packet(
 
         let new_gamma = compute_mac(&derived_secret, &new_alpha, &new_beta, &new_delta);
 
-        eprintln!("PROCESS hop {}: returning Forward with next_hop={}", our_peer_id, next_hop);
+        eprintln!(
+            "PROCESS hop {}: returning Forward with next_hop={}",
+            our_peer_id, next_hop
+        );
         SphinxProcessResult::Forward {
             next_hop,
             packet: SphinxPacket {
@@ -399,7 +421,8 @@ pub fn create_surb(
 
     // Generate a single-use reply decryption key (sender uses this to decrypt reply)
     let mut reply_key = [0u8; 32];
-    rng.fill(&mut reply_key).map_err(|_| anyhow::anyhow!("RNG failure creating SURB"))?;
+    rng.fill(&mut reply_key)
+        .map_err(|_| anyhow::anyhow!("RNG failure creating SURB"))?;
 
     // Create a dummy packet on the reply route
     let dummy_payload = vec![0u8; SPHINX_PAYLOAD_SIZE];
@@ -408,7 +431,11 @@ pub fn create_surb(
     let header = bincode::serialize(&packet)
         .map_err(|e| anyhow::anyhow!("SURB serialization failed: {}", e))?;
 
-    Ok(Surb { header, first_hop: reply_route_ids[0].clone(), reply_key })
+    Ok(Surb {
+        header,
+        first_hop: reply_route_ids[0].clone(),
+        reply_key,
+    })
 }
 
 /// Recipient uses the SURB to send an anonymous reply.
@@ -421,7 +448,8 @@ pub fn use_surb(surb: &Surb, reply_payload: &[u8], rng: &SystemRandom) -> Result
     // Encrypt reply payload to reply_key (FIXED — was missing entirely)
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&surb.reply_key));
     let mut nonce_bytes = [0u8; 12];
-    rng.fill(&mut nonce_bytes).map_err(|_| anyhow::anyhow!("RNG failure in use_surb"))?;
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| anyhow::anyhow!("RNG failure in use_surb"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let padded = pad_to_size(reply_payload, SPHINX_PAYLOAD_SIZE - 12 - 16)?;
@@ -461,7 +489,11 @@ fn compute_mac(shared_secret: &[u8], alpha: &[u8; 32], beta: &[u8], delta: &[u8]
 
 fn pad_to_size(data: &[u8], target: usize) -> Result<Vec<u8>> {
     if data.len() > target.saturating_sub(3) {
-        anyhow::bail!("Payload {} bytes exceeds target {} (need 3 bytes for padding marker)", data.len(), target);
+        anyhow::bail!(
+            "Payload {} bytes exceeds target {} (need 3 bytes for padding marker)",
+            data.len(),
+            target
+        );
     }
     let mut padded = data.to_vec();
     padded.push(0x01);
@@ -480,7 +512,11 @@ fn unpad_from_size(padded: &[u8]) -> Result<Vec<u8>> {
     let hi = padded[padded.len() - 1] as usize;
     let orig_len = lo | (hi << 8);
     if orig_len > padded.len().saturating_sub(3) {
-        anyhow::bail!("Corrupt padding: claimed len {} > buffer {}", orig_len, padded.len());
+        anyhow::bail!(
+            "Corrupt padding: claimed len {} > buffer {}",
+            orig_len,
+            padded.len()
+        );
     }
     Ok(padded[..orig_len].to_vec())
 }
@@ -512,12 +548,8 @@ mod tests {
         let payload = b"Ubuntu \xe2\x80\x94 I am because we are";
 
         // 2 hops (minimum for anonymity)
-        let packet = create_sphinx_packet(
-            &[pk1, pk2],
-            &[id1.clone(), id2.clone()],
-            payload,
-            &rng,
-        ).unwrap();
+        let packet =
+            create_sphinx_packet(&[pk1, pk2], &[id1.clone(), id2.clone()], payload, &rng).unwrap();
 
         // Process at hop 1
         let forwarded = match process_sphinx_packet(&packet, &s1, &id1) {
@@ -551,9 +583,8 @@ mod tests {
         let (s1, pk1, id1) = make_hop();
         let (_s2, pk2, id2) = make_hop();
         let rng = SystemRandom::new();
-        let mut packet = create_sphinx_packet(
-            &[pk1, pk2], &[id1.clone(), id2], b"secret", &rng,
-        ).unwrap();
+        let mut packet =
+            create_sphinx_packet(&[pk1, pk2], &[id1.clone(), id2], b"secret", &rng).unwrap();
         packet.delta[50] ^= 0xFF; // tamper
         match process_sphinx_packet(&packet, &s1, &id1) {
             SphinxProcessResult::Invalid => {} // correct
@@ -577,7 +608,10 @@ mod tests {
         let _pub_key = x25519_dalek::PublicKey::from(new_alpha);
 
         // Also verify it differs from the input (not a no-op)
-        assert_ne!(new_alpha, alpha, "Re-randomised alpha must differ from input");
+        assert_ne!(
+            new_alpha, alpha,
+            "Re-randomised alpha must differ from input"
+        );
     }
 
     #[test]

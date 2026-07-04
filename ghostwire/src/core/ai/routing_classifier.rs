@@ -6,19 +6,19 @@
 //   Layer 4: PRoPHET formula — always-on fallback for routing
 
 use crate::core::ai::OnnxRouter;
+use anyhow::{Context, Result};
 use libp2p::PeerId;
-use anyhow::{Result, Context};
 
 /// Features for routing decision
 #[derive(Clone, Debug, Default)]
 pub struct RoutingFeatures {
-    pub rssi: i16,              // Signal strength (-100 to 0 dBm)
-    pub latency_ms: u64,        // Round-trip latency
-    pub packet_loss: f32,       // Packet loss rate (0.0-1.0)
-    pub trust_score: f32,       // Peer trust score (0.0-1.0)
-    pub hop_count: u8,          // Number of hops to destination
-    pub battery_level: f32,     // Battery level (0.0-1.0, 1.0 for powered nodes)
-    pub time_of_day: u8,        // Hour of day (0-23)
+    pub rssi: i16,          // Signal strength (-100 to 0 dBm)
+    pub latency_ms: u64,    // Round-trip latency
+    pub packet_loss: f32,   // Packet loss rate (0.0-1.0)
+    pub trust_score: f32,   // Peer trust score (0.0-1.0)
+    pub hop_count: u8,      // Number of hops to destination
+    pub battery_level: f32, // Battery level (0.0-1.0, 1.0 for powered nodes)
+    pub time_of_day: u8,    // Hour of day (0-23)
 }
 
 /// Routing decision from ML model
@@ -40,8 +40,7 @@ pub struct RoutingClassifier {
 impl RoutingClassifier {
     /// Create a new routing classifier with the LightGBM ONNX model
     pub fn new(model_path: &str) -> Result<Self> {
-        let router = OnnxRouter::new(model_path)
-            .context("Failed to load ONNX routing model")?;
+        let router = OnnxRouter::new(model_path).context("Failed to load ONNX routing model")?;
 
         Ok(Self { router })
     }
@@ -72,9 +71,8 @@ impl RoutingClassifier {
         }
 
         // Sort by confidence descending
-        scored_candidates.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored_candidates
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Select best
         let (selected_peer, confidence) = scored_candidates
@@ -120,18 +118,14 @@ pub mod fallback {
         let loss_score = 1.0 - packet_loss as f64;
 
         // Weighted combination
-        let base_score = rssi_score * 0.3
-            + latency_score * 0.3
-            + loss_score * 0.2
-            + trust_score as f64 * 0.2;
+        let base_score =
+            rssi_score * 0.3 + latency_score * 0.3 + loss_score * 0.2 + trust_score as f64 * 0.2;
 
         base_score
     }
 
     /// Select best peer using formula-based approach
-    pub fn select_next_hop_formula(
-        candidates: Vec<(PeerId, RoutingFeatures)>,
-    ) -> PeerId {
+    pub fn select_next_hop_formula(candidates: Vec<(PeerId, RoutingFeatures)>) -> PeerId {
         let first_candidate = candidates.first().map(|(p, _)| p.clone());
         candidates
             .into_iter()
@@ -171,7 +165,7 @@ mod tests {
             (
                 peer1.clone(),
                 RoutingFeatures {
-                    rssi: -30,  // Excellent signal
+                    rssi: -30, // Excellent signal
                     latency_ms: 50,
                     packet_loss: 0.01,
                     trust_score: 0.9,
@@ -183,7 +177,7 @@ mod tests {
             (
                 peer2.clone(),
                 RoutingFeatures {
-                    rssi: -80,  // Poor signal
+                    rssi: -80, // Poor signal
                     latency_ms: 300,
                     packet_loss: 0.3,
                     trust_score: 0.5,
@@ -207,8 +201,21 @@ mod tests {
         // rssi=0.2, latency=0.7, loss=0.7 → score ≈ 0.51
         let score_poor = fallback::calculate_delivery_predictivity(-80, 300, 0.3, 0.5);
 
-        assert!(score_good > score_poor, "Good link should score higher (good={}, poor={})", score_good, score_poor);
-        assert!(score_good > 0.8, "Good link should be > 0.8, got {}", score_good);
-        assert!(score_poor < 0.6, "Poor link should be < 0.6, got {}", score_poor);
+        assert!(
+            score_good > score_poor,
+            "Good link should score higher (good={}, poor={})",
+            score_good,
+            score_poor
+        );
+        assert!(
+            score_good > 0.8,
+            "Good link should be > 0.8, got {}",
+            score_good
+        );
+        assert!(
+            score_poor < 0.6,
+            "Poor link should be < 0.6, got {}",
+            score_poor
+        );
     }
 }

@@ -14,7 +14,7 @@
 //! Veilid flaw we fix: they still leak packet sizes. We integrate
 //! `traffic_armor.rs` to pad all routed payloads.
 
-use crate::genesis_constants::{ONION_HOP_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, ONION_HOP_DOMAIN};
 
 use anyhow::Result;
 use chacha20poly1305::{

@@ -52,7 +52,9 @@ pub fn lock_memory(_ptr: *const u8, _len: usize) -> Result<()> {
 #[cfg(unix)]
 pub fn unlock_memory(ptr: *const u8, len: usize) {
     use std::os::raw::c_void;
-    unsafe { libc::munlock(ptr as *const c_void, len); }
+    unsafe {
+        libc::munlock(ptr as *const c_void, len);
+    }
 }
 
 #[cfg(not(unix))]
@@ -76,15 +78,23 @@ impl LockedBuffer {
         buf
     }
 
-    pub fn as_bytes(&self) -> &[u8] { &self.data }
-    pub fn as_mut_bytes(&mut self) -> &mut [u8] { &mut self.data }
-    pub fn len(&self) -> usize { self.data.len() }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+    pub fn as_mut_bytes(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
 }
 
 impl Drop for LockedBuffer {
     fn drop(&mut self) {
         // Zeroize before unlock
-        for byte in self.data.iter_mut() { *byte = 0; }
+        for byte in self.data.iter_mut() {
+            *byte = 0;
+        }
         unlock_memory(self.data.as_ptr(), self.data.len());
     }
 }
@@ -124,7 +134,8 @@ pub async fn verify_binary_integrity() -> Result<bool> {
     let exe_path = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("Cannot determine executable path: {}", e))?;
 
-    let binary = tokio::fs::read(&exe_path).await
+    let binary = tokio::fs::read(&exe_path)
+        .await
         .map_err(|e| anyhow::anyhow!("Cannot read binary for integrity check: {}", e))?;
 
     let actual_hash = *blake3::hash(&binary).as_bytes();

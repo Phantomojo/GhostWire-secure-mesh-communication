@@ -124,7 +124,8 @@ impl PeerController {
                     "INVALID_NODE_ID",
                     "node_id is required",
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
 
         tracing::info!(target: "social", "Connection request sent to {}", &req.node_id[..8.min(req.node_id.len())]);
@@ -134,7 +135,8 @@ impl PeerController {
             "status": "request_sent",
             "to": req.node_id,
             "note": "Wire social_graph.send_request() here"
-        }))).into_response()
+        })))
+        .into_response()
     }
 
     /// GET /api/v2/peers/requests — Pending inbound connection requests
@@ -180,14 +182,16 @@ impl PeerController {
             Json(ApiV2Response::success(serde_json::json!({
                 "status": "accepted",
                 "request_id": req.request_id
-            }))).into_response()
+            })))
+            .into_response()
         } else {
             tracing::info!(target: "social", "Denying connection request {}", req.request_id);
             // Wire: core.social_graph.deny_request(&req.request_id).await
             Json(ApiV2Response::success(serde_json::json!({
                 "status": "denied",
                 "request_id": req.request_id
-            }))).into_response()
+            })))
+            .into_response()
         }
     }
 
@@ -198,7 +202,9 @@ impl PeerController {
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Removing connection to {}", &node_id[..8.min(node_id.len())]);
         // Wire: core.social_graph.remove(&node_id).await
-        Json(ApiV2Response::success(serde_json::json!({ "status": "removed" })))
+        Json(ApiV2Response::success(
+            serde_json::json!({ "status": "removed" }),
+        ))
     }
 
     /// POST /api/v2/peers/:node_id/block — Block a node
@@ -208,7 +214,9 @@ impl PeerController {
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Blocking node {}", &node_id[..8.min(node_id.len())]);
         // Wire: core.social_graph.block(&node_id).await
-        Json(ApiV2Response::success(serde_json::json!({ "status": "blocked" })))
+        Json(ApiV2Response::success(
+            serde_json::json!({ "status": "blocked" }),
+        ))
     }
 
     /// GET /api/v2/peers/:node_id/profile — Get a peer's public profile

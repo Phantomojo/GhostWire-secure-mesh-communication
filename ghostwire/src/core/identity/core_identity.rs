@@ -1,9 +1,9 @@
 use crate::core::identity::encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
 use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
+use parking_lot::RwLock;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
-use parking_lot::RwLock;
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
@@ -100,7 +100,10 @@ impl Identity {
                         if let Ok(password) = Self::load_keyfile_password(&storage_path) {
                             match identity.unlock(&password) {
                                 Ok(()) => {
-                                    tracing::info!("Identity {} loaded (auto-unlocked via keyfile)", &identity.id[..8]);
+                                    tracing::info!(
+                                        "Identity {} loaded (auto-unlocked via keyfile)",
+                                        &identity.id[..8]
+                                    );
                                 }
                                 Err(e) => {
                                     tracing::debug!(
@@ -119,10 +122,7 @@ impl Identity {
                     return Ok(identity);
                 }
                 Err(e) => {
-                    tracing::debug!(
-                        "Failed to load identity ({}), creating new one.",
-                        e
-                    );
+                    tracing::debug!("Failed to load identity ({}), creating new one.", e);
                 }
             }
         }
@@ -141,10 +141,15 @@ impl Identity {
             perms.set_mode(0o600);
             std::fs::set_permissions(&keyfile_path, perms)?;
         }
-        tracing::info!("New identity created. See ~/.ghostwire/.initial-password for your password.");
+        tracing::info!(
+            "New identity created. See ~/.ghostwire/.initial-password for your password."
+        );
 
         if let Err(e) = Self::save_keyfile_password(&storage_path, &initial_password) {
-            tracing::warn!("Failed to save keyfile (auto-unlock won't work on restart): {}", e);
+            tracing::warn!(
+                "Failed to save keyfile (auto-unlock won't work on restart): {}",
+                e
+            );
         }
 
         Ok(identity)
@@ -189,7 +194,8 @@ impl Identity {
         use ring::rand::{SecureRandom, SystemRandom};
         let rng = SystemRandom::new();
         let mut bytes = [0u8; 16]; // 128 bits
-        rng.fill(&mut bytes).map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+        rng.fill(&mut bytes)
+            .map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
         Ok(hex::encode(bytes))
     }
 
@@ -201,8 +207,8 @@ impl Identity {
         identity_path: &std::path::Path,
         password: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
         use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
         use ring::rand::{SecureRandom, SystemRandom};
 
         let keyfile_path = identity_path.with_file_name(".identity.key");
@@ -212,19 +218,25 @@ impl Identity {
             .ok()
             .and_then(|h| h.into_string().ok())
             .unwrap_or_else(|| "ghostwire-default".to_string());
-        let seed = format!("ghostwire-keyfile-v2-{}-{}", machine_id, identity_path.display());
+        let seed = format!(
+            "ghostwire-keyfile-v2-{}-{}",
+            machine_id,
+            identity_path.display()
+        );
         let derived = ring::digest::digest(&ring::digest::SHA256, seed.as_bytes());
 
         // Generate random nonce
         let rng = SystemRandom::new();
         let mut nonce_bytes = [0u8; 24];
-        rng.fill(&mut nonce_bytes).map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+        rng.fill(&mut nonce_bytes)
+            .map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
 
         // Encrypt password
         let key = Key::from_slice(derived.as_ref());
         let cipher = XChaCha20Poly1305::new(key);
         let nonce = XNonce::from_slice(&nonce_bytes);
-        let ciphertext = cipher.encrypt(nonce, password.as_bytes())
+        let ciphertext = cipher
+            .encrypt(nonce, password.as_bytes())
             .map_err(|e| anyhow::anyhow!("Keyfile encryption failed: {}", e))?;
 
         // Store: nonce (24 bytes) + ciphertext
@@ -254,8 +266,8 @@ impl Identity {
     fn load_keyfile_password(
         identity_path: &std::path::Path,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key, KeyInit};
         use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
 
         let keyfile_path = identity_path.with_file_name(".identity.key");
 
@@ -272,21 +284,27 @@ impl Identity {
                 .ok()
                 .and_then(|h| h.into_string().ok())
                 .unwrap_or_else(|| "ghostwire-default".to_string());
-            let seed = format!("ghostwire-keyfile-v2-{}-{}", machine_id, identity_path.display());
+            let seed = format!(
+                "ghostwire-keyfile-v2-{}-{}",
+                machine_id,
+                identity_path.display()
+            );
             let derived = ring::digest::digest(&ring::digest::SHA256, seed.as_bytes());
 
-            let nonce_bytes: [u8; 24] = data[..24].try_into()
+            let nonce_bytes: [u8; 24] = data[..24]
+                .try_into()
                 .map_err(|_| "Invalid keyfile format: nonce too short")?;
             let ciphertext = &data[24..];
 
             let key = Key::from_slice(derived.as_ref());
             let cipher = XChaCha20Poly1305::new(key);
             let nonce = XNonce::from_slice(&nonce_bytes);
-            let plaintext = cipher.decrypt(nonce, ciphertext)
+            let plaintext = cipher
+                .decrypt(nonce, ciphertext)
                 .map_err(|_| "Keyfile decryption failed — machine identity may have changed")?;
 
-            let password = String::from_utf8(plaintext)
-                .map_err(|_| "Keyfile contains invalid UTF-8")?;
+            let password =
+                String::from_utf8(plaintext).map_err(|_| "Keyfile contains invalid UTF-8")?;
 
             tracing::debug!(
                 target: "identity",
@@ -296,8 +314,7 @@ impl Identity {
             Ok(password)
         } else {
             // Legacy plaintext format — migrate to encrypted
-            let password = String::from_utf8(data)
-                .map_err(|_| "Keyfile contains invalid UTF-8")?;
+            let password = String::from_utf8(data).map_err(|_| "Keyfile contains invalid UTF-8")?;
             let password = password.trim().to_string();
 
             // Re-save in encrypted format
@@ -396,7 +413,10 @@ impl Identity {
                 id: persisted.id,
                 did: persisted.did,
                 metadata: RwLock::new(persisted.metadata),
-                state: RwLock::new(IdentityState::Locked(persisted.encrypted_keypair, pub_key_bytes)),
+                state: RwLock::new(IdentityState::Locked(
+                    persisted.encrypted_keypair,
+                    pub_key_bytes,
+                )),
                 profile: None, // Will be set by caller
             });
         }
@@ -589,12 +609,10 @@ impl Identity {
     pub fn get_public_key(&self) -> Vec<u8> {
         let state = self.state.read();
         match &*state {
-            IdentityState::Unlocked(kp, _) => {
-                match kp.public().try_into_ed25519() {
-                    Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
-                    Err(_) => vec![],
-                }
-            }
+            IdentityState::Unlocked(kp, _) => match kp.public().try_into_ed25519() {
+                Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
+                Err(_) => vec![],
+            },
             // CRITICAL FIX: Return stored public key bytes when locked
             IdentityState::Locked(_, pub_key_bytes) => pub_key_bytes.clone(),
         }

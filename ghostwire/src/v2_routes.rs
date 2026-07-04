@@ -3,9 +3,9 @@
 
 use crate::api_v2_types::ApiV2Response;
 use crate::core::mesh_health::build_snapshot;
+use crate::web::AppState;
 use axum::{extract::State, Json};
 use std::sync::Arc;
-use crate::web::AppState;
 
 /// GET /api/v2/system/mesh-health
 /// Returns comprehensive mesh health metrics
@@ -14,13 +14,13 @@ pub async fn get_mesh_health(
 ) -> impl axum::response::IntoResponse {
     // Get WebSocket subscriber count
     let ws_count = 0; // TODO: Track actual subscriber count
-    
+
     // Get core reference
     let core_guard = state.core.read().await;
-    
+
     // Build health snapshot from core
     let snapshot = build_snapshot(&core_guard, ws_count).await;
-    
+
     Json(ApiV2Response::success(snapshot))
 }
 
@@ -30,17 +30,17 @@ pub async fn get_security_dashboard(
     State(state): State<Arc<AppState>>,
 ) -> impl axum::response::IntoResponse {
     let core = state.core.read().await;
-    
+
     // Get security stats from SecurityManager
     let sec_manager = &core.security_manager;
     let stats = sec_manager.get_stats().await;
-    
+
     // Get identity lock status
     let identity_locked = {
         let identity = core.identity.read().await;
         identity.is_locked()
     };
-    
+
     // Build dashboard from available metrics
     let dashboard = SecurityDashboard {
         security_score: stats.peers_verified as f32 / 100.0 * 100.0,
@@ -53,7 +53,7 @@ pub async fn get_security_dashboard(
         encryption_active: true,
         firewall_active: sec_manager.is_blacklist_enabled().await,
     };
-    
+
     Json(ApiV2Response::success(dashboard))
 }
 

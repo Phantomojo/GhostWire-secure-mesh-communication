@@ -1,2 +1,2 @@
 pub mod ghost_channels;
-pub use ghost_channels::{GhostChannel, ChannelMessage, GhostChannelRegistry};
+pub use ghost_channels::{ChannelMessage, GhostChannel, GhostChannelRegistry};

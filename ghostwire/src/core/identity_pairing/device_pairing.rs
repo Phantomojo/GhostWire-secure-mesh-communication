@@ -28,7 +28,7 @@
 //!
 //! After any of these three, the two devices are peers and can communicate.
 
-use crate::genesis_constants::{PAIRING_SESSION_DOMAIN, RENDEZVOUS_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, PAIRING_SESSION_DOMAIN, RENDEZVOUS_DOMAIN};
 
 use anyhow::Result;
 use chacha20poly1305::{
@@ -40,7 +40,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
 
 // ── Pairing code ──────────────────────────────────────────────────────────────
 
@@ -105,11 +104,7 @@ impl PairingCode {
 
     /// Derive a session key from this pairing code + both parties' node IDs
     /// Uses BLAKE3 with domain separation — both sides must agree on the display string
-    pub fn derive_session_key(
-        &self,
-        initiator_node_id: &str,
-        responder_node_id: &str,
-    ) -> [u8; 32] {
+    pub fn derive_session_key(&self, initiator_node_id: &str, responder_node_id: &str) -> [u8; 32] {
         // Hash the display string to get a consistent shared secret
         // Both generate() and from_string() produce the same canonical display format
         let display_hash = blake3::hash(self.display.as_bytes());
@@ -248,10 +243,8 @@ impl PairingManager {
         peer_response: &PairingResponse,
         code: &PairingCode,
     ) -> Result<PairedPeer> {
-        let session_key = code.derive_session_key(
-            &self.our_node_id,
-            &peer_response.responder_node_id,
-        );
+        let session_key =
+            code.derive_session_key(&self.our_node_id, &peer_response.responder_node_id);
 
         // Decrypt and verify peer identity
         let _decrypted = self
@@ -309,10 +302,7 @@ impl PairingManager {
 
     // ── Internal helpers ──────────────────────────────────────────────────
 
-    fn encrypt_identity_for_pairing(
-        &self,
-        session_key: &[u8; 32],
-    ) -> Result<Vec<u8>> {
+    fn encrypt_identity_for_pairing(&self, session_key: &[u8; 32]) -> Result<Vec<u8>> {
         let rng = SystemRandom::new();
         let payload = serde_json::json!({
             "node_id": self.our_node_id,
@@ -440,7 +430,11 @@ mod tests {
         let key2 = parsed.derive_session_key("nodeA", "nodeB");
         // They should match because from_string produces a canonical display format
         // and derive_session_key hashes the display string
-        assert_eq!(key1, key2, "Session keys should match (code.display={}, parsed.display={})", code.display, parsed.display);
+        assert_eq!(
+            key1, key2,
+            "Session keys should match (code.display={}, parsed.display={})",
+            code.display, parsed.display
+        );
     }
 
     #[test]

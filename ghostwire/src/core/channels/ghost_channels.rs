@@ -8,7 +8,7 @@
 //!      does not leak via compression attacks.
 //!   3. prepare_message: PoW solving is offloaded to spawn_blocking.
 
-use crate::genesis_constants::{CHANNEL_INVITE_PREFIX, CHANNEL_KDF_DOMAIN, derive_with_domain};
+use crate::genesis_constants::{derive_with_domain, CHANNEL_INVITE_PREFIX, CHANNEL_KDF_DOMAIN};
 
 use anyhow::Result;
 use lru::LruCache;
@@ -37,8 +37,14 @@ impl GhostChannel {
     pub fn new(local_name: Option<String>) -> Result<Self> {
         let rng = SystemRandom::new();
         let mut topic_id = [0u8; 32];
-        rng.fill(&mut topic_id).map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        Ok(Self { topic_id, local_name, description: None, created_at: now_secs() })
+        rng.fill(&mut topic_id)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        Ok(Self {
+            topic_id,
+            local_name,
+            description: None,
+            created_at: now_secs(),
+        })
     }
 
     pub fn gossipsub_topic(&self) -> String {
@@ -46,20 +52,31 @@ impl GhostChannel {
     }
 
     pub fn invite_string(&self) -> String {
-        format!("{}{}", CHANNEL_INVITE_PREFIX, bs58::encode(self.topic_id).into_string())
+        format!(
+            "{}{}",
+            CHANNEL_INVITE_PREFIX,
+            bs58::encode(self.topic_id).into_string()
+        )
     }
 
     pub fn from_invite(s: &str) -> Result<Self> {
-        let stripped = s.strip_prefix(CHANNEL_INVITE_PREFIX)
-            .ok_or_else(|| anyhow::anyhow!("Not a Ghost Channel invite (wrong prefix — different network?)"))?;
-        let bytes = bs58::decode(stripped).into_vec()
+        let stripped = s.strip_prefix(CHANNEL_INVITE_PREFIX).ok_or_else(|| {
+            anyhow::anyhow!("Not a Ghost Channel invite (wrong prefix — different network?)")
+        })?;
+        let bytes = bs58::decode(stripped)
+            .into_vec()
             .map_err(|e| anyhow::anyhow!("Decode failed: {}", e))?;
         if bytes.len() != 32 {
             anyhow::bail!("Invalid channel ID: expected 32 bytes, got {}", bytes.len());
         }
         let mut topic_id = [0u8; 32];
         topic_id.copy_from_slice(&bytes);
-        Ok(Self { topic_id, local_name: None, description: None, created_at: now_secs() })
+        Ok(Self {
+            topic_id,
+            local_name: None,
+            description: None,
+            created_at: now_secs(),
+        })
     }
 }
 
@@ -98,9 +115,13 @@ pub fn solve_pow(content: &[u8], channel_id: &[u8; 32]) -> u64 {
 fn meets_difficulty(hash: &[u8], bits: u32) -> bool {
     let mut remaining = bits;
     for &byte in hash {
-        if remaining == 0 { return true; }
+        if remaining == 0 {
+            return true;
+        }
         if remaining >= 8 {
-            if byte != 0 { return false; }
+            if byte != 0 {
+                return false;
+            }
             remaining -= 8;
         } else {
             return byte.leading_zeros() >= remaining;
@@ -115,13 +136,18 @@ fn meets_difficulty(hash: &[u8], bits: u32) -> bool {
 pub fn pad_content(plaintext: &str, rng: &SystemRandom) -> Result<Vec<u8>> {
     let bytes = plaintext.as_bytes();
     if bytes.len() + 3 > CHANNEL_MAX_MSG_BYTES {
-        anyhow::bail!("Message too long: {} chars (max {})", plaintext.len(), CHANNEL_MAX_MSG_BYTES - 3);
+        anyhow::bail!(
+            "Message too long: {} chars (max {})",
+            plaintext.len(),
+            CHANNEL_MAX_MSG_BYTES - 3
+        );
     }
     let mut padded = bytes.to_vec();
     padded.push(0x01); // marker
     let pad_needed = CHANNEL_MAX_MSG_BYTES - padded.len() - 2;
     let mut padding = vec![0u8; pad_needed];
-    rng.fill(&mut padding).map_err(|_| anyhow::anyhow!("RNG failure in pad_content"))?;
+    rng.fill(&mut padding)
+        .map_err(|_| anyhow::anyhow!("RNG failure in pad_content"))?;
     padded.extend_from_slice(&padding);
     padded.push((bytes.len() & 0xFF) as u8);
     padded.push(((bytes.len() >> 8) & 0xFF) as u8);
@@ -136,7 +162,11 @@ pub fn unpad_content(padded: &[u8]) -> Result<String> {
     let hi = padded[padded.len() - 1] as usize;
     let len = lo | (hi << 8);
     if len > padded.len().saturating_sub(3) {
-        anyhow::bail!("Corrupt padding: claimed len {} > buffer {}", len, padded.len());
+        anyhow::bail!(
+            "Corrupt padding: claimed len {} > buffer {}",
+            len,
+            padded.len()
+        );
     }
     String::from_utf8(padded[..len].to_vec())
         .map_err(|e| anyhow::anyhow!("UTF-8 decode failed: {}", e))
@@ -156,9 +186,9 @@ impl GhostChannelRegistry {
         Self {
             channels: Arc::new(RwLock::new(HashMap::new())),
             message_cache: Arc::new(RwLock::new(HashMap::new())),
-            seen_ids: Arc::new(tokio::sync::Mutex::new(
-                LruCache::new(NonZeroUsize::new(SEEN_ID_CAPACITY).unwrap())
-            )),
+            seen_ids: Arc::new(tokio::sync::Mutex::new(LruCache::new(
+                NonZeroUsize::new(SEEN_ID_CAPACITY).unwrap(),
+            ))),
             rng: SystemRandom::new(),
         }
     }
@@ -166,9 +196,13 @@ impl GhostChannelRegistry {
     pub async fn create(&self, name: Option<String>) -> Result<GhostChannel> {
         let channel = GhostChannel::new(name)?;
         let key = hex::encode(channel.topic_id);
-        self.channels.write().await.insert(key.clone(), channel.clone());
+        self.channels
+            .write()
+            .await
+            .insert(key.clone(), channel.clone());
         self.message_cache.write().await.insert(
-            key, std::collections::VecDeque::with_capacity(CHANNEL_MSG_CACHE)
+            key,
+            std::collections::VecDeque::with_capacity(CHANNEL_MSG_CACHE),
         );
         Ok(channel)
     }
@@ -176,9 +210,13 @@ impl GhostChannelRegistry {
     pub async fn join(&self, invite: &str) -> Result<GhostChannel> {
         let channel = GhostChannel::from_invite(invite)?;
         let key = hex::encode(channel.topic_id);
-        self.channels.write().await.insert(key.clone(), channel.clone());
+        self.channels
+            .write()
+            .await
+            .insert(key.clone(), channel.clone());
         self.message_cache.write().await.insert(
-            key, std::collections::VecDeque::with_capacity(CHANNEL_MSG_CACHE)
+            key,
+            std::collections::VecDeque::with_capacity(CHANNEL_MSG_CACHE),
         );
         Ok(channel)
     }
@@ -191,19 +229,30 @@ impl GhostChannelRegistry {
 
     /// Prepare a message: pad + solve PoW.
     /// FIXED: PoW solving runs in spawn_blocking (CPU-heavy, must not block async runtime).
-    pub async fn prepare_message(&self, channel: &GhostChannel, text: &str) -> Result<ChannelMessage> {
+    pub async fn prepare_message(
+        &self,
+        channel: &GhostChannel,
+        text: &str,
+    ) -> Result<ChannelMessage> {
         let padded = pad_content(text, &self.rng)?;
         let mut msg_id = [0u8; 16];
-        self.rng.fill(&mut msg_id).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        self.rng
+            .fill(&mut msg_id)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
 
         let channel_id = channel.topic_id;
         let padded_clone = padded.clone();
         // FIXED: offload CPU-heavy PoW to a blocking thread pool
-        let pow_nonce = tokio::task::spawn_blocking(move || {
-            solve_pow(&padded_clone, &channel_id)
-        }).await.map_err(|e| anyhow::anyhow!("PoW task failed: {}", e))?;
+        let pow_nonce = tokio::task::spawn_blocking(move || solve_pow(&padded_clone, &channel_id))
+            .await
+            .map_err(|e| anyhow::anyhow!("PoW task failed: {}", e))?;
 
-        Ok(ChannelMessage { channel_id, content: padded, pow_nonce, msg_id })
+        Ok(ChannelMessage {
+            channel_id,
+            content: padded,
+            pow_nonce,
+            msg_id,
+        })
     }
 
     pub async fn receive_message(&self, msg: ChannelMessage) -> Result<Option<String>> {
@@ -223,7 +272,9 @@ impl GhostChannelRegistry {
         let key = hex::encode(msg.channel_id);
         let mut cache = self.message_cache.write().await;
         if let Some(queue) = cache.get_mut(&key) {
-            if queue.len() >= CHANNEL_MSG_CACHE { queue.pop_front(); }
+            if queue.len() >= CHANNEL_MSG_CACHE {
+                queue.pop_front();
+            }
             queue.push_back(msg);
         }
         Ok(Some(text))
@@ -232,9 +283,14 @@ impl GhostChannelRegistry {
     pub async fn get_messages(&self, topic_id: &[u8; 32]) -> Vec<String> {
         let key = hex::encode(topic_id);
         let cache = self.message_cache.read().await;
-        cache.get(&key).map(|q| {
-            q.iter().filter_map(|m| unpad_content(&m.content).ok()).collect()
-        }).unwrap_or_default()
+        cache
+            .get(&key)
+            .map(|q| {
+                q.iter()
+                    .filter_map(|m| unpad_content(&m.content).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub async fn list(&self) -> Vec<GhostChannel> {
@@ -242,18 +298,25 @@ impl GhostChannelRegistry {
     }
 
     pub async fn get(&self, topic_id: &[u8; 32]) -> Option<GhostChannel> {
-        self.channels.read().await.get(&hex::encode(topic_id)).cloned()
+        self.channels
+            .read()
+            .await
+            .get(&hex::encode(topic_id))
+            .cloned()
     }
 }
 
 impl Default for GhostChannelRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs()
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -308,6 +371,9 @@ mod tests {
             id[..8].copy_from_slice(&i.to_le_bytes());
             seen.put(id, ());
         }
-        assert!(seen.len() <= SEEN_ID_CAPACITY, "LRU must not exceed capacity");
+        assert!(
+            seen.len() <= SEEN_ID_CAPACITY,
+            "LRU must not exceed capacity"
+        );
     }
 }
