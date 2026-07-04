@@ -10,6 +10,7 @@
 use crate::core::armor::TrafficArmor;
 use crate::core::crl;
 use crate::core::double_ratchet;
+use rand_core::OsRng;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -20,7 +21,6 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
-use rand_core::OsRng;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

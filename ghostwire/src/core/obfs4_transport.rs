@@ -8,8 +8,8 @@
 //! This implementation provides the foundation for future integration.
 
 use anyhow::Result;
-use rand_core::RngCore;
 use rand_core::OsRng;
+use rand_core::RngCore;
 
 /// Obfs4 configuration
 #[derive(Debug, Clone)]

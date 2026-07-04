@@ -1,7 +1,7 @@
-use rand_core::OsRng;
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use anyhow::Result;
+use rand_core::OsRng;
 // use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

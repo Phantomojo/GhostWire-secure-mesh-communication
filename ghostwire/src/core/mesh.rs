@@ -12,7 +12,6 @@ use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Behaviour as Kad;
 // NoTcpTransport needed
-use rand_core::OsRng;
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
@@ -25,6 +24,7 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 use libp2p_webrtc as webrtc;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicUsize;

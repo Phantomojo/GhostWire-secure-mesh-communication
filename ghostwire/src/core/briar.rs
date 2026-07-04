@@ -1,5 +1,5 @@
-use rand_core::OsRng;
 use anyhow::Result;
+use rand_core::OsRng;
 // use crate::core::message::Message;
 // use async_trait::async_trait;
 use crate::core::Identity;
