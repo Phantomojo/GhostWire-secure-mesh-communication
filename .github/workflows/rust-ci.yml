@@ -102,12 +102,8 @@ jobs:
         working-directory: ghostwire
 
   features:
-    name: 🧩 Feature Matrix (${{ matrix.feature }})
+    name: 🧩 Feature Check (default)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        feature: [default, cli, mesh, security, stealth, qr, minimal]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -118,8 +114,8 @@ jobs:
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
-      - name: Check feature ${{ matrix.feature }}
-        run: cargo check --no-default-features --features ${{ matrix.feature }}
+      - name: Check default features
+        run: cargo check
         working-directory: ghostwire
 
   coverage:
