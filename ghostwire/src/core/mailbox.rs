@@ -18,6 +18,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
+use rand_core::OsRng;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use sled::Db;
@@ -90,7 +91,7 @@ impl MailboxStore {
         }
 
         // Generate ephemeral X25519 keypair
-        let ephemeral_secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
+        let ephemeral_secret = x25519_dalek::EphemeralSecret::random_from_rng(OsRng);
         let ephemeral_pub = x25519_dalek::PublicKey::from(&ephemeral_secret);
 
         // DH shared secret
@@ -280,7 +281,7 @@ mod tests {
 
     #[test]
     fn seal_and_open_roundtrip() {
-        let recipient_secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let recipient_secret = StaticSecret::random_from_rng(OsRng);
         let recipient_pub: PublicKey = (&recipient_secret).into();
 
         let db = Arc::new(sled::Config::new().temporary(true).open().unwrap());
@@ -300,7 +301,7 @@ mod tests {
         let db = Arc::new(sled::Config::new().temporary(true).open().unwrap());
         let store = MailboxStore::open(db).unwrap();
 
-        let secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let secret = StaticSecret::random_from_rng(OsRng);
         let pub_key: x25519_dalek::PublicKey = (&secret).into();
 
         for _ in 0..MAX_MAILBOX_SIZE + 10 {

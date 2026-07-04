@@ -8,7 +8,8 @@
 //! This implementation provides the foundation for future integration.
 
 use anyhow::Result;
-use rand::RngCore;
+use rand_core::RngCore;
+use rand_core::OsRng;
 
 /// Obfs4 configuration
 #[derive(Debug, Clone)]
@@ -45,7 +46,7 @@ impl Obfs4State {
             key
         } else {
             let mut secret = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut secret);
+            OsRng.fill_bytes(&mut secret);
             secret
         };
 
@@ -80,7 +81,7 @@ impl Obfs4State {
 /// Generate a new obfs4 keypair for sharing with peers
 pub fn generate_obfs4_keypair() -> ([u8; 32], Vec<u8>) {
     let mut secret = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut secret);
+    OsRng.fill_bytes(&mut secret);
     let public = secret.to_vec(); // Placeholder for real elligator2 public key
     (secret, public)
 }

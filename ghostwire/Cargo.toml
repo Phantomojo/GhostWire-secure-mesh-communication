@@ -11,7 +11,7 @@ categories = ["network-programming", "security", "asynchronous"]
 
 [dependencies]
 tokio = { version = "1.51", features = ["full"] }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 tower = { version = "0.5" }
 tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "auth"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -23,7 +23,7 @@ libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 reqwest = { version = ">=0.11.23, <0.12", default-features = false, features = ["json", "rustls-tls"] }  # CVE-2025-0805 fixed in 0.11.23
 governor = "0.10"
-tower_governor = { version = "0.4" }
+tower_governor = { version = "0.8" }
 ring = { version = "0.17.12" }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
@@ -45,7 +45,7 @@ argon2 = "0.5.3"
 cryptify = "3.2.1"
 num-traits = "0.2"
 num-derive = "0.4"
-rand_distr = "0.4.3"
+rand_distr = "0.5"
 anyhow = { version = "1.0" }
 thiserror = { version = "1.0" }
 parking_lot = "0.12"
@@ -63,7 +63,7 @@ base64 = { version = "0.22" }
 hex = { version = "0.4" }
 bs58 = { version = "0.5" }
 lazy_static = { version = "1.4" }
-rand = { version = "0.8" }
+rand = { version = "0.9" }
 bytes = { version = "1.5" }
 bincode = { version = "1.3" }
 zeroize = { version = "1.7", features = ["derive"] }

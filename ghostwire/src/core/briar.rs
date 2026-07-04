@@ -1,3 +1,4 @@
+use rand_core::OsRng;
 use anyhow::Result;
 // use crate::core::message::Message;
 // use async_trait::async_trait;
@@ -264,9 +265,9 @@ impl BriarManager {
         )
         .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
-        use rand::Rng;
+        use rand_core::RngCore;
         let mut nonce = [0u8; 12];
-        rand::thread_rng().fill(&mut nonce);
+        OsRng.fill_bytes(&mut nonce);
 
         let ciphertext = cipher
             .encrypt(&nonce.into(), content)

@@ -529,11 +529,11 @@ fn unpad_from_size(padded: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand_core::OsRng;
     use x25519_dalek::{PublicKey, StaticSecret};
 
     fn make_hop() -> (StaticSecret, HopPublicKey, String) {
-        let mut rng = rand::thread_rng();
-        let secret = StaticSecret::random_from_rng(&mut rng);
+        let secret = StaticSecret::random_from_rng(OsRng);
         let pub_key = PublicKey::from(&secret);
         let id = format!("peer_{}", hex::encode(&pub_key.as_bytes()[..4]));
         (secret, *pub_key.as_bytes(), id)

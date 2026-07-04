@@ -12,6 +12,7 @@ use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Behaviour as Kad;
 // NoTcpTransport needed
+use rand_core::OsRng;
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
@@ -220,7 +221,7 @@ impl MeshTransport {
         // Add WebRTC transport for browser/P2P connectivity
         let webrtc_transport = webrtc::tokio::Transport::new(
             local_key.clone(),
-            webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?,
+            webrtc::tokio::Certificate::generate(&mut OsRng)?,
         );
 
         // Build the transport stack:

@@ -159,7 +159,7 @@ impl CoverTrafficScheduler {
         tokio::spawn(async move {
             let mut sequence: u32 = 0;
             loop {
-                let delay_ms = rand::thread_rng().gen_range(cover_min_ms..=cover_max_ms);
+                let delay_ms = rand::rng().random_range(cover_min_ms..=cover_max_ms);
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
                 if !*self.enabled.read().await {

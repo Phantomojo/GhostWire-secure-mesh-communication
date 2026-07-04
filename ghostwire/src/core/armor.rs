@@ -112,13 +112,13 @@ impl TrafficArmor {
             return payload;
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let target_size = (self.config.min_packet_size)
-            .max(payload.len() + rng.gen_range(0..self.config.max_padding));
+            .max(payload.len() + rng.random_range(0..self.config.max_padding));
 
         if payload.len() < target_size {
             let padding_len = target_size - payload.len();
-            let padding: Vec<u8> = (0..padding_len).map(|_| rng.gen()).collect();
+            let padding: Vec<u8> = (0..padding_len).map(|_| rng.random()).collect();
             payload.extend_from_slice(&padding);
         }
 
@@ -132,8 +132,8 @@ impl TrafficArmor {
         }
 
         let delay_ms = {
-            let mut rng = rand::thread_rng();
-            rng.gen_range(0..self.config.max_chaff_delay_ms)
+            let mut rng = rand::rng();
+            rng.random_range(0..self.config.max_chaff_delay_ms)
         };
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
