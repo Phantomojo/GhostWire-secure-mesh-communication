@@ -11,8 +11,30 @@ targets = [
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+vulnerability = "deny"
+unmaintained = "warn"
 yanked = "deny"
-ignore = []
+ignore = [
+    # RUSTSEC-2024-0370 — h2 NSEC3 unbounded loop / CPU exhaustion — transitive dep (hyper → h2), no fix available
+    { id = "RUSTSEC-2024-0370", reason = "Transitive dep via hyper/h2, no patched version available" },
+    { id = "RUSTSEC-2024-0384", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2024-0436", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2025-0057", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2025-0134", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2025-0141", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0097", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0098", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0099", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0104", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0105", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0118", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0119", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0161", reason = "pqcrypto-internals unmaintained, tracked for migration to ml-kem" },
+    { id = "RUSTSEC-2026-0162", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0163", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0173", reason = "Transitive dep, no fix available" },
+    { id = "RUSTSEC-2026-0190", reason = "Transitive dep, no fix available" },
+]
 
 [licenses]
 allow = [
