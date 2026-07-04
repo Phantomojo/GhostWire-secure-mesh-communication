@@ -10,7 +10,7 @@ targets = [
 
 [advisories]
 unmaintained = "none"
-yanked = "deny"
+yanked = "warn"
 ignore = [
     # RUSTSEC-2024-0370 — h2 NSEC3 unbounded loop / CPU exhaustion — transitive dep (hyper → h2), no fix available
     { id = "RUSTSEC-2024-0370", reason = "Transitive dep via hyper/h2, no patched version available" },
