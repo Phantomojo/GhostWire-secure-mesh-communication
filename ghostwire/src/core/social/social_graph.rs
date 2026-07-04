@@ -164,7 +164,10 @@ pub enum SocialEvent {
 }
 
 impl SocialGraph {
-    pub fn new(our_node_id: String, our_ed25519_pub: Vec<u8>) -> (Self, tokio::sync::broadcast::Receiver<SocialEvent>) {
+    pub fn new(
+        our_node_id: String,
+        our_ed25519_pub: Vec<u8>,
+    ) -> (Self, tokio::sync::broadcast::Receiver<SocialEvent>) {
         let (tx, rx) = tokio::sync::broadcast::channel(256);
         let graph = Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
@@ -198,9 +201,13 @@ impl SocialGraph {
             peer.last_seen = now_secs();
         }
         let event = if online {
-            SocialEvent::PeerOnline { node_id: node_id.to_string() }
+            SocialEvent::PeerOnline {
+                node_id: node_id.to_string(),
+            }
         } else {
-            SocialEvent::PeerOffline { node_id: node_id.to_string() }
+            SocialEvent::PeerOffline {
+                node_id: node_id.to_string(),
+            }
         };
         let _ = self.notify_tx.send(event);
     }
@@ -243,16 +250,15 @@ impl SocialGraph {
         let request_id = uuid::Uuid::new_v4().to_string();
         let ts = now_secs();
 
-        let signable = ConnectRequest::signable_bytes(
-            &request_id,
-            &self.our_node_id,
-            to_node_id,
-            ts,
-        );
+        let signable =
+            ConnectRequest::signable_bytes(&request_id, &self.our_node_id, to_node_id, ts);
         let signature = sign_fn(&signable);
 
         // Get our nickname from peers — fallback to truncated node ID
-        let nickname = self.peers.read().await
+        let nickname = self
+            .peers
+            .read()
+            .await
             .get(&self.our_node_id)
             .map(|p| p.nickname.clone())
             .unwrap_or_else(|| self.our_node_id[..8.min(self.our_node_id.len())].to_string());
@@ -260,7 +266,10 @@ impl SocialGraph {
         let request = ConnectRequest {
             request_id: request_id.clone(),
             from_node_id: self.our_node_id.clone(),
-            from_did: format!("did:ghost:gw00:{}", &self.our_node_id[..16.min(self.our_node_id.len())]),
+            from_did: format!(
+                "did:ghost:gw00:{}",
+                &self.our_node_id[..16.min(self.our_node_id.len())]
+            ),
             from_nickname: nickname,
             from_ed25519_pub: self.our_ed25519_pub.clone(),
             message,
@@ -279,7 +288,11 @@ impl SocialGraph {
             .await
             .insert(to_node_id.to_string(), request.clone());
 
-        tracing::info!("Sent connection request {} → {}", &self.our_node_id[..8.min(self.our_node_id.len())], &to_node_id[..8.min(to_node_id.len())]);
+        tracing::info!(
+            "Sent connection request {} → {}",
+            &self.our_node_id[..8.min(self.our_node_id.len())],
+            &to_node_id[..8.min(to_node_id.len())]
+        );
         Ok(request)
     }
 
@@ -287,16 +300,25 @@ impl SocialGraph {
     pub async fn receive_request(&self, request: ConnectRequest) -> Result<()> {
         // Verify signature
         if !request.verify() {
-            anyhow::bail!("Connection request has invalid signature from {}", request.from_node_id);
+            anyhow::bail!(
+                "Connection request has invalid signature from {}",
+                request.from_node_id
+            );
         }
 
         // Check if blocked
-        let state = self.peers.read().await
+        let state = self
+            .peers
+            .read()
+            .await
             .get(&request.from_node_id)
             .map(|p| p.connection_state.clone());
 
         if matches!(state, Some(ConnectionState::Blocked)) {
-            tracing::debug!("Ignoring request from blocked node {}", request.from_node_id);
+            tracing::debug!(
+                "Ignoring request from blocked node {}",
+                request.from_node_id
+            );
             return Ok(());
         }
 
@@ -316,14 +338,17 @@ impl SocialGraph {
                 connection_state: ConnectionState::PendingInbound,
                 signal: 0.5,
                 is_online: true,
-            }).await;
+            })
+            .await;
         } else {
             if let Some(peer) = self.peers.write().await.get_mut(&request.from_node_id) {
                 peer.connection_state = ConnectionState::PendingInbound;
             }
         }
 
-        let event = SocialEvent::ConnectionRequestReceived { request: request.clone() };
+        let event = SocialEvent::ConnectionRequestReceived {
+            request: request.clone(),
+        };
         self.inbound_requests
             .write()
             .await
@@ -340,7 +365,8 @@ impl SocialGraph {
         our_x25519_pub: Vec<u8>,
         sign_fn: impl Fn(&[u8]) -> Vec<u8>,
     ) -> Result<ConnectResponse> {
-        let request = self.inbound_requests
+        let request = self
+            .inbound_requests
             .read()
             .await
             .get(request_id)
@@ -375,13 +401,17 @@ impl SocialGraph {
             nickname: request.from_nickname,
         });
 
-        tracing::info!("Accepted connection request from {}", &request.from_node_id[..8.min(request.from_node_id.len())]);
+        tracing::info!(
+            "Accepted connection request from {}",
+            &request.from_node_id[..8.min(request.from_node_id.len())]
+        );
         Ok(response)
     }
 
     /// Deny a connection request
     pub async fn deny_request(&self, request_id: &str) -> Result<()> {
-        let request = self.inbound_requests
+        let request = self
+            .inbound_requests
             .write()
             .await
             .remove(request_id)
@@ -406,7 +436,12 @@ impl SocialGraph {
 
     /// Get all pending inbound requests
     pub async fn pending_inbound(&self) -> Vec<ConnectRequest> {
-        self.inbound_requests.read().await.values().cloned().collect()
+        self.inbound_requests
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Get connected peers only
@@ -430,8 +465,12 @@ impl PeerFilter {
         match self {
             Self::All => !matches!(peer.connection_state, ConnectionState::Blocked),
             Self::Connected => matches!(peer.connection_state, ConnectionState::Connected),
-            Self::Online => peer.is_online && !matches!(peer.connection_state, ConnectionState::Blocked),
-            Self::PendingInbound => matches!(peer.connection_state, ConnectionState::PendingInbound),
+            Self::Online => {
+                peer.is_online && !matches!(peer.connection_state, ConnectionState::Blocked)
+            }
+            Self::PendingInbound => {
+                matches!(peer.connection_state, ConnectionState::PendingInbound)
+            }
             Self::Nearby => matches!(peer.discovered_via, DiscoveryMethod::Mdns),
         }
     }
@@ -469,7 +508,10 @@ mod tests {
 
         // Should emit ConnectionRequestReceived
         let event = rx.try_recv().unwrap();
-        assert!(matches!(event, SocialEvent::ConnectionRequestReceived { .. }));
+        assert!(matches!(
+            event,
+            SocialEvent::ConnectionRequestReceived { .. }
+        ));
 
         // Alice accepts
         let _response = graph

@@ -63,11 +63,7 @@ impl EncryptedStore {
     /// Open (or create) an encrypted store, deriving the master key from password.
     ///
     /// `namespace` scopes the store (e.g. "messages", "identity", "peers").
-    pub async fn open(
-        db: Arc<Db>,
-        password: &str,
-        namespace: &str,
-    ) -> Result<Self> {
+    pub async fn open(db: Arc<Db>, password: &str, namespace: &str) -> Result<Self> {
         let master_key = Self::derive_master_key(password, namespace, &db).await?;
 
         Ok(Self {
@@ -79,12 +75,7 @@ impl EncryptedStore {
     }
 
     /// Store an encrypted value. Optionally set a TTL for automatic expiry.
-    pub async fn put(
-        &self,
-        key: &str,
-        value: &[u8],
-        ttl: Option<Duration>,
-    ) -> Result<()> {
+    pub async fn put(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
         let master_key = self.master_key.read().await;
         let cipher = self.make_cipher(&master_key)?;
 
@@ -208,10 +199,14 @@ impl EncryptedStore {
             .collect();
 
         for (db_key, blob) in entries {
-            let Ok((meta, ct)) = Self::parse_blob(&blob) else { continue };
+            let Ok((meta, ct)) = Self::parse_blob(&blob) else {
+                continue;
+            };
             let nonce = Nonce::from_slice(&meta.nonce);
 
-            let Ok(plaintext) = old_cipher.decrypt(nonce, ct) else { continue };
+            let Ok(plaintext) = old_cipher.decrypt(nonce, ct) else {
+                continue;
+            };
 
             // Re-encrypt with new key and fresh nonce
             let mut new_nonce_bytes = [0u8; NONCE_LEN];
@@ -275,7 +270,11 @@ impl EncryptedStore {
         }
         let meta_len = u32::from_le_bytes(blob[..4].try_into()?) as usize;
         if blob.len() < 4 + meta_len {
-            anyhow::bail!("Blob truncated: meta_len={} but blob={}", meta_len, blob.len());
+            anyhow::bail!(
+                "Blob truncated: meta_len={} but blob={}",
+                meta_len,
+                blob.len()
+            );
         }
         let meta: ValueMeta = bincode::deserialize(&blob[4..4 + meta_len])?;
         let ciphertext = &blob[4 + meta_len..];
@@ -283,16 +282,11 @@ impl EncryptedStore {
     }
 
     /// Derive a 32-byte master key via Argon2id. Saves/loads salt from sled.
-    async fn derive_master_key(
-        password: &str,
-        namespace: &str,
-        db: &Db,
-    ) -> Result<MasterKey> {
+    async fn derive_master_key(password: &str, namespace: &str, db: &Db) -> Result<MasterKey> {
         let salt_key = format!("gw_kdf_salt_v1:{}", namespace);
 
         let salt_str = if let Some(existing) = db.get(salt_key.as_bytes())? {
-            String::from_utf8(existing.to_vec())
-                .map_err(|_| anyhow::anyhow!("Corrupt salt"))?
+            String::from_utf8(existing.to_vec()).map_err(|_| anyhow::anyhow!("Corrupt salt"))?
         } else {
             // Generate new salt
             let salt = SaltString::generate(&mut OsRng);
@@ -309,8 +303,8 @@ impl EncryptedStore {
         // Include namespace in the password to create domain separation
         let namespaced_pwd = format!("ghostwire_store_v1:{}:{}", namespace, password);
 
-        let salt = SaltString::from_b64(&salt_str)
-            .map_err(|e| anyhow::anyhow!("Bad salt: {}", e))?;
+        let salt =
+            SaltString::from_b64(&salt_str).map_err(|e| anyhow::anyhow!("Bad salt: {}", e))?;
 
         let hash = argon2
             .hash_password(namespaced_pwd.as_bytes(), &salt)
@@ -341,7 +335,9 @@ mod tests {
 
     async fn make_store() -> EncryptedStore {
         let db = Arc::new(sled::Config::new().temporary(true).open().unwrap());
-        EncryptedStore::open(db, "test_password_123", "test").await.unwrap()
+        EncryptedStore::open(db, "test_password_123", "test")
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -371,7 +367,10 @@ mod tests {
         store.put("sensitive_key_name", b"val", None).await.unwrap();
         // The plaintext key should not appear in the database
         let raw_key_present = store.db.scan_prefix(b"sensitive").next().is_some();
-        assert!(!raw_key_present, "Plaintext key found in DB — key hashing broken");
+        assert!(
+            !raw_key_present,
+            "Plaintext key found in DB — key hashing broken"
+        );
     }
 
     #[tokio::test]

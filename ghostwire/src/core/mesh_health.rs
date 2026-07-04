@@ -96,14 +96,18 @@ pub async fn build_snapshot(
     let metrics = core.monitor.get_metrics().await;
     let active_transport_name = {
         let guard = core.active_transport.read().await;
-        guard.as_ref().map(|t| t.name()).unwrap_or("none").to_string()
+        guard
+            .as_ref()
+            .map(|t| t.name())
+            .unwrap_or("none")
+            .to_string()
     };
     let network_state = NetworkStateInfo {
         state: "full_mesh".to_string(),
         internet_reachable: metrics.is_internet_reachable,
         lan_reachable: local_ip_address::local_ip().is_ok(),
         active_transport: active_transport_name,
-        uptime_secs: 0, // TODO: track startup time in Core
+        uptime_secs: 0,               // TODO: track startup time in Core
         bootstrap_nodes_reachable: 0, // TODO: probe bootstrap nodes
         latency_ms: metrics.latency_ms,
         packet_loss_pct: metrics.packet_loss_ratio * 100.0,
@@ -153,14 +157,14 @@ pub async fn build_snapshot(
         block_store_count: core.block_store.block_count().await,
         mailbox_pending,
         encrypted_store_namespaces: 0, // TODO: count encrypted_store namespaces
-        db_size_bytes: 0, // TODO: sled db_size_on_disk()
+        db_size_bytes: 0,              // TODO: sled db_size_on_disk()
     };
 
     let security = SecurityHealthInfo {
         failed_unlock_attempts_24h: 0, // TODO: wire audit_logger query
         blocked_peers,
         sybil_rejections_24h: 0, // TODO: counter in DiverseRoutingTable
-        audit_events_24h: 0, // TODO: audit_logger.count_recent(24h)
+        audit_events_24h: 0,     // TODO: audit_logger.count_recent(24h)
         identity_locked,
         trust_score_avg: core.trust_store.average_trust_score().await,
         last_key_rotation_days_ago: None, // TODO: track in identity metadata

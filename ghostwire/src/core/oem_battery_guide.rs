@@ -79,8 +79,11 @@ pub fn get_guide(manufacturer: &str, model: &str) -> OemBatteryGuide {
 
 fn samsung_guide(model: &str) -> OemBatteryGuide {
     // One UI 6+ promised standard behavior but still has Device Care
-    let is_one_ui_6_plus = model.contains("s24") || model.contains("s23") ||
-        model.contains("a54") || model.contains("a35") || model.contains("a25");
+    let is_one_ui_6_plus = model.contains("s24")
+        || model.contains("s23")
+        || model.contains("a54")
+        || model.contains("a35")
+        || model.contains("a25");
 
     if is_one_ui_6_plus {
         OemBatteryGuide {
@@ -303,7 +306,11 @@ mod tests {
         ];
         for (mfr, model) in oems {
             let guide = get_guide(mfr, model);
-            assert!(!guide.steps.is_empty(), "Guide for {} should have steps", mfr);
+            assert!(
+                !guide.steps.is_empty(),
+                "Guide for {} should have steps",
+                mfr
+            );
             assert!(!guide.oem_name.is_empty());
         }
     }

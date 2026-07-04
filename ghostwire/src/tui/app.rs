@@ -180,12 +180,8 @@ impl TuiApp {
         let net_fut = self.client.get_network_status();
         let ai_fut = self.client.get_ai_status_summary();
 
-        let (identity, contacts, net, ai_status) = tokio::join!(
-            identity_fut,
-            contacts_fut,
-            net_fut,
-            ai_fut
-        );
+        let (identity, contacts, net, ai_status) =
+            tokio::join!(identity_fut, contacts_fut, net_fut, ai_fut);
 
         if let Some(identity) = identity {
             self.my_name = if identity.nickname.is_empty() {
@@ -287,9 +283,8 @@ impl TuiApp {
                             let peer_id = contact.peer_id.clone();
                             let client = self.client.clone_for_send();
                             let rt = tokio::runtime::Handle::current();
-                            let messages = rt.block_on(async {
-                                client.get_messages(&peer_id).await
-                            });
+                            let messages =
+                                rt.block_on(async { client.get_messages(&peer_id).await });
                             self.messages = messages;
                         }
                     }
@@ -421,10 +416,10 @@ impl TuiApp {
         let main = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),   // Status bar
-                Constraint::Min(8),      // Main content (sidebar + conversation)
-                Constraint::Length(3),   // Input area
-                Constraint::Length(3),   // Help bar
+                Constraint::Length(1), // Status bar
+                Constraint::Min(8),    // Main content (sidebar + conversation)
+                Constraint::Length(3), // Input area
+                Constraint::Length(3), // Help bar
             ])
             .split(area);
 
@@ -577,8 +572,7 @@ impl TuiApp {
                 })
                 .collect();
 
-            let conversation = Paragraph::new(msg_lines)
-                .block(theme::themed_block(contact_name));
+            let conversation = Paragraph::new(msg_lines).block(theme::themed_block(contact_name));
             f.render_widget(conversation, area);
         }
     }
@@ -623,11 +617,7 @@ impl TuiApp {
 
     fn render_help_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let hints = if self.input_mode {
-            theme::help_bar(&[
-                ("Enter", "Send"),
-                ("Esc", "Cancel"),
-                ("←→", "Move cursor"),
-            ])
+            theme::help_bar(&[("Enter", "Send"), ("Esc", "Cancel"), ("←→", "Move cursor")])
         } else {
             theme::help_bar(&[
                 ("↑↓", "Navigate"),

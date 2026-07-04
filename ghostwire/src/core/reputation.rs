@@ -138,11 +138,7 @@ impl TrustStore {
     ///   - Ok(true) if this is a new peer (key pinned)
     ///   - Ok(false) if key matches existing record (trusted)
     ///   - Err with warning if key has CHANGED for a known peer
-    pub async fn verify_or_pin(
-        &self,
-        peer_id: &str,
-        public_key: &[u8],
-    ) -> Result<bool> {
+    pub async fn verify_or_pin(&self, peer_id: &str, public_key: &[u8]) -> Result<bool> {
         let mut peers = self.peers.write().await;
 
         if let Some(record) = peers.get_mut(peer_id) {
@@ -377,7 +373,9 @@ mod tests {
 impl TrustStore {
     /// Count of blocked peers (used by mesh_health)
     pub async fn blocked_count(&self) -> usize {
-        self.peers.read().await
+        self.peers
+            .read()
+            .await
             .values()
             .filter(|r| r.trust_level == TrustLevel::Blocked)
             .count()
@@ -386,10 +384,10 @@ impl TrustStore {
     /// Average trust score across all known peers (used by mesh_health)
     pub async fn average_trust_score(&self) -> f32 {
         let peers = self.peers.read().await;
-        if peers.is_empty() { return 0.0; }
-        let sum: f32 = peers.values()
-            .map(|r| r.trust_level.score())
-            .sum();
+        if peers.is_empty() {
+            return 0.0;
+        }
+        let sum: f32 = peers.values().map(|r| r.trust_level.score()).sum();
         sum / peers.len() as f32
     }
 }

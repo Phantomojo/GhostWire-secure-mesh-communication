@@ -1,2 +1,2 @@
-pub mod epidemic;
 pub mod bundle;
+pub mod epidemic;

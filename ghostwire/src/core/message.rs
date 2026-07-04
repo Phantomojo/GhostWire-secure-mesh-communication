@@ -70,7 +70,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Type of message being sent
-/// 
+///
 /// **Security Note:** Message type is visible in plaintext for routing purposes.
 /// Sensitive message types (e.g., `Control`, `Handshake`) should be encrypted
 /// at a higher layer.
@@ -98,7 +98,7 @@ impl Default for MessageType {
 }
 
 /// Encryption status of the message
-/// 
+///
 /// **Security Note:** This is a **local state** indicator, not a security guarantee.
 /// Always verify encryption at the transport/storage layer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -169,59 +169,59 @@ impl Default for EncryptionStatus {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     /// Unique message identifier (UUID v4)
-    /// 
+    ///
     /// **Purpose:** Deduplication, tracking, reference
     /// **Security:** Random (unpredictable), prevents enumeration
     pub id: Uuid,
-    
+
     /// Sender's node ID (public key hash)
-    /// 
+    ///
     /// **Purpose:** Routing, display, verification
     /// **Security:** Plaintext in memory, encrypted in transit
     pub sender: String,
-    
+
     /// Recipient's node ID (public key hash)
-    /// 
+    ///
     /// **Purpose:** Routing, access control
     /// **Security:** Plaintext in memory, encrypted in transit
     /// **Special Values:** "broadcast" for broadcast messages
     pub recipient: String,
-    
+
     /// Message content (the actual message)
-    /// 
+    ///
     /// **Purpose:** User data
     /// **Security:** ENCRYPT before storage/network transmission
     /// **Size Limit:** 10KB recommended (enforced at API layer)
     pub content: String,
-    
+
     /// Unix timestamp (seconds since 1970-01-01 UTC)
-    /// 
+    ///
     /// **Purpose:** Ordering, display, expiry
     /// **Security:** Add jitter (±5 seconds) before sending to prevent traffic analysis
     /// **Precision:** Seconds (sufficient for messaging)
     pub timestamp: u64,
-    
+
     /// Legacy encryption flag (deprecated)
-    /// 
+    ///
     /// **Status:** DEPRECATED - use `encryption_status` instead
     /// **Backwards Compatibility:** Kept for old code
     /// **Value:** `false` for plaintext, `true` for encrypted
     pub encrypted: bool,
-    
+
     /// Type of message
-    /// 
+    ///
     /// **Purpose:** Routing, handling, display
     /// **Security:** Visible in plaintext for routing
     pub message_type: String,
-    
+
     /// Current encryption status
-    /// 
+    ///
     /// **Purpose:** Track encryption state
     /// **Security:** Local state indicator, not a security guarantee
     pub encryption_status: String,
-    
+
     /// Hop count for multi-hop relay
-    /// 
+    ///
     /// **Purpose:** Track how many hops this message has traversed
     /// **Security:** Prevents infinite loops (max 8 hops via reliability::MAX_HOPS)
     /// **Default:** 0 (originating node)
@@ -290,7 +290,7 @@ impl Message {
             vector_clock: crate::core::vector_clock::VectorClock::new(),
         }
     }
-    
+
     /// Create a new message with custom type
     ///
     /// ## Parameters
@@ -337,7 +337,7 @@ impl Message {
             vector_clock: crate::core::vector_clock::VectorClock::new(),
         }
     }
-    
+
     /// Mark message as encrypted
     ///
     /// **Usage:** Call after encryption to track status
@@ -346,14 +346,14 @@ impl Message {
         self.encrypted = true;
         self.encryption_status = "full".to_string();
     }
-    
+
     /// Check if message is a broadcast
     ///
     /// **Returns:** `true` if recipient is "broadcast" or empty
     pub fn is_broadcast(&self) -> bool {
         self.recipient == "broadcast" || self.recipient.is_empty()
     }
-    
+
     /// Get message age in seconds
     ///
     /// **Returns:** Seconds since message was created
@@ -365,7 +365,7 @@ impl Message {
             .as_secs();
         now.saturating_sub(self.timestamp)
     }
-    
+
     /// Check if message has expired
     ///
     /// ## Parameters
@@ -411,15 +411,11 @@ impl std::fmt::Display for Message {
         } else {
             self.content.clone()
         };
-        
+
         write!(
             f,
             "Message[id={}, sender={}, recipient={}, content={}, type={}]",
-            self.id,
-            self.sender,
-            self.recipient,
-            content_preview,
-            self.message_type
+            self.id, self.sender, self.recipient, content_preview, self.message_type
         )
     }
 }
@@ -430,12 +426,8 @@ mod tests {
 
     #[test]
     fn test_message_creation() {
-        let message = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Hello!".to_string(),
-        );
-        
+        let message = Message::new("Alice".to_string(), "Bob".to_string(), "Hello!".to_string());
+
         assert_eq!(message.sender, "Alice");
         assert_eq!(message.recipient, "Bob");
         assert_eq!(message.content, "Hello!");
@@ -452,22 +444,19 @@ mod tests {
             "SHUTDOWN".to_string(),
             MessageType::Control,
         );
-        
+
         assert_eq!(message.message_type, "Control");
     }
 
     #[test]
     fn test_message_mark_encrypted() {
-        let mut message = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Secret".to_string(),
-        );
-        
+        let mut message =
+            Message::new("Alice".to_string(), "Bob".to_string(), "Secret".to_string());
+
         assert_eq!(message.encrypted, false);
-        
+
         message.mark_encrypted();
-        
+
         assert_eq!(message.encrypted, true);
         assert_eq!(message.encryption_status, "full");
     }
@@ -480,66 +469,43 @@ mod tests {
             "Hello all!".to_string(),
         );
         assert!(broadcast.is_broadcast());
-        
-        let empty_recipient = Message::new(
-            "Alice".to_string(),
-            "".to_string(),
-            "Hello!".to_string(),
-        );
+
+        let empty_recipient =
+            Message::new("Alice".to_string(), "".to_string(), "Hello!".to_string());
         assert!(empty_recipient.is_broadcast());
-        
-        let direct = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Hey".to_string(),
-        );
+
+        let direct = Message::new("Alice".to_string(), "Bob".to_string(), "Hey".to_string());
         assert!(!direct.is_broadcast());
     }
 
     #[test]
     fn test_message_age() {
-        let message = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Test".to_string(),
-        );
-        
+        let message = Message::new("Alice".to_string(), "Bob".to_string(), "Test".to_string());
+
         // Message just created, age should be 0 or 1 second
         assert!(message.age() <= 1);
     }
 
     #[test]
     fn test_message_expiry() {
-        let message = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Test".to_string(),
-        );
-        
+        let message = Message::new("Alice".to_string(), "Bob".to_string(), "Test".to_string());
+
         // Not expired with 1 hour TTL
         assert!(!message.is_expired(3600));
-        
+
         // Expired with 0 TTL
         assert!(message.is_expired(0));
     }
 
     #[test]
     fn test_message_equality() {
-        let message1 = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Hello!".to_string(),
-        );
-        
-        let message2 = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Hello!".to_string(),
-        );
-        
+        let message1 = Message::new("Alice".to_string(), "Bob".to_string(), "Hello!".to_string());
+
+        let message2 = Message::new("Alice".to_string(), "Bob".to_string(), "Hello!".to_string());
+
         // Different IDs, not equal
         assert_ne!(message1, message2);
-        
+
         // Same ID (clone), equal
         let message1_clone = message1.clone();
         assert_eq!(message1, message1_clone);
@@ -552,9 +518,9 @@ mod tests {
             "Bob".to_string(),
             "This is a very long message that should be truncated in display format".to_string(),
         );
-        
+
         let display = format!("{}", message);
-        
+
         assert!(display.contains("Message["));
         assert!(display.contains("Alice"));
         assert!(display.contains("Bob"));
@@ -565,25 +531,21 @@ mod tests {
     #[test]
     fn test_message_hash() {
         use std::collections::HashSet;
-        
-        let message1 = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "Hello!".to_string(),
-        );
-        
+
+        let message1 = Message::new("Alice".to_string(), "Bob".to_string(), "Hello!".to_string());
+
         let message2 = message1.clone(); // Same ID
         let message3 = Message::new(
             "Alice".to_string(),
             "Bob".to_string(),
             "Different!".to_string(),
         );
-        
+
         let mut set = HashSet::new();
         set.insert(message1.clone());
         set.insert(message2.clone()); // Should not add (same ID)
         set.insert(message3);
-        
+
         assert_eq!(set.len(), 2); // Only 2 unique messages
     }
 }

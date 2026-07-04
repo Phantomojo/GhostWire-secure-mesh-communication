@@ -35,8 +35,12 @@ impl VectorClock {
         for node in all_nodes {
             let a = self.clocks.get(node).copied().unwrap_or(0);
             let b = other.clocks.get(node).copied().unwrap_or(0);
-            if a < b { less = true; }
-            if a > b { greater = true; }
+            if a < b {
+                less = true;
+            }
+            if a > b {
+                greater = true;
+            }
         }
         match (less, greater) {
             (true, false) => Some(std::cmp::Ordering::Less),

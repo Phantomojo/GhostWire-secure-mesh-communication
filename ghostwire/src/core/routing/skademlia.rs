@@ -79,7 +79,7 @@ impl HardenedNodeId {
     }
 
     fn compute_id(public_key: &[u8], nonce: u64) -> [u8; 32] {
-        use crate::genesis_constants::{POW_DOMAIN, genesis_derive};
+        use crate::genesis_constants::{genesis_derive, POW_DOMAIN};
         let mut ikm = public_key.to_vec();
         ikm.extend_from_slice(&nonce.to_le_bytes());
         genesis_derive(POW_DOMAIN, &ikm)
@@ -190,10 +190,7 @@ impl DiverseRoutingTable {
         }
 
         *count += 1;
-        self.entries
-            .write()
-            .await
-            .insert(peer_id, (ip, node_id));
+        self.entries.write().await.insert(peer_id, (ip, node_id));
         Ok(true)
     }
 
@@ -224,7 +221,11 @@ impl DiverseRoutingTable {
             .collect();
 
         with_dist.sort_by(|a, b| a.1.cmp(&b.1));
-        with_dist.into_iter().take(limit).map(|(id, _)| id).collect()
+        with_dist
+            .into_iter()
+            .take(limit)
+            .map(|(id, _)| id)
+            .collect()
     }
 
     pub async fn len(&self) -> usize {
@@ -458,14 +459,21 @@ mod tests {
         let pub_key = vec![0xAB; 32];
         let node_id = HardenedNodeId::generate(&pub_key);
         assert!(HardenedNodeId::verify(&pub_key, node_id.nonce, &node_id.id));
-        assert!(HardenedNodeId::meets_difficulty(&node_id.id, NODE_ID_DIFFICULTY));
+        assert!(HardenedNodeId::meets_difficulty(
+            &node_id.id,
+            NODE_ID_DIFFICULTY
+        ));
     }
 
     #[test]
     fn wrong_nonce_fails_verification() {
         let pub_key = vec![0xCD; 32];
         let node_id = HardenedNodeId::generate(&pub_key);
-        assert!(!HardenedNodeId::verify(&pub_key, node_id.nonce + 1, &node_id.id));
+        assert!(!HardenedNodeId::verify(
+            &pub_key,
+            node_id.nonce + 1,
+            &node_id.id
+        ));
     }
 
     #[tokio::test]

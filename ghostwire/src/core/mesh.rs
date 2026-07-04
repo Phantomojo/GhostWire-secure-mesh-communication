@@ -15,8 +15,7 @@ use libp2p::kad::Behaviour as Kad;
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
-        Behaviour as Gossipsub, Message as GossipsubMessage,
-        MessageAuthenticity, MessageId,
+        Behaviour as Gossipsub, Message as GossipsubMessage, MessageAuthenticity, MessageId,
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig},
@@ -27,8 +26,8 @@ use libp2p::{
 use libp2p_webrtc as webrtc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
@@ -596,7 +595,10 @@ impl MeshTransport {
 
     pub async fn get_topology(&self) -> MeshTopology {
         let topo = self.topology.read().await;
-        let nodes = topo.iter().map(|(id, node)| (id.clone(), node.clone())).collect();
+        let nodes = topo
+            .iter()
+            .map(|(id, node)| (id.clone(), node.clone()))
+            .collect();
 
         MeshTopology {
             nodes,
@@ -729,8 +731,8 @@ impl MeshDriver {
             MeshCommand::ConnectPeer { peer_id, reply } => {
                 // Subscribe to the peer's DM topic so we can receive their replies
                 let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-            let sub_result = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
-            tracing::info!("Subscribe to {}: {:?}", dm_topic, sub_result);
+                let sub_result = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
+                tracing::info!("Subscribe to {}: {:?}", dm_topic, sub_result);
 
                 let res = self
                     .swarm
@@ -810,44 +812,62 @@ impl MeshDriver {
                 message.vector_clock = self.vector_clock.clone();
 
                 let mut encrypted_msg = message.clone();
-                let use_ratchet = self.encryption_manager.has_ratchet_session(&recipient.to_string());
+                let use_ratchet = self
+                    .encryption_manager
+                    .has_ratchet_session(&recipient.to_string());
 
                 let enc_result: Result<_, anyhow::Error> = if use_ratchet {
-                    self.encryption_manager.encrypt_message_ratchet(
-                        &message.content,
-                        &message.recipient,
-                        EncMessageType::Text,
-                    ).map_err(|e| anyhow::anyhow!("{}", e))
+                    self.encryption_manager
+                        .encrypt_message_ratchet(
+                            &message.content,
+                            &message.recipient,
+                            EncMessageType::Text,
+                        )
+                        .map_err(|e| anyhow::anyhow!("{}", e))
                 } else {
-                    self.encryption_manager.encrypt_message(
-                        &message.content,
-                        &message.recipient,
-                        EncMessageType::Text,
-                    ).map_err(|e| anyhow::anyhow!("{}", e))
+                    self.encryption_manager
+                        .encrypt_message(&message.content, &message.recipient, EncMessageType::Text)
+                        .map_err(|e| anyhow::anyhow!("{}", e))
                 };
 
                 if let Ok(encrypted_content) = enc_result {
-                    encrypted_msg.content =
-                        base64::engine::general_purpose::STANDARD.encode(&encrypted_content.ciphertext);
+                    encrypted_msg.content = base64::engine::general_purpose::STANDARD
+                        .encode(&encrypted_content.ciphertext);
                     encrypted_msg.encrypted = true;
                     encrypted_msg.encryption_status = "full".to_string();
-                    let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
-                    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_content.signature);
-                    let version_prefix = if encrypted_content.version == 0x04 { "v4:" } else { "" };
+                    let nonce_b64 =
+                        base64::engine::general_purpose::STANDARD.encode(&encrypted_content.nonce);
+                    let sig_b64 = base64::engine::general_purpose::STANDARD
+                        .encode(&encrypted_content.signature);
+                    let version_prefix = if encrypted_content.version == 0x04 {
+                        "v4:"
+                    } else {
+                        ""
+                    };
                     // v4 prefix: receiver uses this to select ratchet vs static decrypt
                     encrypted_msg.message_type = if let Some(ref pq) = encrypted_content.pq_key {
                         let header_b64 = base64::engine::general_purpose::STANDARD.encode(pq);
-                        format!("encrypted:{}{}:{}:{}", version_prefix, nonce_b64, sig_b64, header_b64)
+                        format!(
+                            "encrypted:{}{}:{}:{}",
+                            version_prefix, nonce_b64, sig_b64, header_b64
+                        )
                     } else {
                         format!("encrypted:{}{}:{}", version_prefix, nonce_b64, sig_b64)
                     };
                 } else {
-                    tracing::warn!("Failed to encrypt DM to {}, dropping message (plaintext rejected)", recipient);
-                    let _ = reply.send(Err(anyhow::anyhow!("Encryption failed for DM to {}", recipient)));
+                    tracing::warn!(
+                        "Failed to encrypt DM to {}, dropping message (plaintext rejected)",
+                        recipient
+                    );
+                    let _ = reply.send(Err(anyhow::anyhow!(
+                        "Encryption failed for DM to {}",
+                        recipient
+                    )));
                     return;
                 }
 
-                self.pending_messages.insert(encrypted_msg.id, encrypted_msg.clone());
+                self.pending_messages
+                    .insert(encrypted_msg.id, encrypted_msg.clone());
                 self.reliability.on_message_sent(encrypted_msg.id);
 
                 use crate::core::wire_protocol::{Frame, FrameKind};
@@ -861,30 +881,51 @@ impl MeshDriver {
                 };
                 let data = frame.to_bytes();
 
-                if let Err(e) = self.swarm
+                if let Err(e) = self
+                    .swarm
                     .behaviour_mut()
                     .gossipsub
                     .publish(topic.clone(), data.clone())
                 {
-                    tracing::warn!("Gossipsub publish to {} failed: {}, trying DTN fallback", recipient, e);
+                    tracing::warn!(
+                        "Gossipsub publish to {} failed: {}, trying DTN fallback",
+                        recipient,
+                        e
+                    );
 
                     if let Some(ref dtn_store) = self.dtn_store {
-                        let destination = *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
+                        let destination =
+                            *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
                         let bundle = crate::core::dtn::bundle::DtnBundle::new(data, destination);
                         if dtn_store.store(bundle).await {
-                            tracing::info!("DTN fallback: message queued for epidemic delivery to {}", recipient);
+                            tracing::info!(
+                                "DTN fallback: message queued for epidemic delivery to {}",
+                                recipient
+                            );
                             let _ = reply.send(Ok(()));
                             return;
                         } else {
-                            tracing::warn!("DTN store full or bundle expired, message dropped for {}", recipient);
+                            tracing::warn!(
+                                "DTN store full or bundle expired, message dropped for {}",
+                                recipient
+                            );
                         }
                     }
 
-                    let _ = reply.send(Err(anyhow::anyhow!("Direct send and DTN fallback both failed for {}: {}", recipient, e)));
+                    let _ = reply.send(Err(anyhow::anyhow!(
+                        "Direct send and DTN fallback both failed for {}: {}",
+                        recipient,
+                        e
+                    )));
                     return;
                 }
 
-                tracing::info!("Sent direct message to peer {} on topic {} (ratchet={})", recipient, topic, use_ratchet);
+                tracing::info!(
+                    "Sent direct message to peer {} on topic {} (ratchet={})",
+                    recipient,
+                    topic,
+                    use_ratchet
+                );
                 let _ = reply.send(Ok(()));
             }
             MeshCommand::GetListeners { reply } => {
@@ -910,23 +951,26 @@ impl MeshDriver {
 
     async fn handle_swarm_event(&mut self, event: SwarmEvent<MeshBehaviourEvent>) {
         // Handle mDNS discovery — auto-connect to discovered peers
-        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
-            libp2p::mdns::Event::Discovered(peers),
-        )) = &event
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(libp2p::mdns::Event::Discovered(
+            peers,
+        ))) = &event
         {
             for (peer_id, addr) in peers {
                 tracing::info!("mDNS discovered peer {} at {}", peer_id, addr);
                 // Add to Kademlia routing table
-                self.swarm.behaviour_mut().kad.add_address(peer_id, addr.clone());
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(peer_id, addr.clone());
                 // Attempt to connect
                 let _ = self.swarm.dial(addr.clone());
             }
             return;
         }
 
-        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(
-            libp2p::mdns::Event::Expired(peers),
-        )) = &event
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(libp2p::mdns::Event::Expired(
+            peers,
+        ))) = &event
         {
             for (peer_id, _addr) in peers {
                 tracing::info!("mDNS peer expired: {}", peer_id);
@@ -943,40 +987,46 @@ impl MeshDriver {
         {
             tracing::info!(
                 "Connection established with {} ({} total)",
-                peer_id, num_established
+                peer_id,
+                num_established
             );
             // Subscribe to this peer's DM topic
             let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
             let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
 
             let my_id = self._identity.id.clone();
-            let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
-                self.encryption_manager.get_public_key()
-            );
+            let my_pubkey = base64::engine::general_purpose::STANDARD
+                .encode(self.encryption_manager.get_public_key());
             let mut handshake = Message::new(my_id, peer_id.to_string(), my_pubkey);
             handshake.message_type = "handshake".to_string();
-            self.swarm.behaviour_mut().request_response.send_request(
+            self.swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(peer_id, ChatRequest(handshake));
+            tracing::info!(
+                "Sent encryption handshake via request_response to {} (key: {} bytes)",
                 peer_id,
-                ChatRequest(handshake),
+                self.encryption_manager.get_public_key().len()
             );
-            tracing::info!("Sent encryption handshake via request_response to {} (key: {} bytes)", peer_id, self.encryption_manager.get_public_key().len());
 
             {
                 let mut topo = self.topology.write().await;
-                topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
-                    id: peer_id.to_string(),
-                    peer_id: *peer_id,
-                    last_seen_addresses: Vec::new(),
-                    username: String::new(),
-                    public_key: Vec::new(),
-                    last_seen: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    connection_quality: 1.0,
-                    is_online: true,
-                    threat_level: ThreatLevel::Low,
-                }).is_online = true;
+                topo.entry(peer_id.to_string())
+                    .or_insert_with(|| MeshNode {
+                        id: peer_id.to_string(),
+                        peer_id: *peer_id,
+                        last_seen_addresses: Vec::new(),
+                        username: String::new(),
+                        public_key: Vec::new(),
+                        last_seen: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        connection_quality: 1.0,
+                        is_online: true,
+                        threat_level: ThreatLevel::Low,
+                    })
+                    .is_online = true;
                 if let Some(node) = topo.get_mut(&peer_id.to_string()) {
                     node.last_seen = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -986,7 +1036,10 @@ impl MeshDriver {
             }
 
             if let Some(cache) = &self.peer_count_cache {
-                let count = self.topology.read().await
+                let count = self
+                    .topology
+                    .read()
+                    .await
                     .values()
                     .filter(|n| n.is_online)
                     .count() as usize;
@@ -1010,7 +1063,10 @@ impl MeshDriver {
             }
 
             if let Some(cache) = &self.peer_count_cache {
-                let count = self.topology.read().await
+                let count = self
+                    .topology
+                    .read()
+                    .await
                     .values()
                     .filter(|n| n.is_online)
                     .count() as usize;
@@ -1019,7 +1075,11 @@ impl MeshDriver {
         }
 
         if let SwarmEvent::Behaviour(MeshBehaviourEvent::Identify(
-            libp2p::identify::Event::Received { peer_id, info, connection_id: _ },
+            libp2p::identify::Event::Received {
+                peer_id,
+                info,
+                connection_id: _,
+            },
         )) = &event
         {
             tracing::info!(
@@ -1057,9 +1117,9 @@ impl MeshDriver {
         )) = event
         {
             match result {
-                libp2p::kad::QueryResult::GetRecord(Ok(
-                    libp2p::kad::GetRecordOk::FoundRecord(record),
-                )) => {
+                libp2p::kad::QueryResult::GetRecord(Ok(libp2p::kad::GetRecordOk::FoundRecord(
+                    record,
+                ))) => {
                     if let Some(reply) = self.pending_get_queries.remove(&id) {
                         let _ = reply.send(Ok(record.record.value.clone()));
                     } else {
@@ -1183,7 +1243,11 @@ impl MeshDriver {
                     let pong = WirePong { ts: ping.ts };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
                         let pong_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-                        let _ = self.swarm.behaviour_mut().gossipsub.publish(pong_topic, pong_frame.to_bytes());
+                        let _ = self
+                            .swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .publish(pong_topic, pong_frame.to_bytes());
                         tracing::debug!("Responded to ping from {} with pong", peer_id);
                     }
                 }
@@ -1238,18 +1302,28 @@ impl MeshDriver {
 
         // Feature 4: Multi-hop relay forwarding
         // If message is a DM not intended for us, and hops < MAX_HOPS, forward it
-        if !msg.is_broadcast() && msg.recipient != self.local_peer_id.to_string() && msg.hops < MAX_HOPS {
+        if !msg.is_broadcast()
+            && msg.recipient != self.local_peer_id.to_string()
+            && msg.hops < MAX_HOPS
+        {
             let mut forwarded = msg.clone();
             forwarded.hops += 1;
             tracing::info!(
                 "Relaying message {} (hop {}/{}) to {}",
-                forwarded.id, forwarded.hops, MAX_HOPS, forwarded.recipient
+                forwarded.id,
+                forwarded.hops,
+                MAX_HOPS,
+                forwarded.recipient
             );
             // Publish to the recipient's DM topic
             let relay_topic = IdentTopic::new(&format!("ghostwire-dm-{}", forwarded.recipient));
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
-                let _ = self.swarm.behaviour_mut().gossipsub.publish(relay_topic, frame.to_bytes());
+                let _ = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(relay_topic, frame.to_bytes());
             }
         }
 
@@ -1262,7 +1336,11 @@ impl MeshDriver {
             // v3: encrypted:nonce:sig, v4: encrypted:v4:nonce:sig:header
             let after_encrypted = &msg.message_type["encrypted:".len()..];
             let is_ratchet = after_encrypted.starts_with("v4:");
-            let payload = if is_ratchet { &after_encrypted["v4:".len()..] } else { after_encrypted };
+            let payload = if is_ratchet {
+                &after_encrypted["v4:".len()..]
+            } else {
+                after_encrypted
+            };
             let payload_parts: Vec<&str> = payload.splitn(3, ':').collect();
 
             if payload_parts.len() >= 2 {
@@ -1279,9 +1357,8 @@ impl MeshDriver {
                     base64::engine::general_purpose::STANDARD.decode(nonce_b64),
                     base64::engine::general_purpose::STANDARD.decode(sig_b64),
                 ) {
-                    let pq_key_bytes = header_b64.and_then(|h| {
-                        base64::engine::general_purpose::STANDARD.decode(&h).ok()
-                    });
+                    let pq_key_bytes = header_b64
+                        .and_then(|h| base64::engine::general_purpose::STANDARD.decode(&h).ok());
 
                     let enc_msg = crate::core::encryption::EncryptedMessage {
                         ciphertext,
@@ -1300,10 +1377,12 @@ impl MeshDriver {
                     };
 
                     let decrypt_result: Result<String, anyhow::Error> = if is_ratchet {
-                        self.encryption_manager.decrypt_message_ratchet(&enc_msg)
+                        self.encryption_manager
+                            .decrypt_message_ratchet(&enc_msg)
                             .map_err(|e| anyhow::anyhow!("{}", e))
                     } else {
-                        self.encryption_manager.decrypt_message(&enc_msg)
+                        self.encryption_manager
+                            .decrypt_message(&enc_msg)
                             .map_err(|e| anyhow::anyhow!("{}", e))
                     };
 
@@ -1347,7 +1426,11 @@ impl MeshDriver {
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &ack_msg) {
                 let ack_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-                let _ = self.swarm.behaviour_mut().gossipsub.publish(ack_topic, frame.to_bytes());
+                let _ = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(ack_topic, frame.to_bytes());
                 debug!("Sent ACK for message {} to {}", msg.id, peer_id);
             }
         }
@@ -1360,10 +1443,12 @@ impl MeshDriver {
     }
 
     async fn handle_handshake(&mut self, peer_id: PeerId, msg: &Message) {
-        tracing::info!("🤝 Received Handshake from {} (sender_id: {})", peer_id, msg.sender);
-        if let Ok(pub_key_bytes) =
-            base64::engine::general_purpose::STANDARD.decode(&msg.content)
-        {
+        tracing::info!(
+            "🤝 Received Handshake from {} (sender_id: {})",
+            peer_id,
+            msg.sender
+        );
+        if let Ok(pub_key_bytes) = base64::engine::general_purpose::STANDARD.decode(&msg.content) {
             let key_len = pub_key_bytes.len();
             let key_type = if key_len >= 1248 {
                 crate::core::encryption::KeyType::Ultimate
@@ -1375,28 +1460,36 @@ impl MeshDriver {
                 pub_key_bytes.clone(),
                 key_type.clone(),
             );
-            self.encryption_manager.add_peer_key(
-                msg.sender.clone(),
-                pub_key_bytes,
-                key_type,
+            self.encryption_manager
+                .add_peer_key(msg.sender.clone(), pub_key_bytes, key_type);
+            tracing::info!(
+                "✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})",
+                peer_id,
+                key_len,
+                if key_len >= 1248 {
+                    "Ultimate"
+                } else {
+                    "Hybrid"
+                }
             );
-            tracing::info!("✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})", peer_id, key_len, if key_len >= 1248 { "Ultimate" } else { "Hybrid" });
 
             if !self.completed_handshakes.contains(&peer_id) {
                 self.completed_handshakes.insert(peer_id);
                 let my_id = self._identity.id.clone();
-                let my_pubkey = base64::engine::general_purpose::STANDARD.encode(
-                    self.encryption_manager.get_public_key()
-                );
+                let my_pubkey = base64::engine::general_purpose::STANDARD
+                    .encode(self.encryption_manager.get_public_key());
                 let mut reply = Message::new(my_id, peer_id.to_string(), my_pubkey);
                 reply.message_type = "handshake".to_string();
-                self.swarm.behaviour_mut().request_response.send_request(
-                    &peer_id,
-                    ChatRequest(reply),
-                );
+                self.swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_request(&peer_id, ChatRequest(reply));
                 tracing::info!("Sent handshake reply via request_response to {}", peer_id);
             } else {
-                tracing::info!("Already exchanged handshakes with {}, skipping reply", peer_id);
+                tracing::info!(
+                    "Already exchanged handshakes with {}, skipping reply",
+                    peer_id
+                );
             }
         } else {
             tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
@@ -1440,7 +1533,12 @@ impl MeshDriver {
 
                 use crate::core::wire_protocol::{Frame, FrameKind};
                 if let Ok(frame) = Frame::encode(FrameKind::Message, &retransmit) {
-                    if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(topic, frame.to_bytes()) {
+                    if let Err(e) = self
+                        .swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(topic, frame.to_bytes())
+                    {
                         tracing::warn!("Retry publish to {} failed: {}", recipient, e);
                     } else {
                         tracing::info!("Retransmitted message {} to {}", msg_id, recipient);
@@ -1454,20 +1552,29 @@ impl MeshDriver {
     }
 
     async fn send_periodic_pings(&mut self) {
-        let peers: Vec<PeerId> = self.topology.read().await.keys()
+        let peers: Vec<PeerId> = self
+            .topology
+            .read()
+            .await
+            .keys()
             .filter_map(|id| id.parse().ok())
             .collect();
 
         for peer_id in peers {
             use crate::core::wire_protocol::{Frame, FrameKind, WirePing};
-                    let ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u32;
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u32;
             let ping = WirePing { ts };
             if let Ok(frame) = Frame::encode(FrameKind::Ping, &ping) {
                 let topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-                if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(topic, frame.to_bytes()) {
+                if let Err(e) = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic, frame.to_bytes())
+                {
                     tracing::warn!("Failed to send ping to {}: {}", peer_id, e);
                 } else {
                     self.peer_health.record_ping(&peer_id.to_string()).await;
@@ -1615,7 +1722,9 @@ impl MeshManager {
     }
 
     pub async fn publish_to_topic(&self, topic: &str, message: &str) -> Result<()> {
-        self.transport.publish_to_topic(topic, message.as_bytes().to_vec()).await
+        self.transport
+            .publish_to_topic(topic, message.as_bytes().to_vec())
+            .await
     }
 
     /// Get all messages received by this node (in-memory history)
@@ -1652,7 +1761,7 @@ unsafe impl Send for MeshTransport {}
 mod tests {
     use super::*;
     use libp2p::PeerId;
-use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, VecDeque};
 
     #[test]
     fn test_mesh_node_serialization() {

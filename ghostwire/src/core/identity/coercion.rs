@@ -64,24 +64,25 @@ impl CoercionConfig {
     /// Argon2id parameters — tuned for ~1 second on a mid-range phone
     fn argon2_params() -> Params {
         Params::new(
-            65536,  // 64 MB memory
-            3,      // 3 iterations
-            4,      // 4 parallel lanes
+            65536,    // 64 MB memory
+            3,        // 3 iterations
+            4,        // 4 parallel lanes
             Some(32), // 32-byte output
-        ).expect("valid Argon2 params")
+        )
+        .expect("valid Argon2 params")
     }
 
     /// Derive a namespace key from a password and salt
     pub fn derive_key(password: &str, salt_hex: &str) -> Result<DerivedKey> {
-        let salt = hex::decode(salt_hex)
-            .map_err(|_| anyhow::anyhow!("Invalid salt hex"))?;
+        let salt = hex::decode(salt_hex).map_err(|_| anyhow::anyhow!("Invalid salt hex"))?;
         let argon2 = Argon2::new(
             argon2::Algorithm::Argon2id,
             Version::V0x13,
             Self::argon2_params(),
         );
         let mut key = [0u8; 32];
-        argon2.hash_password_into(password.as_bytes(), &salt, &mut key)
+        argon2
+            .hash_password_into(password.as_bytes(), &salt, &mut key)
             .map_err(|e| anyhow::anyhow!("Argon2 failed: {:?}", e))?;
         Ok(DerivedKey(key))
     }
@@ -252,7 +253,9 @@ mod tests {
 
         let real = config.unlock("real_pass").unwrap();
         let duress = config.unlock("duress_pass").unwrap();
-        assert_ne!(real.namespace_key.0, duress.namespace_key.0,
-            "Real and duress keys must be cryptographically independent");
+        assert_ne!(
+            real.namespace_key.0, duress.namespace_key.0,
+            "Real and duress keys must be cryptographically independent"
+        );
     }
 }

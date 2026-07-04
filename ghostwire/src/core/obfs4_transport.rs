@@ -52,7 +52,7 @@ impl Obfs4State {
         // Generate a public key representation
         // Note: The actual obfs4 handshake uses x25519 elligator2 keys
         // This is a simplified version for now
-        let public_key = secret.to_vec();  // Placeholder - real impl uses elligator2
+        let public_key = secret.to_vec(); // Placeholder - real impl uses elligator2
 
         Ok(Self {
             config,
@@ -81,7 +81,7 @@ impl Obfs4State {
 pub fn generate_obfs4_keypair() -> ([u8; 32], Vec<u8>) {
     let mut secret = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut secret);
-    let public = secret.to_vec();  // Placeholder for real elligator2 public key
+    let public = secret.to_vec(); // Placeholder for real elligator2 public key
     (secret, public)
 }
 
@@ -105,7 +105,7 @@ pub fn obfs4_version() -> &'static str {
 /// Check if obfs4 is ready for use
 /// Note: The current obfs4 crate is alpha quality
 pub fn is_obfs4_production_ready() -> bool {
-    false  // Alpha version - use with caution
+    false // Alpha version - use with caution
 }
 
 #[cfg(test)]

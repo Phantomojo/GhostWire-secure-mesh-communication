@@ -63,7 +63,8 @@ impl TransportPsk {
     pub fn generate() -> Result<Self> {
         let rng = SystemRandom::new();
         let mut key = [0u8; 32];
-        rng.fill(&mut key).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+        rng.fill(&mut key)
+            .map_err(|_| anyhow::anyhow!("RNG failure"))?;
         Ok(Self(key))
     }
 
@@ -194,7 +195,11 @@ pub fn ws_frame_decode(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     let total = header_len + mask_len + payload_len;
 
     if data.len() < total {
-        anyhow::bail!("Incomplete WebSocket frame: need {}, have {}", total, data.len());
+        anyhow::bail!(
+            "Incomplete WebSocket frame: need {}, have {}",
+            total,
+            data.len()
+        );
     }
 
     let mut payload = data[header_len + mask_len..total].to_vec();
@@ -220,7 +225,8 @@ pub fn ss_encrypt_chunk(data: &[u8], psk: &TransportPsk, rng: &SystemRandom) -> 
     let cipher = ChaCha20Poly1305::new(key);
 
     let mut nonce_bytes = [0u8; 12];
-    rng.fill(&mut nonce_bytes).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| anyhow::anyhow!("RNG failure"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher

@@ -159,24 +159,31 @@ impl DaemonClient {
 
     /// Get my identity info
     pub async fn get_identity(&self) -> Option<DaemonIdentity> {
-        match self
-            .authenticated_get("/api/v2/identity")
-            .send()
-            .await
-        {
+        match self.authenticated_get("/api/v2/identity").send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
                         let data = val.get("data").unwrap_or(&val);
                         Some(DaemonIdentity {
-                            id: data.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+                            id: data
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string(),
                             nickname: data
                                 .get("nickname")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("unnamed")
                                 .to_string(),
-                            did: data.get("did").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                            is_locked: data.get("is_locked").and_then(|v| v.as_bool()).unwrap_or(false),
+                            did: data
+                                .get("did")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            is_locked: data
+                                .get("is_locked")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false),
                         })
                     }
                     Err(e) => {
@@ -198,11 +205,7 @@ impl DaemonClient {
 
     /// Get the list of contacts/peers
     pub async fn get_contacts(&self) -> Vec<DaemonContact> {
-        match self
-            .authenticated_get("/api/v2/peers")
-            .send()
-            .await
-        {
+        match self.authenticated_get("/api/v2/peers").send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
@@ -351,42 +354,39 @@ impl DaemonClient {
             return Vec::new();
         }
 
-        let url = format!(
-            "/api/v2/messages?peer_id={}&limit=50",
-            peer_id,
-        );
+        let url = format!("/api/v2/messages?peer_id={}&limit=50", peer_id,);
 
         match self.authenticated_get(&url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
                         let data = val.get("data").unwrap_or(&val);
-                        let msgs = data
-                            .as_array()
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                data.get("messages")
-                                    .and_then(|v| v.as_array())
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
+                        let msgs = data.as_array().cloned().unwrap_or_else(|| {
+                            data.get("messages")
+                                .and_then(|v| v.as_array())
+                                .cloned()
+                                .unwrap_or_default()
+                        });
 
                         let result: Vec<DaemonMessage> = msgs
                             .iter()
                             .filter_map(|m| {
-                                let sender = m.get("sender")
+                                let sender = m
+                                    .get("sender")
                                     .or_else(|| m.get("sender_id"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown")
                                     .to_string();
 
-                                let content = m.get("content")
+                                let content = m
+                                    .get("content")
                                     .or_else(|| m.get("message"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("")
                                     .to_string();
 
-                                let timestamp = m.get("timestamp")
+                                let timestamp = m
+                                    .get("timestamp")
                                     .or_else(|| m.get("created_at"))
                                     .and_then(|v| v.as_u64())
                                     .unwrap_or(0);
@@ -442,8 +442,14 @@ impl DaemonClient {
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
                         let data = val.get("data").unwrap_or(&val);
-                        let active = data.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
-                        let layer = data.get("active_layer").and_then(|v| v.as_str()).unwrap_or("none");
+                        let active = data
+                            .get("active")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let layer = data
+                            .get("active_layer")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("none");
                         let latency = data.get("latency_us").and_then(|v| v.as_u64());
                         if active {
                             match latency {

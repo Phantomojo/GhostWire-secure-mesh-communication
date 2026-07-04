@@ -85,7 +85,12 @@ impl GemmaClient {
     /// * `base_url` - Ollama server URL (e.g., "http://localhost:11434")
     /// * `model` - Gemma 4 model tag (e.g., "gemma4:e2b", "gemma4:26b")
     pub fn new(base_url: &str, model: &str) -> Self {
-        Self::with_backend(base_url, model, InferenceBackend::Ollama, Gemma4Variant::E2B)
+        Self::with_backend(
+            base_url,
+            model,
+            InferenceBackend::Ollama,
+            Gemma4Variant::E2B,
+        )
     }
 
     /// Create new Gemma 4 client with explicit backend and variant
@@ -292,7 +297,9 @@ impl GemmaClient {
     }
 
     /// Get list of available models from Ollama
-    pub async fn list_models(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn list_models(
+        &self,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self
             .client
             .get(format!("{}/api/tags", self.base_url))

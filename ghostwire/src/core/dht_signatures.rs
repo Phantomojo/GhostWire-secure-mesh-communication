@@ -48,9 +48,8 @@ impl SignedDhtRecord {
         let publisher_pubkey = signing_key.verifying_key().to_bytes();
         let timestamp = now_secs();
 
-        let to_sign = Self::signable_bytes(
-            &dht_key, &value, &publisher_pubkey, timestamp, sequence
-        );
+        let to_sign =
+            Self::signable_bytes(&dht_key, &value, &publisher_pubkey, timestamp, sequence);
         let signature = signing_key.sign(&to_sign).to_bytes().to_vec();
 
         Ok(Self {
@@ -71,7 +70,8 @@ impl SignedDhtRecord {
         if age_secs > self.ttl_secs {
             anyhow::bail!(
                 "DHT record expired: age={}s ttl={}s",
-                age_secs, self.ttl_secs
+                age_secs,
+                self.ttl_secs
             );
         }
 
@@ -95,15 +95,16 @@ impl SignedDhtRecord {
         let sig = Signature::from_slice(&self.signature)
             .map_err(|e| anyhow::anyhow!("Invalid signature bytes: {}", e))?;
 
-        pubkey.verify(&to_verify, &sig)
-            .map_err(|_| anyhow::anyhow!("DHT record signature verification failed — poisoned record?"))
+        pubkey.verify(&to_verify, &sig).map_err(|_| {
+            anyhow::anyhow!("DHT record signature verification failed — poisoned record?")
+        })
     }
 
     /// Whether this record is fresher than another (for conflict resolution)
     pub fn is_fresher_than(&self, other: &Self) -> bool {
         // Higher sequence wins; if equal, newer timestamp wins
-        self.sequence > other.sequence ||
-            (self.sequence == other.sequence && self.timestamp > other.timestamp)
+        self.sequence > other.sequence
+            || (self.sequence == other.sequence && self.timestamp > other.timestamp)
     }
 
     fn signable_bytes(
@@ -158,7 +159,10 @@ impl DhtRecordVerifier {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -173,26 +177,16 @@ mod tests {
     #[test]
     fn sign_and_verify_roundtrip() {
         let key = make_signing_key();
-        let record = SignedDhtRecord::new(
-            [0x01u8; 32],
-            b"test value".to_vec(),
-            &key,
-            1,
-            3600,
-        ).unwrap();
+        let record =
+            SignedDhtRecord::new([0x01u8; 32], b"test value".to_vec(), &key, 1, 3600).unwrap();
         assert!(record.verify().is_ok());
     }
 
     #[test]
     fn tampered_value_fails_verification() {
         let key = make_signing_key();
-        let mut record = SignedDhtRecord::new(
-            [0x02u8; 32],
-            b"original".to_vec(),
-            &key,
-            1,
-            3600,
-        ).unwrap();
+        let mut record =
+            SignedDhtRecord::new([0x02u8; 32], b"original".to_vec(), &key, 1, 3600).unwrap();
         record.value = b"tampered".to_vec();
         assert!(record.verify().is_err());
     }

@@ -628,7 +628,7 @@ impl EncryptionManager {
         const POLY1305_TAG_LEN: usize = 16;
         const MIN_CIPHERTEXT_LEN: usize = POLY1305_TAG_LEN;
         const MAX_MESSAGE_LEN: usize = 256 * 1024 * 1024; // 256 MB
-        
+
         // Validate ciphertext length BEFORE any arithmetic operations
         if ciphertext.len() < MIN_CIPHERTEXT_LEN {
             tracing::warn!(
@@ -638,7 +638,7 @@ impl EncryptionManager {
             );
             return Err("Ciphertext too short (possible truncation attack)".into());
         }
-        
+
         // Prevent DoS via large memory allocations
         if ciphertext.len() > MAX_MESSAGE_LEN {
             tracing::warn!(
@@ -653,14 +653,12 @@ impl EncryptionManager {
         let nonce = XNonce::from_slice(nonce);
 
         // Decrypt with sanitized error messages (don't leak internal details)
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| {
-                // Log full error internally for debugging
-                tracing::debug!(error = ?e, "XChaCha20 decryption failed");
-                // Return generic error to attacker (prevent oracle attacks)
-                "Decryption failed (authentication failed or corrupted data)".into()
-            })
+        cipher.decrypt(nonce, ciphertext).map_err(|e| {
+            // Log full error internally for debugging
+            tracing::debug!(error = ?e, "XChaCha20 decryption failed");
+            // Return generic error to attacker (prevent oracle attacks)
+            "Decryption failed (authentication failed or corrupted data)".into()
+        })
     }
 
     fn derive_session_key(
@@ -704,7 +702,9 @@ impl EncryptionManager {
         // An attacker sending a small-order point (e.g., the zero point) would produce
         // an all-zero DH output, bypassing encryption entirely.
         if shared_secret.as_bytes() == &[0u8; 32] {
-            return Err("X25519 shared secret is all zeros — small-order point attack detected".into());
+            return Err(
+                "X25519 shared secret is all zeros — small-order point attack detected".into(),
+            );
         }
 
         // Derive session key using HKDF-SHA256 (Robust way)
@@ -791,11 +791,10 @@ impl EncryptionManager {
         let nonce = &data[..24];
         let ciphertext = &data[24..];
 
-        Self::decrypt_with_xchacha20(ciphertext, nonce, &key)
-            .map_err(|e| {
-                tracing::debug!(error = ?e, "CLI decryption failed");
-                DecryptionError::DecryptionFailed
-            })
+        Self::decrypt_with_xchacha20(ciphertext, nonce, &key).map_err(|e| {
+            tracing::debug!(error = ?e, "CLI decryption failed");
+            DecryptionError::DecryptionFailed
+        })
     }
 
     // Enhanced signature methods
@@ -943,14 +942,16 @@ impl EncryptionManager {
         peer_id: &str,
         bob_public_key: &[u8; 32],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let session_key = self.derive_session_key(peer_id, &[
-            self.key_pair.public_key[32..64].to_vec(),
-        ].concat())?;
+        let session_key = self.derive_session_key(
+            peer_id,
+            &[self.key_pair.public_key[32..64].to_vec()].concat(),
+        )?;
 
         let mut shared_secret = [0u8; 32];
         shared_secret.copy_from_slice(&session_key);
 
-        self.ratchet_sessions.init_alice(peer_id, &shared_secret, bob_public_key);
+        self.ratchet_sessions
+            .init_alice(peer_id, &shared_secret, bob_public_key);
         Ok(())
     }
 
@@ -959,9 +960,10 @@ impl EncryptionManager {
         peer_id: &str,
         alice_public_key: &[u8; 32],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let session_key = self.derive_session_key(peer_id, &[
-            self.key_pair.public_key[32..64].to_vec(),
-        ].concat())?;
+        let session_key = self.derive_session_key(
+            peer_id,
+            &[self.key_pair.public_key[32..64].to_vec()].concat(),
+        )?;
 
         let mut shared_secret = [0u8; 32];
         shared_secret.copy_from_slice(&session_key);
@@ -979,7 +981,8 @@ impl EncryptionManager {
         let mut bob_secret = [0u8; 32];
         bob_secret.copy_from_slice(&priv_key_bytes[x25519_start..x25519_start + 32]);
 
-        self.ratchet_sessions.init_bob(peer_id, &shared_secret, &bob_secret);
+        self.ratchet_sessions
+            .init_bob(peer_id, &shared_secret, &bob_secret);
         Ok(())
     }
 
@@ -993,7 +996,9 @@ impl EncryptionManager {
             return Err(format!("Peer key {} is revoked", peer_id).into());
         }
 
-        let ratchet_msg = self.ratchet_sessions.encrypt(peer_id, message.as_bytes())
+        let ratchet_msg = self
+            .ratchet_sessions
+            .encrypt(peer_id, message.as_bytes())
             .map_err(|e| format!("Ratchet encrypt failed: {}", e))?;
 
         let signature = self.sign_message(&ratchet_msg.ciphertext)?;
@@ -1030,7 +1035,9 @@ impl EncryptionManager {
             return Err("Expected ratchet message (v4)".into());
         }
 
-        let header_json = encrypted_msg.pq_key.as_ref()
+        let header_json = encrypted_msg
+            .pq_key
+            .as_ref()
             .ok_or("Missing ratchet header")?;
         let header: double_ratchet::RatchetHeader = serde_json::from_slice(header_json)
             .map_err(|e| format!("Invalid ratchet header: {}", e))?;
@@ -1041,10 +1048,14 @@ impl EncryptionManager {
             nonce: encrypted_msg.nonce.clone(),
         };
 
-        let peer_id = encrypted_msg.key_id.strip_prefix("ratchet:")
+        let peer_id = encrypted_msg
+            .key_id
+            .strip_prefix("ratchet:")
             .unwrap_or(&encrypted_msg.sender_id);
 
-        let plaintext = self.ratchet_sessions.decrypt(peer_id, &ratchet_msg)
+        let plaintext = self
+            .ratchet_sessions
+            .decrypt(peer_id, &ratchet_msg)
             .map_err(|e| format!("Ratchet decrypt failed: {}", e))?;
 
         String::from_utf8(plaintext).map_err(|e| e.into())

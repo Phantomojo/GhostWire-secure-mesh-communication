@@ -26,9 +26,9 @@ impl DeviceTier {
     /// (min_packet_size, max_padding, max_chaff_delay_ms, cover_min_ms, cover_max_ms)
     pub fn params(self) -> (usize, usize, u64, u64, u64) {
         match self {
-            Self::High   => (1024, 512, 200, 5_000, 15_000),
-            Self::Medium => (512,  256, 100, 3_000, 12_000),
-            Self::Low    => (256,  128,  50, 1_000,  5_000),
+            Self::High => (1024, 512, 200, 5_000, 15_000),
+            Self::Medium => (512, 256, 100, 3_000, 12_000),
+            Self::Low => (256, 128, 50, 1_000, 5_000),
         }
     }
 
@@ -40,7 +40,9 @@ impl DeviceTier {
                 let on_ac = std::fs::read_to_string("/sys/class/power_supply/AC/online")
                     .map(|s| s.trim() == "1")
                     .unwrap_or(false);
-                if on_ac { return Self::High; }
+                if on_ac {
+                    return Self::High;
+                }
             }
         }
         Self::Medium

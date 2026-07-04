@@ -102,7 +102,8 @@ impl ToolRegistry {
                         "recipient_id".to_string(),
                         FunctionParameter {
                             param_type: "string".to_string(),
-                            description: "The peer ID or nickname of the message recipient".to_string(),
+                            description: "The peer ID or nickname of the message recipient"
+                                .to_string(),
                             enum_values: None,
                             items: None,
                         },
@@ -217,22 +218,21 @@ impl ToolRegistry {
             "analyze_threats".to_string(),
             FunctionSchema {
                 name: "analyze_threats".to_string(),
-                description: "Analyze network traffic for security threats and anomalies".to_string(),
-                parameters: HashMap::from([
-                    (
-                        "scope".to_string(),
-                        FunctionParameter {
-                            param_type: "string".to_string(),
-                            description: "Analysis scope: 'local', 'mesh', or 'full'".to_string(),
-                            enum_values: Some(vec![
-                                "local".to_string(),
-                                "mesh".to_string(),
-                                "full".to_string(),
-                            ]),
-                            items: None,
-                        },
-                    ),
-                ]),
+                description: "Analyze network traffic for security threats and anomalies"
+                    .to_string(),
+                parameters: HashMap::from([(
+                    "scope".to_string(),
+                    FunctionParameter {
+                        param_type: "string".to_string(),
+                        description: "Analysis scope: 'local', 'mesh', or 'full'".to_string(),
+                        enum_values: Some(vec![
+                            "local".to_string(),
+                            "mesh".to_string(),
+                            "full".to_string(),
+                        ]),
+                        items: None,
+                    },
+                )]),
                 required: vec![],
             },
         );
@@ -257,7 +257,8 @@ impl ToolRegistry {
                         "limit".to_string(),
                         FunctionParameter {
                             param_type: "integer".to_string(),
-                            description: "Maximum number of messages to retrieve (default: 20)".to_string(),
+                            description: "Maximum number of messages to retrieve (default: 20)"
+                                .to_string(),
                             enum_values: None,
                             items: None,
                         },
@@ -272,7 +273,8 @@ impl ToolRegistry {
             "set_identity".to_string(),
             FunctionSchema {
                 name: "set_identity".to_string(),
-                description: "Update the node's identity, nickname, or profile information".to_string(),
+                description: "Update the node's identity, nickname, or profile information"
+                    .to_string(),
                 parameters: HashMap::from([
                     (
                         "nickname".to_string(),
@@ -302,13 +304,15 @@ impl ToolRegistry {
             "scan_network".to_string(),
             FunctionSchema {
                 name: "scan_network".to_string(),
-                description: "Scan the local network for available mesh nodes and services".to_string(),
+                description: "Scan the local network for available mesh nodes and services"
+                    .to_string(),
                 parameters: HashMap::from([
                     (
                         "scan_type".to_string(),
                         FunctionParameter {
                             param_type: "string".to_string(),
-                            description: "Type of scan: 'mdns', 'dht', 'bluetooth', or 'all'".to_string(),
+                            description: "Type of scan: 'mdns', 'dht', 'bluetooth', or 'all'"
+                                .to_string(),
                             enum_values: Some(vec![
                                 "mdns".to_string(),
                                 "dht".to_string(),
@@ -364,7 +368,9 @@ impl ToolRegistry {
 
     /// Validate a function call against its schema
     pub fn validate_call(&self, call: &FunctionCall) -> Result<(), String> {
-        let schema = self.tools.get(&call.name)
+        let schema = self
+            .tools
+            .get(&call.name)
             .ok_or_else(|| format!("Unknown tool: {}", call.name))?;
 
         let args = call
@@ -958,7 +964,10 @@ mod tests {
     fn test_device_class_recommendations() {
         assert_eq!(DeviceClass::Phone.recommended_gemma4_model(), "gemma4:e2b");
         assert_eq!(DeviceClass::Tablet.recommended_gemma4_model(), "gemma4:e4b");
-        assert_eq!(DeviceClass::RaspberryPi.recommended_gemma4_model(), "gemma4:e2b");
+        assert_eq!(
+            DeviceClass::RaspberryPi.recommended_gemma4_model(),
+            "gemma4:e2b"
+        );
         assert_eq!(DeviceClass::Laptop.recommended_gemma4_model(), "gemma4:26b");
         assert_eq!(DeviceClass::Server.recommended_gemma4_model(), "gemma4:31b");
     }
