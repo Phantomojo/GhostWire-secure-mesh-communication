@@ -12,9 +12,7 @@ targets = [
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = [
-    "RUSTSEC-2026-0002",  # lru Stacked Borrows — ratatui dependency, not exploitable in our usage
-]
+ignore = []
 
 [licenses]
 allow = [
