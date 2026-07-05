@@ -269,28 +269,20 @@ pub fn create_sphinx_packet(
         }
     }
 
-    // Build and encrypt header layers from innermost (final hop) to outermost (first hop)
-    // Each hop sees only its next_hop_id and an encrypted blob for the remaining hops.
+    // ── Build header layers (innermost → outermost) ──────────────────────
     let mut current_header = vec![0u8; SPHINX_HEADER_SIZE];
+    current_header[..8].copy_from_slice(b"DELIVER\x00");
 
-    // Start with the final hop's routing data
-    let final_routing = b"DELIVER\x00";
-    current_header[..final_routing.len()].copy_from_slice(final_routing);
+    // Capture β_i (header state at each hop) before encryption for MAC chain
+    let mut header_at_hop: Vec<Vec<u8>> = vec![vec![]; n];
 
-    // Encrypt for each hop from last to first (innermost to outermost)
-    // Hop n-1 is the final hop (sees DELIVER), hop 0 is the first hop (sees next_hop = hop 1)
     for i in (0..n).rev() {
-        // If this is not the final hop (i < n-1), prepend the next_hop_id for this hop
-        // The next_hop for hop i is route_ids[i+1] (the hop that comes AFTER this one in the route)
-        // We prepend BEFORE encrypting so the next_hop_id is visible to this hop after decryption.
         if i < n - 1 {
             let next_id = route_ids[i + 1].as_bytes();
             let id_len = next_id.len().min(255);
-            // Shift encrypted data right and prepend next_hop_id
             let mut new_header = vec![0u8; SPHINX_HEADER_SIZE];
             new_header[0] = id_len as u8;
             new_header[1..1 + id_len].copy_from_slice(&next_id[..id_len]);
-            // Copy encrypted data after the next_hop_id
             let copy_len = (SPHINX_HEADER_SIZE - 1 - id_len).min(current_header.len());
             new_header[1 + id_len..1 + id_len + copy_len]
                 .copy_from_slice(&current_header[..copy_len]);
@@ -298,54 +290,80 @@ pub fn create_sphinx_packet(
         }
 
         let keys = HopKeys::derive(&shared_secrets[i], 0, &alphas[i]);
-
-        // SECURITY FIX: Diversified nonce derivation.
-        // nonce = BLAKE3(shared_secret || alpha || label)[..12]
-        // The hop index is NOT included because the receiving hop doesn't know it.
-        // The alpha value changes at each hop (blinding), ensuring nonce diversity.
         let header_nonce: [u8; 12] = {
             let mut hasher = blake3::Hasher::new();
             hasher.update(&shared_secrets[i]);
             hasher.update(&alphas[i]);
             hasher.update(b"header-nonce");
             let hash = hasher.finalize();
-            let mut n = [0u8; 12];
-            n.copy_from_slice(&hash.as_bytes()[..12]);
-            n
+            let mut nn = [0u8; 12];
+            nn.copy_from_slice(&hash.as_bytes()[..12]);
+            nn
         };
-
-        // Encrypt the entire header with ChaCha20 stream cipher
         let mut cipher = ChaCha20::new(&keys.header_key.into(), &header_nonce.into());
         cipher.apply_keystream(&mut current_header);
+
+        // Capture AFTER encryption: this is what the relay sees as packet.beta
+        header_at_hop[i] = current_header.clone();
     }
 
-    // Encrypt payload outward using ChaCha20 stream cipher (no AEAD tag)
-    // The MAC (gamma) provides authentication, so we only need confidentiality here.
+    // ── Build payload layers with MAC chain (innermost → outermost) ─────
+    //
+    // Standard Sphinx MAC chain: sender pre-computes γ_i for every hop.
+    // γ_{i+1} is prepended to δ_i before encrypting with hop i's payload_key.
+    // During processing, hop i decrypts δ_i → reveals γ_{i+1} for hop i+1.
+    // This is necessary because a relay cannot compute the next hop's mac_key
+    // (it would require the next hop's private key).
     let mut current_payload = padded_payload;
-    for (i, secret) in shared_secrets.iter().enumerate().rev() {
-        let keys = HopKeys::derive(secret, 0, &alphas[i]);
+    let mut next_gamma: Option<[u8; 32]> = None;
 
-        // SECURITY FIX: Diversified nonce for payload encryption
+    for i in (0..n).rev() {
+        if let Some(g) = next_gamma {
+            let mut with_gamma = g.to_vec();
+            with_gamma.extend_from_slice(&current_payload);
+            current_payload = with_gamma;
+        }
+
+        let keys = HopKeys::derive(&shared_secrets[i], 0, &alphas[i]);
         let payload_nonce: [u8; 12] = {
             let mut hasher = blake3::Hasher::new();
-            hasher.update(secret);
+            hasher.update(&shared_secrets[i]);
             hasher.update(&alphas[i]);
             hasher.update(b"payload-nonce");
             let hash = hasher.finalize();
-            let mut n = [0u8; 12];
-            n.copy_from_slice(&hash.as_bytes()[..12]);
-            n
+            let mut nn = [0u8; 12];
+            nn.copy_from_slice(&hash.as_bytes()[..12]);
+            nn
         };
 
         let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut current_payload);
+
+        // The relay reconstructs the header after extracting next_hop_id and
+        // zero-padding. We must MAC against THAT version, not the full
+        // header_at_hop[i], because the prepend step truncates the inner header
+        // to fit SPHINX_HEADER_SIZE.
+        // Hop 0 sees the original packet.beta (full header_at_hop[0]).
+        // Hop i>0 sees the truncated remainder from hop i-1's processing,
+        // which strips route_ids[i]'s prefix and zero-pads to SPHINX_HEADER_SIZE.
+        let mac_beta = if i == 0 {
+            header_at_hop[i].clone()
+        } else {
+            let nid_len = route_ids[i].as_bytes().len().min(255);
+            let mut rb = header_at_hop[i][..SPHINX_HEADER_SIZE - 1 - nid_len].to_vec();
+            rb.resize(SPHINX_HEADER_SIZE, 0u8);
+            rb
+        };
+
+        next_gamma = Some(compute_mac(
+            &keys.mac_key,
+            &alphas[i],
+            &mac_beta,
+            &current_payload,
+        ));
     }
 
-    let gamma = compute_mac(
-        &alphas[0],
-        &current_header,
-        &current_payload,
-    );
+    let gamma = next_gamma.expect("n >= 1, so gamma was computed");
 
     Ok(SphinxPacket {
         alpha: alphas[0],
@@ -362,11 +380,24 @@ pub fn process_sphinx_packet(
     our_x25519_secret: &x25519_dalek::StaticSecret,
     _our_peer_id: &str,
 ) -> SphinxProcessResult {
+    // Reject low-order / small-subgroup points (confinement attack defense).
+    // These points on Curve25519 (Montgomery form) have order dividing 8.
+    // An attacker sending them can probe the relay's static private key over
+    // repeated packets via the DH output's torsion component.
+    if packet.alpha == [0u8; 32] || (packet.alpha[0] == 1 && packet.alpha[1..] == [0u8; 31]) {
+        return SphinxProcessResult::Invalid;
+    }
+
     let alpha_pub = match x25519_dalek::PublicKey::try_from(packet.alpha) {
         Ok(p) => p,
         Err(_) => return SphinxProcessResult::Invalid,
     };
     let shared = our_x25519_secret.diffie_hellman(&alpha_pub);
+
+    // Reject zero shared secret (would produce degenerate derived keys)
+    if shared.as_bytes() == &[0u8; 32] {
+        return SphinxProcessResult::Invalid;
+    }
 
     let derived_secret = {
         let mut ikm = shared.as_bytes().to_vec();
@@ -376,8 +407,9 @@ pub fn process_sphinx_packet(
 
     let keys = HopKeys::derive(&derived_secret, 0, &packet.alpha);
 
-    // SECURITY FIX: Use constant-time comparison to prevent timing side-channels
-    let expected_mac = compute_mac(&packet.alpha, &packet.beta, &packet.delta);
+    // SECURITY FIX: Use per-hop mac_key (derived from shared secret) instead
+    // of public SPHINX_MAC_DOMAIN constant. Previous version was forgeable.
+    let expected_mac = compute_mac(&keys.mac_key, &packet.alpha, &packet.beta, &packet.delta);
     let mac_match: bool = expected_mac.ct_eq(&packet.gamma).into();
     if !mac_match {
         return SphinxProcessResult::Invalid;
@@ -451,15 +483,24 @@ pub fn process_sphinx_packet(
             hasher.update(&packet.alpha);
             hasher.update(b"payload-nonce");
             let hash = hasher.finalize();
-            let mut n = [0u8; 12];
-            n.copy_from_slice(&hash.as_bytes()[..12]);
-            n
+            let mut nn = [0u8; 12];
+            nn.copy_from_slice(&hash.as_bytes()[..12]);
+            nn
         };
         let mut new_delta = packet.delta.clone();
         let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut new_delta);
 
-        let new_gamma = compute_mac(&new_alpha, &new_beta, &new_delta);
+        // Extract next hop's gamma and delta from decrypted payload.
+        // The sender embedded γ_{i+1} as the first 32 bytes of δ_i before
+        // encrypting. A relay cannot compute the next hop's mac_key (would
+        // require the next hop's private key), so extraction is the only option.
+        if new_delta.len() < 32 {
+            return SphinxProcessResult::Invalid;
+        }
+        let mut new_gamma = [0u8; 32];
+        new_gamma.copy_from_slice(&new_delta[..32]);
+        let remaining_delta = new_delta[32..].to_vec();
 
         SphinxProcessResult::Forward {
             next_hop,
@@ -467,7 +508,7 @@ pub fn process_sphinx_packet(
                 alpha: new_alpha,
                 beta: new_beta,
                 gamma: new_gamma,
-                delta: new_delta,
+                delta: remaining_delta,
             },
         }
     } else {
@@ -546,11 +587,22 @@ pub fn decrypt_surb_reply(surb_reply_payload: &[u8], reply_key: &[u8; 32]) -> Re
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn compute_mac(alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
+/// Compute HMAC over (alpha || beta || delta) using a per-hop secret MAC key.
+///
+/// SECURITY FIX: The previous version used SPHINX_MAC_DOMAIN (a public
+/// compile-time constant) as the blake3 keyed-hash key. Since genesis_derive
+/// = blake3::keyed_hash(domain, data), the domain IS the cryptographic key.
+/// A public key means gamma is computable by anyone from wire-visible data —
+/// it catches bit-flips but provides zero protection against an active
+/// attacker forging a tampered packet.
+///
+/// Now uses keys.mac_key derived per-hop from the shared secret via
+/// HopKeys::derive("mac"), which was already computed but never consumed.
+fn compute_mac(mac_key: &[u8; 32], alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
     let mut ikm = alpha.to_vec();
     ikm.extend_from_slice(beta);
     ikm.extend_from_slice(delta);
-    genesis_derive(SPHINX_MAC_DOMAIN, &ikm)
+    genesis_derive(mac_key, &ikm)
 }
 
 fn pad_to_size(data: &[u8], target: usize) -> Result<Vec<u8>> {
@@ -586,11 +638,6 @@ fn unpad_from_size(padded: &[u8]) -> Result<Vec<u8>> {
     }
     Ok(padded[..orig_len].to_vec())
 }
-
-// Helper to avoid the typo in the macro above — just re-export it correctly
-// (the typo `bllined` in the body above must be fixed before compile)
-// The field name in SphinxPacket and the variable in create_sphinx_packet
-// are consistent. This section is a comment-only note.
 
 #[cfg(test)]
 mod tests {
@@ -685,17 +732,78 @@ mod tests {
         let (s2, pk2, id2) = make_hop();
         let rng = SystemRandom::new();
 
-        // Create SURB for reply route: id1 → id2
         let surb = create_surb(&[pk1, pk2], &[id1, id2], &rng).unwrap();
         let reply_key = surb.reply_key;
         let reply_text = b"I got your message";
 
-        // Recipient uses SURB to encrypt reply
         let reply_packet = use_surb(&surb, reply_text, &rng).unwrap();
 
-        // Sender decrypts incoming reply payload using stored reply_key
-        // (In reality the packet routes back through the mesh first)
         let decrypted = decrypt_surb_reply(&reply_packet.delta, &reply_key).unwrap();
         assert_eq!(decrypted, reply_text);
+    }
+
+    #[test]
+    fn forged_gamma_is_rejected() {
+        let (s1, pk1, id1) = make_hop();
+        let (_s2, pk2, id2) = make_hop();
+        let rng = SystemRandom::new();
+
+        let mut packet = create_sphinx_packet(
+            &[pk1, pk2],
+            &[id1.clone(), id2],
+            b"test payload",
+            &rng,
+        )
+        .unwrap();
+
+        // Forge a new gamma using the public domain constant (old broken approach).
+        // An attacker can compute this from wire-visible data, but the relay now
+        // uses a secret mac_key that the attacker doesn't have.
+        let forged_gamma = genesis_derive(
+            SPHINX_MAC_DOMAIN,
+            &[packet.alpha.as_slice(), &packet.beta, &packet.delta].concat(),
+        );
+        packet.gamma = forged_gamma;
+
+        match process_sphinx_packet(&packet, &s1, &id1) {
+            SphinxProcessResult::Invalid => {}
+            _ => panic!("Forged gamma (using public MAC_DOMAIN) should be rejected"),
+        }
+    }
+
+    #[test]
+    fn low_order_alpha_is_rejected() {
+        let (s1, pk1, id1) = make_hop();
+        let (_s2, pk2, id2) = make_hop();
+        let rng = SystemRandom::new();
+
+        let mut packet = create_sphinx_packet(
+            &[pk1, pk2],
+            &[id1.clone(), id2.clone()],
+            b"test",
+            &rng,
+        )
+        .unwrap();
+
+        // Inject zero-point (order 1)
+        packet.alpha = [0u8; 32];
+        match process_sphinx_packet(&packet, &s1, &id1) {
+            SphinxProcessResult::Invalid => {}
+            _ => panic!("Zero-point alpha should be rejected"),
+        }
+
+        // Re-create and inject identity point (order 2)
+        let mut packet2 = create_sphinx_packet(
+            &[pk1, pk2],
+            &[id1.clone(), id2],
+            b"test",
+            &rng,
+        )
+        .unwrap();
+        packet2.alpha = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        match process_sphinx_packet(&packet2, &s1, &id1) {
+            SphinxProcessResult::Invalid => {}
+            _ => panic!("Identity-point alpha should be rejected"),
+        }
     }
 }
