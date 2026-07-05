@@ -264,15 +264,18 @@ if (diagramCanvas && !prefersReducedMotion) {
 }
 
 // ---- MODAL SYSTEM ----
+let activeModal = null;
+let modalKeyHandler = null;
+
 function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (!modal) return;
+  if (activeModal) closeModal(activeModal);
+  activeModal = modal;
   modal.classList.add('active');
   document.body.style.overflow = 'hidden';
-  // Focus the close button for accessibility
   const closeBtn = modal.querySelector('.modal-close');
   if (closeBtn) closeBtn.focus();
-  // Trap focus
   trapFocus(modal);
 }
 
@@ -281,16 +284,22 @@ function closeModal(modal) {
   if (!modal) return;
   modal.classList.remove('active');
   document.body.style.overflow = '';
+  if (modalKeyHandler) {
+    modal.removeEventListener('keydown', modalKeyHandler);
+    modalKeyHandler = null;
+  }
+  if (activeModal === modal) activeModal = null;
 }
 
 function trapFocus(modal) {
   const focusable = modal.querySelectorAll(
     'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
   );
+  if (!focusable.length) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
 
-  modal.addEventListener('keydown', function handler(e) {
+  modalKeyHandler = function(e) {
     if (e.key === 'Escape') {
       closeModal(modal);
       return;
@@ -308,15 +317,15 @@ function trapFocus(modal) {
         }
       }
     }
-  });
+  };
+  modal.addEventListener('keydown', modalKeyHandler);
 }
 
-// Click handlers for data-modal cards and features
 document.querySelectorAll('[data-modal]').forEach(trigger => {
-  trigger.addEventListener('click', () => {
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
     openModal(trigger.dataset.modal);
   });
-  // Keyboard support for role="button" elements
   trigger.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -325,20 +334,21 @@ document.querySelectorAll('[data-modal]').forEach(trigger => {
   });
 });
 
-// Close on overlay click
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      closeModal(overlay);
-    }
+    if (e.target === overlay) closeModal(overlay);
   });
 });
 
-// Close on Escape (global fallback)
+document.querySelectorAll('.modal-close').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeModal(btn.closest('.modal-overlay'));
+  });
+});
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m));
-  }
+  if (e.key === 'Escape' && activeModal) closeModal(activeModal);
 });
 
 // ---- QUICK START TABS ----
@@ -405,23 +415,33 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
 
 // ---- INTERSECTION OBSERVER — FADE IN ----
 const fadeEls = document.querySelectorAll('.persona-card, .feature, .hiw-step, .community-card, .limitation');
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      entry.target.style.opacity = '1';
-      entry.target.style.transform = 'translateY(0)';
-    }
-  });
-}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
-fadeEls.forEach((el, i) => {
-  if (prefersReducedMotion) {
-    el.style.opacity = '1';
-    el.style.transform = 'none';
-  } else {
+if (prefersReducedMotion) {
+  fadeEls.forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
+} else {
+  const fadeObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        entry.target.style.opacity = '1';
+        entry.target.style.transform = 'translateY(0)';
+        fadeObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.05, rootMargin: '0px 0px -20px 0px' });
+
+  fadeEls.forEach((el, i) => {
     el.style.opacity = '0';
     el.style.transform = 'translateY(16px)';
     el.style.transition = `opacity 0.5s ease ${i * 0.04}s, transform 0.5s ease ${i * 0.04}s`;
-    observer.observe(el);
-  }
+    fadeObserver.observe(el);
+  });
+}
+
+// ---- MOBILE NAV CLOSE ON LINK CLICK ----
+document.querySelectorAll('.nav-mobile a').forEach(link => {
+  link.addEventListener('click', () => {
+    navMobile.classList.remove('open');
+    navToggle.setAttribute('aria-expanded', 'false');
+  });
 });
