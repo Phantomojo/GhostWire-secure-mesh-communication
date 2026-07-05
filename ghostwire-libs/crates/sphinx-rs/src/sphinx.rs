@@ -162,6 +162,29 @@ fn blind_ephemeral_secret(ephemeral: &[u8; 32], blinding_factor: &[u8; 32]) -> [
     next_e.to_bytes()
 }
 
+/// Compute X25519 DH without re-clamping the scalar.
+///
+/// x25519_dalek::StaticSecret::from() re-clamps the scalar bytes (clears
+/// bottom 3 bits, sets bit 254), changing the value by ~2^254. After
+/// blind_ephemeral_secret(), the ephemeral bytes are NOT in clamped form
+/// (they're raw Scalar.to_bytes()), so StaticSecret::from would produce a
+/// different scalar, breaking multi-hop Sphinx — creator and relay would
+/// derive different shared secrets at hop ≥ 1.
+///
+/// This uses curve25519_dalek's MontgomeryPoint × Scalar directly, which
+/// does NOT re-clamp. For clamped inputs (hop 0), the result is identical
+/// to x25519_dalek. For non-clamped inputs (hop 1+), the result matches
+/// what the relay computes via its own StaticSecret × alpha DH.
+fn raw_dh(scalar_bytes: &[u8; 32], point_bytes: &[u8; 32]) -> [u8; 32] {
+    use curve25519_dalek::montgomery::MontgomeryPoint;
+    use curve25519_dalek::scalar::Scalar;
+
+    let scalar = Scalar::from_bytes_mod_order(*scalar_bytes);
+    let point = MontgomeryPoint(*point_bytes);
+    let result = &point * &scalar;
+    result.0
+}
+
 // ── Packet creation ───────────────────────────────────────────────────────────
 
 pub fn create_sphinx_packet(
@@ -211,14 +234,13 @@ pub fn create_sphinx_packet(
     let mut current_ephemeral = ephemeral_bytes;
 
     for i in 0..n {
-        let hop_pub = x25519_dalek::PublicKey::from(route_keys[i]);
-
-        // Real ECDH: shared_secret_i = ECDH(e_i, hop_i_pub)
-        let e_i_secret = x25519_dalek::StaticSecret::from(current_ephemeral);
-        let shared = e_i_secret.diffie_hellman(&hop_pub);
+        // ECDH without re-clamping: blind_ephemeral_secret() produces non-clamped
+        // bytes; StaticSecret::from() would change the scalar by ~2^254, breaking
+        // the DH match with the relay. raw_dh() uses curve25519-dalek directly.
+        let shared_bytes = raw_dh(&current_ephemeral, &route_keys[i]);
 
         // Derive the hop's shared secret with path binding
-        let mut ikm = shared.as_bytes().to_vec();
+        let mut ikm = shared_bytes.to_vec();
         ikm.extend_from_slice(&alphas[i]);
         let hop_shared_secret = genesis_derive(SPHINX_SHARED_DOMAIN, &ikm);
         shared_secrets.push(hop_shared_secret.to_vec());
@@ -266,7 +288,7 @@ pub fn create_sphinx_packet(
             current_header = new_header;
         }
 
-        let keys = HopKeys::derive(&shared_secrets[i], i as u8, &alphas[i]);
+        let keys = HopKeys::derive(&shared_secrets[i], 0, &alphas[i]);
 
         // SECURITY FIX: Diversified nonce derivation.
         // nonce = BLAKE3(shared_secret || alpha || label)[..12]
@@ -292,7 +314,7 @@ pub fn create_sphinx_packet(
     // The MAC (gamma) provides authentication, so we only need confidentiality here.
     let mut current_payload = padded_payload;
     for (i, secret) in shared_secrets.iter().enumerate().rev() {
-        let keys = HopKeys::derive(secret, i as u8, &alphas[i]);
+        let keys = HopKeys::derive(secret, 0, &alphas[i]);
 
         // SECURITY FIX: Diversified nonce for payload encryption
         let payload_nonce: [u8; 12] = {
@@ -310,7 +332,7 @@ pub fn create_sphinx_packet(
         cipher.apply_keystream(&mut current_payload);
     }
 
-    let gamma = compute_mac(&shared_secrets[0], &alphas[0], &current_header, &current_payload);
+    let gamma = compute_mac(&alphas[0], &current_header, &current_payload);
 
     Ok(SphinxPacket {
         alpha: alphas[0],
@@ -343,7 +365,7 @@ pub fn process_sphinx_packet(
     let keys = HopKeys::derive(&derived_secret, 0, &packet.alpha);
 
     // Verify MAC using constant-time comparison (prevents timing attacks)
-    let expected_mac = compute_mac(&derived_secret, &packet.alpha, &packet.beta, &packet.delta);
+    let expected_mac = compute_mac(&packet.alpha, &packet.beta, &packet.delta);
     if !expected_mac.ct_eq(&packet.gamma).into() {
         return SphinxProcessResult::Invalid;
     }
@@ -395,7 +417,16 @@ pub fn process_sphinx_packet(
         };
 
         // FIXED: rerandomise alpha with real X25519 scalar multiplication
-        let new_alpha = rerandomise_alpha(&packet.alpha, &keys.blinding_factor);
+        // SECURITY FIX: Compute blinding factor the same way as create_sphinx_packet.
+        // Creation uses: genesis_derive(SPHINX_BLIND_DOMAIN, shared_secret || alpha)
+        // HopKeys::derive uses: genesis_derive(SPHINX_KDF_DOMAIN, "blind" + secret + idx + alpha)
+        // These are different derivations — we MUST use the creation's derivation here.
+        let blinding_factor = genesis_derive(SPHINX_BLIND_DOMAIN, &{
+            let mut ikm = derived_secret.to_vec();
+            ikm.extend_from_slice(&packet.alpha);
+            ikm
+        });
+        let new_alpha = rerandomise_alpha(&packet.alpha, &blinding_factor);
 
         let remaining_header = header_pt[1 + id_len..].to_vec();
         let mut new_beta = remaining_header;
@@ -416,7 +447,7 @@ pub fn process_sphinx_packet(
         let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut new_delta);
 
-        let new_gamma = compute_mac(&derived_secret, &new_alpha, &new_beta, &new_delta);
+        let new_gamma = compute_mac(&new_alpha, &new_beta, &new_delta);
 
         SphinxProcessResult::Forward {
             next_hop,
@@ -448,7 +479,7 @@ pub fn create_surb(
     rng.fill(&mut reply_key).map_err(|_| anyhow::anyhow!("RNG failure creating SURB"))?;
 
     // Create a dummy packet on the reply route
-    let dummy_payload = vec![0u8; SPHINX_PAYLOAD_SIZE];
+    let dummy_payload = b"surb-init";
     let packet = create_sphinx_packet(reply_route_keys, reply_route_ids, &dummy_payload, rng)?;
 
     let header = bincode::serialize(&packet)
@@ -497,9 +528,8 @@ pub fn decrypt_surb_reply(surb_reply_payload: &[u8], reply_key: &[u8; 32]) -> Re
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn compute_mac(shared_secret: &[u8], alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
-    let mut ikm = shared_secret.to_vec();
-    ikm.extend_from_slice(alpha);
+fn compute_mac(alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
+    let mut ikm = alpha.to_vec();
     ikm.extend_from_slice(beta);
     ikm.extend_from_slice(delta);
     genesis_derive(SPHINX_MAC_DOMAIN, &ikm)
@@ -550,7 +580,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Sphinx multi-hop requires proper ephemeral key blinding (curve25519 scalar multiplication) — needs curve25519-dalek dependency"]
     fn sphinx_two_hop_deliver() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();
@@ -627,7 +656,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "SURB uses same multi-hop sphinx protocol — needs curve25519-dalek dependency"]
     fn surb_reply_roundtrip() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();

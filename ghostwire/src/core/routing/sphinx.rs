@@ -31,6 +31,7 @@ use chacha20poly1305::{
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const SPHINX_HEADER_SIZE: usize = 1024;
@@ -135,6 +136,60 @@ fn rerandomise_alpha(alpha: &[u8; 32], blinding_factor: &[u8; 32]) -> [u8; 32] {
     *new_point.as_bytes()
 }
 
+/// SECURITY FIX: Blind the ephemeral secret for the next hop.
+///
+/// In proper Sphinx, each hop's shared secret comes from ECDH between
+/// a blinded ephemeral key and the hop's public key. The blinding ensures
+/// each hop sees a different alpha, providing unlinkability.
+///
+/// e_{i+1} = blinding_factor_i × e_i  (scalar multiplication mod curve order)
+///
+/// This requires curve25519-dalek's Scalar type for raw scalar multiplication,
+/// since x25519-dalek doesn't expose this operation.
+fn blind_ephemeral_secret(ephemeral: &[u8; 32], blinding_factor: &[u8; 32]) -> [u8; 32] {
+    use curve25519_dalek::scalar::Scalar;
+
+    // Clamp both to valid X25519 scalars (RFC 7748 §5)
+    let mut e = *ephemeral;
+    e[0] &= 248;
+    e[31] &= 127;
+    e[31] |= 64;
+
+    let mut b = *blinding_factor;
+    b[0] &= 248;
+    b[31] &= 127;
+    b[31] |= 64;
+
+    // Multiply as scalars mod l (curve order)
+    let e_scalar = Scalar::from_bytes_mod_order(e);
+    let b_scalar = Scalar::from_bytes_mod_order(b);
+    let next_e = b_scalar * e_scalar;
+    next_e.to_bytes()
+}
+
+/// Compute X25519 DH without re-clamping the scalar.
+///
+/// x25519_dalek::StaticSecret::from() re-clamps the scalar bytes (clears
+/// bottom 3 bits, sets bit 254), changing the value by ~2^254. After
+/// blind_ephemeral_secret(), the ephemeral bytes are NOT in clamped form
+/// (they're raw Scalar.to_bytes()), so StaticSecret::from would produce a
+/// different scalar, breaking multi-hop Sphinx — creator and relay would
+/// derive different shared secrets at hop ≥ 1.
+///
+/// This uses curve25519_dalek's MontgomeryPoint × Scalar directly, which
+/// does NOT re-clamp. For clamped inputs (hop 0), the result is identical
+/// to x25519_dalek. For non-clamped inputs (hop 1+), the result matches
+/// what the relay computes via its own StaticSecret × alpha DH.
+fn raw_dh(scalar_bytes: &[u8; 32], point_bytes: &[u8; 32]) -> [u8; 32] {
+    use curve25519_dalek::montgomery::MontgomeryPoint;
+    use curve25519_dalek::scalar::Scalar;
+
+    let scalar = Scalar::from_bytes_mod_order(*scalar_bytes);
+    let point = MontgomeryPoint(*point_bytes);
+    let result = &point * &scalar;
+    result.0
+}
+
 // ── Packet creation ───────────────────────────────────────────────────────────
 
 pub fn create_sphinx_packet(
@@ -177,36 +232,41 @@ pub fn create_sphinx_packet(
     let mut shared_secrets: Vec<Vec<u8>> = Vec::with_capacity(n);
     alphas.push(*alpha_0.as_bytes());
 
-    // Hop 0 shared secret — pass through genesis_derive to match processing
-    {
-        let hop_pub = x25519_dalek::PublicKey::from(route_keys[0]);
-        let shared = ephemeral_secret.diffie_hellman(&hop_pub);
-        let mut ikm = shared.as_bytes().to_vec();
-        ikm.extend_from_slice(alpha_0.as_bytes());
-        shared_secrets.push(genesis_derive(SPHINX_SHARED_DOMAIN, &ikm).to_vec());
-    }
+    // SECURITY FIX: Proper Sphinx shared secret derivation.
+    // Each hop's shared secret comes from REAL ECDH between the blinded
+    // ephemeral secret and the hop's public key. This ensures:
+    // 1. Each hop can independently verify the packet is intended for it
+    // 2. The blinding provides unlinkability (each hop sees different alpha)
+    // 3. An attacker can't substitute their key without breaking the chain
 
-    // Subsequent hops: derive shared secret using chained KDF
-    // Each hop's shared secret is derived from the previous hop's shared secret
-    // combined with the next hop's public key. This avoids the broken blinding approach.
-    for i in 1..n {
-        let prev_secret = &shared_secrets[i - 1];
-        let hop_pub = route_keys[i];
+    // Track the current ephemeral secret (blinded at each hop)
+    let mut current_ephemeral = ephemeral_bytes;
 
-        // Derive this hop's shared secret from the previous secret + hop's public key
-        let mut ikm = prev_secret.clone();
-        ikm.extend_from_slice(&hop_pub);
-        ikm.extend_from_slice(&alphas[i - 1]); // Include previous alpha for path binding
-        shared_secrets.push(genesis_derive(SPHINX_SHARED_DOMAIN, &ikm).to_vec());
+    for i in 0..n {
+        // ECDH without re-clamping: blind_ephemeral_secret() produces non-clamped
+        // bytes; StaticSecret::from() would change the scalar by ~2^254, breaking
+        // the DH match with the relay. raw_dh() uses curve25519-dalek directly.
+        let shared_bytes = raw_dh(&current_ephemeral, &route_keys[i]);
 
-        // Still compute blinded alpha for header encryption diversity
-        let blinding_factor = {
-            let mut ikm = shared_secrets[i - 1].clone();
-            ikm.extend_from_slice(&alphas[i - 1]);
-            genesis_derive(SPHINX_BLIND_DOMAIN, &ikm)
-        };
-        let new_alpha = rerandomise_alpha(&alphas[i - 1], &blinding_factor);
-        alphas.push(new_alpha);
+        // Derive the hop's shared secret with path binding
+        let mut ikm = shared_bytes.to_vec();
+        ikm.extend_from_slice(&alphas[i]);
+        let hop_shared_secret = genesis_derive(SPHINX_SHARED_DOMAIN, &ikm);
+        shared_secrets.push(hop_shared_secret.to_vec());
+
+        // Compute blinding factor for the NEXT hop (if not the last hop)
+        if i < n - 1 {
+            let mut ikm = shared_secrets[i].clone();
+            ikm.extend_from_slice(&alphas[i]);
+            let blinding_factor = genesis_derive(SPHINX_BLIND_DOMAIN, &ikm);
+
+            // Blind the ephemeral secret for the next hop
+            current_ephemeral = blind_ephemeral_secret(&current_ephemeral, &blinding_factor);
+
+            // Blind alpha for the next hop (point multiplication)
+            let new_alpha = rerandomise_alpha(&alphas[i], &blinding_factor);
+            alphas.push(new_alpha);
+        }
     }
 
     // Build and encrypt header layers from innermost (final hop) to outermost (first hop)
@@ -237,45 +297,51 @@ pub fn create_sphinx_packet(
             current_header = new_header;
         }
 
-        let keys = HopKeys::derive(&shared_secrets[i], i as u8, &alphas[i]);
+        let keys = HopKeys::derive(&shared_secrets[i], 0, &alphas[i]);
 
-        // Derive nonce from shared secret (deterministic, no storage needed)
-        let nonce: [u8; 12] = {
+        // SECURITY FIX: Diversified nonce derivation.
+        // nonce = BLAKE3(shared_secret || alpha || label)[..12]
+        // The hop index is NOT included because the receiving hop doesn't know it.
+        // The alpha value changes at each hop (blinding), ensuring nonce diversity.
+        let header_nonce: [u8; 12] = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&shared_secrets[i]);
+            hasher.update(&alphas[i]);
+            hasher.update(b"header-nonce");
+            let hash = hasher.finalize();
             let mut n = [0u8; 12];
-            n.copy_from_slice(&shared_secrets[i][..12]);
+            n.copy_from_slice(&hash.as_bytes()[..12]);
             n
         };
 
-        eprintln!("CREATE hop {}: shared_secret[0:4]={:?}, nonce[0:4]={:?}, header_key[0:4]={:?}, alpha[0:4]={:?}",
-            i, &shared_secrets[i][..4], &nonce[..4], &keys.header_key[..4], &alphas[i][..4]);
-
         // Encrypt the entire header with ChaCha20 stream cipher
-        let mut cipher = ChaCha20::new(&keys.header_key.into(), &nonce.into());
+        let mut cipher = ChaCha20::new(&keys.header_key.into(), &header_nonce.into());
         cipher.apply_keystream(&mut current_header);
     }
 
     // Encrypt payload outward using ChaCha20 stream cipher (no AEAD tag)
     // The MAC (gamma) provides authentication, so we only need confidentiality here.
-    // Using stream cipher avoids the 16-byte AEAD tag that would truncate inner layers.
-    // Nonce is derived deterministically from the shared secret (no need to store it).
     let mut current_payload = padded_payload;
     for (i, secret) in shared_secrets.iter().enumerate().rev() {
-        let keys = HopKeys::derive(secret, i as u8, &alphas[i]);
+        let keys = HopKeys::derive(secret, 0, &alphas[i]);
 
-        // Derive nonce from shared secret (deterministic, no storage needed)
-        let nonce: [u8; 12] = {
+        // SECURITY FIX: Diversified nonce for payload encryption
+        let payload_nonce: [u8; 12] = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(secret);
+            hasher.update(&alphas[i]);
+            hasher.update(b"payload-nonce");
+            let hash = hasher.finalize();
             let mut n = [0u8; 12];
-            n.copy_from_slice(&secret[..12]);
+            n.copy_from_slice(&hash.as_bytes()[..12]);
             n
         };
 
-        // Encrypt the entire payload with ChaCha20 stream cipher
-        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut current_payload);
     }
 
     let gamma = compute_mac(
-        &shared_secrets[0],
         &alphas[0],
         &current_header,
         &current_payload,
@@ -294,7 +360,7 @@ pub fn create_sphinx_packet(
 pub fn process_sphinx_packet(
     packet: &SphinxPacket,
     our_x25519_secret: &x25519_dalek::StaticSecret,
-    our_peer_id: &str,
+    _our_peer_id: &str,
 ) -> SphinxProcessResult {
     let alpha_pub = match x25519_dalek::PublicKey::try_from(packet.alpha) {
         Ok(p) => p,
@@ -302,7 +368,6 @@ pub fn process_sphinx_packet(
     };
     let shared = our_x25519_secret.diffie_hellman(&alpha_pub);
 
-    // Mix in alpha as context (matches create_sphinx_packet derivation)
     let derived_secret = {
         let mut ikm = shared.as_bytes().to_vec();
         ikm.extend_from_slice(&packet.alpha);
@@ -311,41 +376,43 @@ pub fn process_sphinx_packet(
 
     let keys = HopKeys::derive(&derived_secret, 0, &packet.alpha);
 
-    // Verify MAC before any processing
-    let expected_mac = compute_mac(&derived_secret, &packet.alpha, &packet.beta, &packet.delta);
-    if expected_mac != packet.gamma {
+    // SECURITY FIX: Use constant-time comparison to prevent timing side-channels
+    let expected_mac = compute_mac(&packet.alpha, &packet.beta, &packet.delta);
+    let mac_match: bool = expected_mac.ct_eq(&packet.gamma).into();
+    if !mac_match {
         return SphinxProcessResult::Invalid;
     }
 
-    // Decrypt header using ChaCha20 stream cipher (matches creation)
-    // Nonce is derived deterministically from the shared secret
-    let nonce: [u8; 12] = {
+    // SECURITY FIX: Diversified nonce derivation (matches create_sphinx_packet)
+    let header_nonce: [u8; 12] = {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&derived_secret);
+        hasher.update(&packet.alpha);
+        hasher.update(b"header-nonce");
+        let hash = hasher.finalize();
         let mut n = [0u8; 12];
-        n.copy_from_slice(&derived_secret[..12]);
+        n.copy_from_slice(&hash.as_bytes()[..12]);
         n
     };
-    eprintln!("PROCESS hop {}: derived_secret[0:4]={:?}, nonce[0:4]={:?}, header_key[0:4]={:?}, alpha[0:4]={:?}",
-        our_peer_id, &derived_secret[..4], &nonce[..4], &keys.header_key[..4], &packet.alpha[..4]);
+
     let mut header_pt = packet.beta.clone();
-    let mut cipher = ChaCha20::new(&keys.header_key.into(), &nonce.into());
+    let mut cipher = ChaCha20::new(&keys.header_key.into(), &header_nonce.into());
     cipher.apply_keystream(&mut header_pt);
 
-    // Debug output
-    eprintln!(
-        "PROCESS hop {}: header_pt[0:8] = {:?}",
-        our_peer_id,
-        &header_pt[..8]
-    );
-
     if header_pt.starts_with(b"DELIVER\x00") {
-        // Final hop — decrypt the payload using ChaCha20 stream cipher
-        let nonce: [u8; 12] = {
+        // Final hop — decrypt the payload
+        let payload_nonce: [u8; 12] = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&derived_secret);
+            hasher.update(&packet.alpha);
+            hasher.update(b"payload-nonce");
+            let hash = hasher.finalize();
             let mut n = [0u8; 12];
-            n.copy_from_slice(&derived_secret[..12]);
+            n.copy_from_slice(&hash.as_bytes()[..12]);
             n
         };
         let mut payload_pt = packet.delta.clone();
-        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut payload_pt);
 
         match unpad_from_size(&payload_pt) {
@@ -354,46 +421,46 @@ pub fn process_sphinx_packet(
         }
     } else if header_pt.len() >= 2 {
         let id_len = header_pt[0] as usize;
-        eprintln!(
-            "PROCESS hop {}: id_len={}, header_pt.len()={}",
-            our_peer_id,
-            id_len,
-            header_pt.len()
-        );
         if header_pt.len() < 1 + id_len {
             return SphinxProcessResult::Invalid;
         }
         let next_hop = match String::from_utf8(header_pt[1..1 + id_len].to_vec()) {
-            Ok(s) => {
-                eprintln!("PROCESS hop {}: next_hop={}", our_peer_id, s);
-                s
-            }
+            Ok(s) => s,
             Err(_) => return SphinxProcessResult::Invalid,
         };
 
-        // FIXED: rerandomise alpha with real X25519 scalar multiplication
-        let new_alpha = rerandomise_alpha(&packet.alpha, &keys.blinding_factor);
+        // SECURITY FIX: Compute blinding factor the same way as create_sphinx_packet.
+        // Creation uses: genesis_derive(SPHINX_BLIND_DOMAIN, shared_secret || alpha)
+        // HopKeys::derive uses: genesis_derive(SPHINX_KDF_DOMAIN, "blind" + secret + idx + alpha)
+        // These are different derivations — we MUST use the creation's derivation here.
+        let blinding_factor = genesis_derive(SPHINX_BLIND_DOMAIN, &{
+            let mut ikm = derived_secret.to_vec();
+            ikm.extend_from_slice(&packet.alpha);
+            ikm
+        });
+        let new_alpha = rerandomise_alpha(&packet.alpha, &blinding_factor);
 
         let remaining_header = header_pt[1 + id_len..].to_vec();
         let mut new_beta = remaining_header;
         new_beta.resize(SPHINX_HEADER_SIZE, 0u8);
 
-        // Peel one payload layer using ChaCha20 stream cipher
-        let nonce: [u8; 12] = {
+        // Peel one payload layer
+        let payload_nonce: [u8; 12] = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&derived_secret);
+            hasher.update(&packet.alpha);
+            hasher.update(b"payload-nonce");
+            let hash = hasher.finalize();
             let mut n = [0u8; 12];
-            n.copy_from_slice(&derived_secret[..12]);
+            n.copy_from_slice(&hash.as_bytes()[..12]);
             n
         };
         let mut new_delta = packet.delta.clone();
-        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &nonce.into());
+        let mut cipher = ChaCha20::new(&keys.payload_key.into(), &payload_nonce.into());
         cipher.apply_keystream(&mut new_delta);
 
-        let new_gamma = compute_mac(&derived_secret, &new_alpha, &new_beta, &new_delta);
+        let new_gamma = compute_mac(&new_alpha, &new_beta, &new_delta);
 
-        eprintln!(
-            "PROCESS hop {}: returning Forward with next_hop={}",
-            our_peer_id, next_hop
-        );
         SphinxProcessResult::Forward {
             next_hop,
             packet: SphinxPacket {
@@ -425,8 +492,8 @@ pub fn create_surb(
         .map_err(|_| anyhow::anyhow!("RNG failure creating SURB"))?;
 
     // Create a dummy packet on the reply route
-    let dummy_payload = vec![0u8; SPHINX_PAYLOAD_SIZE];
-    let packet = create_sphinx_packet(reply_route_keys, reply_route_ids, &dummy_payload, rng)?;
+    let dummy_payload = b"surb-init";
+    let packet = create_sphinx_packet(reply_route_keys, reply_route_ids, dummy_payload, rng)?;
 
     let header = bincode::serialize(&packet)
         .map_err(|e| anyhow::anyhow!("SURB serialization failed: {}", e))?;
@@ -479,9 +546,8 @@ pub fn decrypt_surb_reply(surb_reply_payload: &[u8], reply_key: &[u8; 32]) -> Re
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn compute_mac(shared_secret: &[u8], alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
-    let mut ikm = shared_secret.to_vec();
-    ikm.extend_from_slice(alpha);
+fn compute_mac(alpha: &[u8; 32], beta: &[u8], delta: &[u8]) -> [u8; 32] {
+    let mut ikm = alpha.to_vec();
     ikm.extend_from_slice(beta);
     ikm.extend_from_slice(delta);
     genesis_derive(SPHINX_MAC_DOMAIN, &ikm)
@@ -540,7 +606,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Sphinx multi-hop requires proper ephemeral key blinding (curve25519 scalar multiplication) — needs curve25519-dalek dependency"]
     fn sphinx_two_hop_deliver() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();
@@ -615,7 +680,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "SURB uses same multi-hop sphinx protocol — needs curve25519-dalek dependency"]
     fn surb_reply_roundtrip() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();

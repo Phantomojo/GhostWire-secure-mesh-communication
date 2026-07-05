@@ -2295,6 +2295,7 @@ dependencies = [
  "shamir_secret_sharing",
  "sled",
  "sphinx-rs",
+ "subtle",
  "tempfile",
  "thiserror 1.0.69",
  "time",
