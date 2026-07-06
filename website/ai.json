@@ -1,0 +1,59 @@
+{
+  "$schema": "https://www.ai-visibility.org.uk/specifications/ai-json/v1/ai-json.schema.json",
+  "name": "GhostWire",
+  "url": "https://www.ghostwire.cc",
+  "description": "Decentralized, anonymous peer-to-peer mesh communication platform built in Rust",
+  "permissions": [
+    "Index public pages for search engines",
+    "Summarize content for user queries",
+    "Extract technical documentation for reference",
+    "Create structured data from public pages",
+    "Access public API endpoints"
+  ],
+  "restrictions": [
+    "Do not train AI models on website content",
+    "Do not scrape or bulk-download content",
+    "Do not access private user data or encrypted communications",
+    "Do not bypass authentication or security measures",
+    "Do not redistribute content without attribution",
+    "Do not use content for commercial purposes without permission"
+  ],
+  "contact": {
+    "email": "security@ghostwire.cc",
+    "github": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+  },
+  "content": {
+    "sections": [
+      {
+        "name": "Home",
+        "url": "https://www.ghostwire.cc",
+        "description": "Main landing page with project overview"
+      },
+      {
+        "name": "About",
+        "url": "https://www.ghostwire.cc/about.html",
+        "description": "Detailed project information and mission"
+      },
+      {
+        "name": "Security",
+        "url": "https://www.ghostwire.cc/security.html",
+        "description": "Security architecture and threat model"
+      },
+      {
+        "name": "Download",
+        "url": "https://www.ghostwire.cc/download.html",
+        "description": "Download links for all platforms"
+      },
+      {
+        "name": "Documentation",
+        "url": "https://www.ghostwire.cc/docs.html",
+        "description": "Technical documentation and API reference"
+      }
+    ]
+  },
+  "attribution": {
+    "required": true,
+    "format": "GhostWire (https://www.ghostwire.cc)",
+    "link": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+  }
+}
