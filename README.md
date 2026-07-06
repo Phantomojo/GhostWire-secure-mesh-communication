@@ -1,6 +1,6 @@
 <div align="center">
 
-### 🌐 **[Visit the GhostWire Website →](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)**
+### 🌐 **[Visit the GhostWire Website →](https://www.ghostwire.cc/)**
 
 <img src="docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="200" />
 
@@ -378,7 +378,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 <img src="docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="120" />
 
-**📍 Nairobi, Kenya** | **🌐 [Website](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)** | **📧 mirungu015@proton.me**
+**📍 Nairobi, Kenya** | **🌐 [Website](https://www.ghostwire.cc/)** | **📧 mirungu015@proton.me**
 
 ---
 
