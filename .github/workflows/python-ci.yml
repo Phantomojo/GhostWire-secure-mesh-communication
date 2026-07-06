@@ -24,6 +24,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: "requirements-team.txt"
       - name: Install linting tools
         run: pip install black flake8
       - name: Black check (scripts/)
@@ -44,6 +45,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: "requirements-team.txt"
       - name: Install core dependencies
         run: |
           pip install numpy pandas scikit-learn lightgbm onnx onnxruntime requests pyyaml
@@ -76,6 +78,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: "requirements-team.txt"
       - name: Install dependencies
         run: pip install numpy scikit-learn lightgbm onnx onnxruntime onnxmltools
       - name: LightGBM training smoke test
