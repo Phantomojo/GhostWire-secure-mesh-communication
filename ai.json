@@ -31,22 +31,22 @@
       },
       {
         "name": "About",
-        "url": "https://www.ghostwire.cc/about.html",
+        "url": "https://www.ghostwire.cc/about",
         "description": "Detailed project information and mission"
       },
       {
         "name": "Security",
-        "url": "https://www.ghostwire.cc/security.html",
+        "url": "https://www.ghostwire.cc/security",
         "description": "Security architecture and threat model"
       },
       {
         "name": "Download",
-        "url": "https://www.ghostwire.cc/download.html",
+        "url": "https://www.ghostwire.cc/download",
         "description": "Download links for all platforms"
       },
       {
         "name": "Documentation",
-        "url": "https://www.ghostwire.cc/docs.html",
+        "url": "https://www.ghostwire.cc/docs",
         "description": "Technical documentation and API reference"
       }
     ]
