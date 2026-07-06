@@ -38,19 +38,19 @@ Security layer: Isolation Forest anomaly detection → Gemma 4 threat analysis.
 
 - **Website:** https://www.ghostwire.cc/
 - **GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
-- **Security Policy:** https://www.ghostwire.cc/security.html
-- **Documentation:** https://www.ghostwire.cc/docs.html
-- **Download:** https://www.ghostwire.cc/download.html
+- **Security Policy:** https://www.ghostwire.cc/security
+- **Documentation:** https://www.ghostwire.cc/docs
+- **Download:** https://www.ghostwire.cc/download
 
 ## Key Pages
 
 | Page | URL | Description |
 |------|-----|-------------|
 | Home | / | Project overview, manifesto, protocol stack |
-| About | /about.html | Team, mission, Indra's Net philosophy |
-| Docs | /docs.html | Technical documentation and API reference |
-| Security | /security.html | Threat model, limitations, security architecture |
-| Download | /download.html | Platform builds and installation |
+| About | /about | Team, mission, Indra's Net philosophy |
+| Docs | /docs | Technical documentation and API reference |
+| Security | /security | Threat model, limitations, security architecture |
+| Download | /download | Platform builds and installation |
 
 ## Technical Details
 
