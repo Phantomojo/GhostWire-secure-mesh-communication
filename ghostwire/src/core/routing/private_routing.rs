@@ -22,6 +22,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::seq::SliceRandom;
+use rand_core::OsRng;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -118,7 +119,7 @@ pub fn build_route(
         anyhow::bail!("Route too long: {} > {}", total, MAX_HOPS);
     }
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut selected = candidates.to_vec();
     selected.shuffle(&mut rng);
 
@@ -163,7 +164,7 @@ pub fn wrap_onion(
 
     // Generate ephemeral keypairs for each hop
     for _ in &hops {
-        let secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
+        let secret = x25519_dalek::EphemeralSecret::random_from_rng(&mut OsRng);
         let pub_key = x25519_dalek::PublicKey::from(&secret);
         ephemeral_keys.push(*pub_key.as_bytes());
         all_ephemeral_secrets.push((secret, pub_key));

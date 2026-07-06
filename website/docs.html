@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostWire — Documentation</title>
+<meta name="description" content="GhostWire documentation: installation, architecture, API reference, contributing guide, changelog, and code of conduct.">
+<meta name="keywords" content="GhostWire docs, documentation, API reference, installation guide, contributing, changelog">
+<meta name="author" content="Team GhostWire — Open University of Kenya">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://www.ghostwire.cc/docs.html">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="GhostWire — Documentation">
+<meta property="og:description" content="Installation, architecture, API reference, and more.">
+<meta property="og:image" content="https://www.ghostwire.cc/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://www.ghostwire.cc/docs.html">
+<meta property="og:site_name" content="GhostWire">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GhostWire — Documentation">
+<meta name="twitter:description" content="Installation, architecture, API reference, and more.">
+<meta name="twitter:image" content="https://www.ghostwire.cc/assets/og-image.png">
+
+<!-- Favicon -->
+<link rel="icon" type="image/png" sizes="32x32" href="assets/logo.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="shortcut icon" href="assets/logo.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<noscript>
+  <style>
+    .persona-card, .feature, .hiw-step, .community-card, .limitation { opacity: 1 !important; transform: none !important; }
+  </style>
+</noscript>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">
+      <div class="logo-mark">
+        <img src="assets/logo.png" alt="GhostWire" width="28" height="28" loading="eager">
+      </div>
+      <span class="logo-text">GHOSTWIRE</span>
+    </a>
+    <div class="nav-links">
+      <a href="docs.html" class="nav-link" aria-current="page">Docs</a>
+      <a href="security.html" class="nav-link">Security</a>
+      <a href="about.html" class="nav-link">About</a>
+      <a href="download.html" class="nav-link">Download</a>
+      <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="nav-link nav-link--gh" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav-mobile" id="navMobile">
+    <a href="docs.html">Docs</a>
+    <a href="security.html">Security</a>
+    <a href="about.html">About</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<!-- PAGE HERO -->
+<section class="page-hero">
+  <div class="container page-hero-inner">
+    <div class="page-hero-label mono">// documentation</div>
+    <h1>GhostWire<br>Documentation</h1>
+    <p>Everything you need to install, understand, and contribute to GhostWire. v0.1.0 — Active Development.</p>
+  </div>
+</section>
+
+<!-- DOC CARDS -->
+<section class="doc-cards-section" id="top">
+  <div class="container">
+    <div class="section-label mono">// quick links</div>
+    <h2 class="section-title">Browse documentation</h2>
+    <div class="doc-cards-grid">
+      <a href="#installation" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.28 1.28 1.28 3.356 0 4.636l-1.172 1.172c-1.28 1.28-3.356 1.28-4.636 0L9.75 16.864"/></svg>
+        </div>
+        <h3>Installation</h3>
+        <p>Linux, Docker, and from-source installation guides. System requirements and quick start.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+      <a href="#architecture" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
+        </div>
+        <h3>Architecture</h3>
+        <p>System design, module structure, data flow, and technology stack overview.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+      <a href="#api" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg>
+        </div>
+        <h3>API Reference</h3>
+        <p>RESTful API endpoints, request/response formats, and authentication.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+      <a href="#contributing" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
+        </div>
+        <h3>Contributing</h3>
+        <p>How to contribute code, documentation, security research, and AI models.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+      <a href="#changelog" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <h3>Changelog</h3>
+        <p>Version history, release notes, and breaking changes.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+      <a href="#code-of-conduct" class="doc-card">
+        <div class="doc-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z"/></svg>
+        </div>
+        <h3>Code of Conduct</h3>
+        <p>Community guidelines, expected behavior, and enforcement procedures.</p>
+        <span class="doc-card-link mono">Read more →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- INSTALLATION -->
+<section class="docs-content-section" id="installation">
+  <div class="container">
+    <h2>Installation</h2>
+    <p>GhostWire can be installed on Linux, via Docker, or built from source. Choose the method that works best for your environment.</p>
+
+    <h3>Linux (Recommended)</h3>
+    <pre class="code-block"><code><span class="c-comment"># Clone the repository</span>
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication
+
+<span class="c-comment"># Run the installation script</span>
+./scripts/install.sh
+
+<span class="c-comment"># Start GhostWire</span>
+./scripts/ghostwire.sh start
+
+<span class="c-comment"># Open the dashboard</span>
+<span class="c-green">http://localhost:8080</span></code></pre>
+
+    <h3>Docker</h3>
+    <pre class="code-block"><code><span class="c-comment"># Clone and run</span>
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication
+docker-compose up -d
+
+<span class="c-comment"># Check health</span>
+curl http://localhost:9000/api/v2/health
+<span class="c-green">{"status":"healthy","version":"0.1.0"}</span></code></pre>
+
+    <h3>From Source</h3>
+    <pre class="code-block"><code><span class="c-comment"># Prerequisites: Rust 1.75+, Node 18+</span>
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication/ghostwire
+
+<span class="c-comment"># Build the backend</span>
+cargo build --release
+
+<span class="c-comment"># Build the frontend</span>
+cd ../webui-src && npm install && npm run build
+
+<span class="c-comment"># Run</span>
+cargo run --release</code></pre>
+
+    <p>For detailed installation instructions, see <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/INSTALL.md" target="_blank" rel="noopener" class="mono" style="color:var(--green);">docs/INSTALL.md</a> on GitHub.</p>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section class="docs-content-section" id="architecture" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <h2>Architecture</h2>
+    <p>GhostWire is a decentralized mesh communication platform built in Rust with a React web dashboard. The system is designed for resilience, security, and adaptability.</p>
+
+    <h3>Core Modules</h3>
+    <ul>
+      <li><strong>crypto_machine:</strong> AES-256-GCM encryption, Ed25519 signatures, X25519 key exchange. The cryptographic heart of GhostWire.</li>
+      <li><strong>libp2p networking:</strong> Kademlia DHT for peer discovery, Gossipsub for pub/sub messaging, QUIC and TCP transports.</li>
+      <li><strong>AI integration:</strong> LightGBM anomaly detection (ONNX Runtime) and GNN routing model for intelligent mesh management.</li>
+      <li><strong>Axum HTTP API:</strong> RESTful endpoints for dashboard, health checks, peer management, and mesh statistics.</li>
+      <li><strong>TrustStore:</strong> Distributed reputation system for Sybil resistance and node behavior tracking.</li>
+      <li><strong>DTN (Delay-Tolerant Networking):</strong> Message queuing and store-and-forward for offline-capable communication.</li>
+    </ul>
+
+    <h3>Data Flow</h3>
+    <p>Messages are encrypted locally with AES-256-GCM, routed through the libp2p mesh via Kademlia DHT, monitored by the LightGBM anomaly detector, and delivered to the destination node. If the destination is offline, messages are queued in the DTN layer for later delivery.</p>
+
+    <h3>Technology Stack</h3>
+    <ul>
+      <li><strong>Backend:</strong> Rust, libp2p, Axum, Tokio, ONNX Runtime</li>
+      <li><strong>Frontend:</strong> React, TypeScript, Canvas API for mesh visualization</li>
+      <li><strong>AI/ML:</strong> LightGBM, PyTorch GNN, GuifiSants dataset</li>
+      <li><strong>Transports:</strong> WiFi Direct, Bluetooth LE, LoRa, WebRTC, TCP/IP, Reticulum, Briar</li>
+    </ul>
+  </div>
+</section>
+
+<!-- API -->
+<section class="docs-content-section" id="api">
+  <div class="container">
+    <h2>API Reference</h2>
+    <p>GhostWire exposes a RESTful HTTP API via Axum. The API is used by the web dashboard and can be accessed programmatically.</p>
+
+    <h3>Base URL</h3>
+    <pre class="code-block"><code><span class="c-green">http://localhost:9000/api/v2</span></code></pre>
+
+    <h3>Endpoints</h3>
+    <ul>
+      <li><strong>GET /health</strong> — Health check. Returns status and version.</li>
+      <li><strong>GET /peers</strong> — List all connected peers with status, latency, and reputation.</li>
+      <li><strong>GET /mesh/stats</strong> — Mesh network statistics: node count, message rate, queue depth.</li>
+      <li><strong>GET /mesh/topology</strong> — Current mesh topology as a graph structure.</li>
+      <li><strong>POST /message/send</strong> — Send a message to a peer (JSON body with recipient and content).</li>
+      <li><strong>GET /messages/inbox</strong> — Retrieve received messages.</li>
+      <li><strong>GET /identity/profiles</strong> — List all identity profiles on this node.</li>
+      <li><strong>POST /identity/create</strong> — Create a new identity profile.</li>
+      <li><strong>GET /anomaly/status</strong> — Current anomaly detection status and recent alerts.</li>
+    </ul>
+
+    <p>For the complete API reference with request/response examples, see <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/API_QUICK_REFERENCE.md" target="_blank" rel="noopener" class="mono" style="color:var(--green);">docs/API_QUICK_REFERENCE.md</a>.</p>
+  </div>
+</section>
+
+<!-- CONTRIBUTING -->
+<section class="docs-content-section" id="contributing" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <h2>Contributing</h2>
+    <p>GhostWire is open-source (AGPLv3) and actively seeking contributors. All skill levels welcome — from Rust experts to first-time open-source contributors.</p>
+
+    <h3>Areas We Need Help</h3>
+    <ul>
+      <li><strong>Rust development:</strong> Core networking, cryptography, DTN layer, API endpoints.</li>
+      <li><strong>AI/ML:</strong> GNN model improvement, LightGBM retraining, new anomaly detection features.</li>
+      <li><strong>Frontend:</strong> React dashboard, mesh visualization, mobile responsiveness.</li>
+      <li><strong>Documentation:</strong> User guides, API docs, tutorials, translations.</li>
+      <li><strong>Security research:</strong> Code review, threat modeling, penetration testing.</li>
+      <li><strong>Testing:</strong> Unit tests, integration tests, mesh simulation testing.</li>
+    </ul>
+
+    <h3>How to Get Started</h3>
+    <pre class="code-block"><code><span class="c-comment"># 1. Fork the repository on GitHub</span>
+<span class="c-comment"># 2. Clone your fork</span>
+git clone https://github.com/YOUR_USERNAME/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication
+
+<span class="c-comment"># 3. Create a branch</span>
+git checkout -b feature/my-contribution
+
+<span class="c-comment"># 4. Make your changes and test</span>
+<span class="c-comment"># 5. Commit and push</span>
+git commit -m "feat: add my contribution"
+git push origin feature/my-contribution
+
+<span class="c-comment"># 6. Open a Pull Request on GitHub</span></code></pre>
+
+    <p>Read the full contributing guide at <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CONTRIBUTING.md" target="_blank" rel="noopener" class="mono" style="color:var(--green);">docs/CONTRIBUTING.md</a>.</p>
+  </div>
+</section>
+
+<!-- CHANGELOG -->
+<section class="docs-content-section" id="changelog">
+  <div class="container">
+    <h2>Changelog</h2>
+
+    <h3>v0.1.0 — Current (April 2026)</h3>
+    <ul>
+      <li>Initial release of GhostWire mesh communication platform.</li>
+      <li>Rust core with libp2p networking, Kademlia DHT, Gossipsub pub/sub.</li>
+      <li>AES-256-GCM encryption, Ed25519 signatures, X25519 key exchange.</li>
+      <li>LightGBM anomaly detection (ONNX, 76.7μs inference).</li>
+      <li>GNN routing model trained on GuifiSants dataset (7,931 samples).</li>
+      <li>Axum HTTP API with health, peers, mesh stats endpoints.</li>
+      <li>React web dashboard with real-time mesh visualization.</li>
+      <li>Multi-profile identity support with QR code pairing.</li>
+      <li>TrustStore reputation system for Sybil resistance.</li>
+      <li>Delay-tolerant networking with message queuing.</li>
+      <li>Docker support with docker-compose.</li>
+    </ul>
+
+    <h3>Planned</h3>
+    <ul>
+      <li>ML-KEM-768 post-quantum key encapsulation integration.</li>
+      <li>Windows, macOS, and Android builds.</li>
+      <li>Tor integration for anonymity routing.</li>
+      <li>Independent third-party security audit.</li>
+      <li>Bug bounty program.</li>
+    </ul>
+
+    <p>Full changelog at <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener" class="mono" style="color:var(--green);">docs/CHANGELOG.md</a>.</p>
+  </div>
+</section>
+
+<!-- CODE OF CONDUCT -->
+<section class="docs-content-section" id="code-of-conduct" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <h2>Code of Conduct</h2>
+    <p>GhostWire is committed to providing a welcoming, safe, and harassment-free environment for all contributors regardless of background. Our full Code of Conduct is based on the Contributor Covenant.</p>
+
+    <h3>Our Pledge</h3>
+    <p>We pledge to make participation in our project and community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.</p>
+
+    <h3>Expected Behavior</h3>
+    <ul>
+      <li>Using welcoming and inclusive language.</li>
+      <li>Being respectful of differing viewpoints and experiences.</li>
+      <li>Gracefully accepting constructive criticism.</li>
+      <li>Focusing on what is best for the community.</li>
+      <li>Showing empathy towards other community members.</li>
+    </ul>
+
+    <h3>Unacceptable Behavior</h3>
+    <ul>
+      <li>The use of sexualized language or imagery and unwelcome sexual attention or advances.</li>
+      <li>Trolling, insulting/derogatory comments, and personal or political attacks.</li>
+      <li>Public or private harassment.</li>
+      <li>Publishing others' private information without explicit permission.</li>
+    </ul>
+
+    <h3>Reporting</h3>
+    <p>Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the team at <a href="mailto:mirungu015@proton.me" class="mono" style="color:var(--green);">mirungu015@proton.me</a>. All complaints will be reviewed and investigated promptly and fairly.</p>
+
+    <p>Read the full Code of Conduct at <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CODE_OF_CONDUCT.md" target="_blank" rel="noopener" class="mono" style="color:var(--green);">docs/CODE_OF_CONDUCT.md</a>.</p>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="nav-logo">
+          <div class="logo-mark">
+            <img src="assets/logo.png" alt="GhostWire" width="22" height="22" loading="lazy">
+          </div>
+          <span class="logo-text">GHOSTWIRE</span>
+        </div>
+        <p class="footer-tagline">Resilient Mesh Communication for Connectivity-Constrained Communities.<br>Built in Nairobi, for the world.</p>
+        <p class="footer-license mono">AGPLv3 / Commercial License available</p>
+        <p class="footer-competition mono" style="font-size:10px; color:var(--white-faint); margin-top:0.5rem;">GCD4F 2026 — Open University of Kenya</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>Project</h4>
+          <a href="about.html">About</a>
+          <a href="about.html#manifesto">Manifesto</a>
+          <a href="about.html#team">Team</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Get Started</h4>
+          <a href="download.html">Download</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/QUICK_START.md" target="_blank" rel="noopener">Quick Start</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">Installation</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/API_QUICK_REFERENCE.md" target="_blank" rel="noopener">API Reference</a>
+        </div>
+        <div class="footer-col">
+          <h4>Security</h4>
+          <a href="security.html">Overview</a>
+          <a href="security.html#threat-model">Threat Model</a>
+          <a href="security.html#cryptography">Cryptography</a>
+          <a href="security.html#disclosure">Vulnerability Disclosure</a>
+        </div>
+        <div class="footer-col">
+          <h4>Community</h4>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+          <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+          <a href="mailto:mirungu015@proton.me">Contact</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="mono">&copy; 2026 GhostWire — Team GhostWire, Open University of Kenya</span>
+      <span class="mono footer-pgp">PGP: <a href="mailto:mirungu015@proton.me">mirungu015@proton.me</a></span>
+    </div>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

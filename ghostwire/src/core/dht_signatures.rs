@@ -168,7 +168,7 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
 
     fn make_signing_key() -> SigningKey {
         SigningKey::generate(&mut OsRng)

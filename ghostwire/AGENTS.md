@@ -102,30 +102,24 @@ src/core/mod.rs              — Core struct, module declarations
 src/core/ai/mod.rs           — AI module definition
 src/core/ai/gemma_client.rs  — Gemma 4 Ollama HTTP client
 src/core/ai/routing_classifier.rs — ML routing classifier
-src/core/ai/onnx_inference.rs     — ONNX runtime engine (currently broken)
+src/core/ai/onnx_inference.rs     — ONNX runtime engine (working, ort 2.0)
 src/core/dtn/epidemic.rs     — PRoPHET formula (working)
-src/core/reputation.rs       — Trust scoring (use this, not trust_predictor.rs)
+src/core/reputation.rs       — Trust scoring (trust_predictor.rs deleted, this is canonical)
 src/config.rs                — Feature flags including Gemma 4 variants
-models/anomaly_detector.joblib — Trained Isolation Forest (use this)
-models/hrm_ghostwire_hybrid_101k.pt — BROKEN: wrong task, do not extend
+models/anomaly_detector.joblib — Trained Isolation Forest for Python training
+models/l1_anomaly_detector.onnx — ONNX Isolation Forest for Rust runtime inference
 ```
 
 ---
 
 ## Known Issues (fix before shipping anything)
 
-| Issue | File | Severity |
-|---|---|---|
-| initialize_gemma_client() never assigns to self.gemma_client | core/mod.rs | CRITICAL |
-| onnx_inference.rs commented out (ort::Value import error) | ai/mod.rs | HIGH |
-| anomaly_detector.rs duplicates anomaly_detector.joblib | ai/ | HIGH |
-| trust_predictor.rs duplicates reputation.rs + TrustStore | ai/ | HIGH |
-| GemmaClient never called in routing decisions | ai/ | HIGH |
-| HRM model solves wrong problem (classifier, not regressor) | models/ | HIGH |
-| 2 pre-existing test failures (identity storage, social graph) | tests | LOW |
-| 2 tests hang (network transport startup) | tests | LOW |
-
-Current routing accuracy: 2.69% (target: 85–95% via LightGBM regression)
+| Issue | File | Severity | Status |
+|---|---|---|---|
+| ML routing classifier not wired into actual packet routing | routing/ | HIGH | Open — Layer 1 LightGBM exists but unused in routing decisions |
+| 5 transitive security alerts (hickory-proto, rustls-webpki) | Cargo.lock | MEDIUM | Blocked — needs upstream libp2p/rustls updates |
+| 2 tests hang (network transport startup) | tests/ | LOW | Pre-existing |
+| 2 pre-existing test failures (identity storage, social graph) | tests/ | LOW | Pre-existing |
 
 ## Phase 3 Preview (next work block)
 

@@ -1,6 +1,7 @@
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use anyhow::Result;
+use rand_core::OsRng;
 // use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -130,10 +131,10 @@ impl ReticulumManager {
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
             .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
-        use rand::Rng;
+        use rand_core::RngCore;
 
         let mut nonce = [0u8; 12];
-        rand::thread_rng().fill(&mut nonce);
+        OsRng.fill_bytes(&mut nonce);
 
         let ciphertext = cipher
             .encrypt(&nonce.into(), content)

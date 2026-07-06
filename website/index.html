@@ -1,30 +1,639 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="0; url=https://ghostwire.cc/">
-  <meta name="robots" content="noindex">
-  <title>Redirecting to GhostWire</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      background: #0a0a0f;
-      color: #e0e0e0;
-    }
-    .msg { text-align: center; }
-    a { color: #00d4ff; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostWire — Resilient Mesh Communication for Connectivity-Constrained Communities</title>
+<meta name="description" content="A decentralized, censorship-resistant mesh communication platform. No servers. No owners. Built for when the internet goes dark. GCD4F 2026 submission.">
+<meta name="keywords" content="mesh networking, decentralized communication, privacy, encryption, disaster response, libp2p, Rust, GCD4F, Global South">
+<meta name="author" content="Team GhostWire — Open University of Kenya">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://www.ghostwire.cc/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="GhostWire — Infrastructure for Human Dignity">
+<meta property="og:description" content="A decentralized, censorship-resistant mesh communication platform. No servers. No owners. Built for when the internet goes dark.">
+<meta property="og:image" content="https://www.ghostwire.cc/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://www.ghostwire.cc/">
+<meta property="og:site_name" content="GhostWire">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GhostWire — Infrastructure for Human Dignity">
+<meta name="twitter:description" content="Decentralized mesh communication for when the internet goes dark.">
+<meta name="twitter:image" content="https://www.ghostwire.cc/assets/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/logo.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<noscript><style>.mesh-canvas{display:none!important}#diagramCanvas{display:none!important}.hero{background:radial-gradient(ellipse at 30% 40%,rgba(0,220,154,0.06) 0%,var(--bg) 60%)}.persona-card,.feature,.hiw-step,.community-card,.limitation,.modal{opacity:1!important;transform:none!important}.modal{display:none!important}</style></noscript>
 </head>
 <body>
-  <div class="msg">
-    <h1>GhostWire has moved</h1>
-    <p>Redirecting to <a href="https://ghostwire.cc/">ghostwire.cc</a>...</p>
-    <script>window.location.replace("https://ghostwire.cc/");</script>
+<nav class="nav" id="nav"><div class="nav-inner"><a href="index.html" class="nav-logo"><div class="logo-mark"><img src="assets/logo.png" alt="GhostWire logo" width="28" height="28" loading="eager"></div><span class="logo-text">GHOSTWIRE</span></a><div class="nav-links"><a href="docs.html" class="nav-link">Docs</a><a href="security.html" class="nav-link">Security</a><a href="about.html" class="nav-link">About</a><a href="download.html" class="nav-link">Download</a><a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="nav-link nav-link--gh" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>GitHub</a></div><button class="nav-toggle" id="navToggle" aria-label="Toggle navigation menu" aria-expanded="false"><span></span><span></span><span></span></button></div><div class="nav-mobile" id="navMobile"><a href="docs.html">Docs</a><a href="security.html">Security</a><a href="about.html">About</a><a href="download.html">Download</a><a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a></div></nav>
+
+<section class="hero"><canvas id="meshCanvas" class="mesh-canvas" aria-hidden="true"></canvas><div class="hero-content"><div class="hero-eyebrow"><span class="pulse-dot"></span><span class="mono">v0.1.0 — Active Development · GCD4F 2026</span></div><h1 class="hero-title">Infrastructure<br><span class="hero-title--accent">for Human Dignity</span></h1><p class="hero-desc">A decentralized, censorship-resistant communication mesh.<br>No servers. No owners. Built for when the internet goes dark.</p><div class="hero-ctas"><a href="download.html" class="btn btn--primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Get GhostWire</a><a href="docs.html" class="btn btn--ghost">Read the Docs<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg></a></div><div class="hero-stats"><div class="stat"><span class="stat-num mono">P2P</span><span class="stat-label">No Central Server</span></div><div class="stat-divider"></div><div class="stat"><span class="stat-num mono">AES-256</span><span class="stat-label">End-to-End Encrypted</span></div><div class="stat-divider"></div><div class="stat"><span class="stat-num mono">Rust</span><span class="stat-label">Memory-Safe Core</span></div><div class="stat-divider"></div><div class="stat"><span class="stat-num mono">AI</span><span class="stat-label">Learned Routing</span></div><div class="stat-divider"></div><div class="stat"><span class="stat-num mono">7</span><span class="stat-label">Transport Layers</span></div></div></div><div class="hero-scroll" aria-hidden="true"><span>SCROLL</span><div class="scroll-line"></div></div></section>
+
+<section class="problem"><div class="container"><div class="problem-quote"><blockquote><strong>2.6 billion people lack reliable internet access.</strong> When disasters strike, infrastructure fails, or communities are remote — traditional communication breaks down precisely when coordination is most critical. GhostWire exists because connectivity is a human right, not a luxury.</blockquote></div></div></section>
+
+<section class="for-who"><div class="container"><div class="section-label mono">// who this is for</div><h2 class="section-title">Built for those the internet forgot</h2><p class="section-subtitle">Click any card to learn how GhostWire helps your specific situation.</p><div class="personas-grid"><div class="persona-card" data-modal="modal-disaster" tabindex="0" role="button" aria-label="Learn how GhostWire helps disaster responders"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg></div><h3>Disaster Responders</h3><p>Coordinate when cell towers fail. Works on battery and solar.</p><span class="card-hint mono">Click to learn more →</span></div><div class="persona-card" data-modal="modal-privacy" tabindex="0" role="button" aria-label="Learn how GhostWire helps privacy advocates"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg></div><h3>Privacy Advocates</h3><p>Communicate without corporate surveillance. No logs. No traces.</p><span class="card-hint mono">Click to learn more →</span></div><div class="persona-card" data-modal="modal-rural" tabindex="0" role="button" aria-label="Learn how GhostWire helps rural communities"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21m-3.75 3H21"/></svg></div><h3>Rural Communities</h3><p>Mesh nodes for entire villages. AI-powered routing learns optimal paths.</p><span class="card-hint mono">Click to learn more →</span></div><div class="persona-card" data-modal="modal-activist" tabindex="0" role="button" aria-label="Learn how GhostWire helps activists and journalists"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg></div><h3>Activists &amp; Journalists</h3><p>Coordinate without infiltration. Disposable identities. Mesh during protests.</p><span class="card-hint mono">Click to learn more →</span></div><div class="persona-card" data-modal="modal-whistleblower" tabindex="0" role="button" aria-label="Learn how GhostWire helps whistleblowers"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/></svg></div><h3>Whistleblowers</h3><p>Send documents without revealing identity. Tor integration supported.</p><span class="card-hint mono">Click to learn more →</span></div><div class="persona-card" data-modal="modal-developer" tabindex="0" role="button" aria-label="Learn how GhostWire helps developers and researchers"><div class="persona-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg></div><h3>Developers &amp; Researchers</h3><p>AGPL-licensed. Built in Rust. AI models trained on real mesh data.</p><span class="card-hint mono">Click to learn more →</span></div></div></div></section>
+
+<section class="how-it-works"><div class="container"><div class="section-label mono">// how it works</div><h2 class="section-title">Mesh networking for the real world</h2><div class="hiw-grid"><div class="hiw-visual"><div class="mesh-diagram" id="meshDiagram"><canvas id="diagramCanvas" width="480" height="360" aria-label="Animated mesh network diagram showing how messages hop between nodes" role="img"></canvas></div><p class="diagram-caption mono">Messages hop node-to-node. Remove any node — the mesh routes around it.</p></div><div class="hiw-steps"><div class="hiw-step" data-step="1"><div class="step-num mono">01</div><div class="step-content"><h3>No central server</h3><p>Devices connect directly via libp2p. Pure P2P, no single point of failure.</p></div></div><div class="hiw-step" data-step="2"><div class="step-num mono">02</div><div class="step-content"><h3>7 transport layers</h3><p>WiFi Direct, Bluetooth LE, LoRa, WebRTC, TCP/IP, Reticulum, Briar. Falls back to RF mesh automatically.</p></div></div><div class="hiw-step" data-step="3"><div class="step-num mono">03</div><div class="step-content"><h3>AI-powered routing</h3><p>LightGBM anomaly detection (76.7μs) + GNN trained on real GuifiSants mesh data.</p></div></div><div class="hiw-step" data-step="4"><div class="step-num mono">04</div><div class="step-content"><h3>End-to-end encrypted</h3><p>AES-256-GCM, X25519 key exchange, post-quantum ML-KEM-768 ready.</p></div></div><div class="hiw-step" data-step="5"><div class="step-num mono">05</div><div class="step-content"><h3>Delay-tolerant delivery</h3><p>Messages queue when peers are offline. Delivered when the network reconnects.</p></div></div></div></div></div></section>
+
+<section class="features"><div class="container"><div class="section-label mono">// protocol stack</div><h2 class="section-title">Built on proven cryptographic foundations</h2><p class="section-subtitle">Click any card to understand what it is and why we use it.</p><div class="features-grid"><div class="feature" data-modal="modal-aes" tabindex="0" role="button" aria-label="Learn about AES-256-GCM encryption"><div class="feature-header"><span class="feature-tag mono">Encryption</span></div><h3>AES-256-GCM</h3><p>Industry-standard authenticated encryption. No server ever sees plaintext.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-x25519" tabindex="0" role="button" aria-label="Learn about Ed25519 and X25519"><div class="feature-header"><span class="feature-tag mono">Key Exchange</span></div><h3>Ed25519 / X25519</h3><p>Modern elliptic curve cryptography. Perfect forward secrecy. Keys never leave your device.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-pq" tabindex="0" role="button" aria-label="Learn about post-quantum cryptography"><div class="feature-header"><span class="feature-tag mono">Post-Quantum</span></div><h3>ML-KEM-768</h3><p>NIST-standardized post-quantum key encapsulation. Protects against future quantum computers.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-libp2p" tabindex="0" role="button" aria-label="Learn about libp2p networking"><div class="feature-header"><span class="feature-tag mono">Networking</span></div><h3>libp2p + Kademlia DHT</h3><p>Proven P2P networking used by IPFS and Ethereum. Gossipsub messaging.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-ai" tabindex="0" role="button" aria-label="Learn about AI-powered routing"><div class="feature-header"><span class="feature-tag mono">AI Routing</span></div><h3>LightGBM + GNN</h3><p>L1 anomaly detector: AUC 1.0, 76.7μs. L3 GNN on 7,931 real mesh samples.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-sybil" tabindex="0" role="button" aria-label="Learn about Sybil attack resistance"><div class="feature-header"><span class="feature-tag mono">Defense</span></div><h3>Sybil resistance</h3><p>Proof-of-work node admission. Reputation system with TrustStore.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-traffic" tabindex="0" role="button" aria-label="Learn about traffic obfuscation"><div class="feature-header"><span class="feature-tag mono">Privacy</span></div><h3>Traffic obfuscation</h3><p>Cover traffic, timing randomization, stealth TCP. Makes analysis harder.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-monitor" tabindex="0" role="button" aria-label="Learn about real-time monitoring"><div class="feature-header"><span class="feature-tag mono">Monitoring</span></div><h3>Real-time dashboard</h3><p>Interactive mesh topology. Live CPU, RAM, network metrics. Axum HTTP API.</p><span class="card-hint mono">Click to learn more →</span></div><div class="feature" data-modal="modal-identity" tabindex="0" role="button" aria-label="Learn about multi-profile identity"><div class="feature-header"><span class="feature-tag mono">Identity</span></div><h3>Multi-profile support</h3><p>Separate identities for different contexts. Username discovery. QR pairing.</p><span class="card-hint mono">Click to learn more →</span></div></div></div></section>
+
+<section class="manifesto"><div class="container"><div class="manifesto-inner"><div class="manifesto-left"><div class="section-label mono">// manifesto</div><h2>The internet was built to be ungovernable.</h2><p>In Hindu and Buddhist cosmology, Indra's Net is an infinite web. At each intersection hangs a jewel. Each reflected in all others. No jewel is more important. The net has no center. The net has no edge.</p><p>The original internet architects independently rediscovered what African philosophy had encoded for millennia: systems built on mutual relationship rather than central authority are more resilient, more equitable, and more aligned with existence itself.</p><p><em>Ubuntu</em> — I am because we are. The stranger is a node that has not yet connected to the net.</p><p class="manifesto-attribution">— From <em>GhostWire: The First Root of Yggdrasil</em></p><a href="about.html#manifesto" class="btn btn--outline">Read the full manifesto</a></div><div class="manifesto-right"><div class="manifesto-principles"><div class="principle"><div class="principle-glyph mono">I.</div><p>Connection cannot be owned. Information wants to be free not because someone decided this, but because this is its nature.</p></div><div class="principle"><div class="principle-glyph mono">II.</div><p>Power distributed is power that cannot be seized. The architecture itself is the philosophy.</p></div><div class="principle"><div class="principle-glyph mono">III.</div><p><em>Ubuntu</em> — I am because we are. The stranger is a node that has not yet connected to the net.</p></div><div class="principle"><div class="principle-glyph mono">IV.</div><p>GhostWire begins here: not as a product, but as a restoration. The first root of Yggdrasil.</p></div></div></div></div></div></section>
+
+<section class="transparency"><div class="container"><div class="section-label mono">// transparency</div><h2 class="section-title">What GhostWire does NOT protect against</h2><p class="transparency-sub">Honest security requires honest limitations. Click each card for details and mitigation steps.</p><div class="limitations-grid"><div class="limitation" data-modal="modal-physical" tabindex="0" role="button" aria-label="Learn about physical device seizure risks"><div class="lim-icon">⚠</div><h3>Physical device seizure</h3><p>If your device is seized, local data may be at risk.</p><span class="card-hint mono">Click for mitigation steps →</span></div><div class="limitation" data-modal="modal-anonymity" tabindex="0" role="button" aria-label="Learn about anonymity limitations"><div class="lim-icon">⚠</div><h3>Full anonymity</h3><p>Strong privacy, not complete anonymity. Traffic analysis remains a risk.</p><span class="card-hint mono">Click to understand why →</span></div><div class="limitation" data-modal="modal-endpoint" tabindex="0" role="button" aria-label="Learn about endpoint compromise risks"><div class="lim-icon">⚠</div><h3>Endpoint compromise</h3><p>If either device has malware, encryption can't protect content at that endpoint.</p><span class="card-hint mono">Click for best practices →</span></div><div class="limitation" data-modal="modal-audit" tabindex="0" role="button" aria-label="Learn about audit status"><div class="lim-icon">⚠</div><h3>Not yet independently audited</h3><p>No third-party security audit yet. Internal audits available in docs/.</p><span class="card-hint mono">Click for details →</span></div></div></div></section>
+
+<section class="quickstart"><div class="container"><div class="section-label mono">// quick start</div><h2 class="section-title">Running in under 5 minutes</h2><div class="qs-tabs" role="tablist" aria-label="Installation method tabs"><button class="qs-tab active" data-tab="linux" role="tab" aria-selected="true" tabindex="0">Linux</button><button class="qs-tab" data-tab="docker" role="tab" aria-selected="false" tabindex="-1">Docker</button><button class="qs-tab" data-tab="source" role="tab" aria-selected="false" tabindex="-1">From Source</button></div><div class="qs-panel active" id="tab-linux" role="tabpanel"><pre class="code-block"><code><span class="c-comment"># Clone and install</span>
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication
+./scripts/install.sh
+
+<span class="c-comment"># Start GhostWire</span>
+./scripts/ghostwire.sh start
+
+<span class="c-comment"># Open the dashboard</span>
+<span class="c-green">http://localhost:8080</span></code></pre></div><div class="qs-panel" id="tab-docker" role="tabpanel"><pre class="code-block"><code><span class="c-comment"># Pull and run</span>
+docker-compose up -d
+
+<span class="c-comment"># Check health</span>
+curl http://localhost:9000/api/v2/health
+
+<span class="c-comment"># Expected output</span>
+<span class="c-green">{"status":"healthy","version":"0.1.0"}</span></code></pre></div><div class="qs-panel" id="tab-source" role="tabpanel"><pre class="code-block"><code><span class="c-comment"># Prerequisites: Rust 1.75+, Node 18+</span>
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+cd GhostWire-secure-mesh-communication/ghostwire
+
+<span class="c-comment"># Build the backend</span>
+cargo build --release
+
+<span class="c-comment"># Build the frontend</span>
+cd ../webui-src && npm install && npm run build</code></pre></div><div class="qs-footer"><a href="docs.html" class="btn btn--primary">Full documentation</a><a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/QUICK_START.md" class="btn btn--ghost" target="_blank" rel="noopener">Quick Start on GitHub</a></div></div></section>
+
+<section class="community"><div class="container"><div class="section-label mono">// community</div><h2 class="section-title">Open infrastructure, open community</h2><div class="community-grid"><a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="community-card" target="_blank" rel="noopener"><div class="cc-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg></div><h3>Source Code</h3><p>Full source on GitHub. Report issues, submit PRs, review the code.</p><span class="cc-link mono">github.com/Phantomojo →</span></a><a href="mailto:mirungu015@proton.me" class="community-card"><div class="cc-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></div><h3>Contact</h3><p>Reach the team directly. Press inquiries, security reports, partnerships.</p><span class="cc-link mono">mirungu015@proton.me →</span></a><a href="docs.html#contributing" class="community-card"><div class="cc-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg></div><h3>Contribute</h3><p>Rust, TypeScript, documentation, security research, AI model training — all welcome.</p><span class="cc-link mono">Contributing guide →</span></a><a href="security.html#disclosure" class="community-card"><div class="cc-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg></div><h3>Security</h3><p>Report vulnerabilities responsibly. Read our security policy and threat model.</p><span class="cc-link mono">Security policy →</span></a></div></div></section>
+
+<!-- ================================================
+     ALL 19 MODALS
+     ================================================ -->
+
+<!-- MODAL: Disaster Responders -->
+<div class="modal-overlay" id="modal-disaster" role="dialog" aria-modal="true" aria-labelledby="modal-disaster-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg></div>
+    <h2 id="modal-disaster-title">Disaster Responders</h2>
+    <div class="modal-body">
+      <h3>The Problem</h3>
+      <p>When hurricanes, earthquakes, or floods strike, cell towers go down. First responders lose coordination. Communities are cut off from emergency services. Traditional communication infrastructure is fragile.</p>
+      <h3>How GhostWire Helps</h3>
+      <ul>
+        <li><strong>Works without internet:</strong> WiFi Direct and Bluetooth LE create local mesh networks between devices.</li>
+        <li><strong>Long-range with LoRa:</strong> LoRa radio extends range to kilometers, connecting isolated communities.</li>
+        <li><strong>Battery and solar powered:</strong> Runs on Raspberry Pi, laptops, or phones. No grid power needed.</li>
+        <li><strong>Delay-tolerant messaging:</strong> Messages queue and forward when connectivity resumes. No message is lost.</li>
+        <li><strong>Encrypted coordination:</strong> AES-256-GCM ensures sensitive operational data stays private.</li>
+      </ul>
+      <h3>Real-World Scenario</h3>
+      <p>A hurricane hits the coast. Cell towers are down across 200km. Rescue teams deploy with GhostWire on laptops and phones. A mesh network forms automatically. Coordination messages flow between teams. Medical supply requests reach the staging area. Status updates flow back to command. All without a single cell tower.</p>
+      <div class="modal-tech-note mono">Transports: WiFi Direct, Bluetooth LE, LoRa, Reticulum</div>
+    </div>
+    <div class="modal-cta">
+      <a href="download.html" class="btn btn--primary">Get GhostWire</a>
+      <a href="docs.html" class="btn btn--ghost">Read the Docs</a>
+    </div>
   </div>
+</div>
+
+<!-- MODAL: Privacy Advocates -->
+<div class="modal-overlay" id="modal-privacy" role="dialog" aria-modal="true" aria-labelledby="modal-privacy-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg></div>
+    <h2 id="modal-privacy-title">Privacy Advocates</h2>
+    <div class="modal-body">
+      <h3>The Problem</h3>
+      <p>Corporate surveillance is ubiquitous. Every message, call, and search is logged, analyzed, and monetized. Even "encrypted" services collect metadata about who you talk to, when, and how often.</p>
+      <h3>How GhostWire Protects You</h3>
+      <ul>
+        <li><strong>No servers, no logs:</strong> Pure P2P architecture means there is no central server to log your activity.</li>
+        <li><strong>End-to-end encryption:</strong> AES-256-GCM authenticated encryption. No intermediary ever sees plaintext.</li>
+        <li><strong>Metadata minimization:</strong> Messages carry only what is necessary. No phone numbers, no email addresses required.</li>
+        <li><strong>Traffic obfuscation:</strong> Cover traffic and timing randomization make traffic analysis significantly harder.</li>
+        <li><strong>Multi-profile identities:</strong> Separate cryptographic identities for different contexts. Compartmentalize your digital life.</li>
+      </ul>
+      <h3>What This Means</h3>
+      <p>GhostWire gives you communication without the surveillance capitalism model. Your conversations belong to you — not to a corporation that sells your attention to advertisers.</p>
+      <div class="modal-tech-note mono">Crypto: AES-256-GCM, X25519, Ed25519, ML-KEM-768 (planned)</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="download.html" class="btn btn--ghost">Get GhostWire</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Rural Communities -->
+<div class="modal-overlay" id="modal-rural" role="dialog" aria-modal="true" aria-labelledby="modal-rural-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21m-3.75 3H21"/></svg></div>
+    <h2 id="modal-rural-title">Rural Communities</h2>
+    <div class="modal-body">
+      <h3>The Problem</h3>
+      <p>2.6 billion people lack reliable internet. Rural communities are told to wait for infrastructure that may never arrive. ISPs have no economic incentive to serve sparse populations.</p>
+      <h3>How GhostWire Helps</h3>
+      <ul>
+        <li><strong>Community-owned infrastructure:</strong> Each device is a node. The more people join, the stronger the mesh becomes.</li>
+        <li><strong>AI-powered routing:</strong> LightGBM anomaly detection and GNN routing learn optimal paths through your specific terrain.</li>
+        <li><strong>Multi-hop messaging:</strong> Messages travel through multiple nodes to reach distant recipients. No direct connection needed.</li>
+        <li><strong>Works with commodity hardware:</strong> Laptops, phones, Raspberry Pi devices. No specialized equipment required.</li>
+        <li><strong>Trained on real data:</strong> Our GNN model is trained on the GuifiSants dataset — 7,931 samples from a real community mesh network in Barcelona.</li>
+      </ul>
+      <h3>Building Your Own Mesh</h3>
+      <p>Start with a few devices in your community. Each person installs GhostWire. The mesh forms automatically. Add LoRa radios for longer range. The network grows organically as more people join.</p>
+      <div class="modal-tech-note mono">AI: LightGBM (76.7μs inference) + GNN (7,931 training samples)</div>
+    </div>
+    <div class="modal-cta">
+      <a href="download.html" class="btn btn--primary">Get GhostWire</a>
+      <a href="about.html" class="btn btn--ghost">About the Team</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Activists & Journalists -->
+<div class="modal-overlay" id="modal-activist" role="dialog" aria-modal="true" aria-labelledby="modal-activist-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg></div>
+    <h2 id="modal-activist-title">Activists &amp; Journalists</h2>
+    <div class="modal-body">
+      <h3>The Problem</h3>
+      <p>During protests, governments shut down internet access. Journalists lose their ability to communicate with editors. Activists are infiltrated by informants. Standard communication tools become liabilities.</p>
+      <h3>How GhostWire Protects You</h3>
+      <ul>
+        <li><strong>Mesh during internet shutdowns:</strong> When the internet goes dark, GhostWire keeps working via WiFi Direct and Bluetooth LE.</li>
+        <li><strong>Disposable identities:</strong> Create separate profiles for different operations. Burn them when compromised.</li>
+        <li><strong>QR code pairing:</strong> Securely exchange keys with trusted contacts in person. No central registry to subpoena.</li>
+        <li><strong>Sybil resistance:</strong> Proof-of-work node admission makes it computationally expensive for adversaries to flood your mesh with fake nodes.</li>
+        <li><strong>Reputation system:</strong> TrustStore tracks node behavior over time. Suspicious nodes are flagged automatically.</li>
+      </ul>
+      <h3>Operational Security</h3>
+      <p>Use a dedicated device for GhostWire. Enable full-disk encryption. Use lockdown mode in high-threat environments. Meet contacts in person for initial QR pairing. Never reuse identities across operations.</p>
+      <div class="modal-tech-note mono">Identity: Ed25519 keys / QR pairing / Multi-profile / TrustStore</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="download.html" class="btn btn--ghost">Get GhostWire</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Whistleblowers -->
+<div class="modal-overlay" id="modal-whistleblower" role="dialog" aria-modal="true" aria-labelledby="modal-whistleblower-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/></svg></div>
+    <h2 id="modal-whistleblower-title">Whistleblowers</h2>
+    <div class="modal-body">
+      <h3>The Problem</h3>
+      <p>Exposing wrongdoing requires transmitting sensitive documents without revealing your identity. Standard channels leave traces. Even encrypted services can be compelled to hand over metadata.</p>
+      <h3>How GhostWire Protects You</h3>
+      <ul>
+        <li><strong>Tor integration:</strong> Route GhostWire traffic through Tor for additional anonymity layers.</li>
+        <li><strong>No identifying information required:</strong> No phone number, email, or real name needed to create an identity.</li>
+        <li><strong>End-to-end encryption:</strong> Documents are encrypted before they leave your device. No intermediary can read them.</li>
+        <li><strong>Stealth TCP transport:</strong> GhostWire traffic can blend with normal HTTPS traffic, making it harder to detect.</li>
+        <li><strong>Ephemeral sessions:</strong> Session keys are destroyed after use. No persistent state to subpoena.</li>
+      </ul>
+      <h3>Best Practices</h3>
+      <p>Use a dedicated device. Connect via public WiFi. Route through Tor. Use a disposable identity profile. Meet your journalist contact in person for initial key exchange via QR code. Never reuse the same identity.</p>
+      <div class="modal-tech-note mono">Privacy: Tor integration / Stealth TCP / Ephemeral sessions</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="download.html" class="btn btn--ghost">Get GhostWire</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Developers & Researchers -->
+<div class="modal-overlay" id="modal-developer" role="dialog" aria-modal="true" aria-labelledby="modal-developer-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg></div>
+    <h2 id="modal-developer-title">Developers &amp; Researchers</h2>
+    <div class="modal-body">
+      <h3>The Project</h3>
+      <p>GhostWire is open-source (AGPLv3) and built in Rust for memory safety. The codebase includes a production-ready P2P networking stack, cryptographic primitives, AI/ML models, and a web dashboard.</p>
+      <h3>Technology Stack</h3>
+      <ul>
+        <li><strong>Rust backend:</strong> libp2p networking, Kademlia DHT, Gossipsub pub/sub, QUIC/TCP transports, Axum HTTP API.</li>
+        <li><strong>Cryptography:</strong> AES-256-GCM, Ed25519 signatures, X25519 key exchange, ML-KEM-768 post-quantum (planned).</li>
+        <li><strong>AI/ML:</strong> LightGBM anomaly detection (ONNX, 76.7μs inference), GNN routing model (trained on GuifiSants dataset).</li>
+        <li><strong>Frontend:</strong> React web dashboard with real-time mesh topology visualization.</li>
+        <li><strong>Transports:</strong> WiFi Direct, Bluetooth LE, LoRa, WebRTC, TCP/IP, Reticulum, Briar.</li>
+      </ul>
+      <h3>How to Contribute</h3>
+      <p>Clone the repository, read the contributing guide, and pick an area: Rust core, AI models, documentation, security research, or frontend. All contributions welcome. The project is actively seeking contributors.</p>
+      <div class="modal-tech-note mono">License: AGPLv3 / Commercial license available</div>
+    </div>
+    <div class="modal-cta">
+      <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="btn btn--primary" target="_blank" rel="noopener">View on GitHub</a>
+      <a href="docs.html" class="btn btn--ghost">Read the Docs</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: AES-256-GCM -->
+<div class="modal-overlay" id="modal-aes" role="dialog" aria-modal="true" aria-labelledby="modal-aes-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Encryption</span>
+    <h2 id="modal-aes-title">AES-256-GCM</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>AES-256-GCM (Advanced Encryption Standard with Galois/Counter Mode) is the industry standard for authenticated encryption. It provides both confidentiality (nobody can read your messages) and authenticity (nobody can tamper with them).</p>
+      <h3>Why We Use It</h3>
+      <ul>
+        <li><strong>256-bit keys:</strong> 2^256 possible keys. Brute force is physically impossible with known physics.</li>
+        <li><strong>Authenticated encryption:</strong> GCM mode provides built-in authentication tags. Tampered messages are rejected immediately.</li>
+        <li><strong>Hardware acceleration:</strong> Modern CPUs include AES-NI instructions for fast encryption without performance penalty.</li>
+        <li><strong>NIST standard:</strong> Reviewed and approved by the U.S. National Institute of Standards and Technology.</li>
+      </ul>
+      <h3>Implementation Details</h3>
+      <p>Implemented in Rust via the <code>crypto_machine</code> module. Every message is encrypted before it leaves your device. No server, relay, or intermediate node ever sees plaintext. The implementation uses the <code>ring</code> and/or <code>aws-lc-rs</code> crate for cryptographic operations.</p>
+      <div class="modal-tech-note mono">File: ghostwire/src/core/crypto_machine.rs</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#cryptography" class="btn btn--primary">Full Security Overview</a>
+      <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="btn btn--ghost" target="_blank" rel="noopener">View Source</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Ed25519 / X25519 -->
+<div class="modal-overlay" id="modal-x25519" role="dialog" aria-modal="true" aria-labelledby="modal-x25519-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Key Exchange</span>
+    <h2 id="modal-x25519-title">Ed25519 / X25519</h2>
+    <div class="modal-body">
+      <h3>What Are They?</h3>
+      <p>Ed25519 and X25519 are modern elliptic curve cryptographic algorithms based on Curve25519. Ed25519 is used for digital signatures (proving identity). X25519 is used for key exchange (establishing shared secrets).</p>
+      <h3>Why We Use Them</h3>
+      <ul>
+        <li><strong>Perfect forward secrecy:</strong> Each session uses a unique key. Compromising one session does not compromise others.</li>
+        <li><strong>Fast and secure:</strong> Curve25519 is faster and more secure than older curves like NIST P-256.</li>
+        <li><strong>Identity keys never leave your device:</strong> Your Ed25519 private key is generated locally and never transmitted.</li>
+        <li><strong>Small key sizes:</strong> 32-byte keys are compact and efficient for resource-constrained devices.</li>
+      </ul>
+      <h3>How It Works in GhostWire</h3>
+      <p>When two nodes connect, they perform an X25519 key exchange to establish a shared secret. This secret is used to derive AES-256-GCM session keys. Ed25519 signatures authenticate each node's identity. The entire handshake happens automatically when nodes discover each other.</p>
+      <div class="modal-tech-note mono">Curve: Curve25519 / Ed25519 for signatures / X25519 for key exchange</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#cryptography" class="btn btn--primary">Full Security Overview</a>
+      <a href="docs.html" class="btn btn--ghost">Read the Docs</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Post-Quantum (ML-KEM-768) -->
+<div class="modal-overlay" id="modal-pq" role="dialog" aria-modal="true" aria-labelledby="modal-pq-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Post-Quantum</span>
+    <h2 id="modal-pq-title">ML-KEM-768</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>ML-KEM-768 (Module-Lattice-Based Key Encapsulation Mechanism) is a post-quantum cryptographic standard standardized by NIST in 2024. It is designed to resist attacks from quantum computers.</p>
+      <h3>Why It Matters</h3>
+      <ul>
+        <li><strong>Quantum threat:</strong> Future quantum computers could break X25519 and RSA using Shor's algorithm.</li>
+        <li><strong>Harvest now, decrypt later:</strong> Adversaries are collecting encrypted traffic today to decrypt it when quantum computers become available.</li>
+        <li><strong>NIST standard:</strong> ML-KEM-768 (formerly Kyber-768) is the NIST-selected standard for post-quantum key encapsulation.</li>
+        <li><strong>Hybrid approach:</strong> GhostWire will combine X25519 + ML-KEM-768 for defense in depth.</li>
+      </ul>
+      <h3>Current Status</h3>
+      <p>ML-KEM-768 integration is planned. The cryptographic architecture is designed to support hybrid key exchange (classical + post-quantum) without breaking existing functionality.</p>
+      <div class="modal-tech-note mono">Status: Planned / NIST FIPS 203 standard</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="about.html" class="btn btn--ghost">About the Project</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: libp2p + Kademlia DHT -->
+<div class="modal-overlay" id="modal-libp2p" role="dialog" aria-modal="true" aria-labelledby="modal-libp2p-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Networking</span>
+    <h2 id="modal-libp2p-title">libp2p + Kademlia DHT</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>libp2p is a modular peer-to-peer networking stack used by IPFS, Ethereum 2.0, and other decentralized systems. Kademlia is a distributed hash table (DHT) that enables efficient peer discovery and message routing.</p>
+      <h3>Why We Use It</h3>
+      <ul>
+        <li><strong>Battle-tested:</strong> Used by production systems handling billions of requests.</li>
+        <li><strong>Modular transports:</strong> Supports TCP, QUIC, WebRTC, and custom transports. GhostWire adds WiFi Direct, Bluetooth LE, and LoRa.</li>
+        <li><strong>Gossipsub pub/sub:</strong> Efficient topic-based messaging with mesh optimization.</li>
+        <li><strong>S/Kademlia hardening:</strong> GhostWire uses hardened Kademlia parameters for security against routing attacks.</li>
+      </ul>
+      <h3>How It Works</h3>
+      <p>When a GhostWire node starts, it connects to bootstrap nodes via the DHT. It discovers peers, establishes encrypted connections, and joins the mesh. Messages are routed through the DHT to their destination, hopping through intermediate nodes as needed.</p>
+      <div class="modal-tech-note mono">Stack: libp2p / Kademlia / Gossipsub / QUIC / TCP</div>
+    </div>
+    <div class="modal-cta">
+      <a href="docs.html" class="btn btn--primary">Read the Docs</a>
+      <a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" class="btn btn--ghost" target="_blank" rel="noopener">View Source</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: AI Routing (LightGBM + GNN) -->
+<div class="modal-overlay" id="modal-ai" role="dialog" aria-modal="true" aria-labelledby="modal-ai-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">AI Routing</span>
+    <h2 id="modal-ai-title">LightGBM + GNN</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>GhostWire uses two AI models for intelligent mesh routing: LightGBM for anomaly detection (Layer 1) and a Graph Neural Network for route optimization (Layer 3).</p>
+      <h3>LightGBM Anomaly Detection</h3>
+      <ul>
+        <li><strong>AUC 1.0:</strong> Perfect separation of normal vs. anomalous node behavior in testing.</li>
+        <li><strong>76.7μs inference:</strong> Fast enough for real-time detection on every message.</li>
+        <li><strong>Exported to ONNX:</strong> Runs in Rust via ONNX Runtime — no Python dependency needed at runtime.</li>
+      </ul>
+      <h3>GNN Routing Model</h3>
+      <ul>
+        <li><strong>Trained on real data:</strong> 7,931 samples from the GuifiSants community mesh network in Barcelona (63 nodes, 31 days).</li>
+        <li><strong>Graph Attention Network:</strong> Learns which routes are most reliable based on historical performance.</li>
+        <li><strong>Adapts to conditions:</strong> Routes around congested or unreliable nodes automatically.</li>
+      </ul>
+      <h3>Why AI Matters</h3>
+      <p>Traditional mesh routing uses static algorithms. GhostWire's AI learns from real network conditions and adapts. This means better delivery rates, lower latency, and automatic detection of malicious nodes.</p>
+      <div class="modal-tech-note mono">L1: LightGBM ONNX (76.7μs) / L3: GNN (7,931 samples)</div>
+    </div>
+    <div class="modal-cta">
+      <a href="docs.html" class="btn btn--primary">Read the Docs</a>
+      <a href="about.html" class="btn btn--ghost">About the Team</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Sybil Resistance -->
+<div class="modal-overlay" id="modal-sybil" role="dialog" aria-modal="true" aria-labelledby="modal-sybil-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Defense</span>
+    <h2 id="modal-sybil-title">Sybil Attack Resistance</h2>
+    <div class="modal-body">
+      <h3>What Is a Sybil Attack?</h3>
+      <p>In a Sybil attack, an adversary creates many fake identities (nodes) to infiltrate the mesh. With enough fake nodes, they could monitor traffic, disrupt routing, or gain trust to launch further attacks.</p>
+      <h3>How GhostWire Defends Against It</h3>
+      <ul>
+        <li><strong>Proof-of-work admission:</strong> New nodes must solve a computational puzzle before joining. Creating many fake nodes is expensive.</li>
+        <li><strong>Quota enforcement:</strong> Each node has rate limits. Flooding the mesh with messages is throttled.</li>
+        <li><strong>Blacklist management:</strong> Nodes identified as malicious are blacklisted network-wide.</li>
+        <li><strong>TrustStore reputation:</strong> A distributed reputation system tracks node behavior over time. Suspicious nodes are flagged and isolated.</li>
+      </ul>
+      <h3>Defense in Depth</h3>
+      <p>No single mechanism is perfect. GhostWire layers multiple defenses: PoW makes fake nodes expensive, rate limits prevent flooding, and the reputation system identifies and isolates bad actors over time.</p>
+      <div class="modal-tech-note mono">Defense: PoW admission / Rate limits / TrustStore / Blacklist</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#threat-model" class="btn btn--primary">Threat Model</a>
+      <a href="security.html" class="btn btn--ghost">Security Architecture</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Traffic Obfuscation -->
+<div class="modal-overlay" id="modal-traffic" role="dialog" aria-modal="true" aria-labelledby="modal-traffic-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Privacy</span>
+    <h2 id="modal-traffic-title">Traffic Obfuscation</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>Even encrypted traffic can reveal information through metadata: when you communicate, how much data you send, and who you communicate with. Traffic obfuscation makes this analysis harder.</p>
+      <h3>Techniques Used</h3>
+      <ul>
+        <li><strong>Cover traffic:</strong> GhostWire generates dummy messages that look like real traffic. An observer cannot distinguish real from fake messages.</li>
+        <li><strong>Timing randomization:</strong> Messages are sent at randomized intervals, not immediately. This breaks timing correlation attacks.</li>
+        <li><strong>Stealth TCP:</strong> GhostWire can wrap its traffic in normal-looking HTTPS packets, making it indistinguishable from web browsing.</li>
+        <li><strong>Metadata minimization:</strong> Messages carry only essential routing information. No sender/receiver identifiers in the packet headers.</li>
+      </ul>
+      <h3>Limitations</h3>
+      <p>Traffic obfuscation makes analysis harder but not impossible. A well-resourced adversary with full network visibility could still perform statistical analysis. This is why GhostWire layers multiple defenses.</p>
+      <div class="modal-tech-note mono">Techniques: Cover traffic / Timing randomization / Stealth TCP</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#threat-model" class="btn btn--primary">Threat Model</a>
+      <a href="transparency" class="btn btn--ghost">Transparency</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Real-time Dashboard -->
+<div class="modal-overlay" id="modal-monitor" role="dialog" aria-modal="true" aria-labelledby="modal-monitor-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Monitoring</span>
+    <h2 id="modal-monitor-title">Real-time Dashboard</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>GhostWire includes a web-based dashboard for monitoring your mesh network in real time. Accessible at <code>http://localhost:8080</code> by default.</p>
+      <h3>Features</h3>
+      <ul>
+        <li><strong>Mesh topology visualization:</strong> See all connected nodes and their connections in real time.</li>
+        <li><strong>Live metrics:</strong> CPU usage, RAM consumption, network throughput, message queue depth.</li>
+        <li><strong>Node health:</strong> Status of each peer, latency, uptime, and reputation score.</li>
+        <li><strong>AI anomaly alerts:</strong> Real-time notifications when the LightGBM model detects suspicious behavior.</li>
+        <li><strong>Axum HTTP API:</strong> RESTful API at <code>/api/v2/</code> for programmatic access to mesh data.</li>
+      </ul>
+      <h3>API Endpoints</h3>
+      <p>The dashboard is powered by an Axum HTTP server with endpoints for health checks, peer lists, message stats, and more. Full API documentation is available in the docs.</p>
+      <div class="modal-tech-note mono">Backend: Axum / Frontend: React / API: /api/v2/</div>
+    </div>
+    <div class="modal-cta">
+      <a href="docs.html#api" class="btn btn--primary">API Reference</a>
+      <a href="download.html" class="btn btn--ghost">Get GhostWire</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Multi-profile Identity -->
+<div class="modal-overlay" id="modal-identity" role="dialog" aria-modal="true" aria-labelledby="modal-identity-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <span class="modal-tag mono">Identity</span>
+    <h2 id="modal-identity-title">Multi-profile Support</h2>
+    <div class="modal-body">
+      <h3>What Is It?</h3>
+      <p>GhostWire allows you to create multiple cryptographic identities (profiles) on the same device. Each profile has its own key pair, username, and contact list.</p>
+      <h3>Why Multiple Profiles?</h3>
+      <ul>
+        <li><strong>Context separation:</strong> Use one profile for disaster response, another for personal communication, another for activism.</li>
+        <li><strong>Compartmentalization:</strong> If one profile is compromised, your other identities remain secure.</li>
+        <li><strong>Disposable identities:</strong> Create a temporary profile for a specific operation, then delete it.</li>
+      </ul>
+      <h3>How It Works</h3>
+      <ul>
+        <li><strong>QR code pairing:</strong> Meet contacts in person and scan QR codes to exchange public keys securely.</li>
+        <li><strong>Username discovery:</strong> Find contacts by username without a central registry — the DHT handles discovery.</li>
+        <li><strong>Independent key pairs:</strong> Each profile generates its own Ed25519 identity key pair. Keys never leave the device.</li>
+      </ul>
+      <div class="modal-tech-note mono">Crypto: Ed25519 per profile / QR pairing / DHT discovery</div>
+    </div>
+    <div class="modal-cta">
+      <a href="docs.html" class="btn btn--primary">Read the Docs</a>
+      <a href="download.html" class="btn btn--ghost">Get GhostWire</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Physical Device Seizure -->
+<div class="modal-overlay" id="modal-physical" role="dialog" aria-modal="true" aria-labelledby="modal-physical-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon" style="color:var(--orange);">⚠</div>
+    <h2 id="modal-physical-title">Physical Device Seizure</h2>
+    <div class="modal-body">
+      <h3>The Risk</h3>
+      <p>If your device is physically seized by an adversary, they may be able to access local GhostWire data stored on the device. Encryption protects data in transit, but data at rest depends on your device's security.</p>
+      <h3>What Is at Risk</h3>
+      <ul>
+        <li><strong>Stored messages:</strong> Messages cached on your device could be accessed.</li>
+        <li><strong>Identity keys:</strong> If the device is unlocked, Ed25519 identity keys could be extracted.</li>
+        <li><strong>Contact list:</strong> Your peer list and usernames could reveal your network.</li>
+        <li><strong>Profile metadata:</strong> Profile names and settings could reveal your operational patterns.</li>
+      </ul>
+      <h3>Mitigation Steps</h3>
+      <ul>
+        <li><strong>Full-disk encryption:</strong> Enable LUKS (Linux), FileVault (macOS), or BitLocker (Windows) on your device.</li>
+        <li><strong>Lockdown mode:</strong> GhostWire includes a lockdown mode that clears sensitive data from memory.</li>
+        <li><strong>Ephemeral session keys:</strong> Session keys are destroyed after use and never written to disk.</li>
+        <li><strong>Strong device password:</strong> Use a strong passphrase to lock your device. Biometric locks can be compelled legally in some jurisdictions.</li>
+        <li><strong>Remote wipe:</strong> Consider remote wipe capabilities for devices you carry in high-risk environments.</li>
+      </ul>
+      <div class="modal-tech-note mono">Recommendation: Full-disk encryption + Lockdown mode + Strong passphrase</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="docs.html" class="btn btn--ghost">Hardening Guide</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Anonymity Limitations -->
+<div class="modal-overlay" id="modal-anonymity" role="dialog" aria-modal="true" aria-labelledby="modal-anonymity-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon" style="color:var(--orange);">⚠</div>
+    <h2 id="modal-anonymity-title">Full Anonymity</h2>
+    <div class="modal-body">
+      <h3>The Reality</h3>
+      <p>GhostWire provides strong privacy protections, but it does not provide complete anonymity. Understanding the difference is critical for your operational security.</p>
+      <h3>What GhostWire Protects</h3>
+      <ul>
+        <li><strong>Message content:</strong> AES-256-GCM encryption protects what you say.</li>
+        <li><strong>Identity:</strong> No phone numbers, emails, or real names required.</li>
+        <li><strong>Metadata:</strong> Minimal metadata in packet headers. No central logs.</li>
+      </ul>
+      <h3>What GhostWire Does NOT Protect</h3>
+      <ul>
+        <li><strong>Traffic analysis:</strong> An adversary with full network visibility could perform statistical analysis of message timing and volume.</li>
+        <li><strong>Physical observation:</strong> If someone sees you using GhostWire, they know you are using it.</li>
+        <li><strong>Endpoint compromise:</strong> If your device has malware, all bets are off.</li>
+        <li><strong>Social engineering:</strong> No cryptographic system can protect against human manipulation.</li>
+      </ul>
+      <h3>For Stronger Anonymity</h3>
+      <p>Combine GhostWire with Tor for routing, use it in public spaces rather than at home, and follow operational security best practices. For the highest threat models, consult with a security professional.</p>
+      <div class="modal-tech-note mono">Recommendation: GhostWire + Tor + OPSEC best practices</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#threat-model" class="btn btn--primary">Threat Model</a>
+      <a href="docs.html" class="btn btn--ghost">OPSEC Guide</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Endpoint Compromise -->
+<div class="modal-overlay" id="modal-endpoint" role="dialog" aria-modal="true" aria-labelledby="modal-endpoint-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon" style="color:var(--orange);">⚠</div>
+    <h2 id="modal-endpoint-title">Endpoint Compromise</h2>
+    <div class="modal-body">
+      <h3>The Risk</h3>
+      <p>If either your device or your contact's device has malware (keylogger, screen recorder, rootkit), encryption cannot protect the content of your messages. The malware sees the plaintext before encryption or after decryption.</p>
+      <h3>Why Encryption Is Not Enough</h3>
+      <ul>
+        <li><strong>Keyloggers:</strong> Record everything you type, including messages before they are encrypted.</li>
+        <li><strong>Screen recorders:</strong> Capture what you see on screen, including decrypted messages.</li>
+        <li><strong>Rootkits:</strong> Can intercept messages at the application level, bypassing encryption entirely.</li>
+        <li><strong>Compromised OS:</strong> A malicious operating system can subvert any application.</li>
+      </ul>
+      <h3>Best Practices</h3>
+      <ul>
+        <li><strong>Use a dedicated device:</strong> A device used only for GhostWire, with minimal software installed.</li>
+        <li><strong>Keep software updated:</strong> Apply security patches promptly to your OS and all applications.</li>
+        <li><strong>Verify integrity:</strong> Check SHA-256 checksums and GPG signatures on all downloads.</li>
+        <li><strong>Use a hardened OS:</strong> Consider Qubes OS, Tails, or Whonix for high-threat environments.</li>
+        <li><strong>Out-of-band verification:</strong> Verify critical information through a separate communication channel.</li>
+      </ul>
+      <div class="modal-tech-note mono">Recommendation: Dedicated device + Updated OS + Checksum verification</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html" class="btn btn--primary">Security Architecture</a>
+      <a href="download.html#verification" class="btn btn--ghost">Verify Downloads</a>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Audit Status -->
+<div class="modal-overlay" id="modal-audit" role="dialog" aria-modal="true" aria-labelledby="modal-audit-title">
+  <div class="modal">
+    <button class="modal-close" aria-label="Close modal">&times;</button>
+    <div class="modal-icon" style="color:var(--orange);">⚠</div>
+    <h2 id="modal-audit-title">Not Yet Independently Audited</h2>
+    <div class="modal-body">
+      <h3>The Situation</h3>
+      <p>GhostWire has not yet undergone an independent third-party security audit. This is a significant limitation that users should understand before relying on GhostWire for high-stakes communication.</p>
+      <h3>What We Have Done</h3>
+      <ul>
+        <li><strong>Internal security audits:</strong> Available in <code>docs/SECURITY_AUDIT_REPORT_2026.md</code>.</li>
+        <li><strong>Threat modeling:</strong> Comprehensive threat model documented in <code>docs/SECURITY.md</code>.</li>
+        <li><strong>Open source:</strong> All code is publicly auditable on GitHub. Anyone can review it.</li>
+        <li><strong>Standard cryptography:</strong> We use well-reviewed cryptographic libraries (ring, aws-lc-rs) rather than implementing our own crypto.</li>
+      </ul>
+      <h3>What We Need</h3>
+      <ul>
+        <li><strong>Independent audit:</strong> A professional security firm should review the entire codebase.</li>
+        <li><strong>Formal verification:</strong> Critical cryptographic code should be formally verified.</li>
+        <li><strong>Bug bounty:</strong> A structured bug bounty program would incentivize external security research.</li>
+      </ul>
+      <h3>How You Can Help</h3>
+      <p>If you are a security researcher, we welcome code review and vulnerability reports. If you represent an organization that conducts security audits, please contact us. We are actively seeking an independent audit partner.</p>
+      <div class="modal-tech-note mono">Contact: mirungu015@proton.me for audit inquiries</div>
+    </div>
+    <div class="modal-cta">
+      <a href="security.html#disclosure" class="btn btn--primary">Report a Vulnerability</a>
+      <a href="mailto:mirungu015@proton.me" class="btn btn--ghost">Contact the Team</a>
+    </div>
+  </div>
+</div>
+
+<footer class="footer"><div class="container"><div class="footer-inner"><div class="footer-brand"><div class="nav-logo"><div class="logo-mark"><img src="assets/logo.png" alt="GhostWire" width="22" height="22" loading="lazy"></div><span class="logo-text">GHOSTWIRE</span></div><p class="footer-tagline">Resilient Mesh Communication for Connectivity-Constrained Communities.<br>Built in Nairobi, for the world.</p><p class="footer-license mono">AGPLv3 / Commercial License available</p><p class="footer-competition mono" style="font-size:10px;color:var(--white-faint);margin-top:0.5rem;">GCD4F 2026 — Open University of Kenya</p></div><div class="footer-links"><div class="footer-col"><h4>Project</h4><a href="about.html">About</a><a href="about.html#manifesto">Manifesto</a><a href="about.html#team">Team</a><a href="docs.html#changelog">Changelog</a></div><div class="footer-col"><h4>Get Started</h4><a href="download.html">Download</a><a href="docs.html">Documentation</a><a href="docs.html#installation">Installation</a><a href="docs.html#api">API Reference</a></div><div class="footer-col"><h4>Security</h4><a href="security.html">Overview</a><a href="security.html#threat-model">Threat Model</a><a href="security.html#cryptography">Cryptography</a><a href="security.html#disclosure">Vulnerability Disclosure</a></div><div class="footer-col"><h4>Community</h4><a href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" target="_blank" rel="noopener">GitHub</a><a href="docs.html#contributing">Contribute</a><a href="docs.html#code-of-conduct">Code of Conduct</a><a href="mailto:mirungu015@proton.me">Contact</a></div></div></div><div class="footer-bottom"><span class="mono">&copy; 2026 GhostWire — Team GhostWire, Open University of Kenya</span><span class="mono footer-pgp">PGP: <a href="mailto:mirungu015@proton.me">mirungu015@proton.me</a></span></div></div></footer>
+
+<script src="main.js"></script>
 </body>
 </html>

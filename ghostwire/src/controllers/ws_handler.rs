@@ -39,11 +39,11 @@ fn encrypt_ws_message(
     use base64::Engine;
     use chacha20poly1305::aead::Aead;
     use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
-    use rand::RngCore;
+    use rand_core::{OsRng, RngCore};
 
     // Generate random 24-byte nonce
     let mut nonce_bytes = [0u8; 24];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from(nonce_bytes);
 
     let key = Key::from_slice(session_key);
@@ -186,7 +186,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         version: "2.0.0".into(),
     })
     .unwrap_or_default();
-    let _ = socket.send(Message::Text(connected_msg)).await;
+    let _ = socket.send(Message::Text(connected_msg.into())).await;
 
     // Keepalive ping every 30s
     let mut ping_interval = interval(Duration::from_secs(30));
@@ -207,7 +207,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                 // Encrypt the message before sending
                 match encrypt_ws_message(json.as_bytes(), &session_key) {
                     Ok(encrypted) => {
-                        if socket.send(Message::Text(encrypted)).await.is_err() {
+                        if socket.send(Message::Text(encrypted.into())).await.is_err() {
                             tracing::debug!("WS client disconnected (send failed)");
                             break;
                         }
@@ -215,7 +215,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                     Err(e) => {
                         tracing::warn!("WS encryption failed: {}", e);
                         // Send unencrypted error as fallback
-                        if socket.send(Message::Text(json)).await.is_err() {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
                             break;
                         }
                     }
@@ -248,7 +248,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                 let pong = serde_json::to_string(&WsEvent::Pong {
                     timestamp: now_secs(),
                 }).unwrap_or_default();
-                if socket.send(Message::Text(pong)).await.is_err() {
+                if socket.send(Message::Text(pong.into())).await.is_err() {
                     break;
                 }
             }
@@ -275,7 +275,7 @@ async fn handle_ws_command(
                 message: "Invalid command JSON".into(),
             })
             .unwrap_or_default();
-            let _ = socket.send(Message::Text(err)).await;
+            let _ = socket.send(Message::Text(err.into())).await;
             return;
         }
     };
@@ -286,7 +286,7 @@ async fn handle_ws_command(
                 timestamp: now_secs(),
             })
             .unwrap_or_default();
-            let _ = socket.send(Message::Text(pong)).await;
+            let _ = socket.send(Message::Text(pong.into())).await;
         }
 
         WsCommand::GetPeers => {
@@ -296,7 +296,7 @@ async fn handle_ws_command(
                 count,
             })
             .unwrap_or_default();
-            let _ = socket.send(Message::Text(resp)).await;
+            let _ = socket.send(Message::Text(resp.into())).await;
         }
 
         WsCommand::SendMessage { recipient, content } => {

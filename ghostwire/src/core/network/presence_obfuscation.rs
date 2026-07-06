@@ -98,7 +98,7 @@ pub async fn apply_connect_jitter(config: &PresenceConfig) {
         return;
     }
 
-    let jitter_ms = rand::thread_rng().gen_range(0..=config.connect_jitter_max_secs * 1000);
+    let jitter_ms = rand::rng().random_range(0..=config.connect_jitter_max_secs * 1000);
 
     if jitter_ms > 0 {
         tracing::debug!("Presence jitter: waiting {}ms before announcing", jitter_ms);
@@ -120,7 +120,7 @@ pub fn start_randomised_fetch_loop(
 ) {
     tokio::spawn(async move {
         loop {
-            let interval_ms = rand::thread_rng().gen_range(
+            let interval_ms = rand::rng().random_range(
                 config.fetch_interval_min_secs * 1000..=config.fetch_interval_max_secs * 1000,
             );
             sleep(Duration::from_millis(interval_ms)).await;
@@ -147,8 +147,8 @@ pub enum DummyActivity {
 
 /// Generate a random dummy activity event
 pub fn generate_dummy_activity() -> DummyActivity {
-    let mut rng = rand::thread_rng();
-    let activity_type: u8 = rng.gen_range(0..3);
+    let mut rng = rand::rng();
+    let activity_type: u8 = rng.random_range(0..3);
 
     match activity_type {
         0 => {
@@ -202,7 +202,7 @@ pub fn start_dummy_activity_loop(
         let exp = Exp::new(lambda).expect("Valid lambda");
 
         loop {
-            let delay_ms = exp.sample(&mut rand::thread_rng()) as u64;
+            let delay_ms = exp.sample(&mut rand::rng()) as u64;
             let delay_ms = delay_ms.clamp(1_000, config.dummy_mean_secs * 10_000);
             sleep(Duration::from_millis(delay_ms)).await;
 
@@ -239,7 +239,7 @@ impl Default for KeepaliveConfig {
 pub fn start_keepalive_loop(config: KeepaliveConfig, tx: tokio::sync::mpsc::Sender<()>) {
     tokio::spawn(async move {
         loop {
-            let jitter_ms = rand::thread_rng().gen_range(0..=config.jitter_secs * 1000);
+            let jitter_ms = rand::rng().random_range(0..=config.jitter_secs * 1000);
             let interval_ms = config.interval_secs * 1000 + jitter_ms;
             sleep(Duration::from_millis(interval_ms)).await;
             let _ = tx.try_send(());

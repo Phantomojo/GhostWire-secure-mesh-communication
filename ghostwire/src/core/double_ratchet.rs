@@ -1,6 +1,7 @@
 use parking_lot::RwLock;
-use rand::rngs::OsRng;
-use rand::{Rng, RngCore};
+use rand::Rng;
+use rand_core::OsRng;
+use rand_core::RngCore;
 use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -172,7 +173,7 @@ impl RatchetState {
 
         let cipher = XChaCha20Poly1305::new(output.message_key.as_slice().into());
         let mut nonce = [0u8; 24];
-        OsRng.fill(&mut nonce);
+        OsRng.fill_bytes(&mut nonce);
         let ciphertext = cipher
             .encrypt(XNonce::from_slice(&nonce), plaintext)
             .map_err(|e| format!("Encrypt failed: {}", e))?;

@@ -24,6 +24,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
+use rand_core::OsRng;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -213,7 +214,7 @@ fn encrypt_share_for_guardian(
 ) -> Result<(Vec<u8>, String, String)> {
     use base64::Engine;
 
-    let ephemeral_secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
+    let ephemeral_secret = x25519_dalek::EphemeralSecret::random_from_rng(OsRng);
     let ephemeral_pub = x25519_dalek::PublicKey::from(&ephemeral_secret);
 
     let guardian_x25519 = x25519_dalek::PublicKey::from(*guardian_pub);
@@ -330,7 +331,7 @@ mod tests {
     use x25519_dalek::{PublicKey, StaticSecret};
 
     fn make_guardian() -> (String, String, [u8; 32], StaticSecret) {
-        let secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let secret = StaticSecret::random_from_rng(OsRng);
         let pub_key: PublicKey = (&secret).into();
         let pub_bytes = *pub_key.as_bytes();
         (

@@ -4,7 +4,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     XChaCha20Poly1305, XNonce,
 };
-use rand::RngCore;
+use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 
 const SALT_LEN: usize = 32;
