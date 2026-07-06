@@ -25,7 +25,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use rand::RngCore;
+use rand_core::RngCore;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -351,7 +351,7 @@ mod tests {
     fn sealed_roundtrip() {
         let machine = CryptoMachine::new();
         let mut secret_bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut secret_bytes);
+        OsRng.fill_bytes(&mut secret_bytes);
         secret_bytes[0] &= 248; secret_bytes[31] &= 127; secret_bytes[31] |= 64;
         let recipient_secret = x25519_dalek::StaticSecret::from(secret_bytes);
         let recipient_pub = x25519_dalek::PublicKey::from(&recipient_secret);
@@ -366,7 +366,7 @@ mod tests {
     fn sealed_tamper_detected() {
         let machine = CryptoMachine::new();
         let mut secret_bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut secret_bytes);
+        OsRng.fill_bytes(&mut secret_bytes);
         secret_bytes[0] &= 248; secret_bytes[31] &= 127; secret_bytes[31] |= 64;
         let recipient_secret = x25519_dalek::StaticSecret::from(secret_bytes);
         let recipient_pub = x25519_dalek::PublicKey::from(&recipient_secret);

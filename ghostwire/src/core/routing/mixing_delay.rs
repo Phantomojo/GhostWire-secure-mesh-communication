@@ -22,7 +22,7 @@
 
 use crate::genesis_constants::{derive_with_domain, MIXING_DOMAIN};
 
-use rand::distributions::Distribution;
+use rand::distr::Distribution;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand_distr::Exp;

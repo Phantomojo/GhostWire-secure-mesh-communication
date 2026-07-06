@@ -784,11 +784,29 @@ impl Core {
                                     // Get candidates (our neighbors in topology)
                                     if let Some(neighbors) = topology.adjacency.get(&src_idx) {
                                         if !neighbors.is_empty() {
+                                            let all_health = if let Some(mesh) = &self.mesh_manager {
+                                                let mesh = mesh.read().await;
+                                                Some(mesh.peer_health().get_all_health().await)
+                                            } else {
+                                                None
+                                            };
                                             let mut peer_features =
                                                 std::collections::HashMap::new();
                                             for &cand in neighbors {
-                                                peer_features
-                                                    .insert(cand, ai::RoutingFeatures::default());
+                                                let features = all_health
+                                                    .as_ref()
+                                                    .and_then(|hl| {
+                                                        let peer_id = mapper.get_peer(cand)?;
+                                                        let peer_str = peer_id.to_string();
+                                                        hl.iter().find(|h| h.peer_id == peer_str).map(|h| ai::RoutingFeatures {
+                                                            latency_ms: h.avg_rtt_ms as u64,
+                                                            packet_loss: h.packet_loss_ratio() as f32,
+                                                            trust_score: if h.is_alive { 1.0 } else { 0.0 },
+                                                            ..Default::default()
+                                                        })
+                                                    })
+                                                    .unwrap_or_default();
+                                                peer_features.insert(cand, features);
                                             }
 
                                             match gnn
@@ -872,13 +890,58 @@ impl Core {
             .await
     }
 
-    /// Collect peer features from current mesh state
     async fn collect_mesh_peer_features(
         &self,
     ) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
-        let features = std::collections::HashMap::new();
-        // In production, collect from mesh manager. For now, return empty.
-        // This would query mesh_manager for connected peers and their link quality.
+        let mesh = match &self.mesh_manager {
+            Some(m) => m.read().await,
+            None => return std::collections::HashMap::new(),
+        };
+
+        let topology = mesh.get_topology().await;
+        let all_health = mesh.peer_health().get_all_health().await;
+
+        // peer_health tracks by string peer_id; mesh topology uses the same string keys
+        let health_map: std::collections::HashMap<&str, &peer_health::PeerHealth> = all_health
+            .iter()
+            .map(|h| (h.peer_id.as_str(), h))
+            .collect();
+
+        let trust_avg = self.trust_store.average_trust_score().await;
+        let now_hour = {
+            use chrono::Timelike;
+            chrono::Local::now().hour() as u8
+        };
+
+        let mut features = std::collections::HashMap::new();
+        for (id, node) in &topology.nodes {
+            if !node.is_online {
+                continue;
+            }
+
+            let peer_health_data = health_map.get(id.as_str());
+            let latency = peer_health_data.map(|h| h.avg_rtt_ms as u64).unwrap_or(100);
+            let loss = peer_health_data
+                .map(|h| h.packet_loss_ratio() as f32)
+                .unwrap_or(0.0);
+
+            // connection_quality (0.0-1.0) → rough RSSI estimate
+            let rssi = (node.connection_quality * 50.0 - 90.0) as i16;
+
+            features.insert(
+                node.peer_id,
+                ai::RoutingFeatures {
+                    rssi,
+                    latency_ms: latency,
+                    packet_loss: loss,
+                    trust_score: trust_avg,
+                    hop_count: 1,
+                    battery_level: 1.0,
+                    time_of_day: now_hour,
+                },
+            );
+        }
+
         features
     }
 

@@ -331,9 +331,7 @@ pub async fn start_web_server(
         .finish()
         .unwrap();
 
-    let default_rate_limiter = GovernorLayer {
-        config: std::sync::Arc::new(default_governor_conf),
-    };
+    let default_rate_limiter = GovernorLayer::new(std::sync::Arc::new(default_governor_conf));
 
     // Stricter rate limiter for auth endpoints (brute force protection)
     let auth_governor_conf = GovernorConfigBuilder::default()
@@ -343,9 +341,7 @@ pub async fn start_web_server(
         .finish()
         .unwrap();
 
-    let auth_rate_limiter = GovernorLayer {
-        config: std::sync::Arc::new(auth_governor_conf),
-    };
+    let auth_rate_limiter = GovernorLayer::new(std::sync::Arc::new(auth_governor_conf));
 
     let auth_routes: Router<Arc<AppState>> = Router::new()
         .route("/login", post(AuthController::login))
@@ -355,7 +351,7 @@ pub async fn start_web_server(
         .route("/list", get(ProfilesController::list))
         .route("/create", post(ProfilesController::create))
         .route("/select", post(ProfilesController::select))
-        .route("/delete/:name", delete(ProfilesController::delete));
+        .route("/delete/{name}", delete(ProfilesController::delete));
 
     let system_routes: Router<Arc<AppState>> = Router::new()
         .route("/stats", get(SystemController::status))
@@ -452,11 +448,11 @@ pub async fn start_web_server(
             post(crate::controllers::PeerController::respond_to_request),
         )
         .route(
-            "/v2/peers/:id",
+            "/v2/peers/{id}",
             axum::routing::delete(crate::controllers::PeerController::disconnect),
         )
         .route(
-            "/v2/peers/:id/block",
+            "/v2/peers/{id}/block",
             post(crate::controllers::PeerController::block),
         )
         .route(
@@ -469,15 +465,15 @@ pub async fn start_web_server(
             get(crate::controllers::TrustController::list_peers),
         )
         .route(
-            "/v2/trust/:peer_id",
+            "/v2/trust/{peer_id}",
             get(crate::controllers::TrustController::get_trust),
         )
         .route(
-            "/v2/trust/:peer_id/verify",
+            "/v2/trust/{peer_id}/verify",
             post(crate::controllers::TrustController::mark_verified),
         )
         .route(
-            "/v2/trust/:peer_id/block",
+            "/v2/trust/{peer_id}/block",
             post(crate::controllers::TrustController::block_peer),
         )
         // Knowledge Ark
@@ -494,11 +490,11 @@ pub async fn start_web_server(
             post(crate::controllers::ArkController::create_entry),
         )
         .route(
-            "/v2/ark/entries/:cid",
+            "/v2/ark/entries/{cid}",
             get(crate::controllers::ArkController::get_entry),
         )
         .route(
-            "/v2/ark/entries/:cid",
+            "/v2/ark/entries/{cid}",
             axum::routing::delete(crate::controllers::ArkController::delete_entry),
         )
         .route(
@@ -506,7 +502,7 @@ pub async fn start_web_server(
             get(crate::controllers::ArkController::search),
         )
         .route(
-            "/v2/ark/tags/:tag",
+            "/v2/ark/tags/{tag}",
             get(crate::controllers::ArkController::search_by_tag),
         )
         .route(
@@ -523,19 +519,19 @@ pub async fn start_web_server(
             post(crate::controllers::ChannelController::create),
         )
         .route(
-            "/v2/channels/:id/join",
+            "/v2/channels/{id}/join",
             post(crate::controllers::ChannelController::join),
         )
         .route(
-            "/v2/channels/:id/leave",
+            "/v2/channels/{id}/leave",
             post(crate::controllers::ChannelController::leave),
         )
         .route(
-            "/v2/channels/:id/publish",
+            "/v2/channels/{id}/publish",
             post(crate::controllers::ChannelController::publish),
         )
         .route(
-            "/v2/channels/:id/messages",
+            "/v2/channels/{id}/messages",
             get(crate::controllers::ChannelController::get_messages),
         )
         // Recovery (Shamir)

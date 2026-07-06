@@ -10,6 +10,7 @@
 use crate::core::armor::TrafficArmor;
 use crate::core::crl;
 use crate::core::double_ratchet;
+use rand_core::OsRng;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -352,7 +353,7 @@ impl EncryptionManager {
             .map_err(|e| format!("Failed to create Ed25519 key pair: {:?}", e))?;
 
         // Generate X25519 key pair for encryption (persistent static secret)
-        let x25519_secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let x25519_secret = StaticSecret::random_from_rng(OsRng);
         let x25519_public = XPublicKey::from(&x25519_secret);
         let x25519_public_bytes = *x25519_public.as_bytes();
         let x25519_private_bytes = *x25519_secret.as_bytes();

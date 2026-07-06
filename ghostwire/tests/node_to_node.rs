@@ -83,143 +83,121 @@ async fn build_test_mesh_manager(
 
 #[tokio::test]
 async fn test_node_to_node_connectivity() {
-    // Build two mesh managers on different ports with separate profiles
-    // (separate sled DB paths to avoid lock conflicts)
-    let (mut node_a, peer_id_a, addr_a) =
-        build_test_mesh_manager(19001, Some("test_node_a".to_string()))
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let (mut node_a, peer_id_a, addr_a) =
+            build_test_mesh_manager(19001, Some("test_node_a".to_string()))
+                .await
+                .expect("Failed to build node A");
+        let (node_b, peer_id_b, addr_b) =
+            build_test_mesh_manager(19002, Some("test_node_b".to_string()))
+                .await
+                .expect("Failed to build node B");
+
+        node_a
+            .add_address(peer_id_b, addr_b.clone())
             .await
-            .expect("Failed to build node A");
-    let (node_b, peer_id_b, addr_b) =
-        build_test_mesh_manager(19002, Some("test_node_b".to_string()))
+            .expect("Failed to add address");
+
+        let dm_topic_b = format!("ghostwire-dm-{}", peer_id_b);
+        node_b
+            .subscribe_topic(&dm_topic_b)
             .await
-            .expect("Failed to build node B");
+            .expect("Failed to subscribe to DM topic");
 
-    println!("Node A PeerId: {}", peer_id_a);
-    println!("Node B PeerId: {}", peer_id_b);
-    println!("Node A listening on: {}", addr_a);
-    println!("Node B listening on: {}", addr_b);
+        let dm_topic_a = format!("ghostwire-dm-{}", peer_id_a);
+        node_a
+            .subscribe_topic(&dm_topic_a)
+            .await
+            .expect("Failed to subscribe to DM topic");
 
-    // Node A needs to know Node B's address.
-    // We add Node B's address to Node A's Kademlia and dial.
-    node_a
-        .add_address(peer_id_b, addr_b.clone())
-        .await
-        .expect("Failed to add address");
+        node_a
+            .connect_peer(peer_id_b)
+            .await
+            .expect("Failed to connect to peer");
 
-    // Subscribe node B to its own DM topic (so B can receive from A)
-    let dm_topic_b = format!("ghostwire-dm-{}", peer_id_b);
-    node_b
-        .subscribe_topic(&dm_topic_b)
-        .await
-        .expect("Failed to subscribe to DM topic");
+        sleep(Duration::from_secs(2)).await;
 
-    // Subscribe node A to its own DM topic (so A can receive replies)
-    let dm_topic_a = format!("ghostwire-dm-{}", peer_id_a);
-    node_a
-        .subscribe_topic(&dm_topic_a)
-        .await
-        .expect("Failed to subscribe to DM topic");
+        let peer_id_a_str = peer_id_a.to_string();
+        let peer_id_b_str = peer_id_b.to_string();
+        let message = Message::new(
+            peer_id_a_str,
+            peer_id_b_str,
+            "Hello from Node A!".to_string(),
+        );
 
-    // Connect A to B
-    node_a
-        .connect_peer(peer_id_b)
-        .await
-        .expect("Failed to connect to peer");
+        node_a
+            .send_direct_message(peer_id_b, message.clone())
+            .await
+            .expect("Failed to send direct message");
 
-    // Give the connection time to establish and gossipsub mesh to form
-    sleep(Duration::from_secs(2)).await;
-
-    // Create a message from A to B
-    let peer_id_a_str = peer_id_a.to_string();
-    let peer_id_b_str = peer_id_b.to_string();
-    let message = Message::new(
-        peer_id_a_str,
-        peer_id_b_str,
-        "Hello from Node A!".to_string(),
-    );
-
-    println!("Sending message: {:?}", message);
-
-    // Send direct message from A to B
-    node_a
-        .send_direct_message(peer_id_b, message.clone())
-        .await
-        .expect("Failed to send direct message");
-
-    println!("Message sent, waiting for delivery...");
-
-    // Give time for the message to propagate through gossipsub
-    // Poll for the message rather than using a fixed sleep
-    let mut received = false;
-    for attempt in 0..10 {
-        sleep(Duration::from_millis(500)).await;
-        let b_messages = node_b.get_received_messages().await;
-        if b_messages.iter().any(|m| m.content == "Hello from Node A!") {
-            received = true;
-            println!("Node B received message after {} attempts", attempt + 1);
-            break;
+        let mut received = false;
+        for attempt in 0..10 {
+            sleep(Duration::from_millis(500)).await;
+            let b_messages = node_b.get_received_messages().await;
+            if b_messages.iter().any(|m| m.content == "Hello from Node A!") {
+                received = true;
+                println!("Node B received message after {} attempts", attempt + 1);
+                break;
+            }
         }
-    }
 
-    assert!(received, "Node B did not receive the message from Node A");
+        assert!(received, "Node B did not receive the message from Node A");
 
-    // Clean up
-    let _ = node_a.stop().await;
-    let _ = node_b.stop().await;
-
-    println!("Test passed: node-to-node message delivery verified");
+        let _ = node_a.stop().await;
+        let _ = node_b.stop().await;
+    })
+    .await
+    .expect("test_node_to_node_connectivity timed out after 15s");
 }
 
 #[tokio::test]
 async fn test_ping_pong_same_machine() {
-    let (mut node_a, peer_id_a, addr_a) =
-        build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let (mut node_a, peer_id_a, addr_a) =
+            build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
+                .await
+                .expect("node A");
+        let (node_b, peer_id_b, addr_b) =
+            build_test_mesh_manager(19011, Some("ping_test_b".to_string()))
+                .await
+                .expect("node B");
+
+        node_a
+            .add_address(peer_id_b, addr_b.clone())
             .await
-            .expect("node A");
-    let (node_b, peer_id_b, addr_b) =
-        build_test_mesh_manager(19011, Some("ping_test_b".to_string()))
-            .await
-            .expect("node B");
+            .expect("add_address");
 
-    println!("A={peer_id_a} on {addr_a}");
-    println!("B={peer_id_b} on {addr_b}");
+        let dm_topic_b = format!("ghostwire-dm-{peer_id_b}");
+        node_b.subscribe_topic(&dm_topic_b).await.expect("sub B");
+        let dm_topic_a = format!("ghostwire-dm-{peer_id_a}");
+        node_a.subscribe_topic(&dm_topic_a).await.expect("sub A");
 
-    node_a
-        .add_address(peer_id_b, addr_b.clone())
-        .await
-        .expect("add_address");
+        node_a.connect_peer(peer_id_b).await.expect("connect");
 
-    let dm_topic_b = format!("ghostwire-dm-{peer_id_b}");
-    node_b.subscribe_topic(&dm_topic_b).await.expect("sub B");
-    let dm_topic_a = format!("ghostwire-dm-{peer_id_a}");
-    node_a.subscribe_topic(&dm_topic_a).await.expect("sub A");
+        sleep(Duration::from_secs(6)).await;
 
-    node_a.connect_peer(peer_id_b).await.expect("connect");
+        let peer_b_str = peer_id_b.to_string();
+        let health = node_a.peer_health().get_peer_health(&peer_b_str).await;
 
-    // Wait for connection + gossipsub mesh + at least one ping interval (2s) + round-trip margin
-    sleep(Duration::from_secs(6)).await;
-
-    let peer_b_str = peer_id_b.to_string();
-    let health = node_a.peer_health().get_peer_health(&peer_b_str).await;
-
-    match health {
-        Some(h) => {
-            println!(
-                "Peer B health: pings_sent={}, pongs_received={}, avg_rtt={:.1}ms, alive={}",
-                h.pings_sent, h.pongs_received, h.avg_rtt_ms, h.is_alive
-            );
-            assert!(h.pings_sent > 0, "expected pings sent to B");
-            assert!(h.pongs_received > 0, "expected pongs received from B");
-            assert!(h.avg_rtt_ms > 0.0, "expected positive RTT");
-            assert!(h.is_alive, "peer B should be alive");
+        match health {
+            Some(h) => {
+                println!(
+                    "Peer B health: pings_sent={}, pongs_received={}, avg_rtt={:.1}ms, alive={}",
+                    h.pings_sent, h.pongs_received, h.avg_rtt_ms, h.is_alive
+                );
+                assert!(h.pings_sent > 0, "expected pings sent to B");
+                assert!(h.pongs_received > 0, "expected pongs received from B");
+                assert!(h.avg_rtt_ms > 0.0, "expected positive RTT");
+                assert!(h.is_alive, "peer B should be alive");
+            }
+            None => {
+                panic!("No health record for peer B — ping/pong never fired");
+            }
         }
-        None => {
-            panic!("No health record for peer B — ping/pong never fired");
-        }
-    }
 
-    let _ = node_a.stop().await;
-    let _ = node_b.stop().await;
-
-    println!("Test passed: ping/pong RTT tracking verified");
+        let _ = node_a.stop().await;
+        let _ = node_b.stop().await;
+    })
+    .await
+    .expect("test_ping_pong_same_machine timed out after 15s");
 }

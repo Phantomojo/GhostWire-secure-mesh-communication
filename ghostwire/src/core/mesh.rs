@@ -24,6 +24,7 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 use libp2p_webrtc as webrtc;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicUsize;
@@ -220,7 +221,7 @@ impl MeshTransport {
         // Add WebRTC transport for browser/P2P connectivity
         let webrtc_transport = webrtc::tokio::Transport::new(
             local_key.clone(),
-            webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?,
+            webrtc::tokio::Certificate::generate(&mut OsRng)?,
         );
 
         // Build the transport stack:
