@@ -1,0 +1,24 @@
+# GhostWire
+
+> GhostWire is a decentralized, anonymous peer-to-peer mesh communication platform built in Rust. It enables secure, censorship-resistant messaging and file sharing without central servers, using libp2p for networking and strong end-to-end encryption.
+
+GhostWire provides a web-based interface for mesh networking, supporting features like anonymous peer discovery, encrypted communication channels, and a built-in AI assistant. The project is open source under AGPLv3.
+
+## Key Files
+
+- [About GhostWire](https://www.ghostwire.cc/about): Project overview and mission
+- [Security](https://www.ghostwire.cc/security): Security architecture and threat model
+- [Download](https://www.ghostwire.cc/download): Get GhostWire for your platform
+- [Documentation](https://www.ghostwire.cc/docs): Technical documentation and API reference
+
+## Project Links
+
+- [GitHub Repository](https://github.com/Phantomojo/GhostWire-secure-mesh-communication): Source code and development
+- [Releases](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/releases): Latest builds and changelogs
+
+## Technical Stack
+
+- **Language**: Rust (backend), TypeScript (frontend)
+- **Networking**: libp2p (TCP/QUIC/WebRTC)
+- **Cryptography**: Ed25519, X25519, AES-256-GCM
+- **Build**: Cargo, Tauri (desktop), WebAssembly (browser)
