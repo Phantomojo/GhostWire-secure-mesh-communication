@@ -2302,7 +2302,7 @@ dependencies = [
  "matrix-sdk",
  "mime_guess",
  "mockall",
- "ndarray 0.15.6",
+ "ndarray 0.17.2",
  "ndarray-stats",
  "num-bigint 0.4.6",
  "num-derive",
