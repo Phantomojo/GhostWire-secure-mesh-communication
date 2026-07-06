@@ -84,7 +84,7 @@ qrcode-generator = "5.0"
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
-matrix-sdk = { version = "0.16", optional = true }
+matrix-sdk = { version = "0.18", optional = true }
 serialport = { version = "4.3", optional = true }
 obfstr = "0.4"              # compile-time string encryption
 secrecy = "0.8"             # sensitive type wrappers (no accidental logging of keys)
