@@ -1,0 +1,117 @@
+# GhostWire
+
+> GhostWire is an open protocol for resilient peer-to-peer mesh communication. A decentralized networking stack built in Rust — encrypted, delay-tolerant, post-quantum ready, and AI-routed. It provides the cryptographic, routing, and transport layers that developers build communication tools on top of. No servers. No owners.
+
+## What GhostWire Does
+
+GhostWire creates ad-hoc mesh networks using libp2p. Devices connect directly to each other — no servers, no accounts, no central authority. Messages hop node-to-node across the mesh, with AI-powered routing that learns optimal paths from real network data.
+
+**Core capabilities:**
+- Multi-cipher end-to-end encryption (XChaCha20-Poly1305 primary, vodozemac Olm/Megolm sessions, AES-256-GCM bridges)
+- Key exchange: X25519 + Ed25519 with forward-secrecy symmetric ratchet
+- Post-quantum: ML-KEM-768 (NIST FIPS 203) hybrid key encapsulation
+- 9 transports: 5 core (Stealth TCP, WebRTC, BLE, LoRa, Reticulum) + 4 Traffic Armor anti-DPI (obfs4, WebSocket Camouflage, Shadowsocks AEAD, TLS Camouflage)
+- Delay-tolerant delivery (DTN) — PRoPHET epidemic routing, messages queue when peers are offline
+- 4-layer AI routing: LightGBM (76.7μs) → Gemma 4 → GNN → PRoPHET fallback
+- Sphinx onion routing with SURBs (sphinx-rs crate, published on crates.io)
+- Coercion resistance: duress PIN, panic wipe, dead man's switch
+- Web of Trust: TOFU key pinning with signed attestations
+- Knowledge Ark: decentralized knowledge commons
+- Protocol bridges: Matrix, Meshtastic, Briar, Reticulum interop
+- Ghost Channels: public/private/ephemeral topic-based pub/sub
+- Shamir Recovery: T-of-N identity key recovery
+- HLC causal ordering across disconnected nodes
+
+## Architecture
+
+Seven-layer protocol stack:
+- **APPLICATION:** Messaging · Knowledge Ark · Ghost Channels · Files
+- **API:** REST (Axum) · WebSocket · CLI · TUI
+- **PROTOCOL SERVICES:** BlockStore/Bitswap · Mailbox · Social Graph · Sphinx · HLC · Device Pairing · Shamir Recovery · Coercion Resistance
+- **AI/ML ROUTING:** L1: LightGBM → L2: Gemma 4 → L3: GNN → L4: PRoPHET
+- **CRYPTOGRAPHY:** XChaCha20-Poly1305 · X25519 · Ed25519 · ML-KEM-768 · BLAKE3 · Argon2 · Forward Secrecy Ratchet
+- **PLUGGABLE TRANSPORTS:** StealthTCP · WebRTC · BLE · LoRa · Reticulum · obfs4 · WebSocket Camouflage · Shadowsocks AEAD · TLS Camo
+- **MESH NETWORKING:** libp2p GossipSub · Kademlia DHT · mDNS · DTN · PRoPHET Epidemic Routing
+
+Four-layer AI routing system:
+- **Layer 1 (Fast Path):** LightGBM/ONNX classifier, <1ms per routing decision, AUC 1.0
+- **Layer 2 (Analytical):** Gemma 4 via Ollama, 50-200ms, runs every 30 seconds
+- **Layer 3 (Graph Optimization):** GNN trained on GuifiSants mesh data (7,931 samples, 63 nodes, 31 days), runs every 5 minutes
+- **Layer 4 (Fallback):** PRoPHET epidemic routing, <0.01ms, always available
+
+## Cryptographic Stack
+
+- **Primary AEAD:** XChaCha20-Poly1305 (256-bit key, 192-bit nonce, RFC 8439 extended)
+- **Sessions:** vodozemac (Olm/Megolm) in the crypto_machine module
+- **Sealed delivery:** ChaCha20Poly1305 (sphinx-rs, mailbox, wire_protocol)
+- **Bridges:** AES-256-GCM (Briar, Reticulum transport bridges)
+- **Key Exchange:** X25519 (RFC 7748)
+- **Signatures:** Ed25519 (RFC 8032)
+- **Post-Quantum:** ML-KEM-768 (NIST FIPS 203), hybrid with X25519
+- **Hashing:** BLAKE3 (primary), BLAKE2b
+- **Key Derivation:** Argon2id (64 MiB, 3 iterations, 4 lanes), HKDF-BLAKE3
+- **Forward Secrecy:** Symmetric ratchet with chain key aliasing
+- **Sphinx Routing:** Onion routing with SURBs (sphinx-rs crate, published crates.io)
+
+## Project Links
+
+- **Website:** https://www.ghostwire.cc/
+- **GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- **Security:** security@ghostwire.cc
+- **General contact:** admin@ghostwire.cc
+- **Protocol spec:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs/spec
+
+## Key Pages (single-page app with anchor sections)
+
+| Page | URL | Description |
+|------|-----|-------------|
+| Home | / | Project overview, hero, problem, personas |
+| About | /#about | Protocol-not-app framing, tech stack, published crates |
+| Architecture | /#architecture | 7-layer protocol stack, 4-layer AI routing, message flow |
+| Security | /#security | Threat model, crypto stack, audit status, disclosure |
+| Features | /#features | 13 clickable protocol-stack cards with deep modals |
+| Roadmap | /#roadmap | Now / Next / Later columns, v1.0 plan |
+| FAQ | /#faq | 10 questions: P2P, NAT traversal, key management, offline |
+| Contributors | /#contributors | 6 roles, skills, good first issues |
+| Quick Start | /#quickstart | Linux / Docker / From Source install tabs |
+
+## Technical Details
+
+- **Language:** Rust (core), TypeScript (frontend)
+- **Networking:** libp2p (TCP/QUIC/WebRTC), Kademlia DHT, Gossipsub, mDNS
+- **Desktop:** Tauri framework
+- **Browser:** WebAssembly
+- **License:** AGPL-3.0-or-later (Commercial License available)
+- **Version:** 0.2.0 (active development, target v1.0 stable)
+- **Current score:** 7/10 (B-) — 4 critical gaps identified for v1.0
+
+## Published Crates
+
+- **sphinx-rs** — Sphinx onion routing with SURBs — ✅ Published on crates.io
+- **ghostwire-dtn** — Delay-tolerant networking (PRoPHET) — 🔄 In progress
+- **hlc-rs** — Hybrid Logical Clocks — 🔄 In progress
+- **trust-store** — Web of Trust + TOFU key management — 🔄 In progress
+
+## Limitations (honest disclosure)
+
+- Internal audit complete (February 2026), independent third-party audit pending
+- Strong privacy, not full anonymity (traffic analysis risk against global passive adversary)
+- Physical device seizure may expose local data (mitigated by coercion resistance + Shamir Recovery)
+- Endpoint compromise bypasses encryption
+- Key revocation and rotation in progress (Phase 2)
+
+## How to Cite
+
+If referencing GhostWire in academic work:
+```
+GhostWire Team. "GhostWire: An Open Protocol for Resilient
+Peer-to-Peer Mesh Communication." 2026.
+https://www.ghostwire.cc/
+```
+
+## Contact
+
+- **General:** admin@ghostwire.cc
+- **Security:** security@ghostwire.cc
+- **PGP (encrypted reports):** mirungu015@proton.me
+- **GitHub Issues:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues
