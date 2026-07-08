@@ -19,6 +19,7 @@ import { StatsSection } from "@/components/site/sections/stats-section";
 import { GlossarySection } from "@/components/site/sections/glossary-section";
 import { DocsHubSection } from "@/components/site/sections/docs-hub-section";
 import { PressSection } from "@/components/site/sections/press-section";
+import { BlogSection } from "@/components/site/sections/blog-section";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -192,6 +193,7 @@ export default function Home() {
         <DocsHubSection />
         <CommunitySection />
         <StatsSection />
+        <BlogSection />
         <PressSection />
       </main>
       <SiteFooter />

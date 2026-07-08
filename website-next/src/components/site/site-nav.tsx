@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: "#glossary", label: "Glossary" },
   { href: "#roadmap", label: "Roadmap" },
   { href: "#faq", label: "FAQ" },
+  { href: "#blog", label: "Blog" },
 ] as const;
 
 export function SiteNav() {
