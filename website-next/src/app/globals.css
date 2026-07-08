@@ -1,0 +1,298 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  GhostWire dark theme — forced dark (terminal aesthetic).
+  Using @theme (non-inline) so Tailwind EMITS these as :root variables.
+*/
+@theme {
+  --color-background: #070a0e;
+  --color-foreground: #f0ede6;
+  --color-card: #0d1117;
+  --color-card-foreground: #f0ede6;
+  --color-popover: #0d1117;
+  --color-popover-foreground: #f0ede6;
+  --color-primary: #00dc9a;
+  --color-primary-foreground: #070a0e;
+  --color-secondary: #131c26;
+  --color-secondary-foreground: #f0ede6;
+  --color-muted: #111820;
+  --color-muted-foreground: rgba(240, 237, 230, 0.7);
+  --color-accent: #1a2535;
+  --color-accent-foreground: #f0ede6;
+  --color-destructive: #f97316;
+  --color-border: rgba(0, 220, 154, 0.14);
+  --color-input: rgba(0, 220, 154, 0.15);
+  --color-ring: #00dc9a;
+
+  --color-chart-1: #00dc9a;
+  --color-chart-2: #f97316;
+  --color-chart-3: #6ad7e5;
+  --color-chart-4: #c084fc;
+  --color-chart-5: #facc15;
+
+  --color-sidebar: #0d1117;
+  --color-sidebar-foreground: #f0ede6;
+  --color-sidebar-primary: #00dc9a;
+  --color-sidebar-primary-foreground: #070a0e;
+  --color-sidebar-accent: #1a2535;
+  --color-sidebar-accent-foreground: #f0ede6;
+  --color-sidebar-border: rgba(0, 220, 154, 0.14);
+  --color-sidebar-ring: #00dc9a;
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-syne);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* GhostWire-specific brand tokens (also emitted to :root) */
+  --color-gw-bg: #070a0e;
+  --color-gw-bg-2: #0d1117;
+  --color-gw-bg-3: #111820;
+  --color-gw-surface: #131c26;
+  --color-gw-surface-2: #1a2535;
+  --color-gw-green: #00dc9a;
+  --color-gw-green-dim: rgba(0, 220, 154, 0.12);
+  --color-gw-green-glow: rgba(0, 220, 154, 0.06);
+  --color-gw-orange: #f97316;
+  --color-gw-white: #f0ede6;
+  --color-gw-white-dim: rgba(240, 237, 230, 0.7);
+  --color-gw-white-faint: rgba(240, 237, 230, 0.4);
+  --color-gw-border: rgba(0, 220, 154, 0.08);
+  --color-gw-border-2: rgba(0, 220, 154, 0.18);
+}
+
+/*
+  Legacy raw CSS-variable aliases used throughout the components as var(--gw-*).
+  Defined on :root directly so they are always available at runtime.
+*/
+:root {
+  --gw-bg: #070a0e;
+  --gw-bg-2: #0d1117;
+  --gw-bg-3: #111820;
+  --gw-surface: #131c26;
+  --gw-surface-2: #1a2535;
+  --gw-green: #00dc9a;
+  --gw-green-dim: rgba(0, 220, 154, 0.12);
+  --gw-green-glow: rgba(0, 220, 154, 0.06);
+  --gw-orange: #f97316;
+  --gw-white: #f0ede6;
+  --gw-white-dim: rgba(240, 237, 230, 0.7);
+  --gw-white-faint: rgba(240, 237, 230, 0.4);
+  --gw-border: rgba(0, 220, 154, 0.08);
+  --gw-border-2: rgba(0, 220, 154, 0.18);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--gw-border);
+  }
+  html {
+    background-color: #070a0e;
+    scroll-behavior: smooth;
+    scroll-padding-top: 80px;
+  }
+  body {
+    background-color: #070a0e;
+    color: #f0ede6;
+    font-family: var(--font-inter), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  ::selection {
+    background: rgba(0, 220, 154, 0.25);
+    color: #f0ede6;
+  }
+  :focus-visible {
+    outline: 2px solid var(--gw-green);
+    outline-offset: 2px;
+  }
+}
+
+/* Mono + display helpers */
+.font-mono-gw {
+  font-family: var(--font-mono), 'IBM Plex Mono', monospace;
+}
+.font-display {
+  font-family: var(--font-syne), sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #070a0e;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a2535;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 220, 154, 0.3);
+}
+
+/* Pulse dot animation */
+@keyframes gw-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 220, 154, 0.5); }
+  70% { box-shadow: 0 0 0 12px rgba(0, 220, 154, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 220, 154, 0); }
+}
+.gw-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gw-green);
+  animation: gw-pulse 2.5s ease-out infinite;
+}
+
+/* In-progress badge */
+.gw-in-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--gw-orange);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  vertical-align: middle;
+}
+
+/* Glow text */
+.gw-glow {
+  text-shadow: 0 0 24px rgba(0, 220, 154, 0.35);
+}
+
+/* Reveal on scroll */
+@keyframes gw-reveal {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.gw-reveal {
+  animation: gw-reveal 0.7s ease-out both;
+}
+
+/* Section label */
+.gw-section-label {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--gw-green);
+  text-transform: lowercase;
+}
+
+/* Card hover */
+.gw-card-hover {
+  transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+.gw-card-hover:hover {
+  transform: translateY(-3px);
+  border-color: var(--gw-border-2);
+  background: var(--gw-surface);
+  box-shadow: 0 8px 32px rgba(0, 220, 154, 0.06);
+}
+
+/* Code block */
+.gw-code {
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--gw-bg-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem;
+  overflow-x: auto;
+}
+.gw-code .c-comment { color: rgba(240, 237, 230, 0.4); }
+.gw-code .c-green { color: var(--gw-green); }
+.gw-code .c-orange { color: var(--gw-orange); }
+.gw-code .c-dim { color: var(--gw-white-dim); }
+
+/* Buttons */
+.gw-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--gw-green);
+  color: var(--gw-bg);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 11px 22px;
+  border-radius: 4px;
+  border: 1px solid var(--gw-green);
+  transition: all 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+}
+.gw-btn-primary:hover {
+  background: transparent;
+  color: var(--gw-green);
+  box-shadow: 0 0 24px rgba(0, 220, 154, 0.25);
+}
+.gw-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--gw-white);
+  font-weight: 500;
+  font-size: 14px;
+  padding: 11px 22px;
+  border-radius: 4px;
+  border: 1px solid var(--gw-border-2);
+  transition: all 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+}
+.gw-btn-ghost:hover {
+  border-color: var(--gw-green);
+  color: var(--gw-green);
+  background: var(--gw-green-dim);
+}
+.gw-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--gw-green);
+  font-weight: 500;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: 1px solid var(--gw-border-2);
+  transition: all 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+}
+.gw-btn-outline:hover {
+  background: var(--gw-green-dim);
+  border-color: var(--gw-green);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

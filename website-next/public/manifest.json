@@ -1,0 +1,58 @@
+{
+  "name": "GhostWire",
+  "short_name": "GhostWire",
+  "description": "An open protocol for resilient peer-to-peer mesh communication.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070a0e",
+  "theme_color": "#070a0e",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["communication", "productivity", "developer"],
+  "icons": [
+    {
+      "src": "/ghostwire-logo.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/ghostwire-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/ghostwire-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick Start",
+      "short_name": "Start",
+      "url": "/#quickstart",
+      "description": "Install GhostWire"
+    },
+    {
+      "name": "Architecture",
+      "short_name": "Architecture",
+      "url": "/#architecture",
+      "description": "Protocol stack and AI routing"
+    },
+    {
+      "name": "Security",
+      "short_name": "Security",
+      "url": "/#security",
+      "description": "Threat model and crypto stack"
+    },
+    {
+      "name": "GitHub",
+      "short_name": "GitHub",
+      "url": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+    }
+  ]
+}

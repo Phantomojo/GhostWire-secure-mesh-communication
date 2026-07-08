@@ -1,0 +1,84 @@
+{
+  "$schema": "https://www.ai-visibility.org.uk/specifications/ai-json/v1/ai-json.schema.json",
+  "name": "GhostWire",
+  "url": "https://www.ghostwire.cc",
+  "description": "An open protocol for resilient peer-to-peer mesh communication. Decentralized networking stack built in Rust — encrypted, delay-tolerant, post-quantum ready, and AI-routed.",
+  "version": "0.2.0",
+  "license": "AGPL-3.0-or-later",
+  "permissions": [
+    "Index public pages for search engines",
+    "Summarize content for user queries",
+    "Extract technical documentation for reference",
+    "Create structured data from public pages",
+    "Access public API endpoints",
+    "Provide real-time AI-powered search answers"
+  ],
+  "restrictions": [
+    "Do not train AI models on website content",
+    "Do not scrape or bulk-download content",
+    "Do not access private user data or encrypted communications",
+    "Do not bypass authentication or security measures",
+    "Do not redistribute content without attribution",
+    "Do not use content for commercial purposes without permission"
+  ],
+  "contact": {
+    "general": "admin@ghostwire.cc",
+    "security": "security@ghostwire.cc",
+    "pgp": "mirungu015@proton.me",
+    "github": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+  },
+  "content": {
+    "sections": [
+      {
+        "name": "Home",
+        "url": "https://www.ghostwire.cc",
+        "description": "Main landing page with project overview, hero, problem statement, and personas"
+      },
+      {
+        "name": "About",
+        "url": "https://www.ghostwire.cc/#about",
+        "description": "Protocol-not-app framing, tech stack, published crates, three ways to build"
+      },
+      {
+        "name": "Architecture",
+        "url": "https://www.ghostwire.cc/#architecture",
+        "description": "Seven-layer protocol stack, four-layer AI routing, message flow"
+      },
+      {
+        "name": "Security",
+        "url": "https://www.ghostwire.cc/#security",
+        "description": "Threat model, cryptographic stack, audit status, responsible disclosure"
+      },
+      {
+        "name": "Features",
+        "url": "https://www.ghostwire.cc/#features",
+        "description": "Thirteen clickable protocol-stack cards with deep spec modals"
+      },
+      {
+        "name": "Roadmap",
+        "url": "https://www.ghostwire.cc/#roadmap",
+        "description": "Now / Next / Later columns, v1.0 stable plan"
+      },
+      {
+        "name": "FAQ",
+        "url": "https://www.ghostwire.cc/#faq",
+        "description": "Ten questions on P2P messaging, NAT traversal, key management, offline behavior"
+      },
+      {
+        "name": "Contributors",
+        "url": "https://www.ghostwire.cc/#contributors",
+        "description": "Six contributor roles, skills, and good first issues"
+      },
+      {
+        "name": "Quick Start",
+        "url": "https://www.ghostwire.cc/#quickstart",
+        "description": "Linux, Docker, and From Source installation instructions"
+      }
+    ]
+  },
+  "attribution": {
+    "required": true,
+    "format": "GhostWire (https://www.ghostwire.cc)",
+    "link": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+  }
+}
