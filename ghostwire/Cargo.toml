@@ -89,7 +89,7 @@ futures-util = { version = "0.3" }
 matrix-sdk = { version = "0.16", optional = true }
 serialport = { version = "4.3", optional = true }
 obfstr = "0.4"              # compile-time string encryption
-secrecy = "0.8"             # sensitive type wrappers (no accidental logging of keys)
+secrecy = "0.10"             # sensitive type wrappers (no accidental logging of keys)
 rand_core = { version = "0.6", features = ["getrandom"] }
 time = "0.3.47"             # Required for jsonwebtoken 9.2.0
 proc-macro2 = "1.0"         # Edition 2024 support for time crate
