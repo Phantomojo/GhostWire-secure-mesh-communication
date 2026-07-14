@@ -1,4 +1,5 @@
-use crate::core::encryption::{EncryptionManager, KeyType, MessageType as EncMessageType};
+use crate::core::encryption::{EncryptionManager, MessageType as EncMessageType};
+use crate::core::traffic_armor;
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
@@ -39,6 +40,7 @@ const MAX_HOPS: u8 = 5;
 
 /// Maximum number of message IDs to track for deduplication
 const SEEN_MSGS_MAX: usize = 10_000;
+const IN_MEMORY_MSGS_MAX: usize = 5_000;
 
 pub enum MeshCommand {
     PutRecord {
@@ -152,14 +154,14 @@ pub struct MeshBehaviour {
 /// A libp2p transport that wraps TCP in a Stealth Handshake
 pub struct StealthTransport {
     _provider: Arc<StealthTCPProvider>,
-    inner: libp2p::tcp::tokio::Transport,
+    _inner: libp2p::tcp::tokio::Transport,
 }
 
 impl StealthTransport {
     pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
         Self {
             _provider: provider,
-            inner: libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true)),
+            _inner: libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true)),
         }
     }
 }
@@ -183,9 +185,10 @@ pub struct MeshTransport {
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
+    mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
-    pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
+    _pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
 }
 
 impl MeshTransport {
@@ -335,12 +338,13 @@ impl MeshTransport {
             topology: Arc::new(RwLock::new(HashMap::new())),
             peer_count_cache: None,
             dtn_store: None,
+            mailbox_store: None,
             reliability,
             peer_health: Arc::new(crate::core::peer_health::PeerHealthTracker::new(
                 std::time::Duration::from_secs(2),
                 std::time::Duration::from_secs(30),
             )),
-            pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
+            _pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
         })
     }
 
@@ -379,16 +383,21 @@ impl MeshTransport {
         swarm.listen_on(listen_addr.clone())?;
 
         // Subscribe to broadcast topic
-        let topic = IdentTopic::new("ghostwire-messages");
+        let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
         // Get local peer ID before moving swarm into driver
         let local_peer_id = *swarm.local_peer_id();
 
-        // Subscribe to our own DM topic so we can receive direct messages
-        let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", local_peer_id));
+        // Subscribe to shared DM topic (all DMs go here, content encrypted end-to-end)
+        // Using a single topic avoids leaking recipient PeerId in gossipsub metadata
+        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
         swarm.behaviour_mut().gossipsub.subscribe(&dm_topic)?;
-        tracing::info!("Subscribed to own DM topic: ghostwire-dm-{}", local_peer_id);
+        tracing::info!("Subscribed to shared DM topic");
+
+        let dtn_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+        swarm.behaviour_mut().gossipsub.subscribe(&dtn_topic)?;
+        tracing::info!("Subscribed to DTN sync topic");
 
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
@@ -409,6 +418,12 @@ impl MeshTransport {
             }
         }
 
+        let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);
+        let _traffic_armor = Arc::new(crate::core::traffic_armor::TrafficArmor::new(
+            Some(cover_tx),
+            crate::core::armor::DeviceTier::detect(),
+        ));
+
         let driver = MeshDriver {
             swarm,
             command_rx,
@@ -426,12 +441,20 @@ impl MeshTransport {
             topology: self.topology.clone(),
             peer_count_cache: self.peer_count_cache.clone(),
             dtn_store: self.dtn_store.clone(),
+            mailbox_store: self.mailbox_store.clone(),
             completed_handshakes: std::collections::HashSet::new(),
             reliability: self.reliability.clone(),
             vector_clock: crate::core::vector_clock::VectorClock::new(),
             pending_messages: HashMap::new(),
             peer_health: self.peer_health.clone(),
             pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
+            mixing_queue: Arc::new(crate::core::routing::mixing_delay::MixingQueue::new(
+                crate::core::routing::mixing_delay::MixingConfig::default(),
+            )),
+            sphinx_secret: self.encryption_manager.x25519_secret()
+                .ok_or_else(|| anyhow::anyhow!("X25519 secret not available for Sphinx"))?,
+            mixing_tx: None,
+            cover_rx,
         };
 
         tokio::spawn(driver.run());
@@ -640,6 +663,7 @@ struct MeshDriver {
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
+    mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
     completed_handshakes: std::collections::HashSet<PeerId>,
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     vector_clock: crate::core::vector_clock::VectorClock,
@@ -647,14 +671,41 @@ struct MeshDriver {
     pending_messages: HashMap<Uuid, Message>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
     pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
+    /// Delay queue for Sphinx relay forwarding (timing-attack resistance)
+    mixing_queue: Arc<crate::core::routing::mixing_delay::MixingQueue>,
+    /// X25519 secret key for Sphinx packet processing
+    sphinx_secret: x25519_dalek::StaticSecret,
+    /// Channel for mixing queue drain loop → forward packets
+    mixing_tx: Option<mpsc::Sender<crate::core::routing::mixing_delay::QueuedSphinxPacket>>,
+    /// Cover traffic receiver — drains dummy frames from scheduler, publishes to DM topic
+    cover_rx: mpsc::Receiver<crate::core::traffic_armor::PaddedFrame>,
 }
 
 impl MeshDriver {
     async fn run(mut self) {
+        let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+        if let Err(e) = self.swarm.behaviour_mut().gossipsub.subscribe(&sphinx_topic) {
+            tracing::warn!("Failed to subscribe to Sphinx topic: {}", e);
+        } else {
+            tracing::info!("Subscribed to Sphinx topic: {}", crate::core::constants::SPHINX_TOPIC);
+        }
+
+        let (mixing_tx, mut mixing_rx) = mpsc::channel::<crate::core::routing::mixing_delay::QueuedSphinxPacket>(64);
+        let drain_queue = self.mixing_queue.clone();
+        {
+            let tx_slot = self.mixing_tx.insert(mixing_tx);
+            drain_queue.start_drain_loop(tx_slot.clone());
+        }
+
         let mut retry_interval = tokio::time::interval(std::time::Duration::from_secs(5));
         retry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(2));
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // ponytail: DTN housekeeping — purge expired bundles every 60s
+        let mut dtn_purge_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        dtn_purge_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut key_rotation_interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        key_rotation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 event = self.swarm.next() => {
@@ -682,9 +733,103 @@ impl MeshDriver {
                 _ = ping_interval.tick() => {
                     self.send_periodic_pings().await;
                 }
+                _ = dtn_purge_interval.tick() => {
+                    if let Some(ref dtn_store) = self.dtn_store {
+                        dtn_store.purge_expired().await;
+                        let delivered = dtn_store.drain_local_deliveries().await;
+                        for bundle in delivered {
+                            if let Ok((frame, _)) =
+                                crate::core::wire_protocol::Frame::from_bytes(&bundle.payload)
+                            {
+                                if let Ok(m) = frame.decode::<Message>() {
+                                    tracing::info!(
+                                        "DTN: locally delivered bundle {:02x?}",
+                                        &bundle.cid[..8]
+                                    );
+                                    let mut msgs = self.core_messages.write().await;
+                                    msgs.push(m);
+                                    if msgs.len() > IN_MEMORY_MSGS_MAX {
+                                        msgs.drain(..IN_MEMORY_MSGS_MAX / 2);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ = key_rotation_interval.tick() => {
+                    if let Some(enc) = Arc::get_mut(&mut self.encryption_manager) {
+                        if let Err(e) = enc.rotate_keys_if_needed() {
+                            tracing::warn!("Key rotation failed: {}", e);
+                        }
+                    }
+                }
+                Some(ready_pkt) = mixing_rx.recv() => {
+                    self.forward_sphinx_packet(&ready_pkt.next_hop, &ready_pkt.packet_bytes).await;
+                }
+                Some(cover_frame) = self.cover_rx.recv() => {
+                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let cover = crate::core::wire_protocol::Frame::new(
+                        crate::core::wire_protocol::FrameKind::CoverTraffic,
+                        cover_frame.data,
+                    );
+                    if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(dm_topic, cover.to_bytes()) {
+                        tracing::trace!("Cover frame publish failed: {}", e);
+                    }
+                }
             }
         }
         tracing::info!("Mesh driver task exited.");
+    }
+
+    fn select_sphinx_route(&self, recipient: PeerId) -> Option<(Vec<[u8; 32]>, Vec<String>)> {
+        let topo = self.topology.try_read().ok()?;
+        let _our_pub = self.encryption_manager.x25519_public_key()?;
+        let recipient_str = recipient.to_string();
+
+        let mut candidates: Vec<(String, [u8; 32], f32)> = topo
+            .iter()
+            .filter(|(id, node)| {
+                **id != self.local_peer_id.to_string()
+                    && **id != recipient_str
+                    && node.is_online
+                    && node.public_key.len() >= 32
+            })
+            .filter_map(|(id, node)| {
+                let key_bytes: [u8; 32] = node.public_key[..32].try_into().ok()?;
+                Some((id.clone(), key_bytes, node.connection_quality))
+            })
+            .collect();
+
+        if candidates.len() < 2 {
+            return None;
+        }
+
+        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(2);
+
+        let mut route_keys = vec![candidates[0].1, candidates[1].1];
+        let mut route_ids = vec![candidates[0].0.clone(), candidates[1].0.clone()];
+
+        let recipient_node = topo.get(&recipient_str)?;
+        let recipient_key: [u8; 32] = recipient_node.public_key[..32].try_into().ok()?;
+        route_keys.push(recipient_key);
+        route_ids.push(recipient_str);
+
+        Some((route_keys, route_ids))
+    }
+
+    async fn forward_sphinx_packet(&mut self, next_hop: &str, packet_bytes: &[u8]) {
+        let topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+        if let Err(e) = self
+            .swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(topic, packet_bytes.to_vec())
+        {
+            tracing::warn!("Sphinx forward to {} failed: {}", next_hop, e);
+        } else {
+            tracing::trace!("Sphinx packet forwarded to {}", next_hop);
+        }
     }
 
     async fn handle_command(&mut self, cmd: MeshCommand) {
@@ -694,7 +839,9 @@ impl MeshDriver {
                     key: libp2p::kad::RecordKey::new(&key),
                     value,
                     publisher: None,
-                    expires: None,
+                    expires: Some(
+                        std::time::Instant::now() + std::time::Duration::from_secs(86400),
+                    ),
                 };
                 let res = self
                     .swarm
@@ -712,10 +859,10 @@ impl MeshDriver {
                 self.pending_get_queries.insert(query_id, reply);
             }
             MeshCommand::BroadcastMessage { mut message, reply } => {
-                self.vector_clock.increment(&self.local_peer_id.to_string());
+                self.vector_clock.increment(&crate::core::vector_clock::redact_node_id(&self.local_peer_id.to_string()));
                 message.vector_clock = self.vector_clock.clone();
 
-                let topic = IdentTopic::new("ghostwire-messages");
+                let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
                 let res = (|| -> Result<()> {
                     use crate::core::wire_protocol::{Frame, FrameKind};
                     let frame = Frame::encode(FrameKind::Message, &message)?;
@@ -730,11 +877,6 @@ impl MeshDriver {
                 let _ = reply.send(res);
             }
             MeshCommand::ConnectPeer { peer_id, reply } => {
-                // Subscribe to the peer's DM topic so we can receive their replies
-                let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-                let sub_result = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
-                tracing::info!("Subscribe to {}: {:?}", dm_topic, sub_result);
-
                 let res = self
                     .swarm
                     .dial(peer_id)
@@ -766,20 +908,20 @@ impl MeshDriver {
             MeshCommand::PublishUsername { reply } => {
                 let res = (|| -> Result<()> {
                     let identity = self._identity.clone();
-                    if let Some(keypair) = identity.keypair() {
-                        // Ring verification expects raw 32-byte Ed25519 public key; libp2p protobuf is typically 0x08 0x01 0x12 0x20 <32 bytes>
-                        let pk_proto = keypair.public().encode_protobuf();
-                        let pk_bytes: Vec<u8> = if pk_proto.len() >= 32 {
-                            pk_proto[pk_proto.len() - 32..].to_vec()
+                    if let Some(pk_bytes) = identity.public_key().map(|pk| {
+                        let proto = pk.encode_protobuf();
+                        if proto.len() >= 32 {
+                            proto[proto.len() - 32..].to_vec()
                         } else {
-                            pk_proto
-                        };
+                            proto
+                        }
+                    }) {
                         let (key, value) = self
                             ._username_discovery
                             .prepare_username_publication_with_signer(pk_bytes, |sig_data| {
-                                keypair
+                                identity
                                     .sign(sig_data)
-                                    .map_err(|e| anyhow::anyhow!("Signing failed: {:?}", e))
+                                    .ok_or_else(|| anyhow::anyhow!("Signing failed"))
                             })?;
                         self.swarm.behaviour_mut().kad.put_record(
                             libp2p::kad::Record {
@@ -807,9 +949,7 @@ impl MeshDriver {
                 mut message,
                 reply,
             } => {
-                let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
-
-                self.vector_clock.increment(&self.local_peer_id.to_string());
+                self.vector_clock.increment(&crate::core::vector_clock::redact_node_id(&self.local_peer_id.to_string()));
                 message.vector_clock = self.vector_clock.clone();
 
                 let mut encrypted_msg = message.clone();
@@ -817,17 +957,26 @@ impl MeshDriver {
                     .encryption_manager
                     .has_ratchet_session(&recipient.to_string());
 
+                // ponytail: traffic analysis resistance — pad plaintext to 512-byte blocks before encryption
+                let padded_content = traffic_armor::pad_message(
+                    message.content.as_bytes(),
+                    &ring::rand::SystemRandom::new(),
+                )
+                .ok()
+                .map(|p| String::from_utf8(p).unwrap_or(message.content.clone()))
+                .unwrap_or(message.content.clone());
+
                 let enc_result: Result<_, anyhow::Error> = if use_ratchet {
                     self.encryption_manager
                         .encrypt_message_ratchet(
-                            &message.content,
+                            &padded_content,
                             &message.recipient,
                             EncMessageType::Text,
                         )
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 } else {
                     self.encryption_manager
-                        .encrypt_message(&message.content, &message.recipient, EncMessageType::Text)
+                        .encrypt_message(&padded_content, &message.recipient, EncMessageType::Text)
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 };
 
@@ -845,7 +994,6 @@ impl MeshDriver {
                     } else {
                         ""
                     };
-                    // v4 prefix: receiver uses this to select ratchet vs static decrypt
                     encrypted_msg.message_type = if let Some(ref pq) = encrypted_content.pq_key {
                         let header_b64 = base64::engine::general_purpose::STANDARD.encode(pq);
                         format!(
@@ -857,7 +1005,7 @@ impl MeshDriver {
                     };
                 } else {
                     tracing::warn!(
-                        "Failed to encrypt DM to {}, dropping message (plaintext rejected)",
+                        "Failed to encrypt DM to {}, dropping message",
                         recipient
                     );
                     let _ = reply.send(Err(anyhow::anyhow!(
@@ -882,49 +1030,105 @@ impl MeshDriver {
                 };
                 let data = frame.to_bytes();
 
-                if let Err(e) = self
-                    .swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(topic.clone(), data.clone())
-                {
-                    tracing::warn!(
-                        "Gossipsub publish to {} failed: {}, trying DTN fallback",
-                        recipient,
-                        e
-                    );
-
-                    if let Some(ref dtn_store) = self.dtn_store {
-                        let destination =
-                            *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
-                        let bundle = crate::core::dtn::bundle::DtnBundle::new(data, destination);
-                        if dtn_store.store(bundle).await {
-                            tracing::info!(
-                                "DTN fallback: message queued for epidemic delivery to {}",
-                                recipient
-                            );
-                            let _ = reply.send(Ok(()));
-                            return;
-                        } else {
-                            tracing::warn!(
-                                "DTN store full or bundle expired, message dropped for {}",
-                                recipient
-                            );
-                        }
+                if let Some(ref mailbox) = self.mailbox_store {
+                    if let Err(e) = mailbox.queue_delivery(
+                        &recipient.to_string(),
+                        &encrypted_msg.id.to_string(),
+                        &data,
+                    ) {
+                        tracing::warn!("Failed to queue delivery for {}: {}", recipient, e);
                     }
-
-                    let _ = reply.send(Err(anyhow::anyhow!(
-                        "Direct send and DTN fallback both failed for {}: {}",
-                        recipient,
-                        e
-                    )));
-                    return;
                 }
 
-                tracing::info!(
-                    "Sent direct message to peer {} on topic {} (ratchet={})",
+                let sent_via_sphinx = if let Some((route_keys, route_ids)) =
+                    self.select_sphinx_route(recipient)
+                {
+                    match crate::core::routing::sphinx::create_sphinx_packet(
+                        &route_keys,
+                        &route_ids,
+                        &data,
+                        &ring::rand::SystemRandom::new(),
+                    ) {
+                        Ok(packet) => {
+                            match bincode::serialize(&packet) {
+                                Ok(pkt_bytes) => {
+                                    let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+                                    match self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic, pkt_bytes) {
+                                        Ok(_) => {
+                                            tracing::trace!(
+                                                "Sent DM via Sphinx ({} hops) to {}",
+                                                route_keys.len(),
+                                                recipient
+                                            );
+                                            true
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Sphinx publish failed: {}, falling back to direct DM", e);
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Sphinx packet serialization failed: {}", e);
+                                    false
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::trace!("Sphinx route build failed: {}", e);
+                            false
+                        }
+                    }
+                } else {
+                    false
+                };
+
+                if !sent_via_sphinx {
+                    let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    if let Err(e) = self
+                        .swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(topic, data.clone())
+                    {
+                        tracing::warn!(
+                            "Gossipsub publish to {} failed: {}, trying DTN fallback",
+                            recipient,
+                            e
+                        );
+
+                        if let Some(ref dtn_store) = self.dtn_store {
+                            let destination =
+                                *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
+                            let bundle = crate::core::dtn::bundle::DtnBundle::new(data, destination);
+                            if dtn_store.store(bundle).await {
+                                tracing::trace!(
+                                    "DTN fallback: message queued for epidemic delivery to {}",
+                                    recipient
+                                );
+                                let _ = reply.send(Ok(()));
+                                return;
+                            } else {
+                                tracing::warn!(
+                                    "DTN store full or bundle expired, message dropped for {}",
+                                    recipient
+                                );
+                            }
+                        }
+
+                        let _ = reply.send(Err(anyhow::anyhow!(
+                            "Direct send and DTN fallback both failed for {}: {}",
+                            recipient,
+                            e
+                        )));
+                        return;
+                    }
+                }
+
+                tracing::trace!(
+                    "Sent direct message to peer {} (sphinx={}, ratchet={})",
                     recipient,
-                    topic,
+                    sent_via_sphinx,
                     use_ratchet
                 );
                 let _ = reply.send(Ok(()));
@@ -991,10 +1195,6 @@ impl MeshDriver {
                 peer_id,
                 num_established
             );
-            // Subscribe to this peer's DM topic
-            let dm_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
-            let _ = self.swarm.behaviour_mut().gossipsub.subscribe(&dm_topic);
-
             let my_id = self._identity.id.clone();
             let my_pubkey = base64::engine::general_purpose::STANDARD
                 .encode(self.encryption_manager.get_public_key());
@@ -1036,6 +1236,8 @@ impl MeshDriver {
                 }
             }
 
+            self.peer_health.register_peer(peer_id.to_string()).await;
+
             if let Some(cache) = &self.peer_count_cache {
                 let count = self
                     .topology
@@ -1045,6 +1247,72 @@ impl MeshDriver {
                     .filter(|n| n.is_online)
                     .count() as usize;
                 cache.store(count, std::sync::atomic::Ordering::Relaxed);
+            }
+
+            if let Some(ref dtn_store) = self.dtn_store {
+                let peer_dest = *blake3::hash(peer_id.to_string().as_bytes()).as_bytes();
+                let bundles = dtn_store.bundles.read().await;
+                let to_deliver: Vec<crate::core::dtn::bundle::DtnBundle> = bundles
+                    .values()
+                    .filter(|b| b.destination == peer_dest && !b.is_expired())
+                    .cloned()
+                    .collect();
+                drop(bundles);
+
+                if !to_deliver.is_empty() {
+                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    for bundle in &to_deliver {
+                        let _ = self
+                            .swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .publish(dm_topic.clone(), bundle.payload.clone());
+                        tracing::info!(
+                            "DTN: delivered bundle {:02x?} to newly connected peer {}",
+                            &bundle.cid[..8],
+                            peer_id
+                        );
+                    }
+                    for bundle in &to_deliver {
+                        dtn_store.remove(&bundle.cid).await;
+                    }
+                }
+
+                // Trigger epidemic sync handshake (bloom-filter exchange)
+                let handshake = crate::core::dtn::epidemic::DtnSyncHandshake::build(dtn_store).await;
+                if let Ok(hs_bytes) = bincode::serialize(&handshake) {
+                    let sync_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+                    let _ = self.swarm.behaviour_mut().gossipsub.publish(sync_topic, hs_bytes);
+                    tracing::debug!("DTN: published sync handshake to new peer {}", peer_id);
+                }
+            }
+
+            if let Some(ref mailbox) = self.mailbox_store {
+                if let Ok(deliveries) = mailbox.get_pending_deliveries(&peer_id.to_string()) {
+                    if !deliveries.is_empty() {
+                        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                        let mut delivered_ids = Vec::new();
+                        for (msg_id, frame_bytes) in &deliveries {
+                            if self
+                                .swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .publish(dm_topic.clone(), frame_bytes.clone())
+                                .is_ok()
+                            {
+                                delivered_ids.push(msg_id.clone());
+                                tracing::info!(
+                                    "Mailbox: delivered queued message {} to {}",
+                                    msg_id,
+                                    peer_id
+                                );
+                            }
+                        }
+                        for msg_id in &delivered_ids {
+                            let _ = mailbox.remove_delivery(&peer_id.to_string(), msg_id);
+                        }
+                    }
+                }
             }
         }
 
@@ -1062,6 +1330,8 @@ impl MeshDriver {
                     node.is_online = false;
                 }
             }
+
+            self.peer_health.remove_peer(&peer_id.to_string()).await;
 
             if let Some(cache) = &self.peer_count_cache {
                 let count = self
@@ -1208,15 +1478,26 @@ impl MeshDriver {
     ) -> Result<()> {
         let topic_str = message.topic.as_str();
 
-        // Determine if this is a direct message for us or a broadcast
-        let is_dm_for_us = topic_str.starts_with("ghostwire-dm-")
-            && topic_str.ends_with(&self.local_peer_id.to_string());
-        // Also detect DM topics for other peers (for relay forwarding)
-        let is_dm_topic = topic_str.starts_with("ghostwire-dm-");
+        if topic_str == crate::core::constants::SPHINX_TOPIC {
+            return self.handle_sphinx_packet(peer_id, message).await;
+        }
 
-        if !is_dm_for_us && !is_dm_topic && topic_str != "ghostwire-messages" {
-            // Not our DM topic, not any DM topic, and not the broadcast topic — ignore
+        if topic_str == crate::core::constants::DTN_SYNC_TOPIC {
+            return self.handle_dtn_sync(message).await;
+        }
+
+        let is_dm_for_us = topic_str == crate::core::constants::DM_TOPIC;
+        let is_dm_topic = is_dm_for_us;
+
+        if !is_dm_for_us && !is_dm_topic && topic_str != crate::core::constants::BROADCAST_TOPIC {
             return Ok(());
+        }
+
+        if let Ok((frame, _)) = crate::core::wire_protocol::Frame::from_bytes(&message.data) {
+            if frame.kind == crate::core::wire_protocol::FrameKind::CoverTraffic {
+                tracing::trace!("Discarded cover frame from {}", peer_id);
+                return Ok(());
+            }
         }
 
         debug!(
@@ -1243,7 +1524,7 @@ impl MeshDriver {
                     use crate::core::wire_protocol::{Frame, FrameKind, WirePong};
                     let pong = WirePong { ts: ping.ts };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
-                        let pong_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                        let pong_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
                         let _ = self
                             .swarm
                             .behaviour_mut()
@@ -1297,27 +1578,27 @@ impl MeshDriver {
             if let Ok(ack_id) = msg.content.parse::<uuid::Uuid>() {
                 self.reliability.on_ack_received(&ack_id);
                 self.pending_messages.remove(&ack_id);
+                if let Some(ref mailbox) = self.mailbox_store {
+                    let _ = mailbox.remove_delivery(&msg.sender, &ack_id.to_string());
+                }
             }
             return Ok(());
         }
 
-        // Feature 4: Multi-hop relay forwarding
-        // If message is a DM not intended for us, and hops < MAX_HOPS, forward it
         if !msg.is_broadcast()
             && msg.recipient != self.local_peer_id.to_string()
             && msg.hops < MAX_HOPS
         {
             let mut forwarded = msg.clone();
             forwarded.hops += 1;
-            tracing::info!(
+            tracing::trace!(
                 "Relaying message {} (hop {}/{}) to {}",
                 forwarded.id,
                 forwarded.hops,
                 MAX_HOPS,
                 forwarded.recipient
             );
-            // Publish to the recipient's DM topic
-            let relay_topic = IdentTopic::new(&format!("ghostwire-dm-{}", forwarded.recipient));
+            let relay_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
                 let _ = self
@@ -1328,8 +1609,7 @@ impl MeshDriver {
             }
         }
 
-        // If this DM is not for us, we're done (already forwarded above if applicable)
-        if !is_dm_for_us && topic_str != "ghostwire-messages" {
+        if !is_dm_for_us && topic_str != crate::core::constants::BROADCAST_TOPIC {
             return Ok(());
         }
 
@@ -1389,8 +1669,13 @@ impl MeshDriver {
 
                     match decrypt_result {
                         Ok(plaintext) => {
-                            msg.content = plaintext;
+                            // ponytail: unpad after decryption — backward compat: if unpad fails, use as-is
+                            msg.content = traffic_armor::unpad_message(plaintext.as_bytes())
+                                .ok()
+                                .and_then(|v| String::from_utf8(v).ok())
+                                .unwrap_or(plaintext);
                             msg.encryption_status = "decrypted".to_string();
+                            msg.message_type = "text".to_string();
                         }
                         Err(e) => {
                             tracing::warn!("Failed to decrypt message from {}: {}", msg.sender, e);
@@ -1402,9 +1687,9 @@ impl MeshDriver {
         }
 
         if is_dm_for_us {
-            tracing::info!("Received direct message from peer {}", peer_id);
+            tracing::trace!("Received direct message from peer {}", peer_id);
         } else {
-            tracing::info!("Processed broadcast message from {}: {:?}", peer_id, msg);
+            tracing::trace!("Processed broadcast message from {}", peer_id);
         }
 
         if msg.message_type != "handshake" && !msg.message_type.starts_with("encrypted:") {
@@ -1426,13 +1711,121 @@ impl MeshDriver {
 
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &ack_msg) {
-                let ack_topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                let ack_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
                 let _ = self
                     .swarm
                     .behaviour_mut()
                     .gossipsub
                     .publish(ack_topic, frame.to_bytes());
                 debug!("Sent ACK for message {} to {}", msg.id, peer_id);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sphinx_packet(
+        &mut self,
+        peer_id: PeerId,
+        message: GossipsubMessage,
+    ) -> Result<()> {
+        let packet: crate::core::routing::sphinx::SphinxPacket = match bincode::deserialize(&message.data) {
+            Ok(p) => p,
+            Err(_) => return Ok(()),
+        };
+
+        match crate::core::routing::sphinx::process_sphinx_packet(
+            &packet,
+            &self.sphinx_secret,
+            &self.local_peer_id.to_string(),
+        ) {
+            crate::core::routing::sphinx::SphinxProcessResult::Forward {
+                next_hop,
+                packet: new_packet,
+            } => {
+                let delay = crate::core::routing::mixing_delay::sample_delay(
+                    &crate::core::routing::mixing_delay::MixingConfig::default(),
+                );
+                if let Ok(pkt_bytes) = bincode::serialize(&new_packet) {
+                    if delay > std::time::Duration::ZERO {
+                        tracing::trace!(
+                            "Sphinx relay to {} (mixing delay {}ms)",
+                            next_hop,
+                            delay.as_millis()
+                        );
+                        let queue = self.mixing_queue.clone();
+                        queue.enqueue(next_hop, pkt_bytes).await;
+                    } else {
+                        self.forward_sphinx_packet(&next_hop, &pkt_bytes).await;
+                    }
+                }
+            }
+            crate::core::routing::sphinx::SphinxProcessResult::Deliver { payload } => {
+                if let Ok((frame, _)) = crate::core::wire_protocol::Frame::from_bytes(&payload) {
+                    if let Ok(msg) = frame.decode::<Message>() {
+                        tracing::trace!("Sphinx: delivered message from {}", msg.sender);
+                        let _ = self.handle_incoming_message(peer_id, msg).await;
+                    }
+                }
+            }
+            crate::core::routing::sphinx::SphinxProcessResult::Invalid => {
+                tracing::trace!("Sphinx: invalid packet from {}", peer_id);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_dtn_sync(&mut self, message: GossipsubMessage) -> Result<()> {
+        let handshake: crate::core::dtn::epidemic::DtnSyncHandshake =
+            match bincode::deserialize(&message.data) {
+                Ok(h) => h,
+                Err(_) => return Ok(()),
+            };
+
+        if let Some(ref dtn_store) = self.dtn_store {
+            let our_bloom = dtn_store.build_bloom().await;
+            let our_scores = dtn_store.export_delivery_scores().await;
+            let bundles_to_send = dtn_store
+                .on_encounter(
+                    &handshake.node_id,
+                    &handshake.have_bloom,
+                    &handshake.delivery_scores,
+                )
+                .await;
+
+            // Send bundles we have that they need
+            if !bundles_to_send.is_empty() {
+                let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                for bundle in &bundles_to_send {
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(dm_topic.clone(), bundle.payload.clone());
+                }
+                tracing::debug!(
+                    "DTN: sent {} bundles after sync handshake",
+                    bundles_to_send.len()
+                );
+            }
+
+            // Reply with our sync handshake so they can send us what we need
+            let reply = crate::core::dtn::epidemic::DtnSyncHandshake {
+                node_id: dtn_store.node_id(),
+                have_bloom: our_bloom,
+                delivery_scores: our_scores,
+                ts: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            };
+            if let Ok(hs_bytes) = bincode::serialize(&reply) {
+                let sync_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+                let _ = self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(sync_topic, hs_bytes);
             }
         }
 
@@ -1505,13 +1898,16 @@ impl MeshDriver {
             }
         } else if msg.encryption_status == "decrypt_failed" {
             // Save plaintext even if decryption failed (for debugging)
-            tracing::warn!("Saving message with failed decryption: {}", msg.content);
+            tracing::warn!("Saving message with failed decryption from peer (content redacted)");
         }
 
         // Add to in-memory
         {
             let mut messages = self.core_messages.write().await;
             messages.push(msg.clone());
+            if messages.len() > IN_MEMORY_MSGS_MAX {
+                messages.drain(..IN_MEMORY_MSGS_MAX / 2);
+            }
         }
 
         // Send to event bus
@@ -1527,7 +1923,7 @@ impl MeshDriver {
         for msg_id in timed_out {
             if let Some(original) = self.pending_messages.get(&msg_id) {
                 let recipient = original.recipient.clone();
-                let topic = IdentTopic::new(&format!("ghostwire-dm-{}", recipient));
+                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
 
                 let mut retransmit = original.clone();
                 retransmit.hops = 0;
@@ -1550,6 +1946,8 @@ impl MeshDriver {
                 }
             }
         }
+        self.pending_messages
+            .retain(|id, _| self.reliability.ack_tracker.is_pending(id));
     }
 
     async fn send_periodic_pings(&mut self) {
@@ -1569,7 +1967,7 @@ impl MeshDriver {
                 .as_millis() as u32;
             let ping = WirePing { ts };
             if let Ok(frame) = Frame::encode(FrameKind::Ping, &ping) {
-                let topic = IdentTopic::new(&format!("ghostwire-dm-{}", peer_id));
+                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
                 if let Err(e) = self
                     .swarm
                     .behaviour_mut()
@@ -1593,8 +1991,8 @@ pub struct MeshManager {
     _local_identity: Arc<Identity>,
     _security_manager: Arc<SecurityManager>,
     core_messages: Arc<RwLock<Vec<Message>>>,
-    message_store: Arc<crate::core::store::SecureMessageStore>,
-    reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+    _message_store: Arc<crate::core::store::SecureMessageStore>,
+    _reliability: Arc<crate::core::reliability::ReliabilityLayer>,
 }
 
 impl MeshManager {
@@ -1631,8 +2029,8 @@ impl MeshManager {
             _local_identity: identity,
             _security_manager: security_manager,
             core_messages,
-            message_store,
-            reliability,
+            _message_store: message_store,
+            _reliability: reliability,
         })
     }
 
@@ -1693,6 +2091,10 @@ impl MeshManager {
 
     pub fn set_dtn_store(&mut self, store: Arc<crate::core::dtn::epidemic::DtnStore>) {
         self.transport.dtn_store = Some(store);
+    }
+
+    pub fn set_mailbox_store(&mut self, store: Arc<crate::core::mailbox::MailboxStore>) {
+        self.transport.mailbox_store = Some(store);
     }
 
     pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
@@ -1762,7 +2164,7 @@ unsafe impl Send for MeshTransport {}
 mod tests {
     use super::*;
     use libp2p::PeerId;
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::HashMap;
 
     #[test]
     fn test_mesh_node_serialization() {

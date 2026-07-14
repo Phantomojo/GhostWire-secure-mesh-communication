@@ -285,7 +285,7 @@ pub async fn disjoint_lookup(
 
     // Partition candidates into DISJOINT_PATHS disjoint sets
     // Each set is independent — no overlap between paths
-    let mut paths: Vec<LookupPath> = (0..DISJOINT_PATHS)
+    let paths: Vec<LookupPath> = (0..DISJOINT_PATHS)
         .map(|i| {
             let path_peers: Vec<String> = candidates
                 .iter()

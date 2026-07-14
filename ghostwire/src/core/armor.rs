@@ -1,6 +1,4 @@
-use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Device capability tier — drives padding aggressiveness and cover traffic rate.
 ///
@@ -46,96 +44,6 @@ impl DeviceTier {
             }
         }
         Self::Medium
-    }
-}
-
-/// Traffic Morphing configuration for DPI evasion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MorphingConfig {
-    pub enable_padding: bool,
-    pub min_packet_size: usize,
-    pub max_padding: usize,
-    pub enable_timing_chaff: bool,
-    pub max_chaff_delay_ms: u64,
-    #[serde(default)]
-    pub tier: DeviceTier,
-}
-
-impl Default for MorphingConfig {
-    fn default() -> Self {
-        let tier = DeviceTier::Medium;
-        let (min_packet_size, max_padding, max_chaff_delay_ms, _, _) = tier.params();
-        Self {
-            enable_padding: true,
-            min_packet_size,
-            max_padding,
-            enable_timing_chaff: true,
-            max_chaff_delay_ms,
-            tier,
-        }
-    }
-}
-
-impl MorphingConfig {
-    pub fn from_tier(tier: DeviceTier) -> Self {
-        let (min_packet_size, max_padding, max_chaff_delay_ms, _, _) = tier.params();
-        Self {
-            enable_padding: true,
-            min_packet_size,
-            max_padding,
-            enable_timing_chaff: true,
-            max_chaff_delay_ms,
-            tier,
-        }
-    }
-
-    /// Cover traffic interval range for this tier.
-    pub fn cover_range_ms(&self) -> (u64, u64) {
-        let (_, _, _, min, max) = self.tier.params();
-        (min, max)
-    }
-}
-
-/// Military-grade "Armor" for morphing traffic and defeating DPI.
-pub struct TrafficArmor {
-    config: MorphingConfig,
-}
-
-impl TrafficArmor {
-    pub fn new(config: MorphingConfig) -> Self {
-        Self { config }
-    }
-
-    /// Morphs a payload by adding padding and noise.
-    pub fn morph_payload(&self, mut payload: Vec<u8>) -> Vec<u8> {
-        if !self.config.enable_padding {
-            return payload;
-        }
-
-        let mut rng = rand::rng();
-        let target_size = (self.config.min_packet_size)
-            .max(payload.len() + rng.random_range(0..self.config.max_padding));
-
-        if payload.len() < target_size {
-            let padding_len = target_size - payload.len();
-            let padding: Vec<u8> = (0..padding_len).map(|_| rng.random()).collect();
-            payload.extend_from_slice(&padding);
-        }
-
-        payload
-    }
-
-    /// Applies timing chaff to the current execution.
-    pub async fn apply_timing_chaff(&self) {
-        if !self.config.enable_timing_chaff {
-            return;
-        }
-
-        let delay_ms = {
-            let mut rng = rand::rng();
-            rng.random_range(0..self.config.max_chaff_delay_ms)
-        };
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
 }
 

@@ -33,6 +33,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
+use obfstr::obfstr;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -114,7 +115,7 @@ impl PairingCode {
         ids.sort();
         ikm.extend_from_slice(ids[0].as_bytes());
         ikm.extend_from_slice(ids[1].as_bytes());
-        blake3::derive_key("ghostwire pairing session v1", &ikm)
+        blake3::derive_key(obfstr!("ghostwire pairing session v1"), &ikm)
     }
 
     /// Generate a 6-digit safety number for visual verification (like Signal)
@@ -223,17 +224,23 @@ impl PairingManager {
         initiator_node_id: &str,
     ) -> Result<PairingResponse> {
         let code = PairingCode::from_string(code_string)?;
-        let session_key = code.derive_session_key(initiator_node_id, &self.our_node_id);
+        let mut session_key = code.derive_session_key(initiator_node_id, &self.our_node_id);
         let safety = code.safety_number();
 
-        Ok(PairingResponse {
+        let response = Ok(PairingResponse {
             responder_node_id: self.our_node_id.clone(),
             responder_ed25519_pub: self.our_ed25519_pub.clone(),
             responder_x25519_pub: self.our_x25519_pub.clone(),
             safety_number: safety,
             // Encrypt our identity with the session key so only code-holder can read it
             encrypted_identity: self.encrypt_identity_for_pairing(&session_key)?,
-        })
+        });
+
+        // Zeroize session key from stack
+        use zeroize::Zeroize;
+        session_key.zeroize();
+
+        response
     }
 
     /// Step 3: Verify safety numbers match, then complete pairing.
@@ -243,22 +250,20 @@ impl PairingManager {
         peer_response: &PairingResponse,
         code: &PairingCode,
     ) -> Result<PairedPeer> {
-        let session_key = code.derive_session_key(
+        let mut session_key = code.derive_session_key(
             &self.our_node_id,
             &peer_response.responder_node_id,
         );
 
-        // Decrypt and verify peer identity
         let _decrypted = self
             .decrypt_identity_from_pairing(&peer_response.encrypted_identity, &session_key)
             .map_err(|_| anyhow::anyhow!("Decryption failed — wrong pairing code"))?;
 
-        // Verify safety numbers match
         if peer_response.safety_number != code.safety_number() {
+            session_key.zeroize();
             anyhow::bail!("Safety numbers don't match — possible MITM attack!");
         }
 
-        // Update session state
         {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(session_id) {
@@ -284,6 +289,7 @@ impl PairingManager {
             code.safety_number()
         );
 
+        session_key.zeroize();
         Ok(paired)
     }
 
@@ -292,7 +298,7 @@ impl PairingManager {
     /// Compute this node's stable rendezvous address.
     /// Share this out-of-band (text, email, printed QR).
     pub fn rendezvous_address(&self, ed25519_pub: &[u8]) -> String {
-        let hash = blake3::derive_key("ghostwire rendezvous v1", ed25519_pub);
+        let hash = blake3::derive_key(obfstr!("ghostwire rendezvous v1"), ed25519_pub);
         hex::encode(&hash[..16])
     }
 

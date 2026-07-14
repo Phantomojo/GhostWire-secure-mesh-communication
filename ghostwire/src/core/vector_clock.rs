@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Truncate a node identifier to a non-reversible 8-byte hash for wire privacy.
+/// Prevents peer_id leakage in vector clocks sent over GossipSub.
+pub fn redact_node_id(node_id: &str) -> String {
+    let hash = blake3::hash(node_id.as_bytes());
+    hex::encode(&hash.as_bytes()[..8])
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorClock {
     clocks: HashMap<String, u64>,

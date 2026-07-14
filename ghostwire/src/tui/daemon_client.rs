@@ -76,6 +76,7 @@ pub struct DaemonIdentity {
 
 /// Peer info from the daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // ponytail: daemon peer type, not yet consumed by TUI
 pub struct DaemonPeer {
     pub peer_id: String,
     pub display_name: String,

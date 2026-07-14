@@ -22,6 +22,9 @@ toml = { version = "0.9" }
 jsonwebtoken = { version = "=10.3.0" }
 libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
+quinn = "0.11"
+quinn-proto = "0.11"
+rcgen = "0.13"
 reqwest = { version = ">=0.11.23, <0.12", default-features = false, features = ["json", "rustls-tls"] }  # CVE-2025-0805 fixed in 0.11.23
 governor = "0.10"
 tower_governor = { version = "0.8" }
@@ -122,8 +125,8 @@ axum-test = "17.3"
 
 [profile.release]
 opt-level = 2
-lto = false
-codegen-units = 16
+lto = true
+codegen-units = 1
 panic = "abort"
 strip = true
 
@@ -142,6 +145,13 @@ opt-level = 3
 
 [profile.release.package.tokio]
 opt-level = 3
+
+[lints.clippy]
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_precision_loss = "warn"
+cast_sign_loss = "warn"
+as_conversions = "warn"
 
 # Wave 7-8 additions - binary hardening and protocol fixes
 [target.'cfg(unix)'.dependencies]

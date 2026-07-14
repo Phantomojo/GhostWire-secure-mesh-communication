@@ -411,7 +411,7 @@ pub struct FunctionGemmaClient {
     base_url: String,
     model: String,
     tool_registry: Arc<RwLock<ToolRegistry>>,
-    timeout: Duration,
+    _timeout: Duration,
 }
 
 impl FunctionGemmaClient {
@@ -429,7 +429,7 @@ impl FunctionGemmaClient {
             base_url: base_url.to_string(),
             model: model.to_string(),
             tool_registry: Arc::new(RwLock::new(ToolRegistry::new())),
-            timeout: Duration::from_secs(30),
+            _timeout: Duration::from_secs(30),
         }
     }
 
@@ -443,7 +443,7 @@ impl FunctionGemmaClient {
             base_url: base_url.to_string(),
             model: model.to_string(),
             tool_registry: Arc::new(RwLock::new(registry)),
-            timeout: Duration::from_secs(30),
+            _timeout: Duration::from_secs(30),
         }
     }
 

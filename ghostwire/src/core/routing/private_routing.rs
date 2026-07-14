@@ -174,7 +174,7 @@ pub fn wrap_onion(
     let n = hops.len();
     for layer_idx in (0..n).rev() {
         let hop = hops[layer_idx];
-        let (ref secret, _) = all_ephemeral_secrets[layer_idx];
+        let (ref _secret, _) = all_ephemeral_secrets[layer_idx];
 
         // Determine next hop instruction
         let next_hop = if layer_idx == n - 1 {
@@ -194,7 +194,7 @@ pub fn wrap_onion(
         let envelope_bytes = bincode::serialize(&envelope)?;
 
         // Encrypt envelope for this hop's public key
-        let hop_pub = x25519_dalek::PublicKey::from(hop.x25519_pub);
+        let _hop_pub = x25519_dalek::PublicKey::from(hop.x25519_pub);
         // We need a non-ephemeral secret for the already-consumed secret
         // Use pre-generated key material via HKDF instead
         let mut nonce_bytes = [0u8; 12];

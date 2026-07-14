@@ -13,7 +13,7 @@ import sys
 sys.setrecursionlimit(10000)
 
 # Configuration
-OUTPUT_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data")
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data"
 OUTPUT_FILE = OUTPUT_DIR / "ghostwire_mesh_100k.json"
 NUM_SAMPLES = 100000
 NUM_TOPOLOGIES = 10000

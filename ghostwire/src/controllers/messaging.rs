@@ -14,9 +14,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Prevents memory exhaustion attacks
 const MAX_MESSAGE_SIZE: usize = 10 * 1024; // 10KB
 
-/// ✅ SECURITY: Rate limit for messages (100 per minute per user)
-const MESSAGE_RATE_LIMIT: u32 = 100;
-
 pub struct MessagingController;
 
 impl MessagingController {

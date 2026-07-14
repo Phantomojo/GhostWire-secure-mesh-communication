@@ -79,7 +79,7 @@ We researched adding a "Commons Clause" restriction but found:
 - 🏢 Closed-source derivative works
 - 🏢 Custom licensing terms for enterprise customers
 
-**Contact:** mirungu015@proton.me (or create a GitHub issue for inquiries)
+**Contact:** licensing@ghostwire.cc (or create a GitHub issue for inquiries)
 
 ---
 
@@ -279,7 +279,7 @@ curl -s https://github.com/Phantomojo/GhostWire-secure-mesh-communication | grep
 - Open a GitHub issue for clarification
 
 ### **For Commercial Licensing**
-- Email: mirungu015@proton.me
+- Email: licensing@ghostwire.cc
 - GitHub Issue: Create a "Commercial License Inquiry" issue
 - Website: [ghostwire.com/licensing](https://ghostwire.com/licensing) (when available)
 

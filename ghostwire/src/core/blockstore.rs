@@ -359,9 +359,7 @@ impl Wantlist {
         self.entries.values().cloned().collect()
     }
 
-    fn contains(&self, cid_hex: &str) -> bool {
-        self.entries.contains_key(cid_hex)
-    }
+
 }
 
 // ── Ledger ────────────────────────────────────────────────────────────────────

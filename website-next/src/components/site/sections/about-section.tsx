@@ -1,5 +1,9 @@
+'use client'
+
 import type { LucideIcon } from "lucide-react";
 import { Code2, Globe, FileCode2 } from "lucide-react";
+import { useState } from "react";
+import { GithubDocModal } from "../github-doc-modal";
 
 const TECH = [
   "Rust",
@@ -113,6 +117,9 @@ const COMPARISON_COLUMNS: { key: keyof Omit<ComparisonRow, "feature">; label: st
 ];
 
 export function AboutSection() {
+  const [showApiRef, setShowApiRef] = useState(false);
+  const [showProtocolSpec, setShowProtocolSpec] = useState(false);
+
   return (
     <section id="about" className="py-24 border-t border-[var(--gw-border)]">
       <div className="max-w-[1160px] mx-auto px-6 sm:px-8">
@@ -215,24 +222,20 @@ export function AboutSection() {
                   </code>
                 )}
                 {idx === 1 && (
-                  <a
-                    href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/API_QUICK_REFERENCE.md"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono-gw text-[12px] text-[var(--gw-green)] hover:text-[var(--gw-white)] transition-colors inline-block mt-2"
+                  <button
+                    onClick={() => setShowApiRef(true)}
+                    className="font-mono-gw text-[12px] text-[var(--gw-green)] hover:text-[var(--gw-white)] transition-colors inline-block mt-2 bg-transparent border-none cursor-pointer p-0"
                   >
                     API Quick Reference →
-                  </a>
+                  </button>
                 )}
                 {idx === 2 && (
-                  <a
-                    href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs/spec"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono-gw text-[12px] text-[var(--gw-green)] hover:text-[var(--gw-white)] transition-colors inline-block mt-2"
+                  <button
+                    onClick={() => setShowProtocolSpec(true)}
+                    className="font-mono-gw text-[12px] text-[var(--gw-green)] hover:text-[var(--gw-white)] transition-colors inline-block mt-2 bg-transparent border-none cursor-pointer p-0"
                   >
                     Protocol Spec →
-                  </a>
+                  </button>
                 )}
               </div>
             );
@@ -293,6 +296,13 @@ export function AboutSection() {
           </table>
         </div>
       </div>
+
+      {showApiRef && (
+        <GithubDocModal open={showApiRef} onClose={() => setShowApiRef(false)} docPath="docs/API_QUICK_REFERENCE.md" title="API Quick Reference" />
+      )}
+      {showProtocolSpec && (
+        <GithubDocModal open={showProtocolSpec} onClose={() => setShowProtocolSpec(false)} docPath="docs/spec" title="Protocol Specification" />
+      )}
     </section>
   );
 }

@@ -304,7 +304,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 | Proprietary products | 🏢 Commercial |
 | SaaS without source disclosure | 🏢 Commercial |
 
-**Commercial inquiries:** mirungu015@proton.me
+**Commercial inquiries:** licensing@ghostwire.cc
 
 **Full terms:** [LICENSE](LICENSE) | [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) | [LICENSE_EXPLANATION.md](LICENSE_EXPLANATION.md)
 
@@ -316,7 +316,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 | Name | Role | Contact |
 |------|------|---------|
-| **Michael Irungu Muriithi** | Team Lead, Protocol Architecture | mirungu015@proton.me |
+| **Michael Irungu Muriithi** | Team Lead, Protocol Architecture | licensing@ghostwire.cc |
 
 ---
 
@@ -326,7 +326,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 - 📖 **Documentation:** [docs/](docs/)
 - 💬 **Discussions:** [GitHub Discussions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
 - 🐛 **Bug Reports:** [GitHub Issues](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
-- 📧 **Contact:** mirungu015@proton.me
+- 📧 **Contact:** contact@ghostwire.cc
 
 ### Stay Updated
 - ⭐ **Star this repo** to get release notifications
@@ -334,7 +334,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### Security
 - 🔒 **Security Policy:** [docs/SECURITY.md](docs/SECURITY.md)
-- 🚨 **Report Vulnerability:** [GitHub Security Advisories](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories) or mirungu015@proton.me
+- 🚨 **Report Vulnerability:** [GitHub Security Advisories](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
 
 ---
 
@@ -378,7 +378,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 <img src="docs/assets/ghostwire-pfp.png" alt="GhostWire Logo" width="120" />
 
-**📍 Nairobi, Kenya** | **🌐 [Website](https://www.ghostwire.cc/)** | **📧 mirungu015@proton.me**
+**📍 Nairobi, Kenya** | **🌐 [Website](https://www.ghostwire.cc/)** | **📧 contact@ghostwire.cc**
 
 ---
 

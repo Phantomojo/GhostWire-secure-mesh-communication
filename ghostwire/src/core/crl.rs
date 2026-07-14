@@ -22,7 +22,6 @@
 use dashmap::DashMap;
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
@@ -78,7 +77,7 @@ pub struct CrlStore {
     /// key_id → RevocationEntry
     entries: DashMap<String, RevocationEntry>,
     /// Per-node version tracking (for gossip dedup)
-    peer_versions: DashMap<String, u64>,
+    _peer_versions: DashMap<String, u64>,
     /// TTL for entries
     entry_ttl: u64,
 }
@@ -87,7 +86,7 @@ impl CrlStore {
     pub fn new() -> Self {
         Self {
             entries: DashMap::new(),
-            peer_versions: DashMap::new(),
+            _peer_versions: DashMap::new(),
             entry_ttl: DEFAULT_CRL_TTL,
         }
     }

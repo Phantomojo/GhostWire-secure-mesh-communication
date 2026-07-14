@@ -113,5 +113,5 @@ https://www.ghostwire.cc/
 
 - **General:** admin@ghostwire.cc
 - **Security:** security@ghostwire.cc
-- **PGP (encrypted reports):** mirungu015@proton.me
+- **PGP (encrypted reports):** security@ghostwire.cc
 - **GitHub Issues:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues

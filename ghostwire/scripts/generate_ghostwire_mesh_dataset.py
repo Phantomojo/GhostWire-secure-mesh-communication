@@ -248,7 +248,7 @@ def main():
     
     print("\n✅ Dataset ready for HRM training!")
     print("\nNext step: Run HRM training with:")
-    print(f"  cd /home/ph/HRM")
+    print(f"  cd /path/to/HRM")
     print(f"  python pretrain.py data_path={hrm_dir.absolute()}")
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ print_status() {
 
 # 1. Clean Rust artifacts
 print_status "DOING" "Cleaning Rust build artifacts (ghostwire/target)..."
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd "$(dirname "$0")/../../ghostwire"
 if [ -d "target" ]; then
     cargo clean
     print_status "DONE" "Rust build artifacts cleaned (~3.2GB freed)"

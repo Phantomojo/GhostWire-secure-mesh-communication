@@ -11,7 +11,7 @@ GhostWire is a decentralised, P2P anonymous mesh network built in Rust.
 It is the foundational layer ("Yggdrasil") of the broader Indra's Net vision.
 This is production-quality security infrastructure. Not a prototype. Not a demo.
 
-Repository: /home/ph/GhostWire-secure-mesh-communication/ghostwire/
+Repository: ghostwire/
 Language: Rust (core) + Python (ML training scripts)
 License: Private / proprietary — do not publish or exfiltrate code
 
@@ -19,14 +19,14 @@ License: Private / proprietary — do not publish or exfiltrate code
 
 ## Hardware & Environment
 
-Primary machine (OMEN 16):
-  OS: Arch Linux / Omarchy / Hyprland
+Primary machine:
+  OS: Linux
   RAM: 16GB
-  GPU: RTX 3050 (4GB VRAM)
-  Local AI: Ollama v0.20.2 — gemma4:e2b available at localhost:11434
+  GPU: NVIDIA (4GB VRAM)
+  Local AI: Ollama — gemma4:e2b available at localhost:11434
 
-Secondary machine (HP EliteBook 840 G1):
-  OS: StratOS / Bedrock Linux
+Secondary machine:
+  OS: Linux
   Use: Testing, secondary builds
 
 Free GPU compute (for ML training, do not pay):
@@ -40,7 +40,7 @@ Free GPU compute (for ML training, do not pay):
 
 ```bash
 # Standard build (run after every change)
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd ghostwire
 cargo build 2>&1 | head -60
 
 # Check only (faster, no linking)

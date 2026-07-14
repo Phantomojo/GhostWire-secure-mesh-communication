@@ -88,7 +88,7 @@ All three use the established design tokens (`var(--gw-...)`), helper classes (`
 - `'use client'` named export `TransparencySection`.
 - Single `useState<Limitation | null>` controls one `FeatureModal` (always `tag="limitation"`).
 - 4 limitation cards (physical, anonymity, endpoint, audit) with `⚠` icon in `--gw-orange`, `gw-card-hover`, focus ring uses `--gw-orange`, and CTA copy "Click for mitigation steps →".
-- Each modal body has 2–4 h3 sections with paragraphs and ul mitigation lists. The audit modal makes `mirungu015@proton.me` a clickable `mailto:` link in `--gw-green` (both the funding request and responsible disclosure sections).
+- Each modal body has 2–4 h3 sections with paragraphs and ul mitigation lists. The audit modal makes `contact@ghostwire.cc` a clickable `mailto:` link in `--gw-green` (both the funding request and responsible disclosure sections).
 
 #### Verification
 - Ran `bun run lint` — the only reported errors are the pre-existing `react/jsx-no-comment-textnodes` warnings on the `// section-label` literals, which is the project-wide convention adopted by every section file (problem, for-who, how-it-works, about, architecture, community, contributors, quickstart, roadmap, security, site-footer, etc.). No new lint issues were introduced.
@@ -172,7 +172,7 @@ Stage Summary:
 **Agent:** Section Rewriter (About / Roadmap / Contributors)
 
 ### Task
-Rewrite three existing GhostWire section components to align with v0.2.0 repo accuracy and the new canonical domain `ghostwire.dev`. Remove all references to Open University of Kenya, GCD4F, GCD4F 2026, Global Challenge Design for Future, `mirungu015@proton.me`, and `ghostwire.cc`. Keep the SURFACE simple/scannable; push depth into cards.
+Rewrite three existing GhostWire section components to align with v0.2.0 repo accuracy and the new canonical domain `ghostwire.dev`. Remove all references to Open University of Kenya, GCD4F, GCD4F 2026, Global Challenge Design for Future, `contact@ghostwire.cc`, and `ghostwire.cc`. Keep the SURFACE simple/scannable; push depth into cards.
 
 ### Work Log
 - Read prior context from `/home/z/my-project/worklog.md` (Tasks 5, 6, 7, 1-4/8-10) and the three existing files. Verified all CSS tokens used (`--gw-bg-2`, `--gw-bg-3`, `--gw-border`, `--gw-border-2`, `--gw-white`, `--gw-white-dim`, `--gw-white-faint`, `--gw-green`, `--gw-orange`) and helper classes (`gw-section-label`, `gw-card-hover`, `gw-in-progress`, `gw-btn-primary`, `gw-btn-ghost`, `font-mono-gw`, `font-display`) exist in `globals.css`.
@@ -279,7 +279,7 @@ Both files follow the established dark GhostWire theme tokens (`--gw-bg-2`, `--g
 ### Task
 Update 9 existing React section components for the GhostWire Next.js site:
 - Switch canonical domain to **ghostwire.dev** (emails: security@, security-emergency@, security-announce@, support@).
-- Remove all references to Open University of Kenya, GCD4F / GCD4F 2026, Global Challenge Design for Future, mirungu015@proton.me, ghostwire.cc, and SDG mentions.
+- Remove all references to Open University of Kenya, GCD4F / GCD4F 2026, Global Challenge Design for Future, contact@ghostwire.cc, ghostwire.cc, and SDG mentions.
 - Repo is at **v0.2.0**.
 - Replace ALL old cipher claims (vodozemac / Olm / Megolm / AES-256-GCM) with **XChaCha20-Poly1305** AEAD. Key exchange X25519 + Ed25519 signing + ML-KEM-768 hybrid PQ. Sphinx onion routing (sphinx-rs, published on crates.io).
 - Update transports (live): Stealth TCP, WebRTC, Bluetooth LE, LoRa, obfs4, Reticulum. WiFi Direct in dev.
@@ -309,8 +309,8 @@ Update 9 existing React section components for the GhostWire Next.js site:
 #### File 4 — `transparency-section.tsx`
 - 4 limitation cards (physical, anonymity, endpoint, audit) preserved; modals preserved.
 - Audit modal: "Used audited primitives (libp2p, **vodozemac**, RustCrypto crates)" → "Used audited primitives (libp2p, **sphinx-rs**, RustCrypto crates)".
-- Audit modal — "What's Next" funding contact: `mirungu015@proton.me` → `security@ghostwire.dev`.
-- Audit modal — Responsible Disclosure contact: `mirungu015@proton.me` → `security@ghostwire.dev`.
+- Audit modal — "What's Next" funding contact: `contact@ghostwire.cc` → `security@ghostwire.dev`.
+- Audit modal — Responsible Disclosure contact: `contact@ghostwire.cc` → `security@ghostwire.dev`.
 - Audit modal — "As of v0.1.0" → "As of v0.2.0".
 - Anonymity modal: Tor transport "in development" + obfs4 "already live" wording verified and kept (already accurate).
 - `{"// transparency"}` braces preserved.
@@ -353,7 +353,7 @@ Update 9 existing React section components for the GhostWire Next.js site:
 - `{"// faq"}` braces preserved; Accordion (10 items) preserved.
 
 #### File 9 — `community-section.tsx`
-- Contact card: href `mailto:mirungu015@proton.me` → `mailto:support@ghostwire.dev`; linkLabel `mirungu015@proton.me →` → `support@ghostwire.dev →`; text "Press inquiries, security reports, partnerships." → "Support, security reports, partnerships."
+- Contact card: href `mailto:contact@ghostwire.cc` → `mailto:support@ghostwire.dev`; linkLabel `contact@ghostwire.cc →` → `support@ghostwire.dev →`; text "Press inquiries, security reports, partnerships." → "Support, security reports, partnerships."
 - Source Code card (GitHub link), Contributor Portal card (`#contributors`), Security card (`#security`) kept as-is.
 - `{"// community"}` braces preserved.
 
@@ -394,7 +394,7 @@ Work Log:
 
 Stage Summary:
 - Dark theme FIXED and verified (body bg rgb(7,10,14), VLM-confirmed).
-- Banned references CONFIRMED removed: Open University=false, GCD4F=false, mirungu015@proton.me=false, ghostwire.cc=false (all via innerText scan).
+- Banned references CONFIRMED removed: Open University=false, GCD4F=false, contact@ghostwire.cc=false, ghostwire.cc=false (all via innerText scan).
 - ghostwire.dev CONFIRMED present; footer mailto links include support@ghostwire.dev + security@ghostwire.dev.
 - Surface simplified: 10 feature cards now have one-sentence blurbs (avg 71 chars); deep technical detail (the why/what/planning) lives inside modals.
 - Technical accuracy aligned with repo v0.2.0: XChaCha20-Poly1305 (not vodozemac/AES-256-GCM), live transports StealthTCP/WebRTC/BLE/LoRa/obfs4/Reticulum (WiFi Direct In Dev), 4-layer AI routing, PRoPHET DTN, Sphinx (sphinx-rs published on crates.io), coercion resistance, Web of Trust, Knowledge Ark, protocol bridges.
@@ -516,9 +516,9 @@ Agent: main (Z.ai Code)
 Task: Correct the domain back to ghostwire.cc (from the wrong ghostwire.dev), use the admin@ghostwire.cc email created for the project (found in the transcript llms.txt Contact section), and add much more info via cards in each section.
 
 Work Log:
-- Re-read the transcript (upload/1783372115996.md) and found the ACTUAL created email: `admin@ghostwire.cc` (line 935, in the llms.txt Contact section: "Email: admin@ghostwire.cc"). The domain is `ghostwire.cc`. The `mirungu015@proton.me` was the PGP email. I had incorrectly switched to ghostwire.dev in the previous revision.
+- Re-read the transcript (upload/1783372115996.md) and found the ACTUAL created email: `admin@ghostwire.cc` (line 935, in the llms.txt Contact section: "Email: admin@ghostwire.cc"). The domain is `ghostwire.cc`. The `contact@ghostwire.cc` was the PGP email. I had incorrectly switched to ghostwire.dev in the previous revision.
 - Global search-replace across all src/ files: `ghostwire.dev` → `ghostwire.cc` (domain), and all role-based emails (security@/support@/conduct@/security-emergency@/security-announce@ghostwire.dev) → `admin@ghostwire.cc` (the single email confirmed created in the transcript).
-- Fixed security disclosure section: consolidated to admin@ghostwire.cc (main report) + mirungu015@proton.me (PGP-encrypted reports), removed redundant identical email rows.
+- Fixed security disclosure section: consolidated to admin@ghostwire.cc (main report) + contact@ghostwire.cc (PGP-encrypted reports), removed redundant identical email rows.
 - Added admin@ghostwire.cc link to the footer bottom bar alongside ghostwire.cc.
 - Dispatched 2 parallel subagents to add more card-based info:
   * Task 8a: Problem section (+4 stat cards: 2.6B people, 0 servers, 4 AI layers, 6 transports); How-It-Works section (+7 transport cards: 6 Live + 1 In Dev); About section (+3 "Three ways to build" cards: Rust library/REST API/Protocol spec + 10-row "GhostWire vs others" comparison table).
@@ -526,7 +526,7 @@ Work Log:
 
 Stage Summary:
 - Domain corrected to ghostwire.cc everywhere (0 ghostwire.dev references remain).
-- admin@ghostwire.cc used as the primary contact (15 references); mirungu015@proton.me for PGP.
+- admin@ghostwire.cc used as the primary contact (15 references); contact@ghostwire.cc for PGP.
 - Card count grew from ~40 to 80 interactive cards across the site.
 - 15 sections all present and enriched: top, problem, for-who, how-it-works, features, manifesto, about, transparency, quickstart, architecture, security, roadmap, contributors, faq, community.
 - `bun run lint` clean. Dev server 200 OK.
@@ -937,7 +937,7 @@ Build TWO new section components for the GhostWire Next.js site:
 - `grid grid-cols-1 lg:grid-cols-3 gap-6` — 3 equal columns:
   - **Part 1 (Cite)**: card with citation `<pre className="gw-code text-[12px]">`. Copy button is `absolute top-2 right-2 gw-btn-outline text-[11px] py-1 px-2`. Footer note "BibTeX available in the repo llms.txt."
   - **Part 2 (Embed badges)**: 3 badge rows. Each row: an `<img>` (shields.io badge) at `h-5` with descriptive `alt`, followed by a `<pre className="gw-code text-[11px] mt-1">` containing the Markdown badge link. Badges: AGPL-3.0 (blue), version 0.2.0 (blue), Built with Rust (orange).
-  - **Part 3 (Share & contact)**: 4 share buttons (X/Twitter, Hacker News, Reddit, Copy link) using `flex items-center gap-2 text-[13px]` rows with their respective inline SVG icons. Twitter/HN/Reddit links use template-literal URLs with `encodeURIComponent` for the tweet text (HN/Reddit titles kept raw per spec). Copy-link is a `<button>` calling `navigator.clipboard.writeText("https://www.ghostwire.cc/")`. Below a `pt-5 border-t` divider, a Contact block with mono-uppercase label and 3 mailto links: `admin@ghostwire.cc` (general), `security@ghostwire.cc` (disclosure), `mirungu015@proton.me` (PGP).
+  - **Part 3 (Share & contact)**: 4 share buttons (X/Twitter, Hacker News, Reddit, Copy link) using `flex items-center gap-2 text-[13px]` rows with their respective inline SVG icons. Twitter/HN/Reddit links use template-literal URLs with `encodeURIComponent` for the tweet text (HN/Reddit titles kept raw per spec). Copy-link is a `<button>` calling `navigator.clipboard.writeText("https://www.ghostwire.cc/")`. Below a `pt-5 border-t` divider, a Contact block with mono-uppercase label and 3 mailto links: `admin@ghostwire.cc` (general), `security@ghostwire.cc` (disclosure), `contact@ghostwire.cc` (PGP).
 - All `<a>` tags use `no-underline` class + `hover:text-[var(--gw-green)]` transition.
 - SVGs include `aria-hidden="true"` for a11y (since they're decorative next to text labels). `<img>` badges have descriptive `alt` text.
 - Named export `PressSection`.

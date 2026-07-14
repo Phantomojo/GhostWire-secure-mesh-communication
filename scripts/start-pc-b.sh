@@ -1,9 +1,8 @@
 #!/bin/bash
-# 🚀 GhostWire Live Test - PC-B (stratsytem) Start Script
+# GhostWire Live Test - Node B Start Script
 
-echo "🔶 Starting GhostWire on PC-B (stratsytem)..."
-echo "📡 Tailscale IP: 100.105.58.61"
-echo "🌐 Web UI: http://localhost:8080"
+echo "Starting GhostWire on Node B..."
+echo "Web UI: http://localhost:8080"
 echo ""
 
 cd ~/ghostwire-live-test

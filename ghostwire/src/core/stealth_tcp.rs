@@ -1,4 +1,6 @@
+use crate::core::message::Message;
 use crate::core::security::SecurityManager;
+use crate::core::wire_protocol::{Frame, FrameKind, FrameParser, WireMessage};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,6 +11,7 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing;
 
@@ -33,6 +36,8 @@ pub struct StealthTCPProvider {
     handshake_secret: Arc<HandshakeSecret>,
     enable_stealth_mode: bool,
     connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
+    /// peer_id → SocketAddr mapping for send_message
+    peer_map: Arc<DashMap<String, SocketAddr>>,
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
@@ -81,6 +86,7 @@ impl StealthTCPProvider {
             handshake_secret: Arc::new(HandshakeSecret(secret_bytes)),
             enable_stealth_mode,
             connection_history: Arc::new(DashMap::new()),
+            peer_map: Arc::new(DashMap::new()),
         }
     }
 
@@ -460,6 +466,105 @@ impl StealthTCPProvider {
             avg_connection_time,
             last_connection_time,
         }
+    }
+
+    pub fn register_peer(&self, peer_id: &str, addr: SocketAddr) {
+        self.peer_map.insert(peer_id.to_string(), addr);
+        tracing::info!("StealthTCP: Registered peer {} at {}", peer_id, addr);
+    }
+
+    pub async fn send_message(&self, message: &Message) -> anyhow::Result<()> {
+        let addr = self
+            .peer_map
+            .get(&message.recipient)
+            .ok_or_else(|| anyhow::anyhow!("Peer {} not registered", message.recipient))?
+            .value()
+            .clone();
+
+        let mut stream = self.connect(&addr).await?;
+
+        let wire_msg = WireMessage {
+            from: message.sender.as_bytes().to_vec(),
+            to: message.recipient.as_bytes().to_vec(),
+            payload: message.content.as_bytes().to_vec(),
+            id: message.id.as_bytes().to_vec(),
+            ts: message.timestamp as u32,
+            seq: 0,
+        };
+
+        let frame = Frame::encode(FrameKind::Message, &wire_msg)?;
+        stream.write_all(&frame.to_bytes()).await?;
+
+        tracing::trace!("StealthTCP: Sent message to {}", message.recipient);
+        Ok(())
+    }
+
+    pub async fn start_listener(
+        &self,
+        listen_addr: SocketAddr,
+    ) -> anyhow::Result<mpsc::Receiver<(SocketAddr, Message)>> {
+        let listener = TcpListener::bind(listen_addr).await?;
+        tracing::info!("StealthTCP: Listening on {}", listen_addr);
+
+        let (tx, rx) = mpsc::channel(100);
+        let provider = self.clone();
+
+        tokio::spawn(async move {
+            loop {
+                match provider.accept(&listener).await {
+                    Ok(stream) => {
+                        let tx = tx.clone();
+                        let peer_addr = stream.peer_addr().unwrap_or(listen_addr);
+                        tokio::spawn(async move {
+                            let mut parser = FrameParser::new();
+                            let mut buf = [0u8; 8192];
+                            let mut stream = stream;
+
+                            loop {
+                                match stream.read(&mut buf).await {
+                                    Ok(0) => break,
+                                    Ok(n) => match parser.feed(&buf[..n]) {
+                                        Ok(frames) => {
+                                            for frame in frames {
+                                                if let Ok(wire_msg) =
+                                                    frame.decode::<WireMessage>()
+                                                {
+                                                    let msg = Message::new(
+                                                        String::from_utf8_lossy(&wire_msg.from)
+                                                            .to_string(),
+                                                        String::from_utf8_lossy(&wire_msg.to)
+                                                            .to_string(),
+                                                        String::from_utf8_lossy(&wire_msg.payload)
+                                                            .to_string(),
+                                                    );
+                                                    tracing::info!(
+                                                        "StealthTCP: Received message from {}",
+                                                        msg.sender
+                                                    );
+                                                    let _ = tx.send((peer_addr, msg)).await;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "StealthTCP: Frame parse error: {}",
+                                                e
+                                            );
+                                        }
+                                    },
+                                    Err(_) => break,
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!("StealthTCP: Accept error: {}", e);
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
     }
 }
 

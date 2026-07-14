@@ -217,7 +217,7 @@ Commercial license terms are **confidential**:
 
 ### **Step 1: Contact Us**
 
-**Email**: mirungu015@proton.me
+**Email**: licensing@ghostwire.cc
 
 **GitHub**: Create a "Commercial License Inquiry" issue
 
@@ -294,7 +294,7 @@ We'll work with you to:
 ## 📞 Contact Information
 
 ### **Licensing Inquiries**
-- **Email**: mirungu015@proton.me
+- **Email**: licensing@ghostwire.cc
 - **Response Time**: 24-48 hours
 - **GitHub**: Create issue with "commercial-license" label
 
@@ -307,7 +307,7 @@ We'll work with you to:
 - **For**: Contract questions, compliance issues
 
 ### **Support** (Existing Customers)
-- **Email**: mirungu015@proton.me
+- **Email**: licensing@ghostwire.cc
 - **Portal**: [support.ghostwire.com](https://support.ghostwire.com) (when available)
 
 ---
@@ -358,7 +358,7 @@ A full commercial license agreement includes:
 
 **Ready to discuss commercial licensing?**
 
-📧 Email: **mirungu015@proton.me**
+📧 Email: **licensing@ghostwire.cc**
 
 *Last updated: March 2026*
 

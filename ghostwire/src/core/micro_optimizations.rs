@@ -232,7 +232,7 @@ impl MessageDeduplicator {
 /// A message event that won't block the bus if a subscriber is slow
 #[derive(Debug, Clone)]
 pub struct NonBlockingEvent<T: Clone> {
-    inner: T,
+    _inner: T,
 }
 
 /// Per-subscriber ring buffer — drops oldest events on overflow (never blocks sender)

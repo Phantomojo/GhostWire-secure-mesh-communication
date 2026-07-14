@@ -14,9 +14,11 @@ from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, TaskType
 from tqdm import tqdm
 
 # Paths
-MODEL_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_checkpoints/hrm_ghostwire_fixed.pt")
-DATASET_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/ghostwire_mesh_100k.json")
-LORA_OUTPUT = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_lora_adapter.pt")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+MODEL_PATH = REPO_DIR / "models" / "hrm_checkpoints" / "hrm_ghostwire_fixed.pt"
+DATASET_PATH = REPO_DIR / "data" / "ghostwire_mesh_100k.json"
+LORA_OUTPUT = REPO_DIR / "models" / "hrm_lora_adapter.pt"
 
 # Training config
 CONFIG = {

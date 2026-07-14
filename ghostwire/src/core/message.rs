@@ -69,6 +69,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+const TIMESTAMP_JITTER_RANGE: u64 = 60; // ±30 seconds
+
 /// Type of message being sent
 ///
 /// **Security Note:** Message type is visible in plaintext for routing purposes.
@@ -278,10 +280,14 @@ impl Message {
             sender,
             recipient,
             content,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: {
+                let base = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let jitter = rand::random::<u64>() % TIMESTAMP_JITTER_RANGE;
+                base + jitter - (TIMESTAMP_JITTER_RANGE / 2)
+            },
             encrypted: false,
             message_type: "text".to_string(),
             encryption_status: "none".to_string(),
@@ -325,10 +331,14 @@ impl Message {
             sender,
             recipient,
             content,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: {
+                let base = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let jitter = rand::random::<u64>() % TIMESTAMP_JITTER_RANGE;
+                base + jitter - (TIMESTAMP_JITTER_RANGE / 2)
+            },
             encrypted: false,
             message_type: format!("{:?}", message_type),
             encryption_status: "none".to_string(),

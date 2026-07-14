@@ -70,7 +70,7 @@ through the mesh network — no central server, no internet, just pure P2P.
 │  │  (omen)      │                    │  (stratsytem)        │   │
 │  │  Kenya       │                    │  Kenya               │   │
 │  │              │                    │                      │   │
-│  │  100.88.     │─── TCP:4001 ──────→│  100.105.58.61       │   │
+│  │  <NODE_A_IP>     │─── TCP:4001 ──────→│  <NODE_B_IP>          │   │
 │  │  234.14      │    libp2p/gossipsub │                      │   │
 │  │              │                    │                      │   │
 │  │  Publish     │                    │  Receive             │   │

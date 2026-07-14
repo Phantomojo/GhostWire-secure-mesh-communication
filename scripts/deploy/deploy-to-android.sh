@@ -30,7 +30,7 @@ echo ""
 
 # Build frontend
 echo -e "${YELLOW}🔨 Building updated frontend...${NC}"
-cd /home/ph/GhostWire-secure-mesh-communication/webui
+cd "$(dirname "$0")/../../webui"
 npm run build > /dev/null 2>&1
 echo -e "${GREEN}✅ Frontend built${NC}"
 echo ""
@@ -46,9 +46,10 @@ echo -e "${GREEN}✅ Frontend deployed to /sdcard/ghostwire_webui${NC}"
 echo ""
 
 # Option 2: Start backend on device (if ARM binary available)
-if [ -f "/home/ph/GhostWire-secure-mesh-communication/ghostwire/target/aarch64-linux-android/release/ghostwire" ]; then
+REPO_ROOT="$(dirname "$0")/../.."
+if [ -f "$REPO_ROOT/ghostwire/target/aarch64-linux-android/release/ghostwire" ]; then
     echo "   Pushing ARM backend binary..."
-    adb push /home/ph/GhostWire-secure-mesh-communication/ghostwire/target/aarch64-linux-android/release/ghostwire /data/local/tmp/ghostwire
+    adb push "$REPO_ROOT/ghostwire/target/aarch64-linux-android/release/ghostwire" /data/local/tmp/ghostwire
     adb shell "chmod 755 /data/local/tmp/ghostwire"
     echo -e "${GREEN}✅ ARM Backend deployed${NC}"
     echo ""

@@ -199,9 +199,17 @@ impl DtnStore {
         true
     }
 
-    /// Retrieve a bundle by CID
     pub async fn get(&self, cid: &[u8; 32]) -> Option<DtnBundle> {
         self.bundles.read().await.get(cid).cloned()
+    }
+
+    pub async fn remove(&self, cid: &[u8; 32]) -> Option<DtnBundle> {
+        let removed = self.bundles.write().await.remove(cid);
+        if let Some(ref b) = removed {
+            let mut total = self.buffer_bytes.write().await;
+            *total = total.saturating_sub(b.size_bytes());
+        }
+        removed
     }
 
     /// Remove delivered/expired bundles
@@ -429,6 +437,10 @@ impl DtnStore {
         *self.buffer_bytes.read().await
     }
 
+    pub fn node_id(&self) -> [u8; 32] {
+        self.our_node_id
+    }
+
     pub async fn export_delivery_scores(&self) -> Vec<([u8; 32], f32)> {
         self.delivery_table.read().await.export_scores()
     }
@@ -529,5 +541,69 @@ mod tests {
         let delivered = store.drain_local_deliveries().await;
         assert_eq!(delivered.len(), 1);
         assert_eq!(store.bundle_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn dtn_sync_handshake_build_and_serialize() {
+        let store = DtnStore::new([0x01u8; 32]);
+        let bundle = DtnBundle::new(vec![10, 20, 30], [0x02u8; 32]);
+        store.store(bundle).await;
+
+        let hs = DtnSyncHandshake::build(&store).await;
+        assert_eq!(hs.node_id, [0x01u8; 32]);
+        assert!(hs.have_bloom.contains(&DtnBundle::new(vec![10, 20, 30], [0x02u8; 32]).cid));
+        assert!(hs.ts > 0);
+
+        let serialized = bincode::serialize(&hs).unwrap();
+        let deserialized: DtnSyncHandshake = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.node_id, hs.node_id);
+        assert_eq!(deserialized.ts, hs.ts);
+    }
+
+    #[tokio::test]
+    async fn on_encounter_returns_bundles_they_need() {
+        let our_id = [0x01u8; 32];
+        let their_id = [0x02u8; 32];
+        let store = DtnStore::new(our_id);
+
+        let bundle = DtnBundle::new(vec![1, 2, 3], their_id);
+        store.store(bundle).await;
+
+        let their_bloom = SyncBloom::new();
+        let bundles = store.on_encounter(&their_id, &their_bloom, &[]).await;
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].destination, their_id);
+    }
+
+    #[tokio::test]
+    async fn on_encounter_skips_bloom_duplicates() {
+        let our_id = [0x01u8; 32];
+        let their_id = [0x02u8; 32];
+        let store = DtnStore::new(our_id);
+
+        let bundle = DtnBundle::new(vec![4, 5, 6], their_id);
+        let cid = bundle.cid;
+        store.store(bundle).await;
+
+        let mut their_bloom = SyncBloom::new();
+        their_bloom.insert(&cid);
+        let bundles = store.on_encounter(&their_id, &their_bloom, &[]).await;
+        assert_eq!(bundles.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn on_encounter_delivers_to_local() {
+        let our_id = [0x01u8; 32];
+        let store = DtnStore::new(our_id);
+
+        let bundle = DtnBundle::new(vec![7, 8, 9], our_id);
+        store.store(bundle).await;
+
+        let their_bloom = SyncBloom::new();
+        let bundles = store.on_encounter(&[0x02u8; 32], &their_bloom, &[]).await;
+        assert_eq!(bundles.len(), 0);
+
+        let delivered = store.drain_local_deliveries().await;
+        assert_eq!(delivered.len(), 1);
     }
 }

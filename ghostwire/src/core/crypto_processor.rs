@@ -29,10 +29,7 @@ impl CryptoProcessor {
             GhostCryptoMachine::new(
                 identity.id.clone(),
                 identity
-                    .keypair()
-                    .expect("Identity must be unlocked")
-                    .public()
-                    .encode_protobuf(),
+                    .public_key_bytes(),
             )
         });
 

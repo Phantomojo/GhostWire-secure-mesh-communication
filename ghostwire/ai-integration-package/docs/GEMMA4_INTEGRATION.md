@@ -120,7 +120,7 @@ OLLAMA_HOST=0.0.0.0:11434 ollama serve &
 pip install litellm[proxy]
 
 # Start proxy with config
-litellm --config /home/ph/GhostWire-secure-mesh-communication/ghostwire/litellm-config.yaml
+litellm --config ghostwire/litellm-config.yaml
 ```
 
 ### 5. Test Local Gemma 4

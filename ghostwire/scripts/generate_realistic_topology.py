@@ -12,7 +12,7 @@ import json
 from tqdm import tqdm
 
 # Configuration
-OUTPUT_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data")
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data"
 OUTPUT_FILE = OUTPUT_DIR / "ghostwire_mesh_realistic_100k.json"
 NUM_SAMPLES = 10000  # Reduced for faster generation
 

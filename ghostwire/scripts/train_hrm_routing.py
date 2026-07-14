@@ -27,8 +27,10 @@ print("GHOSTWIRE HRM TRAINING")
 print("=" * 70)
 
 # Configuration
-DATA_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/hrm-mesh-1k")
-CHECKPOINT_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_checkpoints")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+DATA_DIR = REPO_DIR / "data" / "hrm-mesh-1k"
+CHECKPOINT_DIR = REPO_DIR / "models" / "hrm_checkpoints"
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
 class GhostWireMeshDataset(Dataset):

@@ -1,5 +1,11 @@
 repos:
-  # Secret scanning and security
+  # Secret scanning — gitleaks (full history)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+
+  # Secret scanning — detect-secrets (baseline)
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.4.0
     hooks:

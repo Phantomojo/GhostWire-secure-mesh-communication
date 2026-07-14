@@ -47,6 +47,10 @@ ghostwire_token.txt
 *.pem
 *.enc
 token
+*credentials*
+*secrets*
+.ssh/
+*.p12
 
 # GhostWire node data (user data, not repo)
 # Note: ~/.local/share/ghostwire/ is outside repo, handled by app
@@ -98,6 +102,9 @@ GOVERNOR_*.md
 
 # Database files
 .ghostwire_db/
+*.sqlite
+*.sqlite3
+*.db
 
 # Well-known (auto-generated)
 .well-known/
@@ -115,6 +122,31 @@ website-content-pack/
 webui-new/
 webui/
 release/
+
+# Packet captures
+*.pcap
+*.pcapng
+
+# Local config overrides
+*.local.toml
+*.local.yaml
+
+# Shell / Python history
+.bash_history
+.zsh_history
+.python_history
+
+# Personal notes (shouldn't be in repo)
+NOTES.md
+TODO.personal.md
+scratch/
+
+# Generated artifacts
+graphify-out/
+.playwright-mcp/
+
+# Log directories
+logs/
 
 # Python cache
 __pycache__/

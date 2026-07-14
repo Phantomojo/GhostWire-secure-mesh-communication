@@ -11,7 +11,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 pub struct PeerController;
@@ -26,19 +26,6 @@ pub struct ConnectRequestBody {
 pub struct RespondRequestBody {
     pub request_id: String,
     pub accept: bool,
-}
-
-#[derive(Serialize)]
-struct PeerSummary {
-    node_id: String,
-    did: String,
-    nickname: String,
-    avatar_cid: Option<String>,
-    connection_state: String,
-    is_online: bool,
-    signal: f32,
-    discovered_via: String,
-    last_seen: u64,
 }
 
 impl PeerController {
@@ -114,7 +101,7 @@ impl PeerController {
 
     /// POST /api/v2/peers/connect — Send a connection request
     pub async fn request_connect(
-        State(state): State<Arc<AppState>>,
+        State(_state): State<Arc<AppState>>,
         Json(req): Json<ConnectRequestBody>,
     ) -> impl IntoResponse {
         if req.node_id.is_empty() {
@@ -174,7 +161,7 @@ impl PeerController {
         State(state): State<Arc<AppState>>,
         Json(req): Json<RespondRequestBody>,
     ) -> impl IntoResponse {
-        let core = state.core.read().await;
+        let _core = state.core.read().await;
 
         if req.accept {
             tracing::info!(target: "social", "Accepting connection request {}", req.request_id);
@@ -197,7 +184,7 @@ impl PeerController {
 
     /// DELETE /api/v2/peers/:node_id — Remove a connection
     pub async fn disconnect(
-        State(state): State<Arc<AppState>>,
+        State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Removing connection to {}", &node_id[..8.min(node_id.len())]);
@@ -209,7 +196,7 @@ impl PeerController {
 
     /// POST /api/v2/peers/:node_id/block — Block a node
     pub async fn block(
-        State(state): State<Arc<AppState>>,
+        State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Blocking node {}", &node_id[..8.min(node_id.len())]);
@@ -221,7 +208,7 @@ impl PeerController {
 
     /// GET /api/v2/peers/:node_id/profile — Get a peer's public profile
     pub async fn get_profile(
-        State(state): State<Arc<AppState>>,
+        State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
         // Wire: look up in social_graph.peers, then fetch avatar from BlockStore if cid present

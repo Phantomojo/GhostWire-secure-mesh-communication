@@ -1,6 +1,7 @@
 // Core networking, encryption, metadata sanitizer, and storage modules will be implemented here.
 
 use serde::Serialize;
+use zeroize::Zeroize;
 
 pub mod armor;
 pub mod binary_hardening;
@@ -62,6 +63,7 @@ pub mod qr;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
 pub mod sim_transport;
+pub mod quic_transport;
 pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
@@ -279,10 +281,9 @@ impl MeshtasticAdapter {
     ) -> anyhow::Result<()> {
         // Apply Military-Grade Erasure Coding (Fountain Code simulation)
         let shards = self.erasure_armor.encode(message.content.as_bytes());
-        tracing::info!(
+        tracing::trace!(
             shards_len = shards.len(),
             device_path = %self.device_path,
-            content = %message.content,
             "Meshtastic: Splitting message into shards for extreme resilience"
         );
 
@@ -346,7 +347,6 @@ pub struct Core {
     pub persistence: Arc<persistence_manager::PersistenceManager>,
     pub monitor: Arc<monitor::NetworkMonitor>,
     pub switcher: Arc<RwLock<transport_manager::AutoTransportSwitcher>>,
-    pub traffic_armor: Arc<armor::TrafficArmor>,
     pub messages: Arc<RwLock<Vec<Message>>>,
     pub message_store: Arc<store::SecureMessageStore>,
     pub bootstrap_nodes: Vec<Multiaddr>,
@@ -405,8 +405,6 @@ impl Core {
             Identity::new(profile.clone())
                 .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
-        let _traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
-
         let encryption = Arc::new(
             Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
         );
@@ -426,6 +424,31 @@ impl Core {
             let sim_kind = crate::core::transport::TransportKind::Simulated(sim_transport);
             registry.register(sim_kind.clone());
             active_transport_inner = Some(sim_kind);
+        }
+
+        {
+            let quic_port = config.server.port.wrapping_add(1).max(5001);
+            let quic_addr: std::net::SocketAddr = format!("0.0.0.0:{}", quic_port).parse()?;
+            let quic = match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
+                Ok(q) => Ok(q),
+                Err(_) => {
+                    let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
+                    crate::core::quic_transport::QuicTransportProvider::new(fallback).await
+                }
+            };
+            match quic {
+                Ok(quic) => {
+                    let quic_kind = crate::core::transport::TransportKind::Quic(Arc::new(quic));
+                    registry.register(quic_kind.clone());
+                    if active_transport_inner.is_none() {
+                        active_transport_inner = Some(quic_kind);
+                    }
+                    tracing::info!("QUIC transport registered on port {}", quic_port);
+                }
+                Err(e) => {
+                    tracing::warn!("QUIC transport init failed (port {}): {}", quic_port, e);
+                }
+            }
         }
 
         let registry = Arc::new(RwLock::new(registry));
@@ -483,8 +506,6 @@ impl Core {
             disaster::DisasterPolicy::default(),
         )));
 
-        let traffic_armor = Arc::new(armor::TrafficArmor::new(armor::MorphingConfig::default()));
-
         let messages = Arc::new(RwLock::new(Vec::new()));
         let message_store = Arc::new(store::SecureMessageStore::new(
             persistence.clone(),
@@ -512,9 +533,8 @@ impl Core {
 
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
-            if let Some(kp) = identity.keypair() {
+            if let Some(peer_id) = identity.public_key().map(|pk| pk.to_peer_id()) {
                 let username = identity.get_metadata().nickname;
-                let peer_id = kp.public().to_peer_id();
 
                 let username_discovery = Arc::new(
                     crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
@@ -563,7 +583,6 @@ impl Core {
             active_adapter,
             monitor,
             switcher,
-            traffic_armor,
             persistence,
             #[cfg(feature = "mesh")]
             mesh_manager: mesh_manager_inner,
@@ -686,7 +705,7 @@ impl Core {
             },
             // Load GNN routing model (Layer 3 — Graph Attention Network)
             gnn_router: match ai::GnnRouter::new(
-                "models/scoring_head.onnx",
+                "models/gnn_routing/gnn_routing.onnx",
                 "models/gnn_routing/node_embeddings.json",
             ) {
                 Ok(router) => {
@@ -1167,8 +1186,8 @@ impl Core {
                     let listeners = core_mesh.get_mesh_listeners().await;
                     if !listeners.is_empty() {
                         println!("\n--- GhostWire Mesh Node Started ---");
-                        if let Some(kp) = core_mesh.identity.read().await.keypair() {
-                            println!("Peer ID: {}", kp.public().to_peer_id());
+                        if let Some(peer_id) = core_mesh.identity.read().await.public_key().map(|pk| pk.to_peer_id()) {
+                            println!("Peer ID: {}", peer_id);
                         } else {
                             println!("Peer ID: <Locked>");
                         }
@@ -1202,7 +1221,7 @@ impl Core {
         if self.security_manager.is_lockdown().await {
             tracing::warn!(
                 "BLOCKED: Attempted to send message during LOCKDOWN: {}",
-                message.content
+                message.id
             );
             return Err(anyhow::anyhow!(
                 "SYSTEM LOCKDOWN ACTIVE - OUTGOING TRAFFIC BLOCKED"
@@ -1244,9 +1263,9 @@ impl Core {
         if let Some(transport) = self.active_transport.read().await.as_ref() {
             return transport.send_message(message).await;
         } else {
-            tracing::info!(
+            tracing::trace!(
                 "Message processed locally (no active transport): {}",
-                message.content
+                message.id
             );
             Ok(())
         }
@@ -1257,7 +1276,7 @@ impl Core {
         if self.security_manager.is_lockdown().await {
             tracing::warn!(
                 "BLOCKED: Attempted to send direct message during LOCKDOWN: {}",
-                message.content
+                message.id
             );
             return Err(anyhow::anyhow!(
                 "SYSTEM LOCKDOWN ACTIVE - OUTGOING TRAFFIC BLOCKED"
@@ -1326,11 +1345,8 @@ impl Core {
             Err(anyhow::anyhow!("Adapter not found: {}", name))
         }
     }
-    /// Send a message through the selected protocol adapter with traffic morphing
+    /// Send a message through the selected protocol adapter
     pub async fn send_adapter_message(&self, message: &Message) -> Result<()> {
-        // Apply Military-Grade Traffic Morphing (Timing Chaff)
-        self.traffic_armor.apply_timing_chaff().await;
-
         if let Some(adapter) = self.active_adapter.read().await.as_ref() {
             adapter.send_message(message).await
         } else {
@@ -1562,14 +1578,14 @@ impl Core {
         #[cfg(feature = "mesh")]
         {
             if self.mesh_manager.is_none() {
-                let kp = self
+                let peer_id = self
                     .identity
                     .read()
                     .await
-                    .keypair()
+                    .public_key()
+                    .map(|pk| pk.to_peer_id())
                     .ok_or_else(|| anyhow::anyhow!("Cannot init mesh: Identity is locked"))?;
                 let username = self.identity.read().await.get_metadata().nickname;
-                let peer_id = kp.public().to_peer_id();
 
                 let username_discovery = Arc::new(
                     crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
@@ -1590,6 +1606,7 @@ impl Core {
                 let mut mesh_manager = mesh_manager;
                 mesh_manager.set_peer_count_cache(self.mesh_peer_count_cache.clone());
                 mesh_manager.set_dtn_store(self.dtn_store.clone());
+                mesh_manager.set_mailbox_store(self.mailbox_store.clone());
                 self.mesh_manager = Some(Arc::new(RwLock::new(mesh_manager)));
                 tracing::info!("Mesh network initialized");
             }
@@ -1864,6 +1881,16 @@ impl Core {
     /// Returns None if model unavailable.
     pub fn score_anomaly(&self, features: &[f32]) -> Option<ai::AnomalyResult> {
         self.anomaly_detector.as_ref().map(|m| m.score(features))
+    }
+}
+
+// Ponytail: zeroize handshake_secret before memory is freed.
+// Core's Drop runs before field drops, so all Arc fields are cleaned up normally.
+impl Drop for Core {
+    fn drop(&mut self) {
+        if let Some(ref mut secret) = self.handshake_secret {
+            secret.zeroize();
+        }
     }
 }
 

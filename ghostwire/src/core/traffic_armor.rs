@@ -288,9 +288,9 @@ mod tests {
 
     #[test]
     fn device_tier_params_ordering() {
-        let (h_min, h_max, _, h_cover_min, h_cover_max) = DeviceTier::High.params();
-        let (m_min, m_max, _, m_cover_min, m_cover_max) = DeviceTier::Medium.params();
-        let (l_min, l_max, _, l_cover_min, l_cover_max) = DeviceTier::Low.params();
+        let (h_min, _h_max, _, h_cover_min, h_cover_max) = DeviceTier::High.params();
+        let (m_min, _m_max, _, m_cover_min, m_cover_max) = DeviceTier::Medium.params();
+        let (l_min, _l_max, _, l_cover_min, l_cover_max) = DeviceTier::Low.params();
         assert!(h_min > m_min && m_min > l_min);
         assert!(h_cover_min > m_cover_min && m_cover_min > l_cover_min);
         assert!(h_cover_max > m_cover_max && m_cover_max > l_cover_max);

@@ -237,7 +237,7 @@ struct RoutingFeatures {
 - Name: Michael Irungu Muriithi (Phantomojo)
 - Location: Nairobi, Kenya
 - GitHub: Phantomojo
-- Email: mirungu015@proton.me
+- Email: [removed for public release]
 - Work style: 6+ hour hyperfocus blocks, uses AI agents extensively
 - Demands: Quality first, no shortcuts, debug until fixed
 

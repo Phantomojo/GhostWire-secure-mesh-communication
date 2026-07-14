@@ -69,6 +69,7 @@ pub fn offline_style() -> Style {
     Style::default().fg(OFFLINE)
 }
 
+#[allow(dead_code)] // ponytail: UI component, used in first_run.rs which is not yet wired
 pub fn error_style() -> Style {
     Style::default().fg(ERROR).add_modifier(Modifier::BOLD)
 }
@@ -98,6 +99,7 @@ pub fn themed_block<'a>(title: &'a str) -> Block<'a> {
 }
 
 /// Block with primary (cyan) border — for the main header
+#[allow(dead_code)] // ponytail: UI component for header styling
 pub fn header_block<'a>() -> Block<'a> {
     Block::default()
         .borders(ratatui::widgets::Borders::ALL)
@@ -113,6 +115,7 @@ pub fn header_block<'a>() -> Block<'a> {
 pub const LOGO_SYMBOL: &str = "\u{2B21}"; // ⬡
 
 /// Compact header logo: "⬡ GHOSTWIRE"
+#[allow(dead_code)] // ponytail: UI component for compact header logo
 pub fn logo_header() -> Line<'static> {
     Line::from(vec![
         Span::styled(LOGO_SYMBOL, primary_bold()),
@@ -130,6 +133,7 @@ pub fn logo_header() -> Line<'static> {
 ///
 ///   Infrastructure for Human Dignity
 /// ```
+#[allow(dead_code)] // ponytail: UI component for splash/welcome screen
 pub fn splash_logo_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
@@ -164,6 +168,7 @@ pub fn status_online() -> Span<'static> {
 }
 
 /// Warning/degraded status dot: "🟡" (yellow circle)
+#[allow(dead_code)] // ponytail: UI component for warning status indicator
 pub fn status_warning() -> Span<'static> {
     Span::styled("🟡", warning_style())
 }

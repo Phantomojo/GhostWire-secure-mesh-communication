@@ -20,7 +20,7 @@
 //!      prominent warning for production use).
 
 use crate::genesis_constants::{
-    genesis_derive, SPHINX_BLIND_DOMAIN, SPHINX_KDF_DOMAIN, SPHINX_MAC_DOMAIN, SPHINX_SHARED_DOMAIN,
+    genesis_derive, SPHINX_BLIND_DOMAIN, SPHINX_KDF_DOMAIN, SPHINX_SHARED_DOMAIN,
 };
 use anyhow::Result;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
@@ -64,7 +64,7 @@ pub enum SphinxProcessResult {
 /// SURB: Single-Use Reply Block.
 /// Sender includes this with their message; recipient fills it with a
 /// reply. The reply_key is how the sender decrypts the incoming reply.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Surb {
     pub header: Vec<u8>,
     pub first_hop: String,
@@ -728,8 +728,8 @@ mod tests {
 
     #[test]
     fn surb_reply_roundtrip() {
-        let (s1, pk1, id1) = make_hop();
-        let (s2, pk2, id2) = make_hop();
+        let (_s1, pk1, id1) = make_hop();
+        let (_s2, pk2, id2) = make_hop();
         let rng = SystemRandom::new();
 
         let surb = create_surb(&[pk1, pk2], &[id1, id2], &rng).unwrap();
@@ -760,7 +760,7 @@ mod tests {
         // An attacker can compute this from wire-visible data, but the relay now
         // uses a secret mac_key that the attacker doesn't have.
         let forged_gamma = genesis_derive(
-            SPHINX_MAC_DOMAIN,
+            crate::genesis_constants::SPHINX_MAC_DOMAIN,
             &[packet.alpha.as_slice(), &packet.beta, &packet.delta].concat(),
         );
         packet.gamma = forged_gamma;

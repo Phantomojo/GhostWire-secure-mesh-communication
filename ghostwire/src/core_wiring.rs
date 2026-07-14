@@ -360,7 +360,7 @@
 //
 // git rm ghostwire/src/controllers/profiles_debug.rs
 // git rm ghostwire/src/core/reputation.rs       ← replace with Wave 2 version
-// git rm ghostwire/src/core/armor.rs            ← replace with traffic_armor.rs
+// git rm ghostwire/src/core/armor.rs            ← DONE: TrafficArmor+MorphingConfig removed, DeviceTier+ErasureArmor remain
 // git rm ghostwire/src/core/updater.rs          ← replace with updater_fixed.rs
 //
 // In controllers/mod.rs remove: pub mod profiles_debug;

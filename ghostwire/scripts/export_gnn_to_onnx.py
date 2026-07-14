@@ -16,7 +16,7 @@ import numpy as np
 # Paths
 PT_MODEL = "/home/ph/STVAL/GhostWire-GNN-extracted/GhostWire-GNN/models/gnn_routing_best.pt"
 HISTORY = "/home/ph/STVAL/GhostWire-GNN-extracted/GhostWire-GNN/models/training_history.json"
-OUTPUT_DIR = "/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/gnn_routing"
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "gnn_routing")
 ONNX_OUTPUT = os.path.join(OUTPUT_DIR, "gnn_routing.onnx")
 
 # Model architecture (must match training)

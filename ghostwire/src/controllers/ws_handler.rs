@@ -62,29 +62,6 @@ fn encrypt_ws_message(
     Ok(serde_json::to_string(&enc_msg)?)
 }
 
-/// Decrypt data using XChaCha20-Poly1305
-fn decrypt_ws_message(
-    encrypted_json: &str,
-    session_key: &[u8; 32],
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    use base64::Engine;
-    use chacha20poly1305::aead::Aead;
-    use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
-
-    let enc_msg: EncryptedWsMessage = serde_json::from_str(encrypted_json)?;
-
-    let nonce_bytes = base64::engine::general_purpose::STANDARD.decode(&enc_msg.nonce)?;
-    let ciphertext = base64::engine::general_purpose::STANDARD.decode(&enc_msg.ct)?;
-
-    let key = Key::from_slice(session_key);
-    let cipher = XChaCha20Poly1305::new(key);
-    let nonce = XNonce::from_slice(&nonce_bytes);
-
-    cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|e| format!("WS decryption failed: {}", e).into())
-}
-
 /// Inbound commands the frontend can send over WebSocket
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]

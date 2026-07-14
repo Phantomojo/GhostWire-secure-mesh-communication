@@ -10,9 +10,11 @@ import onnx
 from pathlib import Path
 
 # Paths
-MODEL_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_checkpoints/hrm_ghostwire_fixed.pt")
-QUANTIZED_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_ghostwire_fixed_int8.pt")
-ONNX_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_ghostwire_fixed_int8.onnx")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+MODEL_PATH = REPO_DIR / "models" / "hrm_checkpoints" / "hrm_ghostwire_fixed.pt"
+QUANTIZED_PATH = REPO_DIR / "models" / "hrm_ghostwire_fixed_int8.pt"
+ONNX_PATH = REPO_DIR / "models" / "hrm_ghostwire_fixed_int8.onnx"
 
 print("=" * 70)
 print("GHOSTWIRE HRM MODEL - INT8 QUANTIZATION")

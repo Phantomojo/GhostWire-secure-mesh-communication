@@ -59,9 +59,10 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 
 # 1. Clean Rust target
-print_status "SIZE" "GhostWire Rust target directory" "$(du -sh /home/ph/GhostWire-secure-mesh-communication/ghostwire/target 2>/dev/null | cut -f1)"
+REPO_ROOT="$(dirname "$0")/../.."
+print_status "SIZE" "GhostWire Rust target directory" "$(du -sh "$REPO_ROOT/ghostwire/target" 2>/dev/null | cut -f1)"
 print_status "DOING" "Cleaning Rust build artifacts..."
-cd /home/ph/GhostWire-secure-mesh-communication/ghostwire
+cd "$REPO_ROOT/ghostwire"
 cargo clean 2>/dev/null || true
 print_status "DONE" "Rust build artifacts cleaned" "3.2GB"
 echo ""

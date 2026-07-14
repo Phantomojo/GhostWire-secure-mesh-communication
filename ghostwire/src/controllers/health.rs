@@ -29,7 +29,7 @@ impl HealthController {
         let (mesh_enabled, mesh_status) = match &core.mesh_manager {
             Some(_) => (true, "initialized".to_string()),
             None => {
-                let identity_locked = core.identity.read().await.keypair().is_none();
+                let identity_locked = core.identity.read().await.is_locked();
                 if identity_locked {
                     (
                         false,
@@ -42,7 +42,7 @@ impl HealthController {
             }
         };
 
-        let mut response = HealthResponse {
+        let response = HealthResponse {
             status: "healthy".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             message: "GhostWire API is running".to_string(),

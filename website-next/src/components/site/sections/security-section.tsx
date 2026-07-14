@@ -374,7 +374,7 @@ const CRYPTO_ROWS = [
 
 const DISCLOSURE_META = [
   { label: "Report to", value: "security@ghostwire.cc", href: "mailto:security@ghostwire.cc" },
-  { label: "PGP (encrypted)", value: "mirungu015@proton.me", href: "mailto:mirungu015@proton.me" },
+  { label: "PGP (encrypted)", value: "security@ghostwire.cc", href: "mailto:security@ghostwire.cc" },
   { label: "Response time", value: "Within 48 hours" },
   { label: "Credit", value: "We publicly credit responsible reporters" },
   { label: "Scope", value: "All GhostWire code, dependencies, and infrastructure" },
