@@ -309,7 +309,7 @@ See `ghostwire.toml.example` for full configuration reference.
 
 ## Hardware & Environment
 
-**Primary machine (OMEN 16):**
+**Primary machine:**
 - OS: Arch Linux / Omarchy / Hyprland
 - RAM: 16GB · GPU: RTX 3050 (4GB VRAM)
 - Local AI: Ollama v0.20.2 — `gemma4:e2b` at `localhost:11434`

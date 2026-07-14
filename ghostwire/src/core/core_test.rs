@@ -1,7 +1,6 @@
 use super::*;
 use crate::config::Config;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Generate a unique profile name for each test to avoid DB lock conflicts
 fn test_profile(name: &str) -> Option<String> {
@@ -19,10 +18,10 @@ async fn test_core_transport_switching() {
         .unwrap();
     let core_arc = Arc::new(core);
 
-    // 1. Initial state should be None (or Simulated if sim_addr was provided, but here it's None)
     {
         let transport = core_arc.active_transport.read().await;
-        assert!(transport.is_none());
+        assert!(transport.is_some());
+        assert_eq!(transport.as_ref().unwrap().name(), "quic");
     }
 
     // 2. Initialize default transport
@@ -78,21 +77,22 @@ async fn test_core_clone_shares_active_transport() {
     let profile = test_profile("clone_shares");
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();
 
-    // Initial core has None
-    assert!(core.active_transport.read().await.is_none());
+    let initial_name = core
+        .active_transport
+        .read()
+        .await
+        .as_ref()
+        .map(|t| t.name().to_string());
+    assert_eq!(initial_name.as_deref(), Some("quic"));
 
-    // Register Dummy transport first
     {
         let mut registry = core.transport_registry.write().await;
         registry.register(crate::core::transport::TransportKind::Dummy);
     }
     core.set_active_transport("dummy").await.unwrap();
 
-    // Clone should share the same Arc<RwLock> references
     let core_clone = core.clone();
 
-    // Clone should see the transport because of Arc<RwLock> sharing
-    assert!(core_clone.active_transport.read().await.is_some());
     assert_eq!(
         core_clone
             .active_transport

@@ -140,13 +140,16 @@ impl<T: Serialize> ApiV2Response<T> {
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StandardErrorCode {
+    #[allow(dead_code)] // ponytail: standard error code, used in API surface
     ProfileLoadFailed,
     InvalidCredentials,
     CoreInitializationFailed,
     Unauthorized,
+    #[allow(dead_code)] // ponytail: standard error code, used in API surface
     NotFound,
     InternalError,
     InvalidInput,
+    #[allow(dead_code)] // ponytail: standard error code, used in API surface
     IdentityLocked,
     RateLimited,
 }

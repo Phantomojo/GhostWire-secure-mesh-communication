@@ -74,8 +74,8 @@
 ### Test 1: Omen ↔ Stratos Encrypted Messaging
 **Date:** April 7, 2026  
 **Nodes:**
-- Omen (Node A): `12D3KooWRaxu8AYL7xHtZTcgdhBKSqvEzDq8vZpDnC7k1f9v3bMu` @ `100.88.234.14:4001`
-- Stratos (Node B): `12D3KooWAq5JuWdeCGAwZxrTY17uaRp33uQ5JCyvn3hNhi8nYPzR` @ `100.105.58.61:4001`
+- Node A: `<PEER_ID_A>` @ `<NODE_A_IP>:4001`
+- Node B: `<PEER_ID_B>` @ `<NODE_B_IP>:4001`
 
 **Results:**
 ```
@@ -83,7 +83,7 @@ Connection:       ✅ Established (mDNS + bootstrap)
 RTT:              ✅ 16-67ms (real measurement via Ping/Pong frames)
 Encryption:       ✅ XChaCha20-Poly1305 with ECDH key exchange via Identify
 Key Exchange:     ✅ Agent version: ghostwire/2.0.0+enc:<64-byte base64 key>
-Messages A→B:     ✅ "ENCRYPTED HELLO FROM OMEN" — decrypted on Stratos
+Messages A→B:     ✅ "ENCRYPTED HELLO" — decrypted on Node B
 Messages B→A:     ✅ "ENCRYPTED HELLO FROM STRATOS" — decrypted on Omen
 Peer Health:      ✅ 1 peer alive, 0% packet loss, RTT tracked
 ```

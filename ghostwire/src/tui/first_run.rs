@@ -20,6 +20,7 @@ use std::io;
 use super::theme;
 
 /// First-run wizard state
+#[allow(dead_code)] // ponytail: first-run wizard, not yet wired into main TUI
 pub struct FirstRunWizard {
     /// Display name being typed
     name_input: String,
@@ -33,6 +34,7 @@ pub struct FirstRunWizard {
     phase: usize,
 }
 
+#[allow(dead_code)] // ponytail: first-run wizard impl, not yet wired into main TUI
 impl FirstRunWizard {
     pub fn new() -> Self {
         Self {
@@ -330,6 +332,7 @@ impl FirstRunWizard {
 
 /// Run the first-run wizard, returning the chosen display name.
 /// Returns None if the user already has a profile.
+#[allow(dead_code)] // ponytail: first-run wizard entry point, not yet wired into main TUI
 pub async fn run_first_run(core: &Core) -> io::Result<Option<String>> {
     // Check if profile already exists
     if core.has_profile().await {

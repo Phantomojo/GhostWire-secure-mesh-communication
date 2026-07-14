@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 /// Briar-inspired secure messaging system
@@ -115,10 +115,7 @@ impl BriarManager {
     /// Derive encryption key from identity
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
         let public_key = identity
-            .keypair()
-            .expect("Identity must be unlocked")
-            .public()
-            .encode_protobuf();
+            .public_key_bytes();
         let mut key = [0u8; 32];
 
         let mut hasher = blake2b_simd::State::new();
@@ -181,7 +178,7 @@ impl BriarManager {
             stats.messages_sent += 1;
         }
         // For now, just log the message
-        info!("Briar message sent: {:?}", briar_msg);
+        trace!("Briar message sent to {}", briar_msg.recipient);
         Ok(())
     }
 
@@ -258,10 +255,7 @@ impl BriarManager {
         let cipher = Aes256Gcm::new_from_slice(
             &self
                 .identity
-                .keypair()
-                .expect("Identity must be unlocked")
-                .public()
-                .encode_protobuf(),
+                .public_key_bytes(),
         )
         .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
@@ -294,10 +288,7 @@ impl BriarManager {
         let cipher = Aes256Gcm::new_from_slice(
             &self
                 .identity
-                .keypair()
-                .expect("Identity must be unlocked")
-                .public()
-                .encode_protobuf(),
+                .public_key_bytes(),
         )
         .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 

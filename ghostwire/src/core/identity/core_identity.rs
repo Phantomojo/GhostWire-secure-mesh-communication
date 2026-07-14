@@ -1,6 +1,7 @@
 use crate::core::identity::encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
 use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
+use obfstr::obfstr;
 use parking_lot::RwLock;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -200,9 +201,6 @@ impl Identity {
     }
 
     /// Save the initial password to a keyfile for auto-unlock on restart.
-    /// The keyfile is stored alongside identity.json as `.identity.key`
-    /// SECURITY FIX: Password is now encrypted with a machine-derived key
-    /// instead of stored in plaintext.
     fn save_keyfile_password(
         identity_path: &std::path::Path,
         password: &str,
@@ -213,38 +211,51 @@ impl Identity {
 
         let keyfile_path = identity_path.with_file_name(".identity.key");
 
-        // Derive encryption key from machine hostname + identity path
         let machine_id = hostname::get()
             .ok()
             .and_then(|h| h.into_string().ok())
-            .unwrap_or_else(|| "ghostwire-default".to_string());
+            .unwrap_or_else(|| obfstr!("ghostwire-default").to_string());
         let seed = format!(
-            "ghostwire-keyfile-v2-{}-{}",
+            "ghostwire-keyfile-v3-{}-{}",
             machine_id,
             identity_path.display()
         );
-        let derived = ring::digest::digest(&ring::digest::SHA256, seed.as_bytes());
 
-        // Generate random nonce
         let rng = SystemRandom::new();
+
+        let mut salt = [0u8; 16];
+        rng.fill(&mut salt)
+            .map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+
+        let argon2 = argon2::Argon2::new(
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            argon2::Params::new(65536, 3, 4, Some(32))
+                .map_err(|e| anyhow::anyhow!("Argon2 params: {}", e))?,
+        );
+        let mut key_bytes = [0u8; 32];
+        argon2
+            .hash_password_into(seed.as_bytes(), &salt, &mut key_bytes)
+            .map_err(|e| anyhow::anyhow!("Argon2 derivation failed: {}", e))?;
+
         let mut nonce_bytes = [0u8; 24];
         rng.fill(&mut nonce_bytes)
             .map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
 
-        // Encrypt password
-        let key = Key::from_slice(derived.as_ref());
+        let key = Key::from_slice(&key_bytes);
         let cipher = XChaCha20Poly1305::new(key);
         let nonce = XNonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
             .encrypt(nonce, password.as_bytes())
             .map_err(|e| anyhow::anyhow!("Keyfile encryption failed: {}", e))?;
 
-        // Store: nonce (24 bytes) + ciphertext
-        let mut out = nonce_bytes.to_vec();
+        // Format: [0x03][salt 16][nonce 24][ciphertext]
+        let mut out = vec![0x03];
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&nonce_bytes);
         out.extend_from_slice(&ciphertext);
-        std::fs::write(&keyfile_path, out)?;
+        std::fs::write(&keyfile_path, &out)?;
 
-        // Set restrictive permissions (owner read/write only) on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -255,7 +266,7 @@ impl Identity {
 
         tracing::debug!(
             target: "identity",
-            "🔑 Encrypted keyfile saved for auto-unlock on restart: {:?}",
+            "🔑 Encrypted keyfile saved (Argon2id): {:?}",
             keyfile_path
         );
         Ok(())
@@ -276,14 +287,47 @@ impl Identity {
         }
 
         let data = std::fs::read(&keyfile_path)?;
+        let machine_id = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| obfstr!("ghostwire-default").to_string());
 
-        // Check if this is the new encrypted format (>= 24 bytes for nonce)
-        if data.len() >= 24 {
-            // Derive same encryption key
-            let machine_id = hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "ghostwire-default".to_string());
+        if data.first() == Some(&0x03) && data.len() > 41 {
+            // v3: [0x03][salt 16][nonce 24][ciphertext]
+            let salt = &data[1..17];
+            let nonce_bytes: [u8; 24] = data[17..41]
+                .try_into()
+                .map_err(|_| "Invalid v3 keyfile: nonce too short")?;
+            let ciphertext = &data[41..];
+
+            let seed = format!(
+                "ghostwire-keyfile-v3-{}-{}",
+                machine_id,
+                identity_path.display()
+            );
+
+            let argon2 = argon2::Argon2::new(
+                argon2::Algorithm::Argon2id,
+                argon2::Version::V0x13,
+                argon2::Params::new(65536, 3, 4, Some(32))
+                    .map_err(|e| anyhow::anyhow!("Argon2 params: {}", e))?,
+            );
+            let mut key_bytes = [0u8; 32];
+            argon2
+                .hash_password_into(seed.as_bytes(), salt, &mut key_bytes)
+                .map_err(|e| anyhow::anyhow!("Argon2 derivation failed: {}", e))?;
+
+            let key = Key::from_slice(&key_bytes);
+            let cipher = XChaCha20Poly1305::new(key);
+            let nonce = XNonce::from_slice(&nonce_bytes);
+            let plaintext = cipher
+                .decrypt(nonce, ciphertext)
+                .map_err(|_| "Keyfile v3 decryption failed — machine identity may have changed")?;
+
+            let password =
+                String::from_utf8(plaintext).map_err(|_| "Keyfile contains invalid UTF-8")?;
+            Ok(password)
+        } else if data.len() >= 24 {
             let seed = format!(
                 "ghostwire-keyfile-v2-{}-{}",
                 machine_id,
@@ -306,24 +350,19 @@ impl Identity {
             let password =
                 String::from_utf8(plaintext).map_err(|_| "Keyfile contains invalid UTF-8")?;
 
-            tracing::debug!(
+            Self::save_keyfile_password(identity_path, &password)?;
+            tracing::info!(
                 target: "identity",
-                "🔑 Decrypted password from keyfile: {:?}",
-                keyfile_path
+                "🔑 Migrated keyfile from SHA256 to Argon2id"
             );
             Ok(password)
         } else {
-            // Legacy plaintext format — migrate to encrypted
             let password = String::from_utf8(data).map_err(|_| "Keyfile contains invalid UTF-8")?;
             let password = password.trim().to_string();
-
-            // Re-save in encrypted format
             Self::save_keyfile_password(identity_path, &password)?;
-
             tracing::info!(
                 target: "identity",
-                "🔑 Migrated keyfile from plaintext to encrypted format: {:?}",
-                keyfile_path
+                "🔑 Migrated keyfile from plaintext to Argon2id"
             );
             Ok(password)
         }
@@ -482,7 +521,15 @@ impl Identity {
             msg = "📝 Writing identity file",
             json_len = json.len(),
         );
-        std::fs::write(&path, json)?;
+        // ponytail: 0o600 — identity.json contains encrypted keypair, not world-readable
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        std::io::Write::write_all(&mut f, json.as_bytes())?;
 
         // CRITICAL FIX: Update the keyfile with the current password.
         // This ensures auto-unlock works even after the user changes their password.
@@ -529,27 +576,31 @@ impl Identity {
         }
     }
 
-    /// Lock identity (clear sensitive data from memory)
+    /// Lock identity — consumes Keypair via ed25519 conversion to trigger
+    /// ed25519_dalek::SigningKey::drop() → secret_key.zeroize().
     pub fn lock(&self) -> Result<()> {
         let mut state = self.state.write();
 
-        // CRITICAL FIX: Extract public key bytes before locking
-        let new_state = if let IdentityState::Unlocked(kp, Some(ref encrypted)) = &*state {
-            let pub_key_bytes = kp.public().encode_protobuf();
-            Some(IdentityState::Locked(encrypted.clone(), pub_key_bytes))
-        } else if let IdentityState::Unlocked(_, None) = &*state {
-            // No encrypted copy available - can't lock
-            None
-        } else {
-            None
-        };
+        if let IdentityState::Locked(_, _) = *state {
+            return Ok(());
+        }
 
-        if let Some(s) = new_state {
-            *state = s;
-            tracing::info!("🔒 Identity locked");
+        if let IdentityState::Unlocked(ref kp, Some(ref encrypted)) = *state {
+            let pub_key_bytes = kp.public().encode_protobuf();
+            let encrypted = encrypted.clone();
+
+            let old = std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
+            if let IdentityState::Unlocked(kp, _) = old {
+                // try_into_ed25519() consumes kp; inner ed25519_dalek::SigningKey
+                // implements ZeroizeOnDrop, so dropping zeroizes the secret key.
+                match kp.try_into_ed25519() {
+                    Ok(ed_kp) => drop(ed_kp),
+                    Err(kp) => drop(kp),
+                }
+            }
+
+            tracing::info!("🔒 Identity locked (secret key zeroized)");
             Ok(())
-        } else if let IdentityState::Locked(_, _) = *state {
-            Ok(()) // Already locked
         } else {
             Err(anyhow::anyhow!(
                 "Cannot lock identity: No encrypted copy available (save with password first)"
@@ -593,6 +644,13 @@ impl Identity {
     pub fn keypair(&self) -> Option<Keypair> {
         match &*self.state.read() {
             IdentityState::Unlocked(kp, _) => Some(kp.clone()),
+            IdentityState::Locked(_, _) => None,
+        }
+    }
+
+    pub fn sign(&self, message: &[u8]) -> Option<Vec<u8>> {
+        match &*self.state.read() {
+            IdentityState::Unlocked(kp, _) => kp.sign(message).ok(),
             IdentityState::Locked(_, _) => None,
         }
     }
@@ -718,8 +776,47 @@ mod tests {
 
         loaded.unlock("secret").unwrap();
         assert_eq!(
-            loaded.keypair().unwrap().public(),
-            identity.keypair().unwrap().public()
+            loaded.public_key().unwrap(),
+            identity.public_key().unwrap()
         );
+    }
+
+    #[test]
+    fn test_lock_zeroizes_keypair() {
+        let identity = Identity::create_new(None).unwrap();
+        identity.save_to_disk("test_password").unwrap();
+
+        assert!(!identity.is_locked());
+        assert!(identity.sign(b"test").is_some());
+
+        identity.lock().unwrap();
+        assert!(identity.is_locked());
+        assert!(identity.sign(b"test").is_none());
+        assert!(identity.keypair().is_none());
+    }
+
+    #[test]
+    fn test_sign_works_before_lock() {
+        let identity = Identity::create_new(None).unwrap();
+        let sig = identity.sign(b"hello world");
+        assert!(sig.is_some());
+        assert!(!sig.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_lock_unlock_roundtrip_preserves_key() {
+        let identity = Identity::create_new(None).unwrap();
+        identity.save_to_disk("roundtrip_password").unwrap();
+
+        let pub_before = identity.public_key().unwrap();
+        identity.lock().unwrap();
+        assert!(identity.is_locked());
+
+        identity.unlock("roundtrip_password").unwrap();
+        assert!(!identity.is_locked());
+        assert_eq!(identity.public_key().unwrap(), pub_before);
+
+        let sig = identity.sign(b"after unlock");
+        assert!(sig.is_some());
     }
 }

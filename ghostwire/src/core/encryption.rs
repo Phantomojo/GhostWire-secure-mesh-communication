@@ -7,7 +7,6 @@
 //! - ✅ Replay protection: Message deduplication integration
 //! - ✅ Timing attacks: Constant-time signature verification
 
-use crate::core::armor::TrafficArmor;
 use crate::core::crl;
 use crate::core::double_ratchet;
 use rand_core::OsRng;
@@ -120,7 +119,6 @@ pub struct EncryptionManager {
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
     key_rotation_interval: u64,
     last_key_rotation: u64,
-    pub traffic_armor: Option<Arc<TrafficArmor>>,
     pub crl: Arc<crl::CrlStore>,
     pub ratchet_sessions: Arc<double_ratchet::RatchetSessionManager>,
 }
@@ -133,33 +131,42 @@ pub struct SessionKey {
     pub usage_count: usize,
 }
 
-/// Trait for managing encryption key lifecycle (rotation, revocation, backup).
-pub trait KeyManager {
-    /// Rotate keys (periodic or on-demand).
-    fn rotate(&mut self);
-    /// Revoke a key by ID.
-    fn revoke(&mut self, key_id: &str);
-    /// Backup keys (encrypted export).
-    fn backup(&self, passphrase: &str) -> Vec<u8>;
-    /// Restore keys from backup.
-    fn restore(&mut self, data: &[u8], passphrase: &str);
-}
-
-/// Stub implementation: does nothing.
-pub struct StubKeyManager;
-
-impl KeyManager for StubKeyManager {
-    fn rotate(&mut self) {}
-    fn revoke(&mut self, _key_id: &str) {}
-    fn backup(&self, _passphrase: &str) -> Vec<u8> {
-        vec![]
-    }
-    fn restore(&mut self, _data: &[u8], _passphrase: &str) {}
-}
-
 impl EncryptionManager {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Self::load_or_create()
+    }
+
+    /// Extract the X25519 static secret for Sphinx packet processing.
+    /// Returns None if the key pair is too short (legacy format).
+    pub fn x25519_secret(&self) -> Option<x25519_dalek::StaticSecret> {
+        let pk = &self.key_pair.private_key;
+        if pk.len() < 34 {
+            return None;
+        }
+        let ed_len = u16::from_le_bytes([pk[0], pk[1]]) as usize;
+        let start = 2 + ed_len;
+        if pk.len() < start + 32 {
+            return None;
+        }
+        let bytes: [u8; 32] = pk[start..start + 32].try_into().ok()?;
+        Some(x25519_dalek::StaticSecret::from(bytes))
+    }
+
+    /// Extract our X25519 public key bytes (32 bytes).
+    pub fn x25519_public_key(&self) -> Option<[u8; 32]> {
+        let pk = &self.key_pair.private_key;
+        if pk.len() < 34 {
+            return None;
+        }
+        let ed_len = u16::from_le_bytes([pk[0], pk[1]]) as usize;
+        let start = 2 + ed_len;
+        if pk.len() < start + 32 {
+            return None;
+        }
+        let secret = x25519_dalek::StaticSecret::from(
+            <[u8; 32]>::try_from(&pk[start..start + 32]).ok()?,
+        );
+        Some(*x25519_dalek::PublicKey::from(&secret).as_bytes())
     }
 
     pub fn load_or_create() -> Result<Self, Box<dyn std::error::Error>> {
@@ -205,7 +212,6 @@ impl EncryptionManager {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            traffic_armor: None,
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
@@ -238,7 +244,6 @@ impl EncryptionManager {
             session_keys: Arc::new(Mutex::new(HashMap::new())),
             key_rotation_interval: persisted.key_rotation_interval,
             last_key_rotation: persisted.last_key_rotation,
-            traffic_armor: None,
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
@@ -292,7 +297,12 @@ impl EncryptionManager {
         // Encrypt with XChaCha20-Poly1305
         let result = Self::encrypt_with_xchacha20(&json_bytes, &master_key)?;
 
-        let mut file = std::fs::File::create(path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
         // Simple container format: [Nonce (12)] [Ciphertext]
         file.write_all(&result.nonce)?;
         file.write_all(&result.ciphertext)?;
@@ -861,7 +871,6 @@ impl EncryptionManager {
         self.peer_keys.lock().unwrap().len()
     }
 
-    /// Check if key rotation is needed
     pub fn should_rotate_keys(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -881,8 +890,8 @@ impl EncryptionManager {
                 .unwrap()
                 .as_secs();
 
-            // Clear session keys
             self.session_keys.lock().unwrap().clear();
+            self.save_to_disk()?;
         }
         Ok(())
     }
@@ -959,7 +968,7 @@ impl EncryptionManager {
     pub fn init_ratchet_session_as_bob(
         &self,
         peer_id: &str,
-        alice_public_key: &[u8; 32],
+        _alice_public_key: &[u8; 32],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let session_key = self.derive_session_key(
             peer_id,

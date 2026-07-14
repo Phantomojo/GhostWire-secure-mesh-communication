@@ -99,6 +99,34 @@ impl Drop for LockedBuffer {
     }
 }
 
+// ── Anti-debug ────────────────────────────────────────────────────────────────
+
+/// Detect and abort if being debugged via ptrace (TRACEME).
+/// One-shot check — runs once at startup, then self-removes.
+/// Covers: gdb, strace, ltrace, and ptrace-based anti-tamper tools.
+#[cfg(unix)]
+pub fn detect_debugger() {
+    // Read /proc/self/status to check TracerPid — safe, no side effects
+    // PTRACE_TRACEME is dangerous: it makes this process a tracee, and any
+    // signal delivery (SIGSTOP from nohup, etc) causes a ptrace-stop that
+    // freezes the process permanently.
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(val) = line.strip_prefix("TracerPid:") {
+                let pid: u32 = val.trim().parse().unwrap_or(0);
+                if pid != 0 {
+                    eprintln!("🚨 Anti-debug: debugger detected (TracerPid={}). Aborting.", pid);
+                    std::process::exit(1);
+                }
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn detect_debugger() {}
+
 // ── Self-integrity check ──────────────────────────────────────────────────────
 
 /// The expected BLAKE3 hash of the release binary, embedded at compile time.
@@ -200,7 +228,7 @@ mod tests {
 
     #[test]
     fn locked_buffer_zeroizes_on_drop() {
-        let ptr = {
+        let _ptr = {
             let buf = LockedBuffer::from_bytes(&[0xFF; 32]);
             buf.data.as_ptr()
         };

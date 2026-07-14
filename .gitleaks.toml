@@ -1,0 +1,47 @@
+# gitleaks configuration for GhostWire
+# https://github.com/gitleaks/gitleaks
+
+[extend]
+useDefault = true
+
+# False positives to suppress
+[[rules]]
+id = "ghostwire-test-keys"
+description = "GhostWire test/example keys in test fixtures"
+regex = '''(?:test|example|dummy|fake|placeholder)[-_]?(?:key|secret|token|password)'''
+tags = ["test", "false-positive"]
+
+# Allow the known public peer IDs and hashes (not secrets)
+[[rules]]
+id = "ghostwire-peer-ids"
+description = "GhostWire peer IDs (public, not secrets)"
+regex = '''12D3KooW[A-Za-z0-9]{40,52}'''
+tags = ["public", "false-positive"]
+
+[[rules]]
+id = "ghostwire-tailscale-ips"
+description = "Tailscale IPs in config (100.x.x.x range)"
+regex = '''100\.\d{1,3}\.\d{1,3}\.\d{1,3}'''
+tags = ["network", "false-positive"]
+
+# Allow BLAKE3 hashes used for topic obfuscation
+[[rules]]
+id = "blake3-topic-hashes"
+description = "BLAKE3 topic hashes (not secrets)"
+regex = '''[a-f0-9]{64}'''
+tags = ["hash", "false-positive"]
+
+# Paths to always ignore
+[allowlist]
+paths = [
+    '''target/''',
+    '''\.git/''',
+    '''ghostwire-scan-reports/''',
+    '''graphify-out/''',
+    '''docs/''',
+    '''website-next/''',
+    '''models/''',
+    '''\.github/''',
+    '''CHANGELOG\.md''',
+    '''Cargo\.lock''',
+]

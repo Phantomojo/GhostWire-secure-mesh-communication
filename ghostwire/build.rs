@@ -5,11 +5,10 @@
 // Never commit the actual key here.
 
 fn main() {
-    // Tell cargo to re-run this if the env var changes
     println!("cargo:rerun-if-env-changed=GHOSTWIRE_RELEASE_SIGNING_KEY_HEX");
+    println!("cargo:rerun-if-env-changed=GHOSTWIRE_BINARY_HASH");
 
     if let Ok(key_hex) = std::env::var("GHOSTWIRE_RELEASE_SIGNING_KEY_HEX") {
-        // Validate it's 64 hex chars (32 bytes)
         if key_hex.len() == 64 && key_hex.chars().all(|c| c.is_ascii_hexdigit()) {
             println!("cargo:rustc-env=GHOSTWIRE_RELEASE_KEY_BYTES={}", key_hex);
             println!(
@@ -20,5 +19,16 @@ fn main() {
         }
     } else {
         println!("cargo:warning=GHOSTWIRE_RELEASE_SIGNING_KEY_HEX not set. Automatic updates will be disabled at runtime.");
+    }
+
+    if let Ok(hash_hex) = std::env::var("GHOSTWIRE_BINARY_HASH") {
+        if hash_hex.len() == 64 && hash_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            println!("cargo:rustc-env=GHOSTWIRE_BINARY_HASH={}", hash_hex);
+            println!("cargo:warning=Binary integrity hash embedded from GHOSTWIRE_BINARY_HASH");
+        } else {
+            println!("cargo:warning=GHOSTWIRE_BINARY_HASH is set but invalid (need 64 hex chars). Integrity check disabled.");
+        }
+    } else {
+        println!("cargo:warning=GHOSTWIRE_BINARY_HASH not set. Binary integrity check disabled at runtime.");
     }
 }

@@ -245,6 +245,27 @@ impl KeyBundle {
 // blake3 = "1.5"  (already needed by mailbox and traffic_armor)
 // ─────────────────────────────────────────────────────────────────────────────
 
+use zeroize::Zeroize;
+
+/// Ponytail: minimal trait for explicit secure wipe before drop.
+/// Types that implement Zeroize get this for free via blanket impl.
+/// Use `secure_wipe()` instead of relying on Drop ordering.
+pub trait SecureWipe {
+    fn secure_wipe(&mut self);
+}
+
+impl<T: Zeroize> SecureWipe for T {
+    fn secure_wipe(&mut self) {
+        self.zeroize();
+    }
+}
+
+/// Zeroize a raw byte slice in place. Use for PanicManager and other
+/// sites that hold key material in raw Vec<u8>/&mut [u8].
+pub fn secure_zero_bytes(bytes: &mut [u8]) {
+    bytes.zeroize();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

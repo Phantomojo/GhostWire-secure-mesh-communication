@@ -100,7 +100,6 @@ impl Default for ReliabilityConfig {
 
 /// Tracks messages awaiting acknowledgment
 struct PendingAck {
-    message_id: Uuid,
     sent_at: Instant,
     attempt: u8,
     next_retry: Instant,
@@ -148,7 +147,6 @@ impl AckTracker {
         self.pending.insert(
             message_id,
             PendingAck {
-                message_id,
                 sent_at: now,
                 attempt: 0,
                 next_retry: now + self.config.ack_timeout,
@@ -231,7 +229,6 @@ pub struct AckTrackerStats {
 
 /// Messages pending retry, keyed by message ID
 struct RetryEntry {
-    message_id: Uuid,
     attempt: u8,
     next_retry: Instant,
     current_delay: Duration,
@@ -266,7 +263,6 @@ impl RetryQueue {
         self.entries.insert(
             message_id,
             RetryEntry {
-                message_id,
                 attempt: 0,
                 next_retry: now + self.config.ack_timeout,
                 current_delay: self.config.initial_retry_delay,

@@ -39,8 +39,10 @@ pub const EMBEDDING_STALENESS_SECS: u64 = 1800;
 /// How often to refresh embeddings by re-running the Python embed script
 pub const EMBEDDING_REFRESH_SECS: u64 = 300;
 
-/// Expected BLAKE2b-256 hash of the scoring_head.onnx file (set after first export)
-pub const EXPECTED_SCORING_HASH: &str = "";
+/// Expected BLAKE2b-256 hash of the scoring model ONNX file.
+/// Set this after model export: `sha256sum models/gnn_routing/gnn_routing.onnx`
+/// or: `python3 -c "import hashlib; print(hashlib.new('blake2b', open('models/gnn_routing/gnn_routing.onnx','rb').read(), digest_size=32).hexdigest())"`
+pub const EXPECTED_SCORING_HASH: &str = "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
 
 // ── Embedding freshness ──────────────────────────────────────────────────────
 
@@ -578,6 +580,7 @@ impl GnnRouter {
     }
 }
 
+#[allow(dead_code)] // used in tests
 fn apply_softmax(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return vec![];

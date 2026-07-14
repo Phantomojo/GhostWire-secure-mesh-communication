@@ -9,6 +9,7 @@ pub enum TransportKind {
     #[cfg(feature = "mesh")]
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
     Dummy, // No-op transport for tests/default
+    Quic(Arc<crate::core::quic_transport::QuicTransportProvider>),
     StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
     #[cfg(feature = "bluetooth")]
     Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
@@ -21,6 +22,7 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => "mesh",
             TransportKind::Dummy => "dummy",
+            TransportKind::Quic(_) => "quic",
             TransportKind::StealthTCP(_) => "stealth_tcp",
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "bluetooth",
@@ -32,6 +34,7 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (no-op)",
+            TransportKind::Quic(_) => "QUIC Transport (Direct Internet)",
             TransportKind::StealthTCP(_) => "Stealth TCP with Traffic Morphing",
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
@@ -46,16 +49,14 @@ impl TransportKind {
                 manager.send_message(message).await
             }
             TransportKind::Dummy => {
-                tracing::info!("Dummy transport sending message: {}", message.content);
+                tracing::trace!("Dummy transport sending message to {}", message.recipient);
                 Ok(())
             }
-            TransportKind::StealthTCP(_provider) => {
-                tracing::info!(
-                    "StealthTCP transport sending message (Mock IP Resolution): {}",
-                    message.content
-                );
-                // In future: Resolve ID -> IP and provider.connect(ip).await
-                Ok(())
+            TransportKind::StealthTCP(provider) => {
+                provider.send_message(message).await
+            }
+            TransportKind::Quic(provider) => {
+                provider.send_message(message).await
             }
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
@@ -83,6 +84,7 @@ impl TransportKind {
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
             TransportKind::StealthTCP(_) => Ok(None),
+            TransportKind::Quic(_) => Ok(None),
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),
             TransportKind::Simulated(transport) => {

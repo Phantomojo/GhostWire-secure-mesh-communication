@@ -13,9 +13,11 @@ import json
 from tqdm import tqdm
 
 # Paths
-DATASET_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/ghostwire_mesh_hybrid_101k.json")
-MODEL_OUTPUT = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_ghostwire_hybrid_101k.pt")
-CHECKPOINT_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_checkpoints")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+DATASET_PATH = REPO_DIR / "data" / "ghostwire_mesh_hybrid_101k.json"
+MODEL_OUTPUT = REPO_DIR / "models" / "hrm_ghostwire_hybrid_101k.pt"
+CHECKPOINT_DIR = REPO_DIR / "models" / "hrm_checkpoints"
 
 # Training config
 CONFIG = {

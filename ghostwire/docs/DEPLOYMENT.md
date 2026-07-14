@@ -44,11 +44,11 @@ The daemon binds the API to `127.0.0.1` by default. Mesh traffic binds to `0.0.0
 
 ---
 
-## 2. Two-Node Mesh (OMEN + Stratos)
+## 2. Two-Node Mesh
 
-Reference setup using the two development machines.
+Reference setup using two development machines.
 
-### Node 1 (OMEN 16 — primary)
+### Node 1 (primary)
 
 ```bash
 ghostwire start \
@@ -58,12 +58,12 @@ ghostwire start \
 
 Note the peer ID from the logs (printed at boot). It looks like `12D3KooW...`.
 
-### Node 2 (HP EliteBook 840 G1 — Stratos)
+### Node 2 (secondary)
 
 ```bash
 ghostwire start \
   --mesh-port 4001 \
-  --bootstrap /ip4/<OMEN_LAN_IP>/tcp/4001/p2p/<OMEN_PEER_ID> \
+  --bootstrap /ip4/<NODE_1_LAN_IP>/tcp/4001/p2p/<NODE_1_PEER_ID> \
   --mesh-size small
 ```
 

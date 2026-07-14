@@ -9,8 +9,10 @@ import onnx
 from pathlib import Path
 
 # Model paths
-MODEL_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_checkpoints/hrm_ghostwire_fixed.pt")
-ONNX_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/models/hrm_ghostwire_fixed.onnx")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+MODEL_PATH = REPO_DIR / "models" / "hrm_checkpoints" / "hrm_ghostwire_fixed.pt"
+ONNX_PATH = REPO_DIR / "models" / "hrm_ghostwire_fixed.onnx"
 
 print("=" * 70)
 print("GHOSTWIRE HRM MODEL - ONNX EXPORT")

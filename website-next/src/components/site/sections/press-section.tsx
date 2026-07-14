@@ -197,10 +197,10 @@ export function PressSection() {
                   security@ghostwire.cc (disclosure)
                 </a>
                 <a
-                  href="mailto:mirungu015@proton.me"
+                  href="mailto:contact@ghostwire.cc"
                   className="block text-[var(--gw-white-dim)] hover:text-[var(--gw-green)] no-underline"
                 >
-                  mirungu015@proton.me (PGP)
+                  contact@ghostwire.cc (PGP)
                 </a>
               </div>
             </div>

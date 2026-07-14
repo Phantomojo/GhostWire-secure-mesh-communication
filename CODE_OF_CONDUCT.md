@@ -69,7 +69,7 @@ As a dual-licensed project (AGPL-3.0 + Commercial), we expect all community memb
 
 For commercial licensing inquiries:
 
-- **Direct to proper channels**: mirungu015@proton.me
+- **Direct to proper channels**: licensing@ghostwire.cc
 - **Do not spam** community members with commercial offers
 - **Respect the separation** between community support and commercial services
 - **Follow the process** outlined in [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)

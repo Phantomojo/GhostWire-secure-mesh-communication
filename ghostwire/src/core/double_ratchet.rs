@@ -1,5 +1,4 @@
 use parking_lot::RwLock;
-use rand::Rng;
 use rand_core::OsRng;
 use rand_core::RngCore;
 use ring::hmac;
@@ -8,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::debug;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const MAX_SKIP: u32 = 200;
 const KEY_LEN: usize = 32;
@@ -55,7 +55,7 @@ fn kdf_rk(root_key: &[u8; KEY_LEN], dh_output: &[u8]) -> ([u8; KEY_LEN], [u8; KE
     (new_root_key, chain_key)
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct RatchetState {
     root_key: Vec<u8>,
     sending_chain_key: Vec<u8>,
@@ -70,7 +70,7 @@ pub struct RatchetState {
     pub last_ratchet_at: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 struct SkippedKey {
     dh_public: Vec<u8>,
     message_number: u32,

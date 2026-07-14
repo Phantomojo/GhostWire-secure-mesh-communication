@@ -1,12 +1,11 @@
 #!/bin/bash
-# 🚀 GhostWire Live Test - PC-A (omen) Start Script
+# GhostWire Live Test - Node A Start Script
 
-echo "🔷 Starting GhostWire on PC-A (omen)..."
-echo "📡 Tailscale IP: 100.88.234.14"
-echo "🌐 Web UI: http://localhost:8080"
+echo "Starting GhostWire on Node A..."
+echo "Web UI: http://localhost:8080"
 echo ""
 
-cd /home/ph/ghostwire-live-test
+cd "$(dirname "$0")/../../ghostwire-live-test" 2>/dev/null || cd ghostwire-live-test
 
 # Run with mesh enabled
 ./ghostwire \

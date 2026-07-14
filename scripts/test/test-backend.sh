@@ -58,11 +58,11 @@ test_local_backend() {
 
 # Test stratsytem backend via SSH
 test_remote_backend() {
-    echo -e "${YELLOW}Testing Remote Backend (PC-B - stratsytem)...${NC}"
+    echo -e "${YELLOW}Testing Remote Backend (Node B)...${NC}"
     
     # Test SSH connectivity first
-    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@100.105.58.61 "echo 'SSH OK'" >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} SSH connection to stratsytem"
+    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "echo 'SSH OK'" >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} SSH connection to Node B"
     else
         echo -e "${RED}✗${NC} SSH connection FAILED"
         echo "   Trying Tailscale IP..."
@@ -70,12 +70,12 @@ test_remote_backend() {
     fi
     
     # Check if backend running
-    RUNNING=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@100.105.58.61 "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
+    RUNNING=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
     if [ -n "$RUNNING" ]; then
-        echo -e "${GREEN}✓${NC} Backend process running on stratsytem"
+        echo -e "${GREEN}✓${NC} Backend process running on Node B"
     else
-        echo -e "${RED}✗${NC} Backend NOT running on stratsytem"
-        echo "   To start: ssh root@100.105.58.61 'cd ~/ghostwire-live-test && ./ghostwire --port 8080 --mesh &'"
+        echo -e "${RED}✗${NC} Backend NOT running on Node B"
+        echo "   To start: ssh root@<NODE_B_IP> 'cd ~/ghostwire-live-test && ./ghostwire --port 8080 --mesh &'"
         return 1
     fi
     
@@ -84,7 +84,7 @@ test_remote_backend() {
     echo "Testing Remote API Endpoints:"
     
     # Profile
-    PROFILE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@100.105.58.61 "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
+    PROFILE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
     if echo "$PROFILE" | grep -q '"id"'; then
         NODE_ID=$(echo "$PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/profile - Node ID: $NODE_ID"
@@ -93,7 +93,7 @@ test_remote_backend() {
     fi
     
     # Peers
-    PEERS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@100.105.58.61 "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
+    PEERS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
     if echo "$PEERS" | grep -q '"data"'; then
         PEER_COUNT=$(echo "$PEERS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']))" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/peers - Peer count: $PEER_COUNT"
@@ -108,20 +108,20 @@ test_remote_backend() {
 test_network() {
     echo -e "${YELLOW}Testing Network Connectivity...${NC}"
     
-    # Ping stratsytem
-    if ping -c 2 100.105.58.61 >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} ICMP ping to stratsytem (100.105.58.61)"
+    # Ping Node B
+    if ping -c 2 <NODE_B_IP> >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} ICMP ping to Node B (<NODE_B_IP>)"
     else
         echo -e "${YELLOW}!${NC} ICMP ping blocked (may be normal)"
     fi
     
     # Test HTTP connectivity via SSH tunnel
     echo -e "${YELLOW}Creating SSH tunnel for HTTP test...${NC}"
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -f -N -L 8082:localhost:8080 root@100.105.58.61 2>/dev/null
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -f -N -L 8082:localhost:8080 root@<NODE_B_IP> 2>/dev/null
     sleep 2
     
     if curl -s http://localhost:8082/api/v2/profile >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} HTTP tunnel to stratsytem:8080"
+        echo -e "${GREEN}✓${NC} HTTP tunnel to Node B:8080"
         pkill -f "ssh.*8082" >/dev/null 2>&1
     else
         echo -e "${RED}✗${NC} HTTP tunnel FAILED"
@@ -181,4 +181,4 @@ echo ""
 echo "To manually connect nodes:"
 echo "  curl -X POST http://127.0.0.1:8080/api/v2/peers/connect \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"peer_id\": \"<STRAT_NODE_ID>\", \"address\": \"/ip4/100.105.58.61/tcp/4001\"}'"
+echo "    -d '{\"peer_id\": \"<STRAT_NODE_ID>\", \"address\": \"/ip4/<NODE_B_IP>/tcp/4001\"}'"

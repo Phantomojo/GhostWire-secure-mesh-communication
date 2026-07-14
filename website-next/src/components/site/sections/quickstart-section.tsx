@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from "react";
+import { GithubDocModal } from "@/components/site/github-doc-modal";
 
 const TABS = [
   { id: "linux", label: "Linux" },
@@ -78,6 +79,7 @@ function SourcePanel() {
 
 export function QuickstartSection() {
   const [activeTab, setActiveTab] = useState<TabId>("linux");
+  const [showQuickStart, setShowQuickStart] = useState(false);
 
   return (
     <section id="quickstart" className="py-24 border-t border-[var(--gw-border)]">
@@ -111,50 +113,34 @@ export function QuickstartSection() {
         </div>
 
         {activeTab === "linux" && (
-          <div
-            role="tabpanel"
-            id="panel-linux"
-            aria-labelledby="tab-linux"
-          >
+          <div role="tabpanel" id="panel-linux" aria-labelledby="tab-linux">
             <LinuxPanel />
           </div>
         )}
         {activeTab === "docker" && (
-          <div
-            role="tabpanel"
-            id="panel-docker"
-            aria-labelledby="tab-docker"
-          >
+          <div role="tabpanel" id="panel-docker" aria-labelledby="tab-docker">
             <DockerPanel />
           </div>
         )}
         {activeTab === "source" && (
-          <div
-            role="tabpanel"
-            id="panel-source"
-            aria-labelledby="tab-source"
-          >
+          <div role="tabpanel" id="panel-source" aria-labelledby="tab-source">
             <SourcePanel />
           </div>
         )}
 
         <div className="flex flex-wrap gap-3 mt-8">
-          <a
-            href="#architecture"
-            className="gw-btn-primary no-underline"
-          >
+          <a href="#architecture" className="gw-btn-primary no-underline">
             Full documentation
           </a>
-          <a
-            href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/QUICK_START.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="gw-btn-ghost no-underline"
-          >
-            Quick Start on GitHub
-          </a>
+          <button onClick={() => setShowQuickStart(true)} className="gw-btn-ghost no-underline">
+            Quick Start Guide
+          </button>
         </div>
       </div>
+
+      {showQuickStart && (
+        <GithubDocModal open={showQuickStart} onClose={() => setShowQuickStart(false)} docPath="docs/QUICK_START.md" title="Quick Start Guide" />
+      )}
     </section>
   );
 }

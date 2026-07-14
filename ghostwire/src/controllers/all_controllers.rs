@@ -488,8 +488,7 @@ impl NetworkController {
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
         let identity = core.identity.read().await;
         let signature = identity
-            .keypair()
-            .map(|kp| kp.sign(&card_bytes).unwrap_or_default())
+            .sign(&card_bytes)
             .unwrap_or_default();
         card.signature = signature;
 
@@ -786,7 +785,7 @@ impl RecoveryController {
                 };
 
                 // CRITICAL FIX: Re-encrypt identity with recovered key
-                let core = state.core.read().await;
+                let _core = state.core.read().await;
 
                 // Create new identity from recovered key
                 match crate::core::identity::core_identity::Identity::from_seed(&recovered_key.0) {

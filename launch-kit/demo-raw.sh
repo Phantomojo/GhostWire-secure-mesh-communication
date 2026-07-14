@@ -110,7 +110,7 @@ fi
 echo ""
 
 echo -e "  ${DIM}Network path:${NC}"
-echo -e "    ${GREEN}omen${NC} (100.88.234.14) ──TCP:4001──→ ${GREEN}stratsytem${NC} (100.105.58.61)"
+echo -e "    ${GREEN}node-a${NC} (<NODE_A_IP>) ──TCP:4001──→ ${GREEN}node-b${NC} (<NODE_B_IP>)"
 echo -e "    ${DIM}Protocol:${NC} libp2p/gossipsub"
 echo -e "    ${DIM}Topic:${NC}    ghostwire-dm-{recipient_peer_id}"
 echo ""

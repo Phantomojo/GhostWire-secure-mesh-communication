@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -233,12 +233,7 @@ fn now_ms_u32() -> u32 {
         .as_millis() as u32
 }
 
-fn now_u32() -> u32 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as u32
-}
+
 
 #[cfg(test)]
 mod tests {

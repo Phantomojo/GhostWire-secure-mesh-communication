@@ -78,7 +78,7 @@ Same as Individual CLA, but:
 - **Signed by** an authorized representative
 - **Covers** all employees who contribute
 
-**Contact**: mirungu015@proton.me for Corporate CLA
+**Contact**: legal@ghostwire.cc for Corporate CLA
 
 ---
 
@@ -93,7 +93,7 @@ Same as Individual CLA, but:
 
 ### **Corporate Contributors**
 
-1. **Contact**: mirungu015@proton.me
+1. **Contact**: legal@ghostwire.cc
 2. **Process**: Email signed PDF or use DocuSign
 3. **Coverage**: List authorized contributors
 4. **Updates**: Notify of changes to authorized list
@@ -118,7 +118,7 @@ Same as Individual CLA, but:
 **A:** Once submitted under CLA, the license is irrevocable. Think before you contribute.
 
 ### **Q: I'm contributing as part of my job. Do I need corporate CLA?**
-**A:** If your employer owns your work, yes. Contact mirungu015@proton.me.
+**A:** If your employer owns your work, yes. Contact legal@ghostwire.cc.
 
 ---
 
@@ -126,7 +126,7 @@ Same as Individual CLA, but:
 
 **Questions about the CLA?**
 
-- **Email**: mirungu015@proton.me
+- **Email**: legal@ghostwire.cc
 - **GitHub Issue**: Create a "CLA Question" issue
 - **Documentation**: See [LICENSE_EXPLANATION.md](../LICENSE_EXPLANATION.md)
 

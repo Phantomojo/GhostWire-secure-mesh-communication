@@ -48,6 +48,7 @@ pub enum DisasterLevel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TransportType {
     Mesh,
+    Quic,
     StealthTcp,
     WiFi,
     Bluetooth,
@@ -58,6 +59,7 @@ impl TransportType {
     pub fn name(&self) -> &'static str {
         match self {
             TransportType::Mesh => "mesh",
+            TransportType::Quic => "quic",
             TransportType::StealthTcp => "stealth_tcp",
             TransportType::WiFi => "wifi",
             TransportType::Bluetooth => "bluetooth",
@@ -156,7 +158,7 @@ pub struct DisasterPolicy {
 impl Default for DisasterPolicy {
     fn default() -> Self {
         Self {
-            normal_priority: vec![TransportType::StealthTcp, TransportType::Mesh],
+            normal_priority: vec![TransportType::Quic, TransportType::StealthTcp, TransportType::Mesh],
             congested_priority: vec![TransportType::Mesh, TransportType::WiFi],
             isolation_priority: vec![TransportType::WiFi, TransportType::Bluetooth],
             blackout_priority: vec![TransportType::LoRa],

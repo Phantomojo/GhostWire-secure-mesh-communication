@@ -105,10 +105,7 @@ impl ReticulumManager {
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
         // Use BLAKE2b to derive a 32-byte key from the identity's public key
         let public_key = identity
-            .keypair()
-            .expect("Identity must be unlocked")
-            .public()
-            .encode_protobuf();
+            .public_key_bytes();
         let mut key = [0u8; 32];
 
         // Simple key derivation - in production, use proper KDF

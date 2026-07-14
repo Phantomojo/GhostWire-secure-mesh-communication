@@ -44,7 +44,7 @@ async fn build_test_mesh_manager(
     );
 
     let security_config = SecurityConfig::default();
-    let security_manager = Arc::new(SecurityManager::new(security_config));
+    let _security_manager = Arc::new(SecurityManager::new(security_config));
 
     let persistence = Arc::new(PersistenceManager::new(None)?);
     let encryption = Arc::new(
@@ -84,7 +84,7 @@ async fn build_test_mesh_manager(
 #[tokio::test]
 async fn test_node_to_node_connectivity() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        let (mut node_a, peer_id_a, addr_a) =
+        let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19001, Some("test_node_a".to_string()))
                 .await
                 .expect("Failed to build node A");
@@ -153,7 +153,7 @@ async fn test_node_to_node_connectivity() {
 #[tokio::test]
 async fn test_ping_pong_same_machine() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        let (mut node_a, peer_id_a, addr_a) =
+        let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
                 .await
                 .expect("node A");

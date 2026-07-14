@@ -61,7 +61,7 @@ rng.fill(&mut secret).unwrap();
 ### **4. Email Addresses (Intentional)**
 
 **Exposed emails:**
-- `mirungu015@proton.me` - Your contact email (intentional, for business)
+- `security@ghostwire.cc` - Your contact email (intentional, for business)
 - `phantomojo@protonmail.com` - GitHub noreply (historical)
 
 **Risk Level:** 🟢 **LOW** - These are public contact emails, not private
@@ -317,7 +317,7 @@ This helps users know what environment variables to set.
 ## 📞 SECURITY CONTACT
 
 **For security issues:**
-- Email: mirungu015@proton.me
+- Email: security@ghostwire.cc
 - GitHub Security Advisories: Enable for private reporting
 
 ---

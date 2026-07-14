@@ -51,9 +51,9 @@ echo ""
 echo "=== Test 2: Network Connectivity ==="
 echo ""
 
-# Check if we can reach stratsytem
-echo -n "1. Ping stratsytem (100.105.58.61) "
-if ping -c 1 100.105.58.61 >/dev/null 2>&1; then
+# Check if we can reach Node B
+echo -n "1. Ping Node B (<NODE_B_IP>) "
+if ping -c 1 <NODE_B_IP> >/dev/null 2>&1; then
     echo "✅ OK"
 else
     echo "⚠️  Blocked (may be normal)"
@@ -67,23 +67,23 @@ echo ""
 echo "=== Test 3: Manual Peer Connection ==="
 echo ""
 
-if [ "$(hostname)" = "omen" ] || [ -n "$PC_A" ]; then
-    echo "Testing connection TO stratsytem..."
+if [ "$(hostname)" = "node-a" ] || [ -n "$PC_A" ]; then
+    echo "Testing connection TO Node B..."
     echo ""
-    echo "Run this command to connect to stratsytem:"
-    echo ""
-    echo "curl -X POST http://localhost:8080/api/v2/peers/connect \\"
-    echo "  -H 'Content-Type: application/json' \\"
-    echo "  -d '{\"peer_id\": \"<STRAT_NODE_ID>\", \"address\": \"/ip4/100.105.58.61/tcp/4001\"}'"
-    echo ""
-elif [ "$(hostname)" = "stratsytem" ] || [ -n "$PC_B" ]; then
-    echo "Testing connection TO omen..."
-    echo ""
-    echo "Run this command to connect to omen:"
+    echo "Run this command to connect to Node B:"
     echo ""
     echo "curl -X POST http://localhost:8080/api/v2/peers/connect \\"
     echo "  -H 'Content-Type: application/json' \\"
-    echo "  -d '{\"peer_id\": \"88ef8419-e3b2-4d27-90f7-9d22db444a6b\", \"address\": \"/ip4/100.88.234.14/tcp/4001\"}'"
+    echo "  -d '{\"peer_id\": \"<NODE_B_PEER_ID>\", \"address\": \"/ip4/<NODE_B_IP>/tcp/4001\"}'"
+    echo ""
+elif [ "$(hostname)" = "node-b" ] || [ -n "$PC_B" ]; then
+    echo "Testing connection TO Node A..."
+    echo ""
+    echo "Run this command to connect to Node A:"
+    echo ""
+    echo "curl -X POST http://localhost:8080/api/v2/peers/connect \\"
+    echo "  -H 'Content-Type: application/json' \\"
+    echo "  -d '{\"peer_id\": \"<NODE_A_PEER_ID>\", \"address\": \"/ip4/<NODE_A_IP>/tcp/4001\"}'"
     echo ""
 fi
 

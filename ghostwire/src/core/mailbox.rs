@@ -23,7 +23,6 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use sled::Db;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use zeroize::Zeroize;
 
 const MAILBOX_PREFIX: &str = "mailbox:";
@@ -60,7 +59,6 @@ impl Drop for MailboxEnvelope {
 pub struct MailboxStore {
     db: Arc<Db>,
     rng: SystemRandom,
-    pending_lock: Arc<RwLock<()>>,
 }
 
 impl MailboxStore {
@@ -68,7 +66,6 @@ impl MailboxStore {
         Ok(Self {
             db,
             rng: SystemRandom::new(),
-            pending_lock: Arc::new(RwLock::new(())),
         })
     }
 
@@ -96,7 +93,7 @@ impl MailboxStore {
 
         // DH shared secret
         let recipient_pub = x25519_dalek::PublicKey::from(*recipient_x25519_pub);
-        let mut shared = ephemeral_secret.diffie_hellman(&recipient_pub);
+        let shared = ephemeral_secret.diffie_hellman(&recipient_pub);
         let shared_bytes = shared.as_bytes().to_vec();
 
         // Derive encryption key via BLAKE3 KDF
@@ -323,6 +320,63 @@ impl MailboxStore {
     pub fn pending_count(&self) -> anyhow::Result<usize> {
         let pending = self.get_pending()?;
         Ok(pending.len())
+    }
+
+    /// Queue an encrypted wire frame for later delivery to `recipient_id`.
+    pub fn queue_delivery(
+        &self,
+        recipient_id: &str,
+        message_id: &str,
+        frame_bytes: &[u8],
+    ) -> Result<()> {
+        let key = format!("{}outgoing:{}:{}", MAILBOX_PREFIX, recipient_id, message_id);
+        self.db.insert(key.as_bytes(), frame_bytes)?;
+        Ok(())
+    }
+
+    pub fn get_pending_deliveries(&self, recipient_id: &str) -> Result<Vec<(String, Vec<u8>)>> {
+        let prefix = format!("{}outgoing:{}:", MAILBOX_PREFIX, recipient_id);
+        let mut results = Vec::new();
+        for item in self.db.scan_prefix(prefix.as_bytes()) {
+            let (key, val) = item?;
+            let key_str = String::from_utf8_lossy(&key);
+            if let Some(msg_id) = key_str.rsplit(':').next() {
+                results.push((msg_id.to_string(), val.to_vec()));
+            }
+        }
+        Ok(results)
+    }
+
+    /// Drain all pending frames for `recipient_id` (returns frames + their message IDs, removes from queue).
+    pub fn drain_deliveries(&self, recipient_id: &str) -> Result<Vec<(String, Vec<u8>)>> {
+        let prefix = format!("{}outgoing:{}:", MAILBOX_PREFIX, recipient_id);
+        let mut results = Vec::new();
+        let keys: Vec<_> = self
+            .db
+            .scan_prefix(prefix.as_bytes())
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for (key, val) in &keys {
+            // Extract message_id from key: mailbox:outgoing:{recipient}:{message_id}
+            let key_str = String::from_utf8_lossy(key);
+            if let Some(msg_id) = key_str.rsplit(':').next() {
+                results.push((msg_id.to_string(), val.to_vec()));
+            }
+            self.db.remove(key)?;
+        }
+        Ok(results)
+    }
+
+    pub fn remove_delivery(&self, recipient_id: &str, message_id: &str) -> Result<()> {
+        let key = format!("{}outgoing:{}:{}", MAILBOX_PREFIX, recipient_id, message_id);
+        self.db.remove(key.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn delivery_count(&self) -> Result<usize> {
+        let prefix = format!("{}outgoing:", MAILBOX_PREFIX);
+        Ok(self.db.scan_prefix(prefix.as_bytes()).count())
     }
 }
 

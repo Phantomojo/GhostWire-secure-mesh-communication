@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { GithubDocModal } from "./github-doc-modal";
 
 interface FeatureModalProps {
   open: boolean;
@@ -9,7 +10,7 @@ interface FeatureModalProps {
   tag: string;
   title: string;
   children: React.ReactNode;
-  ctaPrimary?: { href: string; label: string };
+  ctaPrimary?: { href: string; label: string; docPath?: string; docTitle?: string };
   ctaSecondary?: { href: string; label: string };
 }
 
@@ -22,6 +23,8 @@ export function FeatureModal({
   ctaPrimary,
   ctaSecondary,
 }: FeatureModalProps) {
+  const [showDoc, setShowDoc] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -72,7 +75,12 @@ export function FeatureModal({
           </div>
           {(ctaPrimary || ctaSecondary) && (
             <div className="mt-7 flex flex-wrap gap-3">
-              {ctaPrimary && (
+              {ctaPrimary && ctaPrimary.docPath && (
+                <button onClick={() => setShowDoc(true)} className="gw-btn-primary">
+                  {ctaPrimary.label}
+                </button>
+              )}
+              {ctaPrimary && !ctaPrimary.docPath && (
                 <a href={ctaPrimary.href} className="gw-btn-primary">
                   {ctaPrimary.label}
                 </a>
@@ -86,6 +94,10 @@ export function FeatureModal({
           )}
         </div>
       </div>
+
+      {showDoc && ctaPrimary?.docPath && (
+        <GithubDocModal open={showDoc} onClose={() => setShowDoc(false)} docPath={ctaPrimary.docPath} title={ctaPrimary.docTitle || ctaPrimary.label} />
+      )}
     </div>,
     document.body
   );

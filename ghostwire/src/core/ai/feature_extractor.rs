@@ -90,7 +90,7 @@ pub const NODE_IDS: [u16; NUM_NODES] = [
 /// These correspond to features that don't exist for certain nodes.
 /// We compute this by checking which (node_id, feature_idx) combinations
 /// map to valid column indices in the 2,387-dim output.
-const MISSING_COLUMNS: &[usize] = &[]; // Computed at runtime from schema
+const _MISSING_COLUMNS: &[usize] = &[]; // Computed at runtime from schema
 
 /// StandardScaler parameters — mean and std for each of the 2,387 features.
 /// These are loaded from the training data to normalize live features.
@@ -215,7 +215,7 @@ pub struct FeatureExtractor {
     /// Map from node_id to the column offset in the 2,387-dim vector
     column_map: HashMap<u16, Vec<usize>>,
     /// Valid column indices (0..2387)
-    valid_columns: Vec<usize>,
+    _valid_columns: Vec<usize>,
 }
 
 impl FeatureExtractor {
@@ -230,12 +230,12 @@ impl FeatureExtractor {
         // But some nodes have fewer than 38 features (7 total missing across all nodes).
 
         let column_map = Self::build_column_map();
-        let valid_columns: Vec<usize> = (0..FEATURE_DIM).collect();
+        let _valid_columns: Vec<usize> = (0..FEATURE_DIM).collect();
 
         Self {
             scaler: None,
             column_map,
-            valid_columns,
+            _valid_columns,
         }
     }
 
@@ -480,7 +480,7 @@ impl FeatureExtractor {
         }
 
         // Apply StandardScaler normalization if loaded
-        if let Some(scaler) = &self.scaler {
+        if let Some(_scaler) = &self.scaler {
             // We need to async-lock the scaler, but this function is sync.
             // The scaler params are only updated during load, so we can clone.
             // For now, we'll normalize in the async wrapper method.

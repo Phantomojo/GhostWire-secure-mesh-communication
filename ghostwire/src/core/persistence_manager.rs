@@ -144,6 +144,13 @@ impl PersistenceManager {
         self.db.flush()?;
         Ok(())
     }
+
+    pub fn clear_tree(&self, tree_name: &str) -> Result<()> {
+        let tree = self.get_tree(tree_name)?;
+        tree.clear()?;
+        self.db.flush()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

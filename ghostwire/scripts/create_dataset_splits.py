@@ -9,8 +9,10 @@ import random
 from pathlib import Path
 
 # Paths
-INPUT_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/ghostwire_mesh_100k.json")
-OUTPUT_DIR = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/splits")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+INPUT_PATH = REPO_DIR / "data/ghostwire_mesh_100k.json"
+OUTPUT_DIR = REPO_DIR / "data/splits"
 
 print("=" * 70)
 print("GHOSTWIRE DATASET - TRAIN/VAL/TEST SPLITS")

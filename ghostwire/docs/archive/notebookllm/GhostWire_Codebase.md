@@ -5856,15 +5856,15 @@ pub async fn report_error(Json(req): Json<ErrorReportRequest>) -> impl IntoRespo
 
     // Send email notification
     // let email = Message::builder()
-    //     .from("GhostWire Error Reporter <mirungu015@gmail.com>".parse().unwrap())
-    //     .to("mirungu015@gmail.com".parse().unwrap())
+    //     .from("GhostWire Error Reporter <errors@ghostwire.cc>".parse().unwrap())
+    //     .to("admin@ghostwire.cc".parse().unwrap())
     //     .subject("GhostWire Remote Error Report")
     //     .body(format!("A remote GhostWire node reported an error:\n\n{}", req.error))
     //     .unwrap();
 
     // let creds = Credentials::new(
-    //     "mirungu015@gmail.com".to_string(),
-    //     "ejag znfl zlfn wgge".to_string(),
+    //     "errors@ghostwire.cc".to_string(),
+    //     "[REDACTED]".to_string(),
     // );
 
     // let mailer = SmtpTransport::relay("smtp.gmail.com")

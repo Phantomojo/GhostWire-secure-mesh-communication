@@ -105,7 +105,7 @@ GhostWire-secure-mesh-communication/
 ### **For Commercial Users:**
 1. Read [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md)
 2. Review [`LICENSE_EXPLANATION.md`](LICENSE_EXPLANATION.md)
-3. Contact: mirungu015@proton.me
+3. Contact: licensing@ghostwire.cc
 
 ---
 

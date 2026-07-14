@@ -10,7 +10,7 @@
 
 We take the security of GhostWire seriously. If you believe you have found a security vulnerability, please report it responsibly:
 
-1. **Email**: mirungu015@proton.me
+1. **Email**: security@ghostwire.cc
 2. **PGP Key**: Request via email
 3. **Response time**: Within 48 hours
 

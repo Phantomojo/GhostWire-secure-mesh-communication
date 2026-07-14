@@ -5,11 +5,10 @@ use crate::controllers::{
 };
 use crate::core::Core;
 use axum::body::Body;
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+
 use axum::http::{header, HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::{
     extract::ConnectInfo,
-    extract::State,
     middleware,
     response::IntoResponse,
     response::Response,
@@ -183,13 +182,11 @@ pub async fn auth_middleware(
     // Public endpoints (no auth required)
     if path == "/api/dev/token"
         || path == "/api/auth/login"
-        || path == "/api/status"
         || path.starts_with("/api/v2/health")
         || path.starts_with("/api/v2/ready")
         || path.starts_with("/api/v2/live")
         || path.starts_with("/api/profile")
         || path.starts_with("/api/identity")
-        || path.starts_with("/api/v2/profile")
         || path.starts_with("/api/ble")
     // BLE transport endpoints
     {
@@ -206,8 +203,9 @@ pub async fn auth_middleware(
         .get(header::AUTHORIZATION)
         .and_then(|val| val.to_str().ok());
 
+    use subtle::ConstantTimeEq;
     let authenticated = if let Some(token) = token_header {
-        token == *AUTH_TOKEN
+        token.as_bytes().ct_eq(AUTH_TOKEN.as_bytes()).into()
     } else if let Some(auth_val) = auth_header {
         if auth_val.starts_with("Bearer ") {
             let jwt = &auth_val[7..];

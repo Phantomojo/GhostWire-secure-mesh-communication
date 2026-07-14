@@ -12,8 +12,10 @@ from tqdm import tqdm
 import random
 
 # Paths
-INPUT_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/real/besra_wsn_dataset.csv")
-OUTPUT_PATH = Path("/home/ph/GhostWire-secure-mesh-communication/ghostwire/data/ghostwire_mesh_real_wsn.json")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent  # ghostwire/
+INPUT_PATH = REPO_DIR / "data" / "real" / "besra_wsn_dataset.csv"
+OUTPUT_PATH = REPO_DIR / "data" / "ghostwire_mesh_real_wsn.json"
 
 print("=" * 70)
 print("TRANSFORMING REAL WSN DATASET (FAST)")

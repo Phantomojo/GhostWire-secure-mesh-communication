@@ -20,16 +20,13 @@ pub struct EncryptedIdentity {
 
 /// Derive key from password and salt using Argon2id
 pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32]> {
-    let argon2 = Argon2::default();
+    // ponytail: upgraded from Argon2::default() (19 MiB, 2 iter, 1 lane)
+    // to match EncryptedStore's strong params (64 MiB, 3 iter, 4 lanes)
+    let params = argon2::Params::new(65536, 3, 4, Some(32))
+        .map_err(|e| anyhow!("Argon2 params failed: {}", e))?;
+    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let mut key = [0u8; 32];
 
-    // Argon2 requires a salt string, but we have raw bytes.
-    // For compatibility with existing storage structures, we might need to handle this carefully.
-    // However, since we are upgrading, we will use the raw bytes as the salt input directly if possible,
-    // or encode them. Ideally, Argon2 takes a salt string.
-    // simpler approach: use the simple API or manually hash.
-
-    // We'll use the lower-level API to hash into a 32-byte key directly
     argon2
         .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|e| anyhow!("Argon2 key derivation failed: {}", e))?;

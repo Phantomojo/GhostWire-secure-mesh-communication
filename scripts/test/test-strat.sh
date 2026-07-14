@@ -44,8 +44,8 @@ except:
 
 echo ""
 echo "======================================="
-echo "To test connection to PC-A (omen):"
+echo "To test connection to Node A:"
 echo ""
 echo "curl -X POST http://localhost:8080/api/v2/peers/connect \\"
 echo "  -H 'Content-Type: application/json' \\"
-echo "  -d '{\"peer_id\": \"88ef8419-e3b2-4d27-90f7-9d22db444a6b\", \"address\": \"/ip4/100.88.234.14/tcp/4001\"}'"
+echo "  -d '{\"peer_id\": \"<NODE_A_PEER_ID>\", \"address\": \"/ip4/<NODE_A_IP>/tcp/4001\"}'"

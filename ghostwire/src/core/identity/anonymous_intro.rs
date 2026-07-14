@@ -23,7 +23,7 @@
 //!   key = BLAKE3_keyed(RENDEZVOUS_DOMAIN, pubkey || floor(unix_ts / 86400))
 
 use anyhow::Result;
-use rand_core::OsRng;
+
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
@@ -173,7 +173,7 @@ pub fn send_introduction(
     let packet_bytes = bincode::serialize(&sphinx_packet)
         .map_err(|e| anyhow::anyhow!("Packet serialise: {}", e))?;
 
-    Ok((packet_bytes, surb.first_hop))
+    Ok((packet_bytes, surb.first_hop.clone()))
 }
 
 /// Alice calls this when she receives an introduction through her SURB.
@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn ecies_roundtrip() {
         let mut secret_bytes = [0u8; 32];
-        rand_core::RngCore::fill_bytes(&mut OsRng, &mut secret_bytes);
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut secret_bytes);
         secret_bytes[0] &= 248;
         secret_bytes[31] &= 127;
         secret_bytes[31] |= 64;

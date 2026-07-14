@@ -71,7 +71,7 @@ pub struct GemmaClient {
     client: Client,
     base_url: String,
     model: String,
-    timeout: Duration,
+    _timeout: Duration,
     /// The inference backend being used (Ollama, LiteRT, or Local)
     backend: InferenceBackend,
     /// The Gemma 4 variant loaded
@@ -107,7 +107,7 @@ impl GemmaClient {
                 .expect("Failed to create HTTP client"),
             base_url: base_url.to_string(),
             model: model.to_string(),
-            timeout: Duration::from_secs(60),
+            _timeout: Duration::from_secs(60),
             backend,
             variant,
         }

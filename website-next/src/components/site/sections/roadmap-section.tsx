@@ -74,10 +74,12 @@ const COLUMNS: RoadmapColumn[] = [
     ],
     tag: "v1.0 plan",
     title: "Planned for v1.0 stable",
-    ctaPrimary: {
-      href: "https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/ghostwire/ROADMAP.md",
-      label: "Full ROADMAP.md",
-    },
+      ctaPrimary: {
+        href: "https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/ghostwire/ROADMAP.md",
+        label: "Full ROADMAP.md",
+        docPath: "ghostwire/ROADMAP.md",
+        docTitle: "Full Roadmap",
+      },
   },
 ];
 
