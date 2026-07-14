@@ -187,3 +187,9 @@ build_errors.txt
 *.rs.bak
 probe_sss.rs
 test_dalek.rs
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
