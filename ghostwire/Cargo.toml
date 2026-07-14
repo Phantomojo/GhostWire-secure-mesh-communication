@@ -25,7 +25,7 @@ libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 quinn = "0.11"
 quinn-proto = "0.11"
 rcgen = "0.13"
-reqwest = { version = ">=0.11.23, <0.12", default-features = false, features = ["json", "rustls-tls"] }  # CVE-2025-0805 fixed in 0.11.23
+reqwest = { version = ">=0.11.23, <0.13", default-features = false, features = ["json", "rustls-tls"] }  # CVE-2025-0805 fixed in 0.11.23
 governor = "0.10"
 tower_governor = { version = "0.8" }
 ring = { version = "0.17.12" }
