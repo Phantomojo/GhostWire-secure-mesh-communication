@@ -39,7 +39,6 @@ use ghostwire::core::updater;
 use ghostwire::core::Core;
 use ghostwire::daemon;
 
-/// Initialize logging with structured JSON output for production
 fn init_logging(filter: &str) {
     #[cfg(not(debug_assertions))]
     {
@@ -61,6 +60,28 @@ fn init_logging(filter: &str) {
             .with_thread_names(true)
             .with_env_filter(filter)
             .init();
+    }
+}
+
+async fn check_first_run(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/api/v2/identity", port);
+    match reqwest::get(&url).await {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                return true;
+            }
+            match resp.json::<serde_json::Value>().await {
+                Ok(val) => {
+                    let data = val.get("data").unwrap_or(&val);
+                    data.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|id| id.is_empty() || id == "unknown")
+                        .unwrap_or(true)
+                }
+                Err(_) => true,
+            }
+        }
+        Err(_) => true,
     }
 }
 
@@ -126,6 +147,10 @@ struct Args {
     /// Quiet output (warn level logging only)
     #[arg(long, short, global = true)]
     quiet: bool,
+
+    /// Skip first-run wizard
+    #[arg(long)]
+    quick: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -143,6 +168,7 @@ struct Args {
     daemon: bool,
     tailscale_bootstrap: Vec<String>,
     mesh_size: String,
+    quick: bool,
 }
 
 #[cfg(feature = "cli")]
@@ -220,6 +246,7 @@ async fn main() -> Result<()> {
         mesh_size: "small".to_string(),
         verbose: false,
         quiet: false,
+        quick: false,
     };
 
     let log_filter = if args.quiet {
@@ -312,7 +339,9 @@ async fn main() -> Result<()> {
                     }
                 }
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
-                ghostwire::tui::run_tui(port)
+
+                let is_first_run = !args.quick && check_first_run(port).await;
+                ghostwire::tui::run_tui(port, is_first_run)
                     .await
                     .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
                 return Ok(());

@@ -16,7 +16,6 @@
 [![First Ping](https://img.shields.io/badge/First%20Ping-2026--04--05T22%3A50%3A37.125669222Z-brightgreen?style=for-the-badge)](docs/FIRST_PING.md)
 [![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
 
-**GCD4F 2026 Submission** | [Learn More →](#-competition)
 
 </div>
 
@@ -231,21 +230,6 @@ graph TD;
 
 ---
 
-## 🏆 Competition
-
-### GCD4F 2026
-
-GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F) 2026**, organized by Beijing Normal University and UNESCO IITE.
-
-| Detail | Information |
-|--------|-------------|
-| **Track** | Higher Education — AI for Society |
-| **Team** | Team GhostWire |
-| **Institution** | Open University of Kenya |
-| **Theme** | AI for Society |
-| **SDG Alignment** | SDG 9 (Infrastructure), SDG 11 (Communities), SDG 17 (Partnerships) |
-| **Submission** | 2026 | Track: Higher Education — AI for Society |
-
 ---
 
 ## 🤝 Contributing
@@ -384,6 +368,5 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 **Licensed under** [AGPL-3.0-or-later](LICENSE) **or** [Commercial License](COMMERCIAL_LICENSE.md)
 
-**GCD4F 2026 Submission** — Global Competition on Design for Futures
 
 </div>

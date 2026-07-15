@@ -6,6 +6,7 @@
 
 use super::daemon_client::{DaemonClient, DaemonContact, DaemonMessage};
 use super::theme;
+use super::wizard::WizardState;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -28,12 +29,10 @@ use std::{io, time::Duration};
 /// Which screen/view is active
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
-    /// Main chat view (contacts sidebar + conversation + input)
     Chat,
-    /// Full contact list / address book
     Contacts,
-    /// Dashboard / node status
     Dashboard,
+    Wizard,
 }
 
 /// TUI application state
@@ -71,13 +70,20 @@ pub struct TuiApp {
     /// Encryption type
     encryption_type: String,
     ai_status: String,
+    wizard: Option<WizardState>,
+    start_in_wizard: bool,
 }
 
 impl TuiApp {
-    pub fn new(client: DaemonClient) -> Self {
+    pub fn new(client: DaemonClient, start_in_wizard: bool) -> Self {
+        let view = if start_in_wizard {
+            View::Wizard
+        } else {
+            View::Chat
+        };
         Self {
             client,
-            view: View::Chat,
+            view,
             selected_contact: None,
             contacts: Vec::new(),
             messages: Vec::new(),
@@ -93,25 +99,30 @@ impl TuiApp {
             network_mode: String::from("Mesh P2P"),
             encryption_type: String::from("XChaCha20-Poly1305"),
             ai_status: String::from("Checking..."),
+            wizard: if start_in_wizard {
+                Some(WizardState::new())
+            } else {
+                None
+            },
+            start_in_wizard,
         }
     }
 
     /// Run the TUI application
     pub async fn run(&mut self) -> io::Result<()> {
-        // Verify daemon is reachable
-        if !self.client.health_check().await {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!(
-                    "Cannot connect to GhostWire daemon on port {}.\n\
-                     Run 'ghostwire start' first, or check 'ghostwire status'.",
-                    self.client.port()
-                ),
-            ));
+        if !self.start_in_wizard {
+            if !self.client.health_check().await {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    format!(
+                        "Cannot connect to GhostWire daemon on port {}.\n\
+                         Run 'ghostwire start' first, or check 'ghostwire status'.",
+                        self.client.port()
+                    ),
+                ));
+            }
+            self.refresh_data().await;
         }
-
-        // Initial data load
-        self.refresh_data().await;
 
         // Setup terminal
         enable_raw_mode()?;
@@ -146,17 +157,20 @@ impl TuiApp {
                 break;
             }
 
-            // Refresh data every ~30 ticks (3 seconds at 100ms poll)
-            refresh_tick += 1;
-            if refresh_tick >= 30 {
-                refresh_tick = 0;
-                self.refresh_data().await;
+            if self.view == View::Wizard {
+                if let Some(ref mut wizard) = self.wizard {
+                    wizard.tick();
+                }
+            } else {
+                refresh_tick += 1;
+                if refresh_tick >= 30 {
+                    refresh_tick = 0;
+                    self.refresh_data().await;
+                }
             }
 
-            // Draw UI
             terminal.draw(|f| self.ui(f))?;
 
-            // Poll for events
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind != KeyEventKind::Press {
@@ -226,6 +240,16 @@ impl TuiApp {
     // ═══════════════════════════════════════════════════
 
     fn handle_key(&mut self, key: event::KeyEvent) {
+        if self.view == View::Wizard {
+            if let Some(ref mut wizard) = self.wizard {
+                wizard.handle_key(key);
+                if wizard.done {
+                    self.view = View::Chat;
+                    self.wizard = None;
+                }
+            }
+            return;
+        }
         if self.input_mode {
             self.handle_input_key(key);
         } else {
@@ -252,6 +276,7 @@ impl TuiApp {
                     View::Chat => View::Contacts,
                     View::Contacts => View::Dashboard,
                     View::Dashboard => View::Chat,
+                    View::Wizard => View::Chat,
                 };
             }
             KeyCode::Up => {
@@ -406,6 +431,11 @@ impl TuiApp {
             View::Chat => self.render_chat_view(f),
             View::Contacts => self.render_contacts_view(f),
             View::Dashboard => self.render_dashboard_view(f),
+            View::Wizard => {
+                if let Some(ref wizard) = self.wizard {
+                    wizard.render(f);
+                }
+            }
         }
     }
 
@@ -776,9 +806,8 @@ fn format_duration(secs: u64) -> String {
 // Public Entry Point
 // ═══════════════════════════════════════════════════════════
 
-/// Run the TUI, connecting to the daemon on the given port
-pub async fn run_tui(port: u16) -> io::Result<()> {
+pub async fn run_tui(port: u16, start_in_wizard: bool) -> io::Result<()> {
     let client = DaemonClient::new(port);
-    let mut app = TuiApp::new(client);
+    let mut app = TuiApp::new(client, start_in_wizard);
     app.run().await
 }

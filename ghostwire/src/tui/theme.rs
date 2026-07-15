@@ -69,7 +69,7 @@ pub fn offline_style() -> Style {
     Style::default().fg(OFFLINE)
 }
 
-#[allow(dead_code)] // ponytail: UI component, used in first_run.rs which is not yet wired
+#[allow(dead_code)] // ponytail: UI component, not yet wired
 pub fn error_style() -> Style {
     Style::default().fg(ERROR).add_modifier(Modifier::BOLD)
 }
@@ -133,7 +133,6 @@ pub fn logo_header() -> Line<'static> {
 ///
 ///   Infrastructure for Human Dignity
 /// ```
-#[allow(dead_code)] // ponytail: UI component for splash/welcome screen
 pub fn splash_logo_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(vec![

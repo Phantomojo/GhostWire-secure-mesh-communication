@@ -6,6 +6,7 @@ pub mod config;
 pub mod core;
 pub mod daemon;
 pub mod genesis_constants;
+pub mod startup;
 pub mod tui;
 #[cfg(feature = "web")]
 pub mod web;

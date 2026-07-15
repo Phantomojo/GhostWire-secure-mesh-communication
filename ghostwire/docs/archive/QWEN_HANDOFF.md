@@ -2,13 +2,13 @@
 
 **Generated:** 2026-04-03
 **Project:** GhostWire Secure Mesh Communication
-**Goal:** Improve AI routing model accuracy from 2.69% to 15-70%+ for GCD4F submission
+**Goal:** Improve AI routing model accuracy from 2.69% to 15-70%+
 
 ---
 
 ## 🎯 IMMEDIATE CONTEXT
 
-The user (Michael Irungu Muriithi / Phantomojo) is building GhostWire, a secure mesh communication system with AI-powered routing. The current routing model has **2.69% Top-1 accuracy** and needs to reach **15-70%+** for a competition submission (GCD4F).
+The user (Michael Irungu Muriithi / Phantomojo) is building GhostWire, a secure mesh communication system with AI-powered routing. The current routing model has **2.69% Top-1 accuracy** and needs to reach **15-70%+**.
 
 **CRITICAL:** The user demands QUALITY FIRST - no shortcuts, no fallbacks, no stubs. Debug until fixed. Report honestly what works vs what's broken.
 
@@ -225,7 +225,7 @@ struct RoutingFeatures {
 - The user is technically sophisticated - don't oversimplify
 - They have a 6+ hour hyperfocus work style
 - They prefer direct, honest communication about what works vs what's broken
-- They're working on a competition deadline (GCD4F)
+
 - The PRoPHET implementation in `epidemic.rs` is solid - don't break it
 - The ONNX inference engine in `onnx_inference.rs` is well-structured but needs the right model
 - Focus on getting the model interface right first, then worry about accuracy improvements

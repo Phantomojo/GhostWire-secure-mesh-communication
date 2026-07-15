@@ -59,7 +59,7 @@ Security layer: Isolation Forest anomaly detection → Gemma 4 threat analysis.
 - **Desktop:** Tauri framework
 - **Browser:** WebAssembly
 - **License:** AGPL-3.0-or-later
-- **Status:** Active development, GCD4F 2026 submission
+- **Status:** Active development
 
 ## Limitations (honest disclosure)
 

@@ -697,7 +697,7 @@ async fn handle_setup() -> Result<()> {
 async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
     info!("🖥️  Starting GhostWire TUI (node running in background)...");
     let port = core.config.server.port;
-    crate::tui::run_tui(port)
+    crate::tui::run_tui(port, false)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {}", e))
 }

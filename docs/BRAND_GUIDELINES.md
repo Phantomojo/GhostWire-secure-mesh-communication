@@ -96,7 +96,6 @@ This document defines the visual identity and brand guidelines for GhostWire. Us
 All visual assets are stored in:
 - `webui/public/` - Web and UI assets
 - `docs/assets/` - Documentation assets
-- `./` - GCD4F competition assets
 
 ### **Available Assets**
 
@@ -104,10 +103,6 @@ All visual assets are stored in:
 |-------|------|-------|
 | Logo (PNG) | `webui/public/ghostwire-logo.png` | General use |
 | Logo (SVG) | `docs/assets/ghostwire_logo_wordmark.svg` | Scalable graphics |
-| Presentation Template | `./presentation_title_slide.html` | GCD4F presentations |
-| Video Intro | `./video_intro_frame.html` | Video submissions |
-| Social Media | `./social_media_template.html` | Social posts |
-| Exhibition Poster | `./exhibition_poster_A1.html` | Print posters |
 
 ---
 
@@ -132,45 +127,6 @@ All visual assets are stored in:
 
 ---
 
-## 🏆 **Competition Branding (GCD4F 2026)**
-
-### **Team Name**
-
-**Team GhostWire**
-
-### **Tagline**
-
-"When Infrastructure Fails, Communities Connect"
-
-### **Competition Identity**
-
-```
-┌─────────────────────────────────────────┐
-│                                         │
-│    [GhostWire Logo]                     │
-│                                         │
-│    GhostWire                            │
-│    Resilient Mesh Communication         │
-│    for Connectivity-Constrained         │
-│    Communities                          │
-│                                         │
-│    GCD4F 2026 — AI for Society          │
-│    Team GhostWire                       │
-│    Open University of Kenya             │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-### **Social Media Hashtags**
-
-```
-#GCD4F2026 #GhostWire #MeshNetwork
-#AIforSociety #DigitalResilience #Kenya
-#OpenUniversityOfKenya
-```
-
----
-
 ## 📧 **Email Signature**
 
 ```
@@ -180,11 +136,10 @@ All visual assets are stored in:
 Open University of Kenya
 
 📧 [your email]
-🌐 gcd4fe.bnu.edu.cn
+🌐 ghostwire.cc
 🔗 github.com/Phantomojo/GhostWire-secure-mesh-communication
 
 [GhostWire Logo]
-GCD4F 2026 — AI for Society
 ─────────────────────────────────────────
 ```
 
@@ -218,7 +173,7 @@ Use `webui/public/ghostwire-logo.png` as favicon.
 │                                        │
 │    ───────────────────────────         │
 │                                        │
-│    GCD4F 2026 | Team GhostWire         │
+│    Team GhostWire                      │
 │    Open University of Kenya            │
 │                                        │
 └────────────────────────────────────────┘
@@ -259,11 +214,9 @@ Before publishing any materials:
 - [ ] Logo is from official source (`webui/public/ghostwire-logo.png`)
 - [ ] Colors match brand palette
 - [ ] Typography follows guidelines
-- [ ] Language is competition-appropriate
+- [ ] Language is professional and accessible
 - [ ] Team name is "Team GhostWire"
 - [ ] Institution is "Open University of Kenya"
-- [ ] Competition is "GCD4F 2026"
-- [ ] Theme is "AI for Society"
 
 ---
 
@@ -271,7 +224,6 @@ Before publishing any materials:
 
 Refer to:
 - `VISUAL_ASSETS_COMPLETE.md` - Complete asset guide
-- `./` - All competition assets
 
 ---
 
@@ -281,6 +233,6 @@ Refer to:
 
 *Built for connection. Designed for resilience.*
 
-**Team GhostWire | GCD4F 2026**
+**Team GhostWire | Open University of Kenya**
 
 </div>

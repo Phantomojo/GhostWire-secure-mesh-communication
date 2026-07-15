@@ -11,13 +11,14 @@
 //!
 //! Modules:
 //! - `theme` — color palette, styles, logo rendering, trust bars
-//! - `first_run` — guided setup wizard for new users
+//! - `wizard` — guided first-run setup wizard for new users
 //! - `daemon_client` — HTTP client that talks to the daemon API
 //! - `app` — main application state, event loop, screen rendering
 
 mod app;
 mod daemon_client;
-mod first_run;
 mod theme;
+mod wizard;
 
 pub use app::run_tui;
+pub use wizard::run_wizard;
