@@ -229,18 +229,9 @@ impl StealthTCPProvider {
         // Verify response (HMAC of challenge with secret)
         let expected_response = self.calculate_challenge_response(&challenge[..]);
 
-        Ok(self.constant_time_eq(&response, &expected_response))
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        let mut res = 0;
-        for (x, y) in a.iter().zip(b.iter()) {
-            res |= x ^ y;
-        }
-        res == 0
+        // SECURITY FIX: Use constant-time comparison to prevent timing attacks
+        use subtle::ConstantTimeEq;
+        Ok(response.ct_eq(&expected_response).into())
     }
 
     fn calculate_challenge_response(&self, challenge: &[u8]) -> [u8; 32] {
