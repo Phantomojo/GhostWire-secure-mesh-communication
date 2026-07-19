@@ -183,6 +183,8 @@ pub struct MeshTransport {
     username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
+    /// Step 4: Shared routes map for topology API
+    routes: Arc<RwLock<HashMap<String, Vec<String>>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
     mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
@@ -336,6 +338,8 @@ impl MeshTransport {
             username_discovery,
             event_bus,
             topology: Arc::new(RwLock::new(HashMap::new())),
+            // Step 4: Initialize routes shared between transport and driver
+            routes: Arc::new(RwLock::new(HashMap::new())),
             peer_count_cache: None,
             dtn_store: None,
             mailbox_store: None,
@@ -439,6 +443,8 @@ impl MeshTransport {
             core_messages: self._core_messages.clone(),
             seen_messages: VecDeque::new(),
             topology: self.topology.clone(),
+            // Step 2 & 4: Use shared routes from MeshTransport
+            routes: self.routes.clone(),
             peer_count_cache: self.peer_count_cache.clone(),
             dtn_store: self.dtn_store.clone(),
             mailbox_store: self.mailbox_store.clone(),
@@ -623,10 +629,12 @@ impl MeshTransport {
             .iter()
             .map(|(id, node)| (id.clone(), node.clone()))
             .collect();
+        
+        let routes = self.routes.read().await.clone();
 
         MeshTopology {
             nodes,
-            routes: HashMap::new(),
+            routes,
             local_node_id: self.node_id.clone(),
         }
     }
@@ -661,6 +669,9 @@ struct MeshDriver {
     core_messages: Arc<RwLock<Vec<Message>>>,
     seen_messages: VecDeque<Uuid>,
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
+    /// Step 2: Track peer connections for route computation
+    /// Routes map: source_peer_id -> [neighbor_peer_ids]
+    routes: Arc<RwLock<HashMap<String, Vec<String>>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
     mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
@@ -1249,6 +1260,41 @@ impl MeshDriver {
                 cache.store(count, std::sync::atomic::Ordering::Relaxed);
             }
 
+            // Step 3: Build bidirectional routes when peers connect
+            {
+                let mut routes = self.routes.write().await;
+                let local_id = self.local_peer_id.to_string();
+                let peer_id_str = peer_id.to_string();
+                
+                // Add peer to local's neighbors
+                routes
+                    .entry(local_id.clone())
+                    .or_insert_with(Vec::new);
+                if let Some(neighbors) = routes.get_mut(&local_id) {
+                    if !neighbors.contains(&peer_id_str) {
+                        neighbors.push(peer_id_str.clone());
+                    }
+                }
+                
+                // Add local to peer's neighbors
+                routes
+                    .entry(peer_id_str.clone())
+                    .or_insert_with(Vec::new);
+                if let Some(neighbors) = routes.get_mut(&peer_id_str) {
+                    if !neighbors.contains(&local_id) {
+                        neighbors.push(local_id);
+                    }
+                }
+                
+                tracing::info!(
+                    "Route updated: {} now has {} neighbors",
+                    self.local_peer_id,
+                    routes.get(&self.local_peer_id.to_string())
+                        .map(|n| n.len())
+                        .unwrap_or(0)
+                );
+            }
+
             if let Some(ref dtn_store) = self.dtn_store {
                 let peer_dest = *blake3::hash(peer_id.to_string().as_bytes()).as_bytes();
                 let bundles = dtn_store.bundles.read().await;
@@ -1342,6 +1388,29 @@ impl MeshDriver {
                     .filter(|n| n.is_online)
                     .count() as usize;
                 cache.store(count, std::sync::atomic::Ordering::Relaxed);
+            }
+
+            // Step 3: Remove peer from routes on disconnect
+            {
+                let mut routes = self.routes.write().await;
+                let local_id = self.local_peer_id.to_string();
+                let peer_id_str = peer_id.to_string();
+
+                // Remove peer from local's neighbors
+                if let Some(neighbors) = routes.get_mut(&local_id) {
+                    neighbors.retain(|n| n != &peer_id_str);
+                }
+
+                // Remove local from peer's neighbors
+                if let Some(neighbors) = routes.get_mut(&peer_id_str) {
+                    neighbors.retain(|n| n != &local_id);
+                }
+
+                tracing::info!(
+                    "Route updated: {} disconnected from {}",
+                    peer_id,
+                    local_id
+                );
             }
         }
 
@@ -1855,7 +1924,23 @@ impl MeshDriver {
                 key_type.clone(),
             );
             self.encryption_manager
-                .add_peer_key(msg.sender.clone(), pub_key_bytes, key_type);
+                .add_peer_key(msg.sender.clone(), pub_key_bytes.clone(), key_type);
+            
+            // Step 1: Update topology with peer's public key for Sphinx routing
+            {
+                let mut topo = self.topology.write().await;
+                if let Some(node) = topo.get_mut(&peer_id.to_string()) {
+                    if node.public_key.is_empty() && key_len >= 32 {
+                        node.public_key = pub_key_bytes.clone();
+                        tracing::info!(
+                            "Updated topology with peer {} public key ({} bytes)",
+                            peer_id,
+                            key_len
+                        );
+                    }
+                }
+            }
+
             tracing::info!(
                 "✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})",
                 peer_id,
@@ -2223,5 +2308,52 @@ mod tests {
             .unwrap()
             .get("connection_stats")
             .is_none());
+    }
+
+    #[test]
+    fn test_topology_public_key_storage() {
+        // Test that MeshNode can store public keys for Sphinx routing
+        let peer_id = PeerId::random();
+        let public_key = vec![0u8; 32]; // X25519 key is 32 bytes
+        
+        let node = MeshNode {
+            id: "peer-node".to_string(),
+            peer_id,
+            last_seen_addresses: Vec::new(),
+            username: String::new(),
+            public_key: public_key.clone(),
+            last_seen: 0,
+            connection_quality: 1.0,
+            is_online: true,
+            threat_level: ThreatLevel::Low,
+        };
+
+        assert_eq!(node.public_key.len(), 32);
+        assert!(node.is_online);
+    }
+
+    #[test]
+    fn test_topology_routes_structure() {
+        // Test that routes are properly structured
+        let mut routes = HashMap::new();
+        let local_peer = "local-peer-id".to_string();
+        let peer1 = "peer-1-id".to_string();
+        let peer2 = "peer-2-id".to_string();
+
+        // Local peer connected to peer1 and peer2
+        routes.insert(local_peer.clone(), vec![peer1.clone(), peer2.clone()]);
+        routes.insert(peer1.clone(), vec![local_peer.clone()]);
+        routes.insert(peer2.clone(), vec![local_peer.clone()]);
+
+        let topology = MeshTopology {
+            nodes: HashMap::new(),
+            routes,
+            local_node_id: local_peer,
+        };
+
+        // Verify routes are bidirectional
+        assert_eq!(topology.routes.len(), 3);
+        assert_eq!(topology.routes.get("local-peer-id").unwrap().len(), 2);
+        assert!(topology.routes.get("peer-1-id").unwrap().contains(&"local-peer-id".to_string()));
     }
 }
