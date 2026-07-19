@@ -79,3 +79,83 @@ pub const PROTOCOL_VERSION: &str = "1.0.0";
 
 /// User agent string for libp2p identification.
 pub const USER_AGENT: &str = "ghostwire/0.1.0";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_first_ping_constants() {
+        assert!(!FIRST_PING_TIMESTAMP.is_empty());
+        assert!(FIRST_PING_EPOCH > 0);
+        assert!(!FIRST_PING_MESSAGE.is_empty());
+        assert!(!FIRST_PING_SENDER.is_empty());
+        assert!(!FIRST_PING_RECIPIENT.is_empty());
+        assert!(!FIRST_PING_TOPIC.is_empty());
+        assert!(!FIRST_PING_MESSAGE_ID.is_empty());
+    }
+
+    #[test]
+    fn test_first_ping_message_content() {
+        // Verify the historical first ping message
+        assert_eq!(FIRST_PING_MESSAGE, "FINAL TEST - should work now!");
+    }
+
+    #[test]
+    fn test_protocol_constants() {
+        assert!(DEFAULT_MESH_PORT > 0);
+        assert!(DEFAULT_API_PORT > 0);
+        assert!(DEFAULT_WEB_PORT > 0);
+        assert_ne!(DEFAULT_MESH_PORT, DEFAULT_API_PORT);
+        assert_ne!(DEFAULT_API_PORT, DEFAULT_WEB_PORT);
+        assert_ne!(DEFAULT_MESH_PORT, DEFAULT_WEB_PORT);
+    }
+
+    #[test]
+    fn test_topics_are_valid_hashes() {
+        // Topics should be non-empty hex strings
+        assert_eq!(BROADCAST_TOPIC.len(), 32);
+        assert_eq!(DM_TOPIC.len(), 32);
+        assert_eq!(SPHINX_TOPIC.len(), 32);
+        assert_eq!(DTN_SYNC_TOPIC.len(), 32);
+    }
+
+    #[test]
+    fn test_max_message_hops() {
+        assert!(MAX_MESSAGE_HOPS > 0);
+        assert!(MAX_MESSAGE_HOPS <= 255); // u8 max
+    }
+
+    #[test]
+    fn test_max_message_size() {
+        assert!(MAX_MESSAGE_SIZE > 0);
+        assert!(MAX_MESSAGE_SIZE >= 1024); // At least 1KB
+        assert_eq!(MAX_MESSAGE_SIZE, 1_048_576); // Exactly 1 MB
+    }
+
+    #[test]
+    fn test_version_constants() {
+        assert!(!GHOSTWIRE_VERSION.is_empty());
+        assert!(!PROTOCOL_VERSION.is_empty());
+        assert!(!USER_AGENT.is_empty());
+    }
+
+    #[test]
+    fn test_user_agent_format() {
+        assert!(USER_AGENT.starts_with("ghostwire/"));
+    }
+
+    #[test]
+    fn test_first_ping_peer_ids_are_valid() {
+        // Peer IDs should be 52+ characters for libp2p
+        assert!(FIRST_PING_SENDER.starts_with("12D3Koo"));
+        assert!(FIRST_PING_RECIPIENT.starts_with("12D3Koo"));
+    }
+
+    #[test]
+    fn test_first_ping_timestamp_format() {
+        // ISO 8601 format with timezone
+        assert!(FIRST_PING_TIMESTAMP.contains("T"));
+        assert!(FIRST_PING_TIMESTAMP.contains("+00:00"));
+    }
+}

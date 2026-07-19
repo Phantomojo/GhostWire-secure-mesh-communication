@@ -176,3 +176,271 @@ impl DisasterPolicy {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_disaster_metrics_default() {
+        let metrics = DisasterMetrics::default();
+        assert_eq!(metrics.latency_ms, 0);
+        assert_eq!(metrics.packet_loss_ratio, 0.0);
+        assert_eq!(metrics.active_peers, 0);
+        assert!(metrics.is_internet_reachable);
+        assert!(metrics.last_update > 0);
+    }
+
+    #[test]
+    fn test_disaster_metrics_serialization() {
+        let metrics = DisasterMetrics {
+            latency_ms: 100,
+            packet_loss_ratio: 0.05,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 1234567890,
+        };
+        
+        let json = serde_json::to_string(&metrics).unwrap();
+        let deserialized: DisasterMetrics = serde_json::from_str(&json).unwrap();
+        
+        assert_eq!(deserialized.latency_ms, 100);
+        assert_eq!(deserialized.packet_loss_ratio, 0.05);
+        assert_eq!(deserialized.active_peers, 5);
+    }
+
+    #[test]
+    fn test_disaster_level_ordering() {
+        assert!(DisasterLevel::Normal < DisasterLevel::Congested);
+        assert!(DisasterLevel::Congested < DisasterLevel::Isolation);
+        assert!(DisasterLevel::Isolation < DisasterLevel::Blackout);
+        assert!(DisasterLevel::Blackout > DisasterLevel::Normal);
+    }
+
+    #[test]
+    fn test_disaster_level_equality() {
+        assert_eq!(DisasterLevel::Normal, DisasterLevel::Normal);
+        assert_eq!(DisasterLevel::Blackout, DisasterLevel::Blackout);
+        assert_ne!(DisasterLevel::Normal, DisasterLevel::Blackout);
+    }
+
+    #[test]
+    fn test_disaster_level_debug() {
+        let level = DisasterLevel::Congested;
+        assert_eq!(format!("{:?}", level), "Congested");
+    }
+
+    #[test]
+    fn test_transport_type_names() {
+        assert_eq!(TransportType::Mesh.name(), "mesh");
+        assert_eq!(TransportType::Quic.name(), "quic");
+        assert_eq!(TransportType::StealthTcp.name(), "stealth_tcp");
+        assert_eq!(TransportType::WiFi.name(), "wifi");
+        assert_eq!(TransportType::Bluetooth.name(), "bluetooth");
+        assert_eq!(TransportType::LoRa.name(), "lora");
+    }
+
+    #[test]
+    fn test_transport_type_equality() {
+        assert_eq!(TransportType::Mesh, TransportType::Mesh);
+        assert_eq!(TransportType::LoRa, TransportType::LoRa);
+        assert_ne!(TransportType::WiFi, TransportType::Bluetooth);
+    }
+
+    #[test]
+    fn test_transport_type_serialization() {
+        let tt = TransportType::StealthTcp;
+        let json = serde_json::to_string(&tt).unwrap();
+        let deserialized: TransportType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, TransportType::StealthTcp);
+    }
+
+    #[test]
+    fn test_disaster_manager_new() {
+        let manager = DisasterManager::new(200, 0.1, 3, 5);
+        // Manager should be in Normal state initially
+        assert_eq!(manager.evaluate(&DisasterMetrics::default()), DisasterLevel::Normal);
+    }
+
+    #[test]
+    fn test_disaster_manager_normal_conditions() {
+        let mut manager = DisasterManager::new(200, 0.1, 3, 3);
+        let metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&metrics), DisasterLevel::Normal);
+    }
+
+    #[test]
+    fn test_disaster_manager_high_latency() {
+        let mut manager = DisasterManager::new(100, 0.1, 3, 3);
+        let metrics = DisasterMetrics {
+            latency_ms: 200, // Above threshold
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&metrics), DisasterLevel::Congested);
+    }
+
+    #[test]
+    fn test_disaster_manager_high_packet_loss() {
+        let mut manager = DisasterManager::new(200, 0.05, 3, 3);
+        let metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.1, // Above threshold
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&metrics), DisasterLevel::Congested);
+    }
+
+    #[test]
+    fn test_disaster_manager_isolation() {
+        let mut manager = DisasterManager::new(200, 0.1, 3, 3);
+        let metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: false,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&metrics), DisasterLevel::Isolation);
+    }
+
+    #[test]
+    fn test_disaster_manager_blackout() {
+        let mut manager = DisasterManager::new(200, 0.1, 3, 3);
+        let metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.01,
+            active_peers: 1, // Below isolation threshold
+            is_internet_reachable: false,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&metrics), DisasterLevel::Blackout);
+    }
+
+    #[test]
+    fn test_disaster_manager_fast_escalation() {
+        // When things get worse, it should escalate immediately (no hysteresis)
+        let mut manager = DisasterManager::new(100, 0.1, 3, 5);
+        
+        // Start with normal
+        let normal_metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&normal_metrics), DisasterLevel::Normal);
+        
+        // Escalate immediately to congested
+        let congested_metrics = DisasterMetrics {
+            latency_ms: 200,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&congested_metrics), DisasterLevel::Congested);
+    }
+
+    #[test]
+    fn test_disaster_manager_hysteresis_recovery() {
+        // When things get better, it should wait for stability
+        let mut manager = DisasterManager::new(100, 0.1, 3, 3);
+        
+        // Start with congested
+        let congested_metrics = DisasterMetrics {
+            latency_ms: 200,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        assert_eq!(manager.evaluate(&congested_metrics), DisasterLevel::Congested);
+        
+        // First recovery check - should still be congested (waiting for stability)
+        let normal_metrics = DisasterMetrics {
+            latency_ms: 50,
+            packet_loss_ratio: 0.01,
+            active_peers: 5,
+            is_internet_reachable: true,
+            last_update: 0,
+        };
+        
+        // With required_stable_samples=3, should need multiple consecutive normal readings
+        let _ = manager.evaluate(&normal_metrics);
+        let _ = manager.evaluate(&normal_metrics);
+        assert_eq!(manager.evaluate(&normal_metrics), DisasterLevel::Normal);
+    }
+
+    #[test]
+    fn test_disaster_policy_default() {
+        let policy = DisasterPolicy::default();
+        
+        assert!(!policy.normal_priority.is_empty());
+        assert!(!policy.congested_priority.is_empty());
+        assert!(!policy.isolation_priority.is_empty());
+        assert!(!policy.blackout_priority.is_empty());
+    }
+
+    #[test]
+    fn test_disaster_policy_recommendations() {
+        let policy = DisasterPolicy::default();
+        
+        assert_eq!(
+            policy.get_recommended_transport(DisasterLevel::Normal),
+            Some(TransportType::Quic)
+        );
+        assert_eq!(
+            policy.get_recommended_transport(DisasterLevel::Congested),
+            Some(TransportType::Mesh)
+        );
+        assert_eq!(
+            policy.get_recommended_transport(DisasterLevel::Isolation),
+            Some(TransportType::WiFi)
+        );
+        assert_eq!(
+            policy.get_recommended_transport(DisasterLevel::Blackout),
+            Some(TransportType::LoRa)
+        );
+    }
+
+    #[test]
+    fn test_disaster_policy_priority_order() {
+        let policy = DisasterPolicy::default();
+        
+        // Normal: Quic > StealthTcp > Mesh
+        assert!(policy.normal_priority[0] == TransportType::Quic);
+        assert!(policy.normal_priority.len() >= 3);
+        
+        // Blackout fallback: LoRa only
+        assert_eq!(policy.blackout_priority.len(), 1);
+        assert_eq!(policy.blackout_priority[0], TransportType::LoRa);
+    }
+
+    #[test]
+    fn test_disaster_metrics_clone() {
+        let metrics = DisasterMetrics::default();
+        let cloned = metrics.clone();
+        assert_eq!(metrics.latency_ms, cloned.latency_ms);
+        assert_eq!(metrics.is_internet_reachable, cloned.is_internet_reachable);
+    }
+
+    #[test]
+    fn test_disaster_level_serialization() {
+        let level = DisasterLevel::Isolation;
+        let json = serde_json::to_string(&level).unwrap();
+        let deserialized: DisasterLevel = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, DisasterLevel::Isolation);
+    }
+}
