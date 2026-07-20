@@ -16,7 +16,7 @@ joblib>=1.5.3
 networkx>=3.6.1
 
 # Visualization
-matplotlib>=3.11.0
+matplotlib>=3.11.1
 seaborn>=0.13.2
 
 # Data processing
