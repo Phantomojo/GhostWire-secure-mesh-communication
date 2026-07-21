@@ -583,8 +583,21 @@ pub fn process_sphinx_packet(
     our_secret: &[u8; 32],
     config: &SphinxConfig,
 ) -> SphinxProcessResult {
+    // SECURITY: Reject low-order / small-subgroup points (confinement attack defense).
+    // These points on Curve25519 (Montgomery form) have order dividing 8.
+    // An attacker sending them can probe the relay's static private key over
+    // repeated packets via the DH output's torsion component.
+    if packet.alpha == [0u8; 32] || (packet.alpha[0] == 1 && packet.alpha[1..] == [0u8; 31]) {
+        return SphinxProcessResult::Invalid;
+    }
+
     // Step 1: Compute shared secret using raw ECDH (no clamping)
     let shared = ecdh_raw(our_secret, &packet.alpha);
+
+    // SECURITY: Reject zero shared secret (would produce degenerate derived keys)
+    if shared == [0u8; 32] {
+        return SphinxProcessResult::Invalid;
+    }
 
     let mut ikm = shared.to_vec();
     ikm.extend_from_slice(&packet.alpha);
@@ -692,7 +705,7 @@ pub fn create_surb<R: RngCore + CryptoRng>(
     let mut reply_key = [0u8; 32];
     rng.fill_bytes(&mut reply_key);
 
-    let dummy_payload = vec![0u8; SPHINX_PAYLOAD_SIZE];
+    let dummy_payload = b"surb-init".to_vec();
     let packet = create_sphinx_packet(
         reply_route_keys,
         reply_route_ids,
@@ -902,7 +915,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "SURB reply payload size issue — the dummy SURB packet has a 1024-byte payload, but use_surb expects the reply payload to fit within SPHINX_PAYLOAD_SIZE - 28 bytes. Needs investigation."]
     fn surb_reply_roundtrip() {
         let (s1, pk1, id1) = make_hop();
         let (s2, pk2, id2) = make_hop();
