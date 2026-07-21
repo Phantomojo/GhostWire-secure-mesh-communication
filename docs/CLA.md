@@ -1,149 +1,66 @@
-# ✍️ Contributor License Agreement (CLA)
+# GhostWire Individual Contributor License Agreement
 
-<div align="center">
+**Thank you for your interest in contributing to GhostWire.**
 
-**GhostWire Project**
+This Individual Contributor License Agreement ("Agreement") documents the rights granted by contributors to the project.
 
-*Version 1.0 - Draft (Coming Soon)*
+By signing this Agreement, you accept and agree to the following terms and conditions for your present and future contributions submitted to the GhostWire project. Except for the license granted herein to the GhostWire project and recipients of software distributed by the GhostWire project, you reserve all right, title, and interest in and to your contributions.
 
-</div>
+## 1. Definitions
 
----
+"You" (or "Your") shall mean the copyright owner or individual authorized by the copyright owner who is making this Agreement with the GhostWire project.
 
-## ⚠️ Notice
+"Contribution" shall mean any original work of authorship, including any modifications or additions to an existing work, that is intentionally submitted by You to the GhostWire project for inclusion in, or documentation of, any of the products owned or managed by the GhostWire project (the "Work"). For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the GhostWire project or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the GhostWire project for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by You as "Not a Contribution."
 
-**This CLA is currently a draft and will be implemented soon.**
+## 2. Grant of Copyright License
 
-Until the formal CLA system is in place, by contributing to the GhostWire project you agree to the terms outlined below.
+Subject to the terms and conditions of this Agreement, You hereby grant to the GhostWire project and to recipients of software distributed by the GhostWire project a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare derivative works of, publicly display, publicly perform, sublicense, and distribute Your Contributions and such derivative works in Source and Object form.
 
----
+## 3. Grant of Patent License
 
-## 📋 Individual Contributor License Agreement
+Subject to the terms and conditions of this Agreement, You hereby grant to the GhostWire project and to recipients of software distributed by the GhostWire project a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by You that are necessarily infringed by Your Contribution(s) alone or by combination of Your Contribution(s) with the Work to which such Contribution(s) was submitted.
 
-### **1. Definitions**
+## 4. Representations
 
-- **"You"** or **"Contributor"** means the individual who submits a contribution
-- **"GhostWire"** means the GhostWire project and its successors
-- **"Contribution"** means any original work submitted to GhostWire
-- **"Project"** means the GhostWire software and documentation
+You represent that:
 
-### **2. License Grant**
+(a) You are legally entitled to grant the above license. If your employer(s) has rights to intellectual property that you create that includes your Contributions, you represent that you have received permission to make Contributions on behalf of that employer, that your employer has waived such rights for your Contributions to the GhostWire project, or that your employer has executed a separate Corporate Contributor License Agreement with the GhostWire project.
 
-You grant to GhostWire a perpetual, worldwide, non-exclusive, royalty-free license to:
+(b) Each of Your Contributions is Your original creation. You represent that Your Contribution submissions include complete details of any third-party license or other restriction (including, but not limited to, related patents and trademarks) of which you are personally aware and which are associated with any part of Your Contributions.
 
-- **Use** your Contribution in the GhostWire project
-- **Modify** your Contribution as needed
-- **Distribute** your Contribution under GhostWire's dual licensing model:
-  - AGPL-3.0-or-later license
-  - Commercial license (for proprietary deployments)
-- **Sublicense** your Contribution as part of GhostWire
+## 5. Support; Warranty Disclaimer
 
-### **3. Representations and Warranties**
+You are not expected to provide support for Your Contributions, except to the extent You desire to provide support. You may provide support for free, for a fee, or not at all. Unless required by applicable law or agreed to in writing, **You provide Your Contributions on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND**, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE.
 
-You represent and warrant that:
+## 6. Notification
 
-- **Original Work**: Your Contribution is your original creation
-- **Authority**: You have the legal right to grant this license
-- **No Conflicts**: Your Contribution doesn't violate any third-party rights
-- **Disclosure**: You've disclosed any known third-party components
-- **No Restrictions**: Your Contribution doesn't include incompatible licenses (e.g., Commons Clause, GPL-2.0-only)
+You agree to notify the GhostWire project of any facts or circumstances of which you become aware that would make these representations inaccurate in any respect.
 
-### **4. Patent License**
+## 7. Dual-Licensing Authorization
 
-You grant a patent license to GhostWire for any patents that you own that would be infringed by your Contribution.
+You acknowledge that the GhostWire project operates under a dual-licensing model. By submitting a Contribution, you authorize the GhostWire project to distribute your Contribution under:
 
-### **5. Moral Rights**
+- **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** for the open-source version
+- **Commercial/proprietary license terms** for paid commercial distributions
 
-To the extent permitted by law, you waive your moral rights in your Contribution.
+This dual-licensing authorization is essential to the project's sustainability model and is a condition of contribution.
 
-### **6. No Compensation**
+## 8. AI Training Restrictions
 
-You acknowledge that you will not receive compensation for your Contribution.
+You acknowledge and agree that your Contributions shall not be used for training, fine-tuning, or otherwise developing machine learning models, large language models, or artificial intelligence systems without prior written permission from the copyright holder. Automated data extraction for AI training purposes is expressly prohibited.
 
-### **7. No Obligation**
+## Signature
 
-GhostWire is not obligated to use your Contribution.
+Please sign below, providing your full legal name and email address.
+
+**Name:** ____________________________
+
+**Email:** ____________________________
+
+**Date:** ____________________________
+
+**Signature:** ____________________________
 
 ---
 
-## 🏢 Corporate Contributor License Agreement
-
-If you're contributing on behalf of your employer, your employer must sign the Corporate CLA.
-
-### **Corporate CLA Terms**
-
-Same as Individual CLA, but:
-
-- **Contributor** is the corporation
-- **Signed by** an authorized representative
-- **Covers** all employees who contribute
-
-**Contact**: legal@ghostwire.cc for Corporate CLA
-
----
-
-## 📝 How to Sign (Coming Soon)
-
-### **Individual Contributors**
-
-1. **First Contribution**: You'll be prompted to sign the CLA
-2. **Method**: Electronic signature via GitHub bot
-3. **Storage**: CLA records maintained by project
-4. **One-time**: Sign once, covers all future contributions
-
-### **Corporate Contributors**
-
-1. **Contact**: legal@ghostwire.cc
-2. **Process**: Email signed PDF or use DocuSign
-3. **Coverage**: List authorized contributors
-4. **Updates**: Notify of changes to authorized list
-
----
-
-## ❓ Frequently Asked Questions
-
-### **Q: Why do I need to sign a CLA?**
-**A:** The CLA ensures we can dual-license GhostWire (AGPL + Commercial) and protects both you and the project.
-
-### **Q: Do I lose copyright?**
-**A:** No, you retain copyright to your contribution. You're granting us a license to use it.
-
-### **Q: Can I use my contributions in my own projects?**
-**A:** Yes! You can use your contributions however you want.
-
-### **Q: What if I contribute something I don't own?**
-**A:** Don't! Only contribute original work or work you have rights to license.
-
-### **Q: Can I revoke my contribution?**
-**A:** Once submitted under CLA, the license is irrevocable. Think before you contribute.
-
-### **Q: I'm contributing as part of my job. Do I need corporate CLA?**
-**A:** If your employer owns your work, yes. Contact legal@ghostwire.cc.
-
----
-
-## 📞 Contact
-
-**Questions about the CLA?**
-
-- **Email**: legal@ghostwire.cc
-- **GitHub Issue**: Create a "CLA Question" issue
-- **Documentation**: See [LICENSE_EXPLANATION.md](../LICENSE_EXPLANATION.md)
-
----
-
-## 📄 Full CLA Document
-
-The complete CLA document with all legal terms will be provided when the CLA system is activated.
-
-This summary is for informational purposes only. The actual CLA will contain full legal terms and should be reviewed carefully.
-
----
-
-<div align="center">
-
-**Thank you for contributing to GhostWire!**
-
-*Last updated: March 2026 (Draft)*
-
-</div>
+*This Agreement is adapted from the Apache Individual Contributor License Agreement v2.2 with modifications for AGPL-3.0+ dual licensing.*

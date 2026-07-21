@@ -1,3 +1,25 @@
+<!--
+  Copyright 2025-2026 Michael Irungu and GhostWire Contributors
+  SPDX-License-Identifier: Apache-2.0
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  AI Training Restriction: This specification may not be used for training,
+  fine-tuning, or otherwise developing machine learning models, large language
+  models, or artificial intelligence systems without prior written permission
+  from the copyright holder.
+-->
+
 # Peer Discovery Specification
 
 **GIP:** Pending
@@ -253,3 +275,8 @@ See the following modules in the GhostWire reference implementation:
 | Device pairing | `src/core/discovery/pairing.rs` |
 | Identify protocol | `src/core/discovery/identify.rs` |
 | Rendezvous points | `src/core/discovery/rendezvous.rs` |
+---
+
+> **Lawful Use Only:** GhostWire is designed for lawful communication in connectivity-constrained environments. Users are responsible for complying with all applicable laws and regulations in their jurisdiction. The developers assume no liability for misuse of this software.
+
+---

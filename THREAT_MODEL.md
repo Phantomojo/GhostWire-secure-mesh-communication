@@ -1,5 +1,7 @@
 # GhostWire Threat Model
 
+> **⚠️ LAWFUL USE ONLY**: This document describes the security properties of GhostWire for legitimate, lawful use. Users must comply with all applicable laws.
+
 ## Scope
 
 This document covers the security properties of the GhostWire protocol and implementation, what is enforced receiver-side (fork-safe), known shared limitations, and open problems. It is maintained as part of the NLnet grant evidence trail.

@@ -25,6 +25,28 @@ This approach:
 
 ---
 
+## 🗺️ Three-Zone Licensing Model
+
+GhostWire uses a three-zone licensing approach to balance openness with sustainability:
+
+| Zone | Component | License | Purpose |
+|------|-----------|---------|---------|
+| **Core Application** | `ghostwire/` (Tauri desktop + backend) | AGPL-3.0-or-later / Commercial | Prevents proprietary SaaS forks |
+| **Protocol Specification** | `docs/spec/*.md` | Apache-2.0 | Maximum adoption, no patent traps |
+| **Library Crates** | `sphinx-rs`, `ghostwire-dtn`, `hlc-rs`, `trust-store` | MIT OR Apache-2.0 | Ecosystem adoption, reusability |
+
+### Why Different Licenses for Different Zones?
+
+- **Protocol spec (Apache-2.0)**: We want maximum adoption of the GhostWire protocol. Apache 2.0 provides an explicit patent grant, no copyleft restrictions, and is the industry standard for protocol specifications (used by OpenAPI, gRPC, etc.).
+- **Library crates (MIT/Apache-2.0)**: These are foundational building blocks. MIT/Apache-2.0 maximizes ecosystem adoption — other projects can use them without AGPL constraints.
+- **Core application (AGPL-3.0)**: The main application uses AGPL to prevent proprietary forks that don't contribute back, while the commercial license provides a revenue path.
+
+### No Legal Conflict
+
+Writing code that conforms to an Apache-2.0 specification is NOT creating a derivative work of the spec. The AGPL implementation and Apache-2.0 spec exist independently.
+
+---
+
 ## ⚠️ Why NOT Commons Clause?
 
 We researched adding a "Commons Clause" restriction but found:
@@ -252,18 +274,53 @@ curl -s https://github.com/Phantomojo/GhostWire-secure-mesh-communication | grep
 
 ---
 
+## 🤖 AI Training Restrictions
+
+GhostWire includes explicit AI training restrictions across all license zones:
+
+### What Is Prohibited
+
+- Training machine learning models on GhostWire code or specifications
+- Fine-tuning LLMs using GhostWire source code
+- Automated data extraction for AI training purposes
+- Using GhostWire documentation to train AI systems
+
+### What Is Allowed
+
+- Using AI coding assistants to help write GhostWire code (the assistant generates new code, not training on existing code)
+- Running GhostWire as part of an AI-powered application (as long as the application doesn't train on GhostWire internals)
+- Academic research that references GhostWire (citation, not scraping)
+
+### Why These Restrictions?
+
+1. **Sustainability**: AI companies benefit commercially from open-source code without contributing back
+2. **Fairness**: Contributors expect their work to benefit humans, not train competing AI systems
+3. **Control**: Maintains control over how GhostWire's protocol and code are used in AI contexts
+
+### Implementation
+
+- Added to all LICENSE files (Apache 2.0, MIT, AGPL)
+- Added to CLA (contributors must agree to these restrictions)
+- Added to all protocol specifications
+- Added to website and documentation
+
+---
+
 ## 🚀 Implementation Checklist
 
 - [x] Research licensing options and best practices
 - [x] Create LICENSE_EXPLANATION.md (this file)
-- [ ] Update root LICENSE file with dual licensing notice
-- [ ] Create COMMERCIAL_LICENSE.md
+- [x] Update root LICENSE file with dual licensing notice
+- [x] Create COMMERCIAL_LICENSE.md
 - [ ] Create CODE_OF_CONDUCT.md
 - [ ] Create SUPPORT.md
-- [ ] Update README.md with license clarity
-- [ ] Update CONTRIBUTING.md with CLA requirements
-- [ ] Update SECURITY.md with commercial contact
-- [ ] Create docs/CLA.md (Contributor License Agreement)
+- [x] Update README.md with license clarity
+- [x] Create docs/CLA.md (Contributor License Agreement)
+- [x] Create docs/CLA-CORPORATE.md (Corporate CLA)
+- [x] Add Apache-2.0 headers to protocol specifications
+- [x] Add LICENSE files to library crates
+- [x] Add "Lawful Use Only" notices across all docs and website
+- [x] Add AI training restrictions to all licenses
 - [ ] Create docs/TRADEMARK.md (Trademark Guidelines)
 - [ ] Make repository public via GitHub CLI
 - [ ] Configure GitHub repository settings

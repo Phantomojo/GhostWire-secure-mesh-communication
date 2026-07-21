@@ -8,6 +8,8 @@
 
 **An open protocol for resilient peer-to-peer communication.**
 
+> **⚠️ LAWFUL USE ONLY**: GhostWire is designed for privacy-respecting, legitimate communication. Users are solely responsible for compliance with all applicable local, national, and international laws. The developers assume no liability for misuse.
+
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](ghostwire/CHANGELOG.md)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
