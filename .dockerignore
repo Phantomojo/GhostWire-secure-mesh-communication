@@ -22,6 +22,9 @@ target/
 node_modules/
 build/
 
+# Cargo host config (mold linker, etc.)
+.cargo/
+
 # Logs
 *.log
 logs/

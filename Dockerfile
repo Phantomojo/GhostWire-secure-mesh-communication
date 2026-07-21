@@ -7,12 +7,22 @@
 ARG RUST_VERSION=1.88
 FROM rust:${RUST_VERSION}-bookworm AS builder
 
+# ort_sys downloads ONNX Runtime binaries built against glibc 2.38+.
+# Bookworm has 2.36 — install Trixie's libc6 to provide __isoc23_strtol etc.
+RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends -t trixie libc6 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Override host cargo config — mold linker doesn't exist in this container
+RUN mkdir -p /root/.cargo && printf '[build]\njobs = "n"\n\n[target.x86_64-unknown-linux-gnu]\nlinker = "cc"\n' > /root/.cargo/config.toml
 
 # Set working directory
 WORKDIR /app
@@ -50,9 +60,9 @@ RUN cargo build --release
 
 # =============================================================================
 # Stage 3: Runtime (Minimal)
-# Using Bookworm for newer GLIBC compatibility
+# Trixie provides glibc 2.40 — required by ONNX Runtime prebuilt binaries
 # =============================================================================
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 # Install ONLY runtime dependencies (minimal attack surface)
 # SECURITY FIX: Use wget instead of curl (smaller footprint, no shell needed)

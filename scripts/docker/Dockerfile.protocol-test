@@ -6,7 +6,8 @@
 # =============================================================================
 FROM rust:1.75-bookworm AS builder
 
-# Install build dependencies
+RUN mkdir -p /root/.cargo && printf '[build]\njobs = "n"\n\n[target.x86_64-unknown-linux-gnu]\nlinker = "cc"\n' > /root/.cargo/config.toml
+
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \

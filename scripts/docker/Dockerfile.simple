@@ -3,9 +3,10 @@
 
 FROM rust:latest as builder
 
+RUN mkdir -p /root/.cargo && printf '[build]\njobs = "n"\n\n[target.x86_64-unknown-linux-gnu]\nlinker = "cc"\n' > /root/.cargo/config.toml
+
 WORKDIR /app
 
-# Install dependencies (including dbus for libp2p-bluetooth)
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libdbus-1-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy Cargo files
