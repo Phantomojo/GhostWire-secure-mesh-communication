@@ -6,34 +6,31 @@
 
 ## ✅ CURRENT STATUS
 
-### PC-A (omen) - LOCAL
+### Node A - LOCAL
 ```
 ✅ Backend: RUNNING
-   Node ID: 88ef8419-e3b2-4d27-90f7-9d22db444a6b
-   Profile: PHANTOMOJO
    Port: 8080
    
 ✅ API Endpoints:
    /api/v2/profile ........... OK
-   /api/v2/peers ............. OK (5 peers discovered via mDNS)
+   /api/v2/peers ............. OK
    /api/v2/security/dashboard  OK
 
 ✅ Network:
-   Local IP: 192.168.100.7
-   Ping to stratsytem: OK
+   Local IP: <YOUR_LOCAL_IP>
 ```
 
-### PC-B (stratsytem) - REMOTE
+### Node B - REMOTE
 ```
 ⏳ Status: Needs manual verification
-   Expected Node ID: a19cc36b-59d3-4d02-aefa-d31930701243
+   Configure via: GHOSTWIRE_NODE_B_HOST environment variable
 ```
 
 ---
 
 ## 📋 TEST COMMANDS
 
-### **On PC-A (omen) - Run locally:**
+### **On Node A - Run locally:**
 
 ```bash
 # 1. Check backend status
@@ -46,11 +43,11 @@ curl -s "http://127.0.0.1:8080/api/v2/peers?page=1&per_page=20" | python3 -m jso
 curl -s http://127.0.0.1:8080/api/v2/system/mesh-health | python3 -m json.tool
 ```
 
-### **On PC-B (stratsytem) - SSH and run:**
+### **On Node B - SSH and run:**
 
 ```bash
-# SSH to stratsytem
-ssh root@<NODE_B_IP>
+# SSH to remote node
+ssh <USER>@<REMOTE_NODE_HOST>
 
 # Run these commands:
 cd ~/ghostwire-live-test
@@ -61,10 +58,11 @@ curl -s http://localhost:8080/api/v2/profile | python3 -m json.tool | head -10
 # 2. Check peers
 curl -s "http://localhost:8080/api/v2/peers?page=1&per_page=20" | python3 -m json.tool | head -20
 
-# 3. Connect to PC-A manually
+# 3. Connect to Node A manually
+# Replace <NODE_A_PEER_ID> and <NODE_A_IP> with actual values
 curl -X POST http://localhost:8080/api/v2/peers/connect \
   -H "Content-Type: application/json" \
-  -d '{"peer_id": "88ef8419-e3b2-4d27-90f7-9d22db444a6b", "address": "/ip4/<NODE_B_IP>/tcp/4001"}'
+  -d '{"peer_id": "<NODE_A_PEER_ID>", "address": "/ip4/<NODE_A_IP>/tcp/4001"}'
 
 # 4. Verify connection
 curl -s "http://localhost:8080/api/v2/peers?page=1&per_page=20" | python3 -c "
@@ -100,11 +98,11 @@ for p in d['data'][:5]:
 
 ## 🔍 DEBUGGING
 
-### **If stratsytem backend not running:**
+### **If remote backend not running:**
 
 ```bash
-# SSH to stratsytem
-ssh root@<NODE_B_IP>
+# SSH to remote node
+ssh <USER>@<REMOTE_NODE_HOST>
 
 # Start backend
 cd ~/ghostwire-live-test
@@ -158,28 +156,34 @@ Backend communication is working if:
 
 **Run these in order:**
 
-1. **PC-A:** Check status
+1. **Node A:** Check status
    ```bash
    curl -s http://127.0.0.1:8080/api/v2/profile | python3 -c "import sys,json; print('Node:', json.load(sys.stdin)['data']['id'][:20])"
    ```
 
-2. **PC-B:** Check status (via SSH)
+2. **Node B:** Check status (via SSH)
    ```bash
-   ssh root@<NODE_B_IP> "curl -s http://localhost:8080/api/v2/profile | python3 -c 'import sys,json; print(\"Node:\", json.load(sys.stdin)[\"data\"][\"id\"][:20])'"
+   # Set environment variable first:
+   export GHOSTWIRE_NODE_B_HOST=<your-remote-host>
+   export GHOSTWIRE_NODE_B_USER=<your-ssh-user>
+   
+   # Then run:
+   curl -s http://localhost:8080/api/v2/profile | python3 -c "import sys,json; print('Node:', json.load(sys.stdin)['data']['id'][:20])"
    ```
 
-3. **PC-B:** Connect to PC-A
+3. **Node B:** Connect to Node A
    ```bash
-   ssh root@<NODE_B_IP> "curl -X POST http://localhost:8080/api/v2/peers/connect -H 'Content-Type: application/json' -d '{\"peer_id\": \"88ef8419-e3b2-4d27-90f7-9d22db444a6b\", \"address\": \"/ip4/192.168.100.7/tcp/4001\"}'"
+   # Replace <NODE_A_PEER_ID> and <NODE_A_IP> with actual values
+   curl -X POST http://localhost:8080/api/v2/peers/connect -H 'Content-Type: application/json' -d '{"peer_id": "<NODE_A_PEER_ID>", "address": "/ip4/<NODE_A_IP>/tcp/4001"}'
    ```
 
 4. **Both:** Check peer count
    ```bash
-   # PC-A
-   curl -s "http://127.0.0.1:8080/api/v2/peers?page=1&per_page=20" | python3 -c "import sys,json; print('PC-A Peers:', len(json.load(sys.stdin)['data']))"
+   # Node A
+   curl -s "http://127.0.0.1:8080/api/v2/peers?page=1&per_page=20" | python3 -c "import sys,json; print('Node A Peers:', len(json.load(sys.stdin)['data']))"
    
-   # PC-B
-   ssh root@<NODE_B_IP> "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20' | python3 -c 'import sys,json; print(\"PC-B Peers:\", len(json.load(sys.stdin)[\"data\"]))'"
+   # Node B
+   curl -s "http://localhost:8080/api/v2/peers?page=1&per_page=20" | python3 -c "import sys,json; print('Node B Peers:', len(json.load(sys.stdin)['data']))"
    ```
 
 ---

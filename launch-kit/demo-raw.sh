@@ -16,9 +16,15 @@ WHITE='\033[1;37m'
 DIM='\033[0;90m'
 NC='\033[0m'
 
-TOKEN="eOAL2kTExt70taE71HmYh1wWZ5eD8T3W"
-API_A="http://127.0.0.1:9000"
-API_B="http://127.0.0.1:9001"
+# Token should be set via environment variable
+TOKEN="${GHOSTWIRE_TOKEN:-}"
+if [ -z "$TOKEN" ]; then
+    echo -e "${RED}Error: GHOSTWIRE_TOKEN environment variable not set${NC}"
+    echo "Please set your auth token: export GHOSTWIRE_TOKEN=<your-token>"
+    exit 1
+fi
+API_A="${GHOSTWIRE_API_A:-http://127.0.0.1:9000}"
+API_B="${GHOSTWIRE_API_B:-http://127.0.0.1:9001}"
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
@@ -28,7 +34,15 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # Get PeerIds
-NODE_B=$(ssh ph@stratsytem "sudo grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
+# Node B peer ID should be configured via environment or local file
+NODE_B_FILE="/tmp/node-b-peer-id.txt"
+if [ -f "$NODE_B_FILE" ]; then
+    NODE_B=$(cat "$NODE_B_FILE" 2>/dev/null)
+else
+    echo -e "${YELLOW}Warning: Node B peer ID not found at $NODE_B_FILE${NC}"
+    echo "Set NODE_B environment variable or create $NODE_B_FILE with the peer ID"
+    NODE_B=""
+fi
 
 if [ -z "$NODE_B" ]; then
     echo -e "${RED}❌ Node B not running${NC}"
@@ -123,7 +137,13 @@ echo ""
 sleep 2
 
 # Check Node B logs
-B_LOGS=$(ssh ph@stratsytem "sudo tail -20 /tmp/node-b.log 2>/dev/null" | grep -i "encrypt\|decrypt\|direct\|message\|Received\|Processed" | tail -5)
+NODE_B_LOG="${GHOSTWIRE_NODE_B_LOG:-/tmp/node-b.log}"
+if [ -f "$NODE_B_LOG" ]; then
+    B_LOGS=$(tail -20 "$NODE_B_LOG" 2>/dev/null | grep -i "encrypt\|decrypt\|direct\|message\|Received\|Processed" | tail -5)
+else
+    echo -e "${YELLOW}Warning: Node B log not found at $NODE_B_LOG${NC}"
+    B_LOGS=""
+fi
 if [ -n "$B_LOGS" ]; then
     echo -e "  ${DIM}Node B reception log:${NC}"
     echo "$B_LOGS" | while IFS= read -r line; do
@@ -140,8 +160,12 @@ fi
 echo ""
 
 # Show the received message
-TOKEN_B=$(ssh ph@stratsytem "sudo cat /root/.config/ghostwire/token" 2>/dev/null)
-B_MSG=$(ssh ph@stratsytem "sudo curl -s $API_B/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
+TOKEN_B="${GHOSTWIRE_TOKEN_B:-}"
+if [ -z "$TOKEN_B" ]; then
+    echo -e "${YELLOW}Warning: GHOSTWIRE_TOKEN_B not set, cannot retrieve messages from Node B${NC}"
+    exit 0
+fi
+B_MSG=$(curl -s "$API_B/api/v2/messages" -H "X-Ghost-Token: $TOKEN_B" 2>/dev/null)
 
 echo -e "  ${DIM}Message structure on Node B:${NC}"
 echo "$B_MSG" | python3 -c "

@@ -80,7 +80,14 @@ echo ""
 
 # Get PeerIds
 NODE_A=$(grep "local_peer_id" /tmp/node-a.log 2>/dev/null | tail -1 | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
-NODE_B=$(ssh ph@stratsytem "sudo grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
+# Node B peer ID should be configured via environment or local file
+NODE_B_FILE="/tmp/node-b-peer-id.txt"
+if [ -f "$NODE_B_FILE" ]; then
+    NODE_B=$(cat "$NODE_B_FILE" 2>/dev/null)
+else
+    echo -e "${YELLOW}Warning: Node B peer ID not found at $NODE_B_FILE${NC}"
+    echo "Set NODE_B environment variable or create $NODE_B_FILE with the peer ID"
+fi
 
 echo -e "  ${GREEN}Node A (omen):${NC}      ${YELLOW}${NODE_A:-not running}${NC}"
 echo -e "  ${GREEN}Node B (stratsytem):${NC} ${YELLOW}${NODE_B:-not running}${NC}"
@@ -104,7 +111,13 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Send a message and check hops
-TOKEN="eOAL2kTExt70taE71HmYh1wWZ5eD8T3W"
+# Token should be set via environment variable: export GHOSTWIRE_TOKEN=<your-token>
+TOKEN="${GHOSTWIRE_TOKEN:-}"
+if [ -z "$TOKEN" ]; then
+    echo -e "${RED}Error: GHOSTWIRE_TOKEN environment variable not set${NC}"
+    echo "Please set your auth token: export GHOSTWIRE_TOKEN=<your-token>"
+    exit 1
+fi
 MESSAGE="Multi-hop test message 🔄"
 
 echo -e "  ${DIM}Sending:${NC} $MESSAGE"
@@ -120,8 +133,14 @@ curl -s -X POST "http://127.0.0.1:9000/api/send" \
 sleep 3
 
 # Check received message hops
-TOKEN_B=$(ssh ph@stratsytem "sudo cat /root/.config/ghostwire/token" 2>/dev/null)
-B_MSG=$(ssh ph@stratsytem "sudo curl -s http://127.0.0.1:9001/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
+TOKEN_B="${GHOSTWIRE_TOKEN_B:-}"
+if [ -z "$TOKEN_B" ]; then
+    echo -e "${YELLOW}Warning: GHOSTWIRE_TOKEN_B not set, skipping Node B verification${NC}"
+    exit 0
+fi
+# Node B API URL should be configured via environment variable
+NODE_B_API="${GHOSTWIRE_NODE_B_API:-http://127.0.0.1:9001}"
+B_MSG=$(curl -s "$NODE_B_API/api/v2/messages" -H "X-Ghost-Token: $TOKEN_B" 2>/dev/null)
 
 echo -e "\n  ${DIM}Received on Node B:${NC}"
 echo "$B_MSG" | python3 -c "

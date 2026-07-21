@@ -1,5 +1,10 @@
 #!/bin/bash
 # GhostWire Backend Communication Debug Tool
+# 
+# Configure remote node via environment variables:
+#   NODE_B_HOST - hostname or IP of remote node (default: from /etc/hosts or Tailscale)
+#   NODE_B_USER - SSH username for remote node (default: current user)
+#   NODE_B_PORT - SSH port (default: 22)
 
 echo "🔧 GHOSTWIRE BACKEND COMMUNICATION TEST"
 echo "========================================"
@@ -10,6 +15,23 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Configuration for remote node (from environment or config)
+NODE_B_HOST="${GHOSTWIRE_NODE_B_HOST:-}"
+NODE_B_USER="${GHOSTWIRE_NODE_B_USER:-$USER}"
+NODE_B_PORT="${GHOSTWIRE_NODE_B_PORT:-22}"
+
+# SSH options (use identity file from SSH config)
+SSH_OPTS="-o StrictHostKeyChecking=ask -o ConnectTimeout=5 -o BatchMode=yes"
+
+# Function to run SSH command on Node B
+ssh_node_b() {
+    if [ -z "$NODE_B_HOST" ]; then
+        echo -e "${YELLOW}Warning: NODE_B_HOST not configured, skipping remote command${NC}"
+        return 1
+    fi
+    ssh $SSH_OPTS -p "$NODE_B_PORT" "${NODE_B_USER}@${NODE_B_HOST}" "$@"
+}
 
 # Test local backend
 test_local_backend() {
@@ -56,26 +78,32 @@ test_local_backend() {
     echo ""
 }
 
-# Test stratsytem backend via SSH
+# Test remote backend via SSH
 test_remote_backend() {
     echo -e "${YELLOW}Testing Remote Backend (Node B)...${NC}"
     
+    if [ -z "$NODE_B_HOST" ]; then
+        echo -e "${YELLOW}⚠${NC} NODE_B_HOST not configured - skipping remote tests"
+        echo "   Set GHOSTWIRE_NODE_B_HOST environment variable to test remote node"
+        return 0
+    fi
+    
     # Test SSH connectivity first
-    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "echo 'SSH OK'" >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} SSH connection to Node B"
+    if ssh_node_b "echo 'SSH OK'" >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} SSH connection to Node B (${NODE_B_HOST})"
     else
         echo -e "${RED}✗${NC} SSH connection FAILED"
-        echo "   Trying Tailscale IP..."
+        echo "   Check NODE_B_HOST, NODE_B_USER, and SSH configuration"
         return 1
     fi
     
     # Check if backend running
-    RUNNING=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
+    RUNNING=$(ssh_node_b "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
     if [ -n "$RUNNING" ]; then
         echo -e "${GREEN}✓${NC} Backend process running on Node B"
     else
         echo -e "${RED}✗${NC} Backend NOT running on Node B"
-        echo "   To start: ssh root@<NODE_B_IP> 'cd ~/ghostwire-live-test && ./ghostwire --port 8080 --mesh &'"
+        echo "   To start: ssh ${NODE_B_USER}@${NODE_B_HOST} 'cd ~/ghostwire-live-test && ./ghostwire --port 8080 --mesh &'"
         return 1
     fi
     
@@ -84,7 +112,7 @@ test_remote_backend() {
     echo "Testing Remote API Endpoints:"
     
     # Profile
-    PROFILE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
+    PROFILE=$(ssh_node_b "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
     if echo "$PROFILE" | grep -q '"id"'; then
         NODE_ID=$(echo "$PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/profile - Node ID: $NODE_ID"
@@ -93,7 +121,7 @@ test_remote_backend() {
     fi
     
     # Peers
-    PEERS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
+    PEERS=$(ssh_node_b "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
     if echo "$PEERS" | grep -q '"data"'; then
         PEER_COUNT=$(echo "$PEERS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']))" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/peers - Peer count: $PEER_COUNT"
@@ -108,16 +136,21 @@ test_remote_backend() {
 test_network() {
     echo -e "${YELLOW}Testing Network Connectivity...${NC}"
     
+    if [ -z "$NODE_B_HOST" ]; then
+        echo -e "${YELLOW}⚠${NC} NODE_B_HOST not configured - skipping network tests"
+        return 0
+    fi
+    
     # Ping Node B
-    if ping -c 2 <NODE_B_IP> >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} ICMP ping to Node B (<NODE_B_IP>)"
+    if ping -c 2 "$NODE_B_HOST" >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} ICMP ping to Node B (${NODE_B_HOST})"
     else
         echo -e "${YELLOW}!${NC} ICMP ping blocked (may be normal)"
     fi
     
     # Test HTTP connectivity via SSH tunnel
     echo -e "${YELLOW}Creating SSH tunnel for HTTP test...${NC}"
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -f -N -L 8082:localhost:8080 root@<NODE_B_IP> 2>/dev/null
+    ssh $SSH_OPTS -f -N -L 8082:localhost:8080 "${NODE_B_USER}@${NODE_B_HOST}" 2>/dev/null
     sleep 2
     
     if curl -s http://localhost:8082/api/v2/profile >/dev/null 2>&1; then
@@ -182,3 +215,7 @@ echo "To manually connect nodes:"
 echo "  curl -X POST http://127.0.0.1:8080/api/v2/peers/connect \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"peer_id\": \"<STRAT_NODE_ID>\", \"address\": \"/ip4/<NODE_B_IP>/tcp/4001\"}'"
+echo ""
+echo "Configure remote node:"
+echo "  export GHOSTWIRE_NODE_B_HOST=<node-b-ip-or-hostname>"
+echo "  export GHOSTWIRE_NODE_B_USER=<ssh-username>"
