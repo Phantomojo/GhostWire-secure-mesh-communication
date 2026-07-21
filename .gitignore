@@ -187,3 +187,18 @@ build_errors.txt
 *.rs.bak
 probe_sss.rs
 test_dalek.rs
+
+# Crate workspace lock files (each crate has its own)
+ghostwire-libs/Cargo.lock
+src-tauri/Cargo.lock
+
+# Build artifacts
+ghostwire/target/
+ghostwire-libs/target/
+
+# Bundle archives
+*.zip
+
+# Tool runtime dirs
+.opencode/
+.sisyphus/
