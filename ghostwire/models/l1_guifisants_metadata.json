@@ -1,0 +1,37 @@
+{
+  "dataset": "guifisants_real_mesh",
+  "source": "Guifi.net Guifisants node",
+  "samples": {
+    "train": 1600,
+    "val": 400,
+    "test": 400,
+    "total": 2400
+  },
+  "features": 2387,
+  "class_distribution": {
+    "train_negative": 1570,
+    "train_positive": 30,
+    "train_positive_pct": 1.875,
+    "test_negative": 390,
+    "test_positive": 10,
+    "test_positive_pct": 2.5
+  },
+  "metrics": {
+    "val_auc": 1.0,
+    "val_ap": 1.0,
+    "val_f1": 0.0,
+    "test_auc": 1.0,
+    "test_ap": 1.0,
+    "test_f1": 0.0,
+    "test_f1_optimal": 1.0,
+    "optimal_threshold": 0.015765106791539148
+  },
+  "training": {
+    "time_seconds": 0.9324634075164795,
+    "best_iteration": 7,
+    "scale_pos_weight": 52.333333333333336,
+    "inference_latency_us": 107.33929600974079
+  },
+  "model_type": "LightGBM binary classification",
+  "layer": "L1 - Anomaly detection / link quality"
+}
