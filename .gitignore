@@ -202,3 +202,12 @@ ghostwire-libs/target/
 # Tool runtime dirs
 .opencode/
 .sisyphus/
+
+# Large data and embedded repos
+datasets/
+esp-idf/
+esp32-firmware-*/
+graphify/
+website-backup-*/
+ghostwire-scan-reports/
+cross
