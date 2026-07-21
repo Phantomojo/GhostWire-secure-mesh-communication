@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostWire — Technical Architecture</title>
+<style>
+  @page { size: A4; margin: 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #070a0e;
+    color: #e0e0e0;
+    padding: 20px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 16px;
+    border-bottom: 2px solid #00DC9A;
+    padding-bottom: 12px;
+  }
+  .header h1 {
+    font-size: 22px;
+    color: #00DC9A;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .header .subtitle {
+    font-size: 12px;
+    color: #8a8a8a;
+    margin-top: 4px;
+  }
+  .tagline {
+    text-align: center;
+    font-size: 13px;
+    color: #00DC9A;
+    font-weight: 600;
+    margin-bottom: 16px;
+    font-style: italic;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .section {
+    background: #0d1117;
+    border: 1px solid #1a2332;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .section h3 {
+    font-size: 11px;
+    color: #00DC9A;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #1a2332;
+    padding-bottom: 4px;
+  }
+  .section ul {
+    list-style: none;
+    padding: 0;
+  }
+  .section li {
+    padding: 2px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section li::before {
+    content: "▸";
+    color: #00DC9A;
+    font-size: 10px;
+  }
+  .full-width {
+    grid-column: 1 / -1;
+  }
+  .crypto-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  .crypto-item {
+    background: #111820;
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+  }
+  .crypto-item .label {
+    font-size: 9px;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .crypto-item .value {
+    font-size: 11px;
+    color: #00DC9A;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .bridge-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .bridge-item {
+    background: #111820;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+  .bridge-item .name {
+    color: #00DC9A;
+    font-weight: 600;
+  }
+  .bridge-item .desc {
+    color: #8a8a8a;
+    font-size: 9px;
+  }
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .stat {
+    background: #0d1117;
+    border: 1px solid #1a2332;
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+  }
+  .stat .number {
+    font-size: 18px;
+    color: #00DC9A;
+    font-weight: 700;
+  }
+  .stat .label {
+    font-size: 8px;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .architecture-diagram {
+    background: #111820;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    line-height: 1.3;
+    color: #c0c0c0;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .footer {
+    text-align: center;
+    font-size: 9px;
+    color: #555;
+    margin-top: 12px;
+    border-top: 1px solid #1a2332;
+    padding-top: 8px;
+  }
+  .highlight { color: #00DC9A; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>GhostWire</h1>
+  <div class="subtitle">Resilient P2P Mesh Communication Protocol with Cross-Ecosystem Bridging</div>
+</div>
+
+<div class="tagline">"Infrastructure for Human Dignity — when the internet goes dark."</div>
+
+<div class="stats-row">
+  <div class="stat">
+    <div class="number">42K+</div>
+    <div class="label">Lines of Rust</div>
+  </div>
+  <div class="stat">
+    <div class="number">128</div>
+    <div class="label">Source Files</div>
+  </div>
+  <div class="stat">
+    <div class="number">6</div>
+    <div class="label">Transport Layers</div>
+  </div>
+  <div class="stat">
+    <div class="number">4</div>
+    <div class="label">Protocol Bridges</div>
+  </div>
+</div>
+
+<div class="architecture-diagram">
+┌─────────────────────────────────────────────────────────────────────┐
+│                        APPLICATION LAYER                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│  │ Messaging │ │ Election │ │ Emergency│ │   IoT    │ │  Custom  │ │
+│  │   Apps    │ │ Monitoring│ │Response │ │ Sensors  │ │   Apps   │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
+├─────────────────────────────────────────────────────────────────────┤
+│                       PROTOCOL LAYER (GhostWire)                   │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌──────────────────────┐  │
+│  │  Sphinx Onion   │ │  Delay-Tolerant │ │  AI-Assisted GNN    │  │
+│  │    Routing      │ │   Networking    │ │     Routing         │  │
+│  └─────────────────┘ └─────────────────┘ └──────────────────────┘  │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌──────────────────────┐  │
+│  │ Coercion Resist.│ │  Knowledge Ark  │ │  Presence Obfusc.   │  │
+│  │ (Duress/Panic)  │ │ (DTN Storage)   │ │ (Traffic Analysis)  │  │
+│  └─────────────────┘ └─────────────────┘ └──────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────┤
+│                     CRYPTOGRAPHY LAYER                             │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐               │
+│  │ ML-KEM-768   │ │ XChaCha20    │ │  Ed25519     │               │
+│  │ (Post-Quantum│ │ -Poly1305    │ │  (Signing)   │               │
+│  │  Key Exchange│ │ (Encryption) │ │              │               │
+│  └──────────────┘ └──────────────┘ └──────────────┘               │
+├─────────────────────────────────────────────────────────────────────┤
+│                  TRANSPORT LAYER (6 Transports)                    │
+│  ┌──────┐ ┌──────────┐ ┌─────┐ ┌────────┐ ┌──────┐ ┌──────────┐  │
+│  │ BLE  │ │WiFi Direct│ │LoRa │ │Stealth │ │WebRTC│ │Reticulum │  │
+│  │ Mesh │ │  (Local)  │ │(Long│ │  TCP   │ │(Inter│ │ (Adapter)│  │
+│  │      │ │           │ │Range│ │(obfs4) │ │ net) │ │          │  │
+│  └──────┘ └──────────┘ └─────┘ └────────┘ └──────┘ └──────────┘  │
+├─────────────────────────────────────────────────────────────────────┤
+│                  PROTOCOL BRIDGES (4 Bridges)                      │
+│  ┌────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐                  │
+│  │ Briar  │ │Meshtastic│ │ Matrix │ │Reticulum │                  │
+│  │ Bridge │ │ Adapter  │ │ Bridge │ │ Adapter  │                  │
+│  └────────┘ └──────────┘ └────────┘ └──────────┘                  │
+└─────────────────────────────────────────────────────────────────────┘</div>
+
+<div class="grid">
+  <div class="section">
+    <h3>Transport Layers</h3>
+    <ul>
+      <li><span class="highlight">BLE Mesh</span> — Proximity communication (10-30m)</li>
+      <li><span class="highlight">WiFi Direct</span> — High-bandwidth local (100m+)</li>
+      <li><span class="highlight">LoRa</span> — Long-range low-power (2-15km)</li>
+      <li><span class="highlight">Stealth TCP</span> — Censorship-resistant (obfs4)</li>
+      <li><span class="highlight">WebRTC</span> — Internet-connected P2P</li>
+      <li><span class="highlight">Reticulum</span> — Community mesh networks</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h3>Cryptography Stack</h3>
+    <div class="crypto-grid">
+      <div class="crypto-item">
+        <div class="label">Key Exchange</div>
+        <div class="value">ML-KEM-768</div>
+      </div>
+      <div class="crypto-item">
+        <div class="label">Encryption</div>
+        <div class="value">XChaCha20-Poly1305</div>
+      </div>
+      <div class="crypto-item">
+        <div class="label">Signing</div>
+        <div class="value">Ed25519</div>
+      </div>
+      <div class="crypto-item">
+        <div class="label">Onion Routing</div>
+        <div class="value">Sphinx</div>
+      </div>
+      <div class="crypto-item">
+        <div class="label">Key Derivation</div>
+        <div class="value">Argon2</div>
+      </div>
+      <div class="crypto-item">
+        <div class="label">Shamir Recovery</div>
+        <div class="value">Key Backup</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section full-width">
+    <h3>Protocol Bridges — Connecting Existing Ecosystems</h3>
+    <div class="bridge-grid">
+      <div class="bridge-item">
+        <div class="name">Briar Bridge</div>
+        <div class="desc">Cross-protocol messaging with Briar users (BLE/WiFi/Tor)</div>
+      </div>
+      <div class="bridge-item">
+        <div class="name">Meshtastic Adapter</div>
+        <div class="desc">LoRa hardware integration (Heltec, LilyGo, RAK)</div>
+      </div>
+      <div class="bridge-item">
+        <div class="name">Matrix Bridge</div>
+        <div class="desc">Federation with encrypted chat infrastructure</div>
+      </div>
+      <div class="bridge-item">
+        <div class="name">Reticulum Adapter</div>
+        <div class="desc">Community mesh network integration</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Security Features</h3>
+    <ul>
+      <li><span class="highlight">Duress PIN</span> — Decoy profiles under coercion</li>
+      <li><span class="highlight">Panic Wipe</span> — Instant data destruction</li>
+      <li><span class="highlight">Dead Man's Switch</span> — Auto data destruction</li>
+      <li><span class="highlight">Sphinx Routing</span> — Unlinkable messages</li>
+      <li><span class="highlight">Presence Obfuscation</span> — Traffic analysis resistance</li>
+      <li><span class="highlight">Post-Quantum</span> — Future-proof key exchange</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h3>Delay-Tolerant Networking</h3>
+    <ul>
+      <li><span class="highlight">Spray-and-Wait</span> — Intermittent connectivity</li>
+      <li><span class="highlight">Mailbox System</span> — Store-and-forward</li>
+      <li><span class="highlight">Knowledge Ark</span> — Distributed data storage</li>
+      <li><span class="highlight">Causal Ordering</span> — Message consistency</li>
+      <li><span class="highlight">Ghost Channels</span> — Anonymous broadcast</li>
+      <li><span class="highlight">Shamir Recovery</span> — Key backup/recovery</li>
+    </ul>
+  </div>
+</div>
+
+<div class="footer">
+  GhostWire — Open Source (AGPL-3.0) · github.com/Phantomojo/GhostWire-secure-mesh-communication · ghostwire.cc<br>
+  Built from Nairobi, Kenya · Global Competition on Design for Futures 2026 Participant · OTF Internet Freedom Fund Application
+</div>
+
+</body>
+</html>

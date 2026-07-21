@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Michael Irungu Muriithi — CV</title>
+<link href="Michael%20Irungu%20Muriithi%20%E2%80%94%20CV_files/css2.css" rel="stylesheet">
+<style>
+  :root {
+    --abyss: #010205;
+    --abyss-mid: #0a0d14;
+    --abyss-light: #12151f;
+    --gold: #DB9202;
+    --gold-dim: #a06c02;
+    --gold-faint: rgba(219,146,2,0.08);
+    --text: #e8e4d9;
+    --text-dim: #9a9688;
+    --text-faint: #5a5750;
+    --border: rgba(219,146,2,0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--abyss);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 48px 40px;
+  }
+
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 28px;
+    margin-bottom: 32px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: end;
+  }
+
+  .name-block h1 {
+    font-family: 'Cinzel', serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+
+  .name-block .alias {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--gold);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .name-block .title {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+  }
+
+  .contact-block {
+    text-align: right;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 2;
+  }
+
+  .contact-block a { color: var(--gold); text-decoration: none; }
+
+  .gold-rule {
+    width: 40px;
+    height: 2px;
+    background: var(--gold);
+    margin: 6px 0 12px 0;
+  }
+
+  .section { margin-bottom: 32px; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .section-header h2 {
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--gold);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .section-header::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .summary {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.8;
+    font-weight: 300;
+    border-left: 2px solid var(--gold);
+    padding-left: 16px;
+  }
+
+  .summary strong { color: var(--text); font-weight: 500; }
+
+  .entry {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(219,146,2,0.08);
+  }
+
+  .entry:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .entry-header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+
+  .entry-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  .entry-org {
+    font-size: 11px;
+    color: var(--gold);
+    font-weight: 400;
+    margin-bottom: 6px;
+  }
+
+  .entry-date {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+
+  .entry-desc { font-size: 12.5px; color: var(--text-dim); line-height: 1.7; }
+
+  .entry-desc li {
+    list-style: none;
+    padding-left: 14px;
+    position: relative;
+    margin-bottom: 3px;
+  }
+
+  .entry-desc li::before {
+    content: '◆';
+    position: absolute;
+    left: 0;
+    color: var(--gold-dim);
+    font-size: 7px;
+    top: 5px;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .tag {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--gold-dim);
+    background: var(--gold-faint);
+    border: 1px solid rgba(219,146,2,0.15);
+    padding: 2px 7px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .skills-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .skill-group h3 {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--gold);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .skill-group ul { list-style: none; }
+
+  .skill-group ul li {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(219,146,2,0.05);
+  }
+
+  .skill-group ul li span {
+    color: var(--text-faint);
+    font-size: 10px;
+    font-family: 'Space Mono', monospace;
+    float: right;
+  }
+
+  .ctf-entry {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    margin-bottom: 14px;
+    align-items: start;
+  }
+
+  .ctf-rank {
+    font-family: 'Cinzel', serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    line-height: 1;
+    min-width: 48px;
+    text-align: center;
+  }
+
+  .ctf-rank small {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    color: var(--text-faint);
+    font-weight: 400;
+    letter-spacing: 0.1em;
+    margin-top: 2px;
+  }
+
+  .ctf-detail h4 {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 3px;
+  }
+
+  .ctf-detail p { font-size: 11.5px; color: var(--text-dim); line-height: 1.6; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+
+  .edu-entry { margin-bottom: 12px; }
+
+  .edu-entry h3 {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .edu-entry p { font-size: 11.5px; color: var(--text-dim); }
+  .edu-entry .status { font-size: 10px; color: var(--gold-dim); font-family: 'Space Mono', monospace; }
+
+  .metrics-row {
+    display: flex;
+    gap: 24px;
+    margin: 10px 0 6px 0;
+    flex-wrap: wrap;
+  }
+
+  .metric {
+    text-align: center;
+  }
+
+  .metric .num {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: var(--gold);
+    font-weight: 700;
+    display: block;
+  }
+
+  .metric .label {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .footer {
+    margin-top: 36px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer p {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+  }
+
+  .footer .mark { font-family: 'Cinzel', serif; font-size: 10px; color: var(--gold); letter-spacing: 0.2em; }
+
+  @media print {
+    body {
+      background: #010205;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      padding: 32px;
+    }
+    .section { page-break-inside: avoid; }
+  }
+</style>
+<link type="text/css" rel="stylesheet" id="dark-mode-custom-link"><link type="text/css" rel="stylesheet" id="dark-mode-general-link"><style lang="en" type="text/css" id="dark-mode-custom-style"></style><style lang="en" type="text/css" id="dark-mode-native-style"></style><style lang="en" type="text/css" id="dark-mode-native-sheet"></style></head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="name-block">
+    <div class="alias">Phantomojo / ngairuru</div>
+    <h1>Michael Irungu Muriithi</h1>
+    <div class="gold-rule"></div>
+    <div class="title">Independent Researcher &nbsp;·&nbsp; Security Consultant &nbsp;·&nbsp; Systems Architect</div>
+  </div>
+  <div class="contact-block">
+    <div>Nairobi, Kenya — EAT UTC+3</div>
+    <div><a href="mailto:mirungu015@proton.me">mirungu015@proton.me</a></div>
+    <div><a href="https://github.com/phantomojo">github.com/phantomojo</a></div>
+    <div><a href="https://phantomojo.github.io/phantomojo">phantomojo.github.io</a></div>
+    <div><a href="https://linkedin.com/in/michaelimuriithi">linkedin.com/in/michaelimuriithi</a></div>
+  </div>
+</header>
+
+<!-- SUMMARY -->
+<section class="section">
+  <div class="section-header"><h2>Profile</h2></div>
+  <p class="summary">
+    Independent researcher and security consultant operating across <strong>distributed systems, post-quantum cryptography, machine learning, and full-stack engineering</strong>.
+ Sole architect of GhostWire — a P2P encrypted mesh platform built in 
+Rust over one year, combining ML-KEM-768, Double Ratchet, Sphinx onion 
+routing, and a 4-layer AI routing system. Author of four published Rust 
+crates. GCD4F 2026 competitor across five Kenyan universities. 
+Production deployments across restaurant tech, threat intelligence, 
+voice AI, and East African fintech infrastructure. Available for <strong>security consulting, architecture advisory, and systems research engagements</strong>. Treats security as a research discipline — not a checklist.
+  </p>
+</section>
+
+<!-- CORE EXPERIENCE -->
+<section class="section">
+  <div class="section-header"><h2>Research &amp; Consulting Experience</h2></div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Sole Architect — GhostWire</div>
+        <div class="entry-org">Self-Directed · Open Source · AGPL-3.0 · v0.2.0</div>
+      </div>
+      <div class="entry-date">2024 – Present</div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric"><span class="num">571K</span><span class="label">Lines Rust</span></div>
+      <div class="metric"><span class="num">304</span><span class="label">Source Files</span></div>
+      <div class="metric"><span class="num">178</span><span class="label">Tests</span></div>
+      <div class="metric"><span class="num">4</span><span class="label">Published Crates</span></div>
+      <div class="metric"><span class="num">5</span><span class="label">Universities · GCD4F</span></div>
+    </div>
+    <ul class="entry-desc">
+      <li>Designed and built a post-quantum P2P mesh communication 
+platform in Rust — sole architect across cryptographic, network, AI 
+routing, and application layers.</li>
+      <li>Crypto stack: ML-KEM-768 hybrid KEM, XChaCha20-Poly1305, 
+Double Ratchet via vodozemac (Matrix Olm/Megolm), Ed25519 identity, 
+Sphinx onion routing, Shamir's Secret Sharing, Argon2, Hybrid Logical 
+Clocks.</li>
+      <li>Network layer: libp2p 0.56 (TCP, BLE, DTN), SKademlia 
+Sybil-resistant DHT, GossipSub, Ghost Channels anonymous broadcast, 
+stealth TCP transport with timing randomisation and connection 
+obfuscation.</li>
+      <li>AI routing: 4-model ensemble — LightGBM/ONNX (&lt;1ms) → Gemma
+ 4 Ollama (50–200ms) → GNN PyTorch Geo → PRoPHET fallback — trained on 
+real 63-node Guifi.net data.</li>
+      <li>Live A↔B encrypted messaging test conducted between Omen (Arch Linux) and Stratos (Bedrock Linux). TUI built with ratatui.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Rust</span><span class="tag">ML-KEM-768</span><span class="tag">libp2p</span>
+      <span class="tag">Vodozemac</span><span class="tag">Sphinx Routing</span><span class="tag">PyTorch</span>
+      <span class="tag">ONNX</span><span class="tag">Tokio</span><span class="tag">Ratatui</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Head of Security</div>
+        <div class="entry-org">RVC (Rift Valley Cybersecurity) · Nairobi · Virtual Startup</div>
+      </div>
+      <div class="entry-date">2024 – Present</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Own security architecture, threat modelling, incident response policy, and security tooling for the organisation.</li>
+      <li>Designed and deployed Sentry 2.0 — a production-grade Rust 
+HIDS/DLP engine with 3-component architecture: file integrity monitoring
+ (15+ DLP patterns), transparent proxy (port 7070), and iptables-based 
+egress DPI gate. Auto-restarts via systemd user units. Covers AWS, 
+GitHub, Stripe, Anthropic, Slack, Tailscale, M-Pesa, and Safaricom 
+credential patterns.</li>
+      <li>Built RVC company website (v4) — 6-page static site deployed on Vercel.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Rust</span><span class="tag">HIDS</span><span class="tag">DLP</span>
+      <span class="tag">iptables</span><span class="tag">systemd</span><span class="tag">Arch Linux</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Freelance Full-Stack Engineer</div>
+        <div class="entry-org">Passua Bites · Nairobi Restaurant · Production</div>
+      </div>
+      <div class="entry-date">2025 – Present</div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric"><span class="num">140+</span><span class="label">TS/TSX Files</span></div>
+      <div class="metric"><span class="num">4,058</span><span class="label">Lines Server</span></div>
+      <div class="metric"><span class="num">40+</span><span class="label">Menu Items</span></div>
+      <div class="metric"><span class="num">6</span><span class="label">API Routers</span></div>
+    </div>
+    <ul class="entry-desc">
+      <li>Architected and built a full-stack restaurant web app — online
+ ordering, menu management, customer reviews, admin dashboard with 
+analytics, and payment processing.</li>
+      <li>Stack: React 19, TypeScript, tRPC v11, Express, Drizzle ORM, 
+Neon PostgreSQL (serverless), shadcn/ui (50+ Radix components), TanStack
+ React Query, AWS S3, Google Maps API, Google OAuth.</li>
+      <li>Built 6 API router modules: menu, orders, payments, reviews, 
+admin, analytics. 4 Drizzle migrations. Deployed on Vercel with 
+Cloudflare DNS. M-Pesa Daraja integration in progress.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">React 19</span><span class="tag">tRPC v11</span><span class="tag">Drizzle ORM</span>
+      <span class="tag">Neon PostgreSQL</span><span class="tag">Vercel</span><span class="tag">M-Pesa</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Freelance Full-Stack Engineer</div>
+        <div class="entry-org">Liquid Gold Coffee · Brand Website</div>
+      </div>
+      <div class="entry-date">2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Built full-stack brand website for Liquid Gold Coffee — React,
+ TypeScript, Vite, Tailwind CSS, shadcn/ui, server + client 
+architecture.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">React</span><span class="tag">TypeScript</span><span class="tag">Vite</span><span class="tag">Tailwind</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Security Researcher — Android Fintech</div>
+        <div class="entry-org">Independent Research · East Africa</div>
+      </div>
+      <div class="entry-date">2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Reverse engineered M-Pesa, NCBA, PayPal, and Safaricom Android
+ applications across an 83GB Samsung device corpus using jadx and 
+androguard.</li>
+      <li>Analysed endpoint exposure, storage security, and data 
+handling practices of African fintech apps under the Kenyan Data 
+Protection Act threat model.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">jadx</span><span class="tag">androguard</span><span class="tag">APK RE</span><span class="tag">M-Pesa</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Team Lead &amp; Architect</div>
+        <div class="entry-org">CHAI Hackathon · IBM watsonx Hackathon</div>
+      </div>
+      <div class="entry-date">2024 / 2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>CHAI: Led 5-person cross-functional team to Top 25 finish out 
+of 500+ teams from 2,000+ applicants. Owned end-to-end security 
+architecture and product alignment.</li>
+      <li>IBM watsonx: Built Qonvergence — multi-agent AI ecosystem project integrating Watson services.</li>
+    </ul>
+  </div>
+
+</section>
+
+<!-- SELECTED PROJECTS -->
+<section class="section">
+  <div class="section-header"><h2>Selected Projects</h2></div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">FRIDAY-X — Local-First Voice AI Assistant</div>
+        <div class="entry-org">Personal Infrastructure · Self-Hosted</div>
+      </div>
+      <div class="entry-date">2026</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Tony Stark-inspired voice-controlled AI assistant running 
+entirely locally. Smart orchestrator routes system queries (&lt;0.5s) to
+ local scripts and complex tasks (code gen, research) to Qwen Code.</li>
+      <li>53 MCP tools across 64 servers (filesystem, git, web search, 
+Docker, browser, DBs). 3-tier memory hierarchy. Local inference: 1.12s 
+on RTX 3050 Ti (942MB VRAM). 7 power management tools as MCP primitives.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Python</span><span class="tag">FastAPI</span><span class="tag">Ollama</span>
+      <span class="tag">Whisper</span><span class="tag">MCP</span><span class="tag">Piper TTS</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Free Claude Code — Multi-Provider LLM Proxy</div>
+        <div class="entry-org">Custom Build · MIT</div>
+      </div>
+      <div class="entry-date">2025 – Present</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Custom-built transparent proxy routing Claude Code API calls 
+across 6+ LLM providers: NVIDIA NIM, OpenRouter, DeepSeek, LM Studio, 
+llama.cpp, Ollama. Per-model routing (Opus/Sonnet/Haiku → different 
+backends).</li>
+      <li>Request optimisation intercepting 5 categories of trivial 
+queries locally. Thinking token support. Heuristic tool parser for 
+unstructured model outputs. Discord and Telegram bots with tree 
+threading and voice transcription.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Python 3.14</span><span class="tag">FastAPI</span><span class="tag">NVIDIA NIM</span>
+      <span class="tag">OpenRouter</span><span class="tag">discord.py</span><span class="tag">Whisper</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Cerberus — Bio-Adaptive IoT Honeynet</div>
+        <div class="entry-org">Academic Project · Open University of Kenya · Primary Author</div>
+      </div>
+      <div class="entry-date">2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>AI-powered adaptive SSH honeypot with Carrot &amp; Stick 
+neighbour generation, OS fingerprint masking, HoneyGPT threat response 
+engine, and Phoenix HUD v5.0 real-time visualisation. Cowrie integration
+ for attack pattern collection.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">C</span><span class="tag">Python</span><span class="tag">HoneyGPT</span>
+      <span class="tag">Cowrie</span><span class="tag">Shodan API</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">GlobalThreatMap</div>
+        <div class="entry-org">Live Threat Intelligence Platform · Deployed Vercel</div>
+      </div>
+      <div class="entry-date">2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Live threat intelligence platform — Next.js 16, React 19, 
+Mapbox GL, Valyu API. 1,401-line threat-map component with military base
+ layers, country conflict intelligence, Polymarket integration, OAuth 
+PKCE. 22+ PRs merged.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Next.js 16</span><span class="tag">Mapbox GL</span><span class="tag">Tailwind v4</span><span class="tag">Valyu API</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Obscura — Stealth Browser Automation</div>
+        <div class="entry-org">Rust · 6-Crate Workspace</div>
+      </div>
+      <div class="entry-date">2025</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Rust-based stealth browser automation tool with fingerprint 
+evasion via Chrome DevTools Protocol. 6 workspace crates: browser, CDP, 
+CLI, DOM manipulation, JavaScript injection, networking.</li>
+    </ul>
+    <div class="tags">
+      <span class="tag">Rust</span><span class="tag">CDP</span><span class="tag">Browser Automation</span>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">Published Rust Crates</div>
+        <div class="entry-org">crates.io · phantomojo</div>
+      </div>
+      <div class="entry-date">2024 – Present</div>
+    </div>
+    <ul class="entry-desc">
+      <li><strong>sphinx-rs</strong> — Sphinx onion routing protocol implementation.</li>
+      <li><strong>ghostwire-dtn</strong> — Delay-tolerant networking for disconnected mesh environments.</li>
+      <li><strong>hlc-rs</strong> — Hybrid logical clocks for distributed causal event ordering.</li>
+      <li><strong>trust-store</strong> — Cryptographic trust store primitives.</li>
+    </ul>
+    <div class="tags"><span class="tag">Rust</span><span class="tag">crates.io</span><span class="tag">Open Source</span></div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <div>
+        <div class="entry-title">HRM — Hierarchical Reasoning Model</div>
+        <div class="entry-org">Contributor · sapientinc/HRM · arxiv:2506.21734</div>
+      </div>
+      <div class="entry-date">2026</div>
+    </div>
+    <ul class="entry-desc">
+      <li>Contributed to a two-level recurrent architecture with 
+Q-learning halting mechanism. 27M parameters. Trained on ARC-AGI, 
+Sudoku, and Maze datasets. No pretraining required.</li>
+    </ul>
+    <div class="tags"><span class="tag">PyTorch</span><span class="tag">ARC-AGI</span><span class="tag">bfloat16</span></div>
+  </div>
+
+</section>
+
+<!-- SKILLS -->
+<section class="section">
+  <div class="section-header"><h2>Technical Skills</h2></div>
+  <div class="skills-grid">
+    <div class="skill-group">
+      <h3>Languages</h3>
+      <ul>
+        <li>Rust (tokio, axum, libp2p, ratatui, ort) <span>Expert</span></li>
+        <li>Python (FastAPI, PyTorch, Streamlit, GEE) <span>Proficient</span></li>
+        <li>TypeScript / React 19 / Next.js 16 <span>Proficient</span></li>
+        <li>C (network fingerprinting, secure memory) <span>Competent</span></li>
+        <li>Bash / Fish Shell <span>Proficient</span></li>
+      </ul>
+    </div>
+    <div class="skill-group">
+      <h3>Cryptography &amp; Security</h3>
+      <ul>
+        <li>Post-Quantum: ML-KEM-768, Kyber <span>Advanced</span></li>
+        <li>Double Ratchet via vodozemac <span>Advanced</span></li>
+        <li>Sphinx Onion Routing <span>Advanced</span></li>
+        <li>Ed25519 / X25519 / BLAKE3 / Argon2 <span>Advanced</span></li>
+        <li>APK RE · Ghidra · Heap exploitation <span>Intermediate</span></li>
+      </ul>
+    </div>
+    <div class="skill-group">
+      <h3>Networking &amp; Infrastructure</h3>
+      <ul>
+        <li>libp2p 0.56 — full feature mesh <span>Advanced</span></li>
+        <li>SKademlia DHT · GossipSub · mDNS <span>Advanced</span></li>
+        <li>Delay-Tolerant Networking (DTN) <span>Advanced</span></li>
+        <li>iptables · systemd · LUKS · btrfs <span>Advanced</span></li>
+        <li>Docker · Vercel · GitHub Actions CI <span>Proficient</span></li>
+      </ul>
+    </div>
+    <div class="skill-group">
+      <h3>Machine Learning</h3>
+      <ul>
+        <li>Graph Attention Networks (4-layer, 8-head) <span>Intermediate</span></li>
+        <li>LightGBM · XGBoost · Optuna <span>Intermediate</span></li>
+        <li>ONNX runtime (ort 2.0) <span>Intermediate</span></li>
+        <li>faster-whisper · VAD filtering <span>Intermediate</span></li>
+        <li>Isolation Forest · SHAP explainability <span>Intermediate</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- CTF -->
+<section class="section">
+  <div class="section-header"><h2>CTF, Research &amp; Adversarial Work</h2></div>
+
+  <div class="ctf-entry">
+    <div class="ctf-rank">62<small>nd</small></div>
+    <div class="ctf-detail">
+      <h4>SK-CERT CyberGame 2026 · 2,424 pts · PHANTOMOJO</h4>
+      <p>Heap pwn with MTE simulation (Ricettoni) · Windows AD1 
+forensics · 3-stage reverse engineering (custom hash gate + feedback 
+cipher + 13-opcode VM) · ECC over GF(p⁴) + CRT scalar recovery · PDF 
+steganography via /Count mismatch · Sheet music note-interval binary 
+encoding.</p>
+    </div>
+  </div>
+
+  <div class="ctf-entry">
+    <div class="ctf-rank" style="font-size:11px; padding-top:4px; min-width:48px;">HTB<small>Active</small></div>
+    <div class="ctf-detail">
+      <h4>HackTheBox · Active Directory &amp; Web</h4>
+      <p>AD exploitation (ccache, Kerberos, LDAP, SPN attacks) · Hash 
+cracking · Blind SQL injection · PCAP network forensics · Apache path 
+traversal · Steganography. AutoRecon-based recon pipeline.</p>
+    </div>
+  </div>
+
+  <div class="ctf-entry">
+    <div class="ctf-rank" style="font-size:11px; padding-top:4px; min-width:48px;">OBS<small>Founder</small></div>
+    <div class="ctf-detail">
+      <h4>Obsidian Directive CTF Team · Founder &amp; Lead</h4>
+      <p>Founded and led specialist CTF team through 5 major security 
+competitions. Coordinated real-time incident response simulations and 
+penetration testing toolset development.</p>
+    </div>
+  </div>
+</section>
+
+<!-- EDUCATION + AVAILABILITY -->
+<div class="two-col">
+  <section class="section">
+    <div class="section-header"><h2>Education</h2></div>
+    <div class="edu-entry">
+      <h3>Open University of Kenya</h3>
+      <p>BSc Cyber Security &amp; Digital Forensics</p>
+      <p>Reg: ST02/56336/2023 · Cohort NOV-2023</p>
+      <p class="status">Year 2 Complete · Awaiting Year 3</p>
+    </div>
+    <div class="edu-entry" style="margin-top:14px;">
+      <h3>Certifications (In Progress)</h3>
+      <p>ISC2 Certified in Cybersecurity (CC)</p>
+      <p>Cisco CCST Security</p>
+    </div>
+    <div class="edu-entry" style="margin-top:14px;">
+      <h3>Published Work</h3>
+      <p style="color:var(--text-dim); font-size:11.5px;">"Breaking Into Cybersecurity: A Personal Journey" — 2025</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-header"><h2>Consulting &amp; Availability</h2></div>
+    <div style="font-size:12px; color:var(--text-dim); line-height:2.2;">
+      <div><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">TIMEZONE &nbsp;</span>EAT (UTC+3) · Peak 20:00–02:00</div>
+      <div><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">HOURS &nbsp;&nbsp;&nbsp;&nbsp;</span>20–30 hrs/week · Remote-first</div>
+      <div><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">RATE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>$25–35/hr · Negotiable for long-term</div>
+      <div style="margin-top:8px;"><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">ADVISORY &nbsp;</span>Security architecture reviews · Post-quantum readiness · Threat modelling · Privacy-by-design</div>
+      <div><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">ENGINEERING</span> Rust systems · Distributed/P2P · Full-stack · AI/ML pipelines</div>
+      <div><span style="color:var(--gold); font-family:'Space Mono',monospace; font-size:10px;">RESEARCH &nbsp;</span>Cross-domain · Cryptography · African digital infrastructure · CTF mentoring</div>
+    </div>
+  </section>
+</div>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <p>NAIROBI, KENYA · OPEN SOURCE · REMOTE-FIRST · 2026</p>
+  <p class="mark">◆ PHANTOMOJO</p>
+</footer>
+
+
+
+</body></html>
