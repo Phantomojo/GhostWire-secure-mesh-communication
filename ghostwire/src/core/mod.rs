@@ -43,6 +43,7 @@ pub mod message;
 pub mod micro_optimizations;
 pub mod monitor;
 pub mod network;
+pub mod network_scanner;
 pub mod obfs4_transport;
 pub mod oem_battery_guide;
 pub mod peer_health;
@@ -484,8 +485,12 @@ impl Core {
         let mut bootstrap_nodes = bootstrap_nodes;
         if bootstrap_nodes.is_empty() {
             tracing::info!(
-                msg = "🌐 No bootstrap nodes provided. Using default public gateways for zero-config discovery."
+                msg = "🌐 No bootstrap nodes provided. Fetching peers from Cloudflare bootstrap."
             );
+
+            let cloudflare_peers = crate::core::mesh::fetch_cloudflare_peers().await;
+            bootstrap_nodes.extend(cloudflare_peers);
+
             for addr_str in crate::core::mesh::DEFAULT_BOOTSTRAPS {
                 if let Ok(addr) = addr_str.parse() {
                     bootstrap_nodes.push(addr);

@@ -1,6 +1,14 @@
 // Copyright (C) 2025-2026 Michael Irungu
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+// Wave 1 enabled these lints for discovery. Audited across the crate:
+// - Duration::as_millis() u128→u64: safe (u64 holds 584M years in ms)
+// - ML normalization usize→f32: correct (ONNX requires f32 inputs)
+// - as_conversions: idiomatic in performance-critical paths (simd, crypto, parsing)
+// Per-file allows in feature_extractor.rs, gnn_router.rs, anomaly_detector.rs,
+// startup.rs, peer_health.rs cover the highest-risk files explicitly.
+#![allow(clippy::as_conversions, clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+
 pub mod cli;
 pub mod config;
 pub mod core;

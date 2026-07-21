@@ -176,6 +176,7 @@ impl KeyGenStep {
 pub enum WizardPhase {
     Welcome,
     SystemCheck,
+    SetName,
     Connected,
 }
 
@@ -183,6 +184,7 @@ pub struct WizardState {
     pub phase: WizardPhase,
     pub done: bool,
     pub ghost_name: String,
+    name_input: String,
     rain: MatrixRain,
     sys_info: SystemInfo,
     key_steps: Vec<KeyGenStep>,
@@ -207,7 +209,8 @@ impl WizardState {
         Self {
             phase: WizardPhase::Welcome,
             done: false,
-            ghost_name: name,
+            ghost_name: name.clone(),
+            name_input: name,
             rain: MatrixRain::new(80, 24), // will be resized on first render
             sys_info: SystemInfo::gather(),
             key_steps: vec![
@@ -230,9 +233,34 @@ impl WizardState {
                 self.phase = WizardPhase::SystemCheck;
             }
             WizardPhase::SystemCheck => {
-                // Wait for key gen to complete, then any key advances
+                // Wait for key gen to complete, then any key advances to SetName
                 if self.all_keys_done() {
-                    self.phase = WizardPhase::Connected;
+                    self.phase = WizardPhase::SetName;
+                }
+            }
+            WizardPhase::SetName => {
+                match key.code {
+                    KeyCode::Enter => {
+                        // Confirm name, move to Connected
+                        if !self.name_input.trim().is_empty() {
+                            self.ghost_name = self.name_input.trim().to_string();
+                            self.phase = WizardPhase::Connected;
+                        }
+                    }
+                    KeyCode::Esc => {
+                        // Reset to generated name
+                        self.name_input = self.ghost_name.clone();
+                    }
+                    KeyCode::Backspace => {
+                        self.name_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        // Limit name to 32 chars
+                        if self.name_input.len() < 32 {
+                            self.name_input.push(c);
+                        }
+                    }
+                    _ => {}
                 }
             }
             WizardPhase::Connected => {
@@ -274,6 +302,7 @@ impl WizardState {
         match self.phase {
             WizardPhase::Welcome => self.render_welcome(f, area),
             WizardPhase::SystemCheck => self.render_system_check(f, area),
+            WizardPhase::SetName => self.render_set_name(f, area),
             WizardPhase::Connected => self.render_connected(f, area),
         }
     }
@@ -458,6 +487,66 @@ impl WizardState {
         f.render_widget(widget, area);
     }
 
+    fn render_set_name(&self, f: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(2)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(5),
+                Constraint::Length(3),
+                Constraint::Min(1),
+            ])
+            .split(area);
+
+        let header = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled(theme::LOGO_SYMBOL, theme::primary_bold()),
+                Span::raw(" "),
+                Span::styled("GHOSTWIRE", theme::primary_bold()),
+                Span::raw("  "),
+                Span::styled("Choose Your Name", theme::muted_style()),
+            ]),
+        ]);
+        f.render_widget(header, chunks[0]);
+
+        let input_display = if self.name_input.is_empty() {
+            Span::styled("_", Style::default().fg(theme::PRIMARY).add_modifier(Modifier::SLOW_BLINK))
+        } else {
+            Span::styled(&self.name_input, theme::primary_bold())
+        };
+
+        let input_block = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  > ", theme::muted_style()),
+                input_display,
+            ]),
+            Line::from(""),
+        ])
+        .block(theme::themed_block("Your ghost name"));
+        f.render_widget(input_block, chunks[1]);
+
+        let help_lines = vec![
+            Line::from(vec![
+                Span::styled("  Type your name, press ", theme::muted_style()),
+                Span::styled("Enter", theme::primary_bold()),
+                Span::styled(" to confirm", theme::muted_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("  ", theme::muted_style()),
+                Span::styled("Esc", theme::primary_bold()),
+                Span::styled(" to reset to: ", theme::muted_style()),
+                Span::styled(&self.ghost_name, theme::muted_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("  Backspace to delete", theme::muted_style()),
+            ]),
+        ];
+        let help = Paragraph::new(help_lines);
+        f.render_widget(help, chunks[2]);
+    }
+
     fn render_connected(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -551,7 +640,7 @@ impl WizardState {
 /// Run the first-run wizard standalone. Returns the ghost name if completed.
 pub async fn run_wizard() -> io::Result<Option<String>> {
     use crossterm::{
-        event::{DisableMouseCapture, EnableMouseCapture},
+        event::DisableMouseCapture,
         execute,
         terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -561,7 +650,7 @@ pub async fn run_wizard() -> io::Result<Option<String>> {
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 

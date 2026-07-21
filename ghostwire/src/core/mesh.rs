@@ -17,6 +17,7 @@ use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
     gossipsub::{
         Behaviour as Gossipsub, Message as GossipsubMessage, MessageAuthenticity, MessageId,
+        PublishError,
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig},
@@ -114,22 +115,56 @@ pub struct MeshNode {
     pub threat_level: ThreatLevel,
 }
 
-/// Default bootstrap nodes for peer discovery. All are official, well-known libp2p/IPFS
-/// bootstrap nodes (bootstrap.libp2p.io pool and IPFS team–run node). Safe for production.
-/// See docs/LIBP2P_NETWORK_CONNECTIVITY.md for privacy notes.
-pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
-    // Original bootstrap.libp2p.io pool
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooP36J7RSRM8uXCc8p6Y74G56EPV45UFSy9Pr7T79F",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCUuY6vS7705XT5ZqUhc4G3n9PqEqH5D3S8Y8xYFSy9Pr",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMo6pXhvG2SFTkS5rTfyS28y2XbY3R7wF1pG4z5W",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWbeUUn9BR3pNDfB3zM9F136G9c6y6y2j9X6v4",
-    // Official IPFS/Kubo default bootstrap nodes (IPFS dev team)
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-];
+pub const DEFAULT_BOOTSTRAPS: &[&str] = &[];
+
+pub const CLOUDFLARE_BOOTSTRAP_URL: &str = "https://ghostwire-bootstrap.st02563362023.workers.dev/api/peers";
+
+pub async fn fetch_cloudflare_peers() -> Vec<Multiaddr> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build();
+    let client = match client {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let resp = match client.get(CLOUDFLARE_BOOTSTRAP_URL).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Cloudflare bootstrap fetch failed: {}", e);
+            return vec![];
+        }
+    };
+
+    let body = match resp.json::<serde_json::Value>().await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("Cloudflare bootstrap parse failed: {}", e);
+            return vec![];
+        }
+    };
+
+    let peers = match body.get("peers").and_then(|p| p.as_array()) {
+        Some(arr) => arr,
+        None => return vec![],
+    };
+
+    let mut addrs = Vec::new();
+    for peer in peers {
+        if let Some(ma_arr) = peer.get("multiaddrs").and_then(|m| m.as_array()) {
+            for ma_str in ma_arr {
+                if let Some(s) = ma_str.as_str() {
+                    if let Ok(addr) = s.parse::<Multiaddr>() {
+                        addrs.push(addr);
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("Fetched {} peer addresses from Cloudflare bootstrap", addrs.len());
+    addrs
+}
 
 /// Mesh network topology
 #[derive(Debug, Clone, Serialize)]
@@ -874,17 +909,26 @@ impl MeshDriver {
                 message.vector_clock = self.vector_clock.clone();
 
                 let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
-                let res = (|| -> Result<()> {
-                    use crate::core::wire_protocol::{Frame, FrameKind};
-                    let frame = Frame::encode(FrameKind::Message, &message)?;
-                    let data = frame.to_bytes();
-                    self.swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic.clone(), data)?;
+                use crate::core::wire_protocol::{Frame, FrameKind};
+                let frame = match Frame::encode(FrameKind::Message, &message) {
+                    Ok(f) => f,
+                    Err(e) => { let _ = reply.send(Err(e)); return; }
+                };
+                let data = frame.to_bytes();
+                let mut res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
+                for attempt in 1..=3u32 {
+                    if let Err(PublishError::NoPeersSubscribedToTopic) = &res {
+                        tracing::debug!("broadcast: no peers subscribed yet (attempt {}/3), waiting 500ms", attempt);
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
+                    } else {
+                        break;
+                    }
+                }
+                let res = res.map(|_| ()).map_err(|e| anyhow::anyhow!("broadcast: {}", e));
+                if res.is_ok() {
                     tracing::info!("Broadcasted message to topic: {}", topic);
-                    Ok(())
-                })();
+                }
                 let _ = reply.send(res);
             }
             MeshCommand::ConnectPeer { peer_id, reply } => {
@@ -1064,7 +1108,17 @@ impl MeshDriver {
                             match bincode::serialize(&packet) {
                                 Ok(pkt_bytes) => {
                                     let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
-                                    match self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic, pkt_bytes) {
+                                    let mut sphinx_res = self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic.clone(), pkt_bytes.clone());
+                                    for attempt in 1..=3u32 {
+                                        if let Err(PublishError::NoPeersSubscribedToTopic) = &sphinx_res {
+                                            tracing::debug!("sphinx-dm: no peers subscribed yet (attempt {}/3), waiting 500ms", attempt);
+                                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                            sphinx_res = self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic.clone(), pkt_bytes.clone());
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    match sphinx_res {
                                         Ok(_) => {
                                             tracing::trace!(
                                                 "Sent DM via Sphinx ({} hops) to {}",
@@ -1096,12 +1150,17 @@ impl MeshDriver {
 
                 if !sent_via_sphinx {
                     let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
-                    if let Err(e) = self
-                        .swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic, data.clone())
-                    {
+                    let mut dm_res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
+                    for attempt in 1..=3u32 {
+                        if let Err(PublishError::NoPeersSubscribedToTopic) = &dm_res {
+                            tracing::debug!("dm-to-{}: no peers subscribed yet (attempt {}/3), waiting 500ms", recipient, attempt);
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            dm_res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Err(e) = dm_res {
                         tracing::warn!(
                             "Gossipsub publish to {} failed: {}, trying DTN fallback",
                             recipient,

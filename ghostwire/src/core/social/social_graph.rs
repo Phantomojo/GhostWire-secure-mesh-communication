@@ -133,6 +133,7 @@ pub enum DiscoveryMethod {
     ManualCode,
     QrScan,
     Introduced { by_node_id: String },
+    NetworkScan,
 }
 
 // ── Social graph manager ──────────────────────────────────────────────────────

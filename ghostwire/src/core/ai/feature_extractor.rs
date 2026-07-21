@@ -121,6 +121,7 @@ impl ScalerParams {
 
 /// Per-node raw metrics collected from the system
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::cast_precision_loss)] // ONNX models require f32 inputs
 pub struct NodeMetrics {
     pub node_id: u16,
     pub processes: f32,

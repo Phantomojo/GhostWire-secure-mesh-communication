@@ -6,6 +6,8 @@
 //
 // Trained on Guifi.net mesh data (63 nodes, 7,931 temporal snapshots).
 // Two-phase avoids exporting GATConv (which can't export to ONNX).
+#![allow(clippy::cast_precision_loss)] // ML normalization: usize→f32 for ONNX-compatible scoring
+#![allow(clippy::cast_possible_truncation)] // i64→i32 ONNX model dimensions
 
 use anyhow::{Context, Result};
 use blake2::Digest;

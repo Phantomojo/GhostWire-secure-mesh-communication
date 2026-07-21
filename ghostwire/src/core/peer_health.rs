@@ -2,6 +2,7 @@
 //!
 //! Tracks latency, packet loss, last_seen, and connection state for each
 //! connected peer. Driven by Ping/Pong frame exchange in the MeshDriver.
+#![allow(clippy::cast_possible_truncation)] // u128→u64 Duration::as_millis() is safe
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

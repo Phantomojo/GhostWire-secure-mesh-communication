@@ -1,6 +1,7 @@
 // Anomaly Detector — Isolation Forest implementation
 // Loads the trained model from models/anomaly_detector.json
 // Provides anomaly scoring for mesh network traffic analysis
+#![allow(clippy::cast_possible_truncation)] // i64 tree indices → usize for array access
 
 use serde::Deserialize;
 use std::fs;

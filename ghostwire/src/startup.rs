@@ -8,6 +8,7 @@
 //!
 //!   Phase 0 — Pre-flight  (environment checks, no network)
 //!   Phase 1 — Identity    (load/create identity, verify keys)
+#![allow(clippy::cast_possible_truncation)] // u128→u64 Duration::as_millis() is safe (u64 holds 584M years)
 //!   Phase 2 — Storage     (encrypted store, message DB)
 //!   Phase 3 — Network     (mesh init, transport selection, NAT probe)
 //!   Phase 4 — Knowledge   (load ark collections, sync index)
