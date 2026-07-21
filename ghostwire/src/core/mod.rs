@@ -3,6 +3,24 @@
 use serde::Serialize;
 use zeroize::Zeroize;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ORGANIZED SUBMODULES
+// These modules provide organized groupings of related functionality
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Cryptographic modules (encryption, signing, key exchange)
+pub mod crypto;
+
+/// Network modules (mesh, transport, protocols)
+pub mod network;
+
+/// Storage modules (persistence, blockstore, mailbox)
+pub mod storage;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INDIVIDUAL MODULES
+// ─────────────────────────────────────────────────────────────────────────────
+
 pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;

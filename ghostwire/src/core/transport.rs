@@ -137,3 +137,105 @@ impl TransportRegistry {
 // registry.register(StealthTCPProvider::new(...));
 
 // Future: refactor transport implementations to use this registry and trait interface.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transport_registry_new() {
+        let registry = TransportRegistry::new();
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_transport_registry_register_and_get() {
+        let mut registry = TransportRegistry::new();
+        
+        // Register a dummy transport (the only one available without feature flags)
+        registry.register(TransportKind::Dummy);
+        
+        let names = registry.list();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0], "dummy");
+        
+        let transport = registry.get("dummy");
+        assert!(transport.is_some());
+        assert_eq!(transport.unwrap().name(), "dummy");
+    }
+
+    #[test]
+    fn test_transport_registry_get_nonexistent() {
+        let registry = TransportRegistry::new();
+        let transport = registry.get("nonexistent");
+        assert!(transport.is_none());
+    }
+
+    #[test]
+    fn test_transport_registry_list_multiple() {
+        let mut registry = TransportRegistry::new();
+        
+        // Registry only has Dummy without feature flags
+        registry.register(TransportKind::Dummy);
+        
+        let names = registry.list();
+        assert!(names.contains(&"dummy".to_string()));
+    }
+
+    #[test]
+    fn test_transport_kind_name() {
+        // Test Dummy transport name (always available)
+        let transport = TransportKind::Dummy;
+        assert_eq!(transport.name(), "dummy");
+    }
+
+    #[test]
+    fn test_transport_kind_description() {
+        // Test Dummy transport description
+        let transport = TransportKind::Dummy;
+        assert_eq!(transport.description(), "Dummy transport (no-op)");
+    }
+
+    #[test]
+    fn test_transport_kind_clone() {
+        let transport1 = TransportKind::Dummy;
+        let _transport2 = transport1.clone();
+        // Both should have the same name
+        assert_eq!(transport1.name(), transport2.name());
+    }
+
+    #[test]
+    fn test_transport_registry_register_same_name_twice() {
+        let mut registry = TransportRegistry::new();
+        
+        registry.register(TransportKind::Dummy);
+        registry.register(TransportKind::Dummy);
+        
+        // Second registration should overwrite the first
+        let names = registry.list();
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_transport_registry_empty_list() {
+        let registry = TransportRegistry::new();
+        let names = registry.list();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_transport_registry_list_returns_owned_strings() {
+        let mut registry = TransportRegistry::new();
+        registry.register(TransportKind::Dummy);
+        
+        let mut names = registry.list();
+        // Should be able to modify the owned strings
+        if let Some(name) = names.first_mut() {
+            name.push_str("_modified");
+        }
+        
+        // Original registry should be unaffected
+        let original_names = registry.list();
+        assert_eq!(original_names[0], "dummy");
+    }
+}
