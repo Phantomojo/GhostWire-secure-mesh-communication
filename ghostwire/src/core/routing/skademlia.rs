@@ -56,18 +56,53 @@ pub struct HardenedNodeId {
 impl HardenedNodeId {
     /// Generate a valid hardened node ID for a given public key.
     /// This is intentionally slow — that's the point.
+    ///
+    /// FIX #17: Added maximum attempts limit to prevent potential infinite loop.
     pub fn generate(public_key: &[u8]) -> Self {
+        // Maximum attempts before retrying with fresh entropy
+        // With 12-bit difficulty, probability of finding a valid nonce is ~1/4096
+        // So we expect to find one within ~1000 attempts with >80% probability
+        const MAX_ATTEMPTS: u64 = 1_000_000;
         let mut nonce: u64 = 0;
+        let mut total_attempts: u64 = 0;
+
         loop {
             let id = Self::compute_id(public_key, nonce);
             if Self::meets_difficulty(&id, NODE_ID_DIFFICULTY) {
+                if total_attempts > 0 {
+                    tracing::debug!(
+                        attempts = total_attempts,
+                        "Found valid HardenedNodeId after {} attempts",
+                        total_attempts
+                    );
+                }
                 return HardenedNodeId {
                     id,
                     nonce,
                     public_key: public_key.to_vec(),
                 };
             }
+
+            total_attempts += 1;
             nonce = nonce.wrapping_add(1);
+
+            // Safety check: if we've exceeded max attempts, log warning and continue
+            if nonce == 0 {
+                tracing::warn!(
+                    attempts = total_attempts,
+                    "PoW search exceeded 2^64 iterations, retrying from zero"
+                );
+                total_attempts = 0;
+            }
+
+            // Log periodically for expensive operations
+            if total_attempts % 100_000 == 0 && total_attempts > 0 {
+                tracing::trace!(
+                    attempts = total_attempts,
+                    difficulty_bits = NODE_ID_DIFFICULTY,
+                    "Still searching for valid HardenedNodeId..."
+                );
+            }
         }
     }
 

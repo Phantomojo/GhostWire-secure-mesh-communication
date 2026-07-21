@@ -208,7 +208,8 @@ impl MatrixAdapter {
                 return Ok(());
             }
         }
-        println!(
+        tracing::debug!(
+            room_id = %message.recipient,
             "[MOCK] Matrix: Would send message to room: {}",
             message.content
         );
@@ -299,11 +300,12 @@ impl MeshtasticAdapter {
             }
         }
         #[cfg(not(feature = "meshtastic"))]
-        println!(
-            "[MOCK] Meshtastic: Would send {} shards to device {}: {}",
+        tracing::debug!(
+            shards_len = shards.len(),
+            device_path = %self.device_path,
+            "[MOCK] Meshtastic: Would send {} shards to device {}",
             shards.len(),
-            self.device_path,
-            message.content
+            self.device_path
         );
         Ok(())
     }
@@ -319,7 +321,8 @@ impl MeshtasticAdapter {
                 return Ok(None);
             }
         }
-        println!(
+        tracing::debug!(
+            device_path = %self.device_path,
             "[MOCK] Meshtastic: Would receive message from device {}",
             self.device_path
         );
@@ -1180,25 +1183,22 @@ impl Core {
             let listen_addr = format!("/ip4/{}/tcp/{}", mesh_bind_ip, mesh_port);
             match core_mesh.start_mesh(&listen_addr).await {
                 Ok(_) => {
-                    tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr);
-                    // Give the swarm a moment to bind, then print addresses
+                    tracing::info!("Mesh Network Auto-Started on {}", listen_addr);
+                    // Give the swarm a moment to bind, then log addresses
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let listeners = core_mesh.get_mesh_listeners().await;
                     if !listeners.is_empty() {
-                        println!("\n--- GhostWire Mesh Node Started ---");
                         if let Some(peer_id) = core_mesh.identity.read().await.public_key().map(|pk| pk.to_peer_id()) {
-                            println!("Peer ID: {}", peer_id);
+                            tracing::info!(peer_id = %peer_id, listeners_count = listeners.len(), "GhostWire Mesh Node started");
                         } else {
-                            println!("Peer ID: <Locked>");
+                            tracing::info!(listeners_count = listeners.len(), "GhostWire Mesh Node started (identity locked)");
                         }
-                        println!("Listening on:");
                         for addr in listeners {
-                            println!("  {}", addr);
+                            tracing::info!(address = %addr, "Listening on");
                         }
-                        println!("------------------------------------\n");
                     }
                 }
-                Err(e) => tracing::warn!("⚠️ Failed to auto-start mesh: {}", e),
+                Err(e) => tracing::warn!(error = %e, "Failed to auto-start mesh"),
             }
         });
     }

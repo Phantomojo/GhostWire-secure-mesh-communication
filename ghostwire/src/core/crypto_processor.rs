@@ -25,13 +25,21 @@ impl CryptoProcessor {
         let (tx, rx) = mpsc::channel(100);
 
         // Attempt to load existing machine state
-        let machine = Self::load_state(&storage_path).unwrap_or_else(|_| {
-            GhostCryptoMachine::new(
-                identity.id.clone(),
-                identity
-                    .public_key_bytes(),
-            )
-        });
+        // FIX #13: Log error when load fails instead of silent fallback
+        let machine = match Self::load_state(&storage_path) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    path = %storage_path.display(),
+                    "Failed to load crypto state from disk, creating new machine"
+                );
+                GhostCryptoMachine::new(
+                    identity.id.clone(),
+                    identity.public_key_bytes(),
+                )
+            }
+        };
 
         (
             Self {
@@ -63,11 +71,14 @@ impl CryptoProcessor {
             machine.handle_event(event)
         };
 
+        // FIX #14: Properly handle channel send errors instead of silent drops
         for action in actions {
             match action {
                 CryptoAction::StoreSecret { .. } => {
                     // Trigger an immediate save when secrets are updated
-                    let _ = self.save_state().await;
+                    if let Err(e) = self.save_state().await {
+                        tracing::error!(error = %e, "Failed to save crypto state after secret update");
+                    }
                 }
                 CryptoAction::DecryptSealedPacket {
                     sender_id,
@@ -85,26 +96,58 @@ impl CryptoProcessor {
                         let nonce = crypto_box::Nonce::from_slice(nonce_bytes);
 
                         if let Ok(plaintext) = b.decrypt(nonce, real_ciphertext) {
-                            let _ = self
+                            if let Err(e) = self
                                 .action_handler
                                 .send(CryptoAction::MessageDecrypted {
                                     sender_id,
                                     plaintext,
                                 })
-                                .await;
+                                .await
+                            {
+                                tracing::error!(
+                                    error = %e,
+                                    "Failed to send MessageDecrypted action"
+                                );
+                            }
                         } else {
-                            let _ = self
+                            let msg = "Failed to decrypt sealed packet".to_string();
+                            tracing::warn!(sender_id = %sender_id, "{}", msg);
+                            if let Err(e) = self
                                 .action_handler
                                 .send(CryptoAction::Log {
                                     level: "WARN".into(),
-                                    message: "Failed to decrypt sealed packet".into(),
+                                    message: msg,
                                 })
-                                .await;
+                                .await
+                            {
+                                tracing::error!(
+                                    error = %e,
+                                    "Failed to queue decryption failure log"
+                                );
+                            }
                         }
                     }
                 }
+                CryptoAction::Log { ref level, ref message } => {
+                    // Log action is informational, use warn level for errors
+                    if level == "WARN" || level == "ERROR" {
+                        tracing::warn!(level = %level, message = %message, "Crypto log action");
+                    } else {
+                        tracing::info!(level = %level, message = %message, "Crypto log action");
+                    }
+                    // Don't send Log actions to handler (would cause infinite loop)
+                }
+                CryptoAction::DepositMailbox { .. } | CryptoAction::PublishPrekeys { .. } => {
+                    // These are informational actions, log if send fails
+                    if let Err(e) = self.action_handler.send(action).await {
+                        tracing::warn!(error = %e, "Failed to queue crypto action");
+                    }
+                }
                 _ => {
-                    self.action_handler.send(action).await?;
+                    // Critical actions must be sent
+                    self.action_handler.send(action).await.map_err(|e| {
+                        anyhow::anyhow!("Crypto action channel closed: {}", e)
+                    })?;
                 }
             }
         }
@@ -118,7 +161,7 @@ impl CryptoProcessor {
             interval.tick().await;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("Time went backwards")
                 .as_secs();
 
             let actions = {
@@ -127,11 +170,15 @@ impl CryptoProcessor {
             };
 
             for action in actions {
-                let _ = self.action_handler.send(action).await;
+                if let Err(e) = self.action_handler.send(action).await {
+                    tracing::warn!(error = %e, "Failed to send heartbeat action");
+                }
             }
 
             // Periodically save state even if no secrets changed
-            let _ = self.save_state().await;
+            if let Err(e) = self.save_state().await {
+                tracing::error!(error = %e, "Failed to save state during heartbeat");
+            }
         }
     }
 }

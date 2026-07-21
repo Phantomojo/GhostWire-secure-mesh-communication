@@ -126,7 +126,12 @@ pub fn start_randomised_fetch_loop(
             sleep(Duration::from_millis(interval_ms)).await;
 
             if config.randomised_fetch {
-                let _ = fetch_tx.try_send(());
+                // FIX #15: Log when fetch trigger is dropped due to full channel
+                if fetch_tx.try_send(()).is_err() {
+                    tracing::trace!(
+                        "Fetch channel full, skipping scheduled fetch (privacy obfuscation preserved)"
+                    );
+                }
             }
         }
     });
@@ -207,7 +212,12 @@ pub fn start_dummy_activity_loop(
             sleep(Duration::from_millis(delay_ms)).await;
 
             let activity = generate_dummy_activity();
-            let _ = tx.try_send(activity);
+            // FIX #15: Log when dummy activity is dropped due to full channel
+            if tx.try_send(activity).is_err() {
+                tracing::trace!(
+                    "Dummy activity channel full, skipping dummy traffic (traffic analysis obfuscation reduced)"
+                );
+            }
         }
     });
 }

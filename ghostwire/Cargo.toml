@@ -102,19 +102,40 @@ crossterm = "0.29"          # Terminal manipulation (used by ratatui)
 
 
 [features]
+# Default features enabled at build time
 default = ["web", "cli", "mesh", "security", "stealth", "qr"]
+
+## Core Features (included in default build)
+# Web UI and API server (Axum-based HTTP server with REST API and WebSocket)
 web = []
+# Command-line interface for terminal-based interaction
 cli = []
+# Mesh networking via libp2p (P2P connectivity, Kademlia DHT, gossipsub)
 mesh = []
+# Security features: rate limiting, blacklists, threat detection
 security = []
-matrix = []
-matrix-bridge = ["matrix-sdk"]
-meshtastic = ["serialport"]
-reticulum = []
-briar = []
+# Stealth TCP transport for censorship resistance
 stealth = []
-bluetooth = []
+# QR code generation for peer pairing (camera/QR-based contact exchange)
 qr = []
+
+## Optional Protocol Integrations
+# Matrix bridge for federated messaging (requires matrix-sdk)
+# Note: matrix = [] is a no-op flag, matrix-bridge enables the actual integration
+matrix = []
+matrix-bridge = ["matrix-sdk"]  # Matrix protocol bridge for federation
+# Meshtastic radio integration for long-range mesh networking
+meshtastic = ["serialport"]
+# Reticulum protocol support (alternative mesh networking)
+reticulum = []
+# Briar protocol support (offline-first messaging)
+briar = []
+# Bluetooth LE transport for proximity-based peer discovery
+bluetooth = []
+
+## Build Profiles
+# Minimal build: web + cli + security only (no mesh, stealth, QR)
+# Use: cargo build --no-default-features --features minimal
 minimal = []
 
 [dev-dependencies]

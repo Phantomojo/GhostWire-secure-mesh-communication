@@ -254,7 +254,7 @@ async fn start_node(core: &Arc<Core>, host: String, port: u16, mesh_port: u16) -
 
     tokio::spawn(async move {
         // TODO: Implement proper reticulum initialization
-        println!("[CLI] Reticulum initialization requested");
+        tracing::debug!("[CLI] Reticulum initialization requested");
     });
 
     println!("✅ GhostWire node started successfully!");
