@@ -15,12 +15,6 @@ pub mod system;
 pub mod trust;
 pub mod ws_handler;
 
-// Re-export all controllers for backward compatibility
-pub use all_controllers::{
-    ArkController, ChannelController, NetworkController, PairingController, RecoveryController,
-    TrustController,
-};
-
 // Re-export individual controllers (split from all_controllers.rs)
 pub use ark::ArkController;
 pub use channel::ChannelController;

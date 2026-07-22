@@ -226,7 +226,9 @@ impl QuicTransportProvider {
         
         // HKDF-like derivation using BLAKE3
         let salt = b"GHOSTWIRE-TOFU-FP-SALT";
-        let mut hasher = blake3::Hasher::new_keyed(&blake3::key::Key::from_bytes(salt));
+        // Derive a 32-byte key from salt using BLAKE3 hash
+        let key_bytes = *blake3::hash(salt).as_bytes();
+        let mut hasher = blake3::Hasher::new_keyed(&key_bytes);
         hasher.update(&key_material);
         *hasher.finalize().as_bytes()
     }
@@ -235,7 +237,7 @@ impl QuicTransportProvider {
     fn encrypt_fingerprint_store(data: &[u8]) -> Result<Vec<u8>> {
         use chacha20poly1305::{
             aead::{Aead, KeyInit},
-            XChaCha20Poly1305, Nonce,
+            XChaCha20Poly1305,
         };
         use ring::rand::{SecureRandom, SystemRandom};
         
@@ -244,9 +246,9 @@ impl QuicTransportProvider {
         let mut nonce_bytes = [0u8; 24];
         rng.fill(&mut nonce_bytes)
             .map_err(|_| anyhow::anyhow!("RNG failure"))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = chacha20poly1305::XNonce::from(nonce_bytes);
         
-        let ciphertext = key.encrypt(nonce, data)
+        let ciphertext = key.encrypt(&nonce, data)
             .map_err(|_| anyhow::anyhow!("Encryption failed"))?;
         
         // Format: [24-byte nonce][ciphertext]
@@ -259,7 +261,7 @@ impl QuicTransportProvider {
     fn decrypt_fingerprint_store(data: &[u8]) -> Result<Vec<u8>> {
         use chacha20poly1305::{
             aead::{Aead, KeyInit},
-            XChaCha20Poly1305, Nonce,
+            XChaCha20Poly1305,
         };
         
         if data.len() < 24 {
@@ -267,10 +269,10 @@ impl QuicTransportProvider {
         }
         
         let key: XChaCha20Poly1305 = XChaCha20Poly1305::new(Self::derive_encryption_key().as_slice().into());
-        let nonce = Nonce::from_slice(&data[..24]);
+        let nonce = chacha20poly1305::XNonce::from_slice(&data[..24]);
         let ciphertext = &data[24..];
         
-        key.decrypt(nonce, ciphertext)
+        key.decrypt(&nonce, ciphertext)
             .map_err(|_| anyhow::anyhow!("Decryption failed"))
     }
 

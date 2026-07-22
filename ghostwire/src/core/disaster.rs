@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_disaster_manager_new() {
-        let manager = DisasterManager::new(200, 0.1, 3, 5);
+        let mut manager = DisasterManager::new(200, 0.1, 3, 5);
         // Manager should be in Normal state initially
         assert_eq!(manager.evaluate(&DisasterMetrics::default()), DisasterLevel::Normal);
     }

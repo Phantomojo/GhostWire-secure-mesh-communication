@@ -141,7 +141,7 @@ pub mod security {
 // ═══════════════════════════════════════════════════════════
 /// Mesh networking constants
 pub mod mesh {
-    use super::buffer::*;
+    use super::buffer;
     use super::network::*;
     use super::time::*;
 

@@ -74,165 +74,94 @@ impl ChannelController {
         Path(channel_id): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        match core.ghost_channels.leave(&channel_id).await {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({ "left": channel_id })))
-                .into_response(),
-            Err(e) => (
-                StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("LEAVE_ERROR", &e.to_string())),
-            )
-                .into_response(),
-        }
-    }
-
-    pub async fn list_members(
-        State(state): State<Arc<AppState>>,
-        Path(channel_id): Path<String>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        let members = core.ghost_channels.list_members(&channel_id).await;
-        Json(ApiV2Response::success(members))
-    }
-
-    pub async fn get_invite(
-        State(state): State<Arc<AppState>>,
-        Path(channel_id): Path<String>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        match core.ghost_channels.get_invite(&channel_id).await {
-            Some(invite) => Json(ApiV2Response::success(serde_json::json!({
-                "invite": invite,
-            })))
-            .into_response(),
-            None => (
-                StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("NOT_FOUND", "Channel not found")),
-            )
-                .into_response(),
-        }
-    }
-
-    pub async fn rotate_invite(
-        State(state): State<Arc<AppState>>,
-        Path(channel_id): Path<String>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        match core.ghost_channels.rotate_invite(&channel_id).await {
-            Ok(invite) => Json(ApiV2Response::success(serde_json::json!({
-                "invite": invite,
-            })))
-            .into_response(),
-            Err(e) => (
-                StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("ROTATE_ERROR", &e.to_string())),
-            )
-                .into_response(),
-        }
-    }
-
-    pub async fn stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        let core = state.core.read().await;
-        let stats = core.ghost_channels.stats().await;
-        Json(ApiV2Response::success(stats))
-    }
-
-    pub async fn set_privacy(
-        State(state): State<Arc<AppState>>,
-        Path((channel_id, privacy)): Path<(String, String)>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        let privacy_enum = match privacy.as_str() {
-            "public" => crate::core::channels::ChannelPrivacy::Public,
-            "private" => crate::core::channels::ChannelPrivacy::Private,
-            _ => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ApiV2Response::<()>::error(
-                        "INVALID_PRIVACY",
-                        "Must be 'public' or 'private'",
-                    )),
-                )
+        if let Ok(bytes) = hex::decode(&channel_id) {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                core.ghost_channels.leave(&arr).await;
+                return Json(ApiV2Response::success(serde_json::json!({ "left": channel_id })))
                     .into_response();
             }
+        }
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiV2Response::<()>::error("INVALID_CHANNEL_ID", "Invalid channel ID (expected 32-byte hex)")),
+        )
+            .into_response()
+    }
+
+    pub async fn publish(
+        State(state): State<Arc<AppState>>,
+        Path(id): Path<String>,
+        Json(req): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        let text = req["text"].as_str().unwrap_or("");
+        if text.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("EMPTY", "text is required")),
+            )
+                .into_response();
+        }
+
+        let topic_id: Option<[u8; 32]> = hex::decode(&id).ok().and_then(|b| b.try_into().ok());
+        let Some(topic_id) = topic_id else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("INVALID_ID", "invalid channel id")),
+            )
+                .into_response();
         };
-        match core
-            .ghost_channels
-            .set_privacy(&channel_id, privacy_enum)
-            .await
-        {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({
-                "channel_id": channel_id,
-                "privacy": privacy,
-            })))
-            .into_response(),
-            Err(e) => (
+
+        let core = state.core.read().await;
+        let Some(channel) = core.ghost_channels.get(&topic_id).await else {
+            return (
                 StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("PRIVACY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("NOT_FOUND", "Channel not joined")),
             )
-                .into_response(),
-        }
-    }
+                .into_response();
+        };
 
-    pub async fn get_channel_info(
-        State(state): State<Arc<AppState>>,
-        Path(channel_id): Path<String>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        match core.ghost_channels.get_info(&channel_id).await {
-            Some(info) => Json(ApiV2Response::success(info)).into_response(),
-            None => (
-                StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("NOT_FOUND", "Channel not found")),
-            )
-                .into_response(),
-        }
-    }
-
-    pub async fn list_topics(
-        State(state): State<Arc<AppState>>,
-        Path(channel_id): Path<String>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        let topics = core.ghost_channels.list_topics(&channel_id).await;
-        Json(ApiV2Response::success(topics))
-    }
-
-    pub async fn add_topic(
-        State(state): State<Arc<AppState>>,
-        Path((channel_id, topic)): Path<(String, String)>,
-    ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        match core.ghost_channels.add_topic(&channel_id, &topic).await {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({
-                "channel_id": channel_id,
-                "topic": topic,
-            })))
-            .into_response(),
+        match core.ghost_channels.prepare_message(&channel, text).await {
+            Ok(msg) => {
+                #[cfg(feature = "mesh")]
+                {
+                    if let Some(mesh_manager) = &core.mesh_manager {
+                        let mgr = mesh_manager.read().await;
+                        let topic = format!("ghostwire-channel-{}", hex::encode(topic_id));
+                        let content = serde_json::to_string(&msg).unwrap_or_default();
+                        let _ = mgr.publish_to_topic(&topic, &content).await;
+                    }
+                }
+                Json(ApiV2Response::success(serde_json::json!({
+                    "status": "published",
+                    "msg_id": hex::encode(msg.msg_id),
+                    "pow_nonce": msg.pow_nonce,
+                })))
+                .into_response()
+            }
             Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("TOPIC_ERROR", &e.to_string())),
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string())),
             )
                 .into_response(),
         }
     }
 
-    pub async fn remove_topic(
+    pub async fn get_messages(
         State(state): State<Arc<AppState>>,
-        Path((channel_id, topic)): Path<(String, String)>,
+        Path(id): Path<String>,
     ) -> impl IntoResponse {
-        let core = state.core.read().await;
-        match core.ghost_channels.remove_topic(&channel_id, &topic).await {
-            Ok(_) => Json(ApiV2Response::success(serde_json::json!({
-                "channel_id": channel_id,
-                "topic": topic,
-                "removed": true,
-            })))
-            .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("TOPIC_ERROR", &e.to_string())),
+        let topic_id: Option<[u8; 32]> = hex::decode(&id).ok().and_then(|b| b.try_into().ok());
+        let Some(topic_id) = topic_id else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("INVALID_ID", "invalid channel id")),
             )
-                .into_response(),
-        }
+                .into_response();
+        };
+        let core = state.core.read().await;
+        let messages = core.ghost_channels.get_messages(&topic_id).await;
+        Json(ApiV2Response::success(messages)).into_response()
     }
 }

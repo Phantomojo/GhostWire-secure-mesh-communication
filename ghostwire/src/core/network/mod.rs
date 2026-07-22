@@ -31,10 +31,12 @@
 pub mod presence_obfuscation;
 
 // Re-exports for backward compatibility
+#[cfg(feature = "briar")]
 pub use crate::core::briar;
 pub use crate::core::mesh;
 pub use crate::core::mesh_health;
 pub use crate::core::monitor;
+#[cfg(feature = "reticulum")]
 pub use crate::core::reticulum;
 pub use crate::core::transport;
 pub use crate::core::quic_transport;

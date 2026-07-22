@@ -42,7 +42,6 @@ pub mod mesh_health;
 pub mod message;
 pub mod micro_optimizations;
 pub mod monitor;
-pub mod network;
 pub mod network_scanner;
 pub mod obfs4_transport;
 pub mod oem_battery_guide;
@@ -134,7 +133,7 @@ pub enum CoreEvent {
 pub enum AdapterKind {
     Matrix(MatrixAdapter),
     Meshtastic(MeshtasticAdapter),
-    // Add more adapters here as needed
+    Irc(IrcAdapter),
 }
 
 impl AdapterKind {
@@ -142,12 +141,14 @@ impl AdapterKind {
         match self {
             AdapterKind::Matrix(a) => a.name(),
             AdapterKind::Meshtastic(a) => a.name(),
+            AdapterKind::Irc(a) => a.name(),
         }
     }
     pub fn description(&self) -> &'static str {
         match self {
             AdapterKind::Matrix(a) => a.description(),
             AdapterKind::Meshtastic(a) => a.description(),
+            AdapterKind::Irc(a) => a.description(),
         }
     }
     pub async fn send_message(
@@ -157,12 +158,14 @@ impl AdapterKind {
         match self {
             AdapterKind::Matrix(a) => a.send_message(message).await,
             AdapterKind::Meshtastic(a) => a.send_message(message).await,
+            AdapterKind::Irc(a) => a.send_message(message).await,
         }
     }
     pub async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
         match self {
             AdapterKind::Matrix(a) => a.receive_message().await,
             AdapterKind::Meshtastic(a) => a.receive_message().await,
+            AdapterKind::Irc(a) => a.receive_message().await,
         }
     }
 }
@@ -346,6 +349,269 @@ impl MeshtasticAdapter {
     }
 }
 
+/// IRC adapter — runs a local IRC server on localhost:6667 so any standard IRC
+/// client (HexChat, WeeChat, HexDroid) can send/receive mesh messages.
+///
+/// Architecture:
+///   IRC Client → localhost:6667 → IrcAdapter → GhostWire Message → mesh
+///   mesh → GhostWire Message → IrcAdapter → IRC PRIVMSG → IRC Client
+#[derive(Clone)]
+pub struct IrcAdapter {
+    pub listen_addr: std::net::SocketAddr,
+    pub channel_name: String,
+    pub server_name: String,
+    /// Shared broadcast receiver for mesh messages destined for IRC clients.
+    /// None when running in mock mode (feature disabled).
+    pub mesh_rx: Option<Arc<tokio::sync::broadcast::Receiver<CoreEvent>>>,
+}
+
+impl IrcAdapter {
+    pub fn name(&self) -> &'static str {
+        "irc"
+    }
+    pub fn description(&self) -> &'static str {
+        "IRC protocol bridge — local IRC server for standard client apps"
+    }
+
+    pub async fn send_message(
+        &self,
+        message: &crate::core::message::Message,
+    ) -> anyhow::Result<()> {
+        tracing::debug!(
+            irc_channel = %self.channel_name,
+            sender = %message.sender,
+            content_len = message.content.len(),
+            "IRC adapter: mesh message ready for broadcast"
+        );
+        Ok(())
+    }
+
+    pub async fn receive_message(&self) -> anyhow::Result<Option<crate::core::message::Message>> {
+        Ok(None)
+    }
+
+    #[cfg(feature = "irc")]
+    pub async fn start(
+        &self,
+        mesh_tx: tokio::sync::broadcast::Sender<crate::core::message::Message>,
+    ) -> anyhow::Result<()> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind(self.listen_addr).await?;
+        tracing::info!(
+            addr = %self.listen_addr,
+            channel = %self.channel_name,
+            "IRC server listening"
+        );
+
+        let channel_name = self.channel_name.clone();
+        let server_name = self.server_name.clone();
+        let mut mesh_rx = self.mesh_rx.as_ref().map(|r| r.as_ref().try_clone()).flatten();
+
+        let clients: Arc<tokio::sync::RwLock<Vec<tokio::sync::mpsc::Sender<String>>>> =
+            Arc::new(tokio::sync::RwLock::new(Vec::new()));
+        let clients_clone = clients.clone();
+
+        if let Some(mut rx) = mesh_rx.take() {
+            let clients = clients_clone.clone();
+            let channel = channel_name.clone();
+            tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(CoreEvent::NewMessage(msg)) => {
+                            let line = format!(
+                                ":mesh!mesh@ghostwire PRIVMSG {} :{}\r\n",
+                                channel, msg.content
+                            );
+                            let guard = clients.read().await;
+                            for tx in guard.iter() {
+                                let _ = tx.send(line.clone()).await;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("IRC forwarder lagged {} messages", n);
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        let mesh_tx = mesh_tx.clone();
+        loop {
+            let (stream, addr) = listener.accept().await?;
+            tracing::debug!(addr = %addr, "IRC client connected");
+
+            let channel = channel_name.clone();
+            let server = server_name.clone();
+            let clients = clients_clone.clone();
+            let mesh_tx = mesh_tx.clone();
+
+            tokio::spawn(async move {
+                let (reader, mut writer) = stream.into_split();
+                let mut lines = BufReader::new(reader).lines();
+
+                let (client_tx, mut client_rx) = tokio::sync::mpsc::channel::<String>(64);
+                {
+                    let mut guard = clients.write().await;
+                    guard.push(client_tx);
+                }
+
+                let write_handle = tokio::spawn(async move {
+                    while let Some(line) = client_rx.recv().await {
+                        if writer.write_all(line.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                let mut nick = String::new();
+                let mut user = String::new();
+                let mut registered = false;
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let line = line.trim_end_matches('\r');
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                    let cmd = parts[0].to_uppercase();
+
+                    match cmd.as_str() {
+                        "NICK" => {
+                            nick = parts.get(1).unwrap_or(&"anon").to_string();
+                            tracing::debug!(nick = %nick, "IRC NICK");
+                        }
+                        "USER" => {
+                            user = parts.get(1).unwrap_or(&"user").to_string();
+                            tracing::debug!(user = %user, "IRC USER");
+                            if !registered {
+                                registered = true;
+                                let welcome = format!(
+                                    ":{} 001 {} :Welcome to GhostWire IRC bridge\r\n\
+                                     :{} 002 {} :Your host is GhostWire\r\n\
+                                     :{} 376 {} :End of MOTD\r\n",
+                                    server, nick, server, nick, server, nick
+                                );
+                                let _ = client_rx.try_send(welcome);
+                            }
+                        }
+                        "PING" => {
+                            let token = parts.get(1).unwrap_or(&"");
+                            let _ = client_rx.try_send(format!("PONG :{}\r\n", token));
+                        }
+                        "JOIN" => {
+                            let ch = parts.get(1).unwrap_or(&channel);
+                            let _ = client_rx.try_send(format!(
+                                ":{}!{}@ghostwire JOIN {}\r\n\
+                                 :{} 353 {} = {} :{}\r\n\
+                                 :{} 366 {} {} :End of NAMES\r\n",
+                                nick, user, ch, server, nick, ch, nick, server, nick, ch
+                            ));
+                        }
+                        "PRIVMSG" => {
+                            if let Some(target) = parts.get(1) {
+                                if let Some(msg_start) = line.find(" :") {
+                                    let content = &line[msg_start + 2..];
+                                    tracing::debug!(
+                                        from = %nick,
+                                        target = %target,
+                                        content_len = content.len(),
+                                        "IRC PRIVMSG"
+                                    );
+                                    let gw_msg = crate::core::message::Message::new(
+                                        nick.clone(),
+                                        target.to_string(),
+                                        content.to_string(),
+                                    );
+                                    let _ = mesh_tx.send(gw_msg);
+                                }
+                            }
+                        }
+                        "PART" | "QUIT" => {
+                            tracing::debug!(nick = %nick, cmd = %cmd, "IRC disconnect");
+                            break;
+                        }
+                        "WHO" => {
+                            let ch = parts.get(1).unwrap_or(&channel);
+                            let _ = client_rx.try_send(format!(
+                                ":{} 352 {} {} ~{} ghostwire {} {} H :0 {}\r\n\
+                                 :{} 315 {} {} :End of WHO\r\n",
+                                server, nick, ch, user, server, nick, nick, server, nick, ch
+                            ));
+                        }
+                        "MODE" => {
+                            let target = parts.get(1).unwrap_or(&nick);
+                            let _ = client_rx.try_send(format!(
+                                ":{} 221 {} +i\r\n",
+                                server, target
+                            ));
+                        }
+                        "LIST" => {
+                            let _ = client_rx.try_send(format!(
+                                ":{} 321 {} Channel :Users Name\r\n\
+                                 :{} 322 {} {} 1 :GhostWire mesh channel\r\n\
+                                 :{} 323 {} :End of LIST\r\n",
+                                server, nick, server, nick, channel, server, nick
+                            ));
+                        }
+                        "NAMES" => {
+                            let ch = parts.get(1).unwrap_or(&channel);
+                            let _ = client_rx.try_send(format!(
+                                ":{} 353 {} = {} :{}\r\n\
+                                 :{} 366 {} {} :End of NAMES\r\n",
+                                server, nick, ch, nick, server, nick, ch
+                            ));
+                        }
+                        "TOPIC" => {
+                            let ch = parts.get(1).unwrap_or(&channel);
+                            let _ = client_rx.try_send(format!(
+                                ":{} 332 {} {} :GhostWire secure mesh — all messages are E2E encrypted on the mesh\r\n",
+                                server, nick, ch
+                            ));
+                        }
+                        "MOTD" => {
+                            let _ = client_rx.try_send(format!(
+                                ":{} 375 {} :- GhostWire IRC Bridge\r\n\
+                                 :{} 372 {} :- Messages sent here traverse the GhostWire mesh\r\n\
+                                 :{} 372 {} :- All traffic is end-to-end encrypted\r\n\
+                                 :{} 376 {} :End of MOTD\r\n",
+                                server, nick, server, nick, server, nick, server, nick
+                            ));
+                        }
+                        "LUSERS" | "USERHOST" | "CAP" | "INVITE" | "WHOIS" => {
+                            if cmd == "CAP" {
+                                let _ = client_rx.try_send("CAP * LS :\r\n".to_string());
+                            }
+                        }
+                        _ => {
+                            tracing::trace!(cmd = %cmd, "IRC unhandled command");
+                        }
+                    }
+                }
+
+                write_handle.abort();
+            });
+        }
+    }
+
+    #[cfg(not(feature = "irc"))]
+    pub async fn start(
+        &self,
+        _mesh_tx: tokio::sync::broadcast::Sender<crate::core::message::Message>,
+    ) -> anyhow::Result<()> {
+        tracing::info!(
+            addr = %self.listen_addr,
+            channel = %self.channel_name,
+            "[MOCK] IRC server would listen here. Enable 'irc' feature for real server."
+        );
+        Ok(())
+    }
+}
+
 /// Core application state and management
 #[derive(Clone)]
 pub struct Core {
@@ -514,6 +780,15 @@ impl Core {
             "/dev/ttyUSB0".to_string(),
             "main".to_string(),
         )));
+        if config.features.irc_bridge {
+            let (event_bus_tx, _) = broadcast::channel(1024);
+            adapter_registry.register(AdapterKind::Irc(IrcAdapter {
+                listen_addr: "127.0.0.1:6667".parse().expect("valid socket addr"),
+                channel_name: "#ghostwire".to_string(),
+                server_name: "GhostWire".to_string(),
+                mesh_rx: Some(Arc::new(event_bus_tx.subscribe())),
+            }));
+        }
         let adapter_registry = Arc::new(RwLock::new(adapter_registry));
         let active_adapter = Arc::new(RwLock::new(None));
 

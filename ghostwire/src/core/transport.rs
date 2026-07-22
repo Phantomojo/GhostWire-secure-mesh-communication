@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn test_transport_kind_clone() {
         let transport1 = TransportKind::Dummy;
-        let _transport2 = transport1.clone();
+        let transport2 = transport1.clone();
         // Both should have the same name
         assert_eq!(transport1.name(), transport2.name());
     }
