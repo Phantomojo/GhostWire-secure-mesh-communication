@@ -16,7 +16,8 @@ WHITE='\033[1;37m'
 DIM='\033[0;90m'
 NC='\033[0m'
 
-TOKEN="eOAL2kTExt70taE71HmYh1wWZ5eD8T3W"
+# ponytail: token moved to env var — was hardcoded, now via GHOSTWIRE_TOKEN
+TOKEN="${GHOSTWIRE_TOKEN:?Set GHOSTWIRE_TOKEN env var}"
 API_A="http://127.0.0.1:9000"
 API_B="http://127.0.0.1:9001"
 
@@ -28,7 +29,7 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # Get PeerIds
-NODE_B=$(ssh ph@stratsytem "sudo grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
+NODE_B=$(ssh "${GHOSTWIRE_NODE_B_USER:-root}@${GHOSTWIRE_NODE_B_HOST:?Set GHOSTWIRE_NODE_B_HOST}" "grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
 
 if [ -z "$NODE_B" ]; then
     echo -e "${RED}❌ Node B not running${NC}"
@@ -123,7 +124,7 @@ echo ""
 sleep 2
 
 # Check Node B logs
-B_LOGS=$(ssh ph@stratsytem "sudo tail -20 /tmp/node-b.log 2>/dev/null" | grep -i "encrypt\|decrypt\|direct\|message\|Received\|Processed" | tail -5)
+B_LOGS=$(ssh "${GHOSTWIRE_NODE_B_USER:-root}@${GHOSTWIRE_NODE_B_HOST}" "tail -20 /tmp/node-b.log 2>/dev/null" | grep -i "encrypt\|decrypt\|direct\|message\|Received\|Processed" | tail -5)
 if [ -n "$B_LOGS" ]; then
     echo -e "  ${DIM}Node B reception log:${NC}"
     echo "$B_LOGS" | while IFS= read -r line; do
@@ -140,8 +141,10 @@ fi
 echo ""
 
 # Show the received message
-TOKEN_B=$(ssh ph@stratsytem "sudo cat /root/.config/ghostwire/token" 2>/dev/null)
-B_MSG=$(ssh ph@stratsytem "sudo curl -s $API_B/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
+TOKEN_B="${GHOSTWIRE_TOKEN_B:-}"
+NODE_B_HOST="${GHOSTWIRE_NODE_B_HOST:?Set GHOSTWIRE_NODE_B_HOST}"
+NODE_B_USER="${GHOSTWIRE_NODE_B_USER:-root}"
+B_MSG=$(ssh "${NODE_B_USER}@${NODE_B_HOST}" "curl -s http://127.0.0.1:9001/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
 
 echo -e "  ${DIM}Message structure on Node B:${NC}"
 echo "$B_MSG" | python3 -c "

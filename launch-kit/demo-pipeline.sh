@@ -17,7 +17,8 @@ WHITE='\033[1;37m'
 NC='\033[0m'
 
 # Config
-TOKEN="eOAL2kTExt70taE71HmYh1wWZ5eD8T3W"
+# ponytail: token moved to env var — was hardcoded, now via GHOSTWIRE_TOKEN
+TOKEN="${GHOSTWIRE_TOKEN:?Set GHOSTWIRE_TOKEN env var}"
 API_A="http://127.0.0.1:9000"
 API_B="http://127.0.0.1:9001"
 
@@ -30,7 +31,7 @@ echo ""
 
 # Get Node B PeerId
 echo -e "${BLUE}[STEP 0]${NC} Discovering nodes..."
-NODE_B=$(ssh ph@stratsytem "sudo grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
+NODE_B=$(ssh "${GHOSTWIRE_NODE_B_USER:-root}@${GHOSTWIRE_NODE_B_HOST:?Set GHOSTWIRE_NODE_B_HOST}" "grep 'local_peer_id' /tmp/node-b.log 2>/dev/null | tail -1" | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
 NODE_A=$(grep "local_peer_id" /tmp/node-a.log 2>/dev/null | tail -1 | python3 -c "import sys,json; [print(json.loads(l)['fields']['local_peer_id']) for l in sys.stdin]" 2>/dev/null)
 
 if [ -z "$NODE_B" ]; then
@@ -80,7 +81,7 @@ sleep 3
 
 # Check Node B logs for encryption/decryption
 echo -e "${BLUE}[STEP 5]${NC} Receiving on Node B..."
-B_LOGS=$(ssh ph@stratsytem "sudo tail -20 /tmp/node-b.log 2>/dev/null" | grep -i "encrypt\|decrypt\|direct\|message\|Received" | tail -5)
+B_LOGS=$(ssh "${GHOSTWIRE_NODE_B_USER:-root}@${GHOSTWIRE_NODE_B_HOST}" "tail -20 /tmp/node-b.log 2>/dev/null" | grep -i "encrypt\|decrypt\|direct\|message\|Received" | tail -5)
 
 if echo "$B_LOGS" | grep -q "Received direct message"; then
     echo -e "  ${GREEN}✅${NC} Message received on Node B"
@@ -91,8 +92,10 @@ echo ""
 
 # Show the stored message
 echo -e "${BLUE}[STEP 6]${NC} Decrypted message on Node B"
-TOKEN_B=$(ssh ph@stratsytem "sudo cat /root/.config/ghostwire/token" 2>/dev/null)
-B_MESSAGES=$(ssh ph@stratsytem "sudo curl -s $API_B/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
+TOKEN_B="${GHOSTWIRE_TOKEN_B:-}"
+NODE_B_HOST="${GHOSTWIRE_NODE_B_HOST:?Set GHOSTWIRE_NODE_B_HOST}"
+NODE_B_USER="${GHOSTWIRE_NODE_B_USER:-root}"
+B_MESSAGES=$(ssh "${NODE_B_USER}@${NODE_B_HOST}" "curl -s http://127.0.0.1:9001/api/v2/messages -H 'X-Ghost-Token: $TOKEN_B'" 2>/dev/null)
 
 echo "$B_MESSAGES" | python3 -c "
 import sys, json

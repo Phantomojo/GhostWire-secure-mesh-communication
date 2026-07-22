@@ -61,7 +61,7 @@ test_remote_backend() {
     echo -e "${YELLOW}Testing Remote Backend (Node B)...${NC}"
     
     # Test SSH connectivity first
-    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "echo 'SSH OK'" >/dev/null 2>&1; then
+    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@<NODE_B_IP> "echo 'SSH OK'" >/dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} SSH connection to Node B"
     else
         echo -e "${RED}✗${NC} SSH connection FAILED"
@@ -70,7 +70,7 @@ test_remote_backend() {
     fi
     
     # Check if backend running
-    RUNNING=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
+    RUNNING=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@<NODE_B_IP> "pgrep -f 'ghostwire --port 8080'" 2>/dev/null)
     if [ -n "$RUNNING" ]; then
         echo -e "${GREEN}✓${NC} Backend process running on Node B"
     else
@@ -84,7 +84,7 @@ test_remote_backend() {
     echo "Testing Remote API Endpoints:"
     
     # Profile
-    PROFILE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
+    PROFILE=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s http://localhost:8080/api/v2/profile" 2>/dev/null)
     if echo "$PROFILE" | grep -q '"id"'; then
         NODE_ID=$(echo "$PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/profile - Node ID: $NODE_ID"
@@ -93,7 +93,7 @@ test_remote_backend() {
     fi
     
     # Peers
-    PEERS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
+    PEERS=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@<NODE_B_IP> "curl -s 'http://localhost:8080/api/v2/peers?page=1&per_page=20'" 2>/dev/null)
     if echo "$PEERS" | grep -q '"data"'; then
         PEER_COUNT=$(echo "$PEERS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']))" 2>/dev/null)
         echo -e "${GREEN}✓${NC} /api/v2/peers - Peer count: $PEER_COUNT"
@@ -117,7 +117,7 @@ test_network() {
     
     # Test HTTP connectivity via SSH tunnel
     echo -e "${YELLOW}Creating SSH tunnel for HTTP test...${NC}"
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -f -N -L 8082:localhost:8080 root@<NODE_B_IP> 2>/dev/null
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -f -N -L 8082:localhost:8080 root@<NODE_B_IP> 2>/dev/null
     sleep 2
     
     if curl -s http://localhost:8082/api/v2/profile >/dev/null 2>&1; then
