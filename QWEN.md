@@ -12,8 +12,7 @@
    - `kaggle kernels pull -p <dir>` — download results
 3. Training script: scripts/train_gnn_kaggle.py — complete GAT training with pip install, dataset gen, training, and model save to /kaggle/working/models/gnn_routing/
 4. Current API key (93b1b329...) is expired — needs regeneration
-- Kaggle API token: KGAT_3f2c7cb3f5a84b3b5242991f5ac916d8 (ACCESS_TOKEN auth method, set via KAGGLE_API_TOKEN env var or kaggle config set -n key). CLI workflow: `kaggle kernels push -p /tmp/kaggle-kernel --accelerator gpu --timeout 3600` pushes and runs. Status: `kaggle kernels status phantomojo/ghostwire-gnn-routing-model-training`. Output: `kaggle kernels output phantomojo/ghostwire-gnn-routing-model-training`. Kernel metadata at /tmp/kaggle-kernel/kernel-metadata.json. Training script at /tmp/kaggle-kernel/train_gnn.py (copied from scripts/train_gnn_kaggle.py).
-- Kaggle API token: KGAT_9a63abbf734af58321ff7deea101c0e1 (set via KAGGLE_API_TOKEN env var). Replaces expired KGAT_3f2c7cb3f5a84b3b5242991f5ac916d8.
+- ⚠️ Kaggle tokens REDACTED (2026-07-22) — rotate at kaggle.com/settings → API. Set via KAGGLE_API_TOKEN env var.
 - GhostWire AI Module & Codebase Audit — State as of 2026-04-05:
 
 SECURITY FIXES APPLIED:

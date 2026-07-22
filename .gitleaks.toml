@@ -31,6 +31,20 @@ description = "BLAKE3 topic hashes (not secrets)"
 regex = '''[a-f0-9]{64}'''
 tags = ["hash", "false-positive"]
 
+# Catch Kaggle API tokens (KGAT_ prefix)
+[[rules]]
+id = "kaggle-api-token"
+description = "Kaggle API tokens (KGAT_ prefix)"
+regex = '''KGAT_[a-f0-9]{32}'''
+tags = ["api-key", "credential"]
+
+# Catch generic API tokens that look like hardcoded secrets
+[[rules]]
+id = "hardcoded-api-token"
+description = "Hardcoded API tokens (long hex strings in config/docs)"
+regex = '''(?:token|key|secret|password)\s*[:=]\s*["\x27]?[A-Za-z0-9_\-]{32,}["\x27]?'''
+tags = ["api-key", "credential"]
+
 # Paths to always ignore
 [allowlist]
 paths = [
@@ -38,7 +52,6 @@ paths = [
     '''\.git/''',
     '''ghostwire-scan-reports/''',
     '''graphify-out/''',
-    '''docs/''',
     '''website-next/''',
     '''models/''',
     '''\.github/''',
