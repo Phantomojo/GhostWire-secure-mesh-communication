@@ -286,20 +286,29 @@ impl TrustStore {
     }
 
     fn verify_attestation_signature(&self, att: &Attestation) -> Result<()> {
-        // In production: verify att.signature using att.attester_id's public key
-        // against payload: (subject_id || subject_pub_key || timestamp as 8-byte LE)
-        //
-        // Using ring::signature::Ed25519 or ed25519-dalek:
-        //
-        // let attester_pub_key = self.get_attester_pub_key(&att.attester_id)?;
-        // let payload = [att.subject_id.as_bytes(), &att.subject_pub_key,
-        //                &att.timestamp.to_le_bytes()].concat();
-        // ring::signature::UnparsedPublicKey::new(
-        //     &ring::signature::ED25519, &attester_pub_key
-        // ).verify(&payload, &att.signature)?;
-        //
-        // Stub for now — TODO: wire with identity keypair lookup
-        let _ = att;
+        if att.signature.is_empty() {
+            anyhow::bail!("Attestation has no signature");
+        }
+
+        let attester_key = {
+            let peers = self.peers.blocking_read();
+            peers
+                .get(&att.attester_id)
+                .map(|r| r.pinned_key.clone())
+                .ok_or_else(|| anyhow::anyhow!("Attester {} not in trust store", att.attester_id))?
+        };
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(att.subject_id.as_bytes());
+        payload.extend_from_slice(&att.subject_pub_key);
+        payload.extend_from_slice(&att.timestamp.to_le_bytes());
+
+        use ring::signature::{UnparsedPublicKey, ED25519};
+        let public_key = UnparsedPublicKey::new(&ED25519, &attester_key);
+        public_key
+            .verify(&payload, &att.signature)
+            .map_err(|e| anyhow::anyhow!("Attestation signature invalid: {}", e))?;
+
         Ok(())
     }
 }

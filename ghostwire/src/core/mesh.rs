@@ -5,6 +5,7 @@ use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
 use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
 use anyhow::Result;
+use bincode::Options;
 // use async_trait::async_trait;
 use crate::core::username_discovery::UsernameDiscovery;
 use base64::Engine;
@@ -915,6 +916,8 @@ impl MeshDriver {
                     Err(e) => { let _ = reply.send(Err(e)); return; }
                 };
                 let data = frame.to_bytes();
+                // ponytail: mark as seen before publish so gossipsub loopback is deduped
+                self.seen_messages.push_back(message.id.clone());
                 let mut res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
                 for attempt in 1..=3u32 {
                     if let Err(PublishError::NoPeersSubscribedToTopic) = &res {
@@ -1238,7 +1241,10 @@ impl MeshDriver {
                     .kad
                     .add_address(peer_id, addr.clone());
                 // Attempt to connect
-                let _ = self.swarm.dial(addr.clone());
+                match self.swarm.dial(addr.clone()) {
+                    Ok(()) => tracing::info!("Initiated dial to {} ({})", peer_id, addr),
+                    Err(e) => tracing::warn!("Failed to dial {} at {}: {}", peer_id, addr, e),
+                }
             }
             return;
         }
@@ -1419,6 +1425,15 @@ impl MeshDriver {
                     }
                 }
             }
+        }
+
+        if let SwarmEvent::OutgoingConnectionError {
+            peer_id,
+            error,
+            ..
+        } = &event
+        {
+            tracing::warn!("Outgoing connection to {:?} failed: {}", peer_id, error);
         }
 
         if let SwarmEvent::ConnectionClosed {
@@ -1857,7 +1872,10 @@ impl MeshDriver {
         peer_id: PeerId,
         message: GossipsubMessage,
     ) -> Result<()> {
-        let packet: crate::core::routing::sphinx::SphinxPacket = match bincode::deserialize(&message.data) {
+        let packet: crate::core::routing::sphinx::SphinxPacket = match bincode::options()
+            .with_limit(1024 * 1024)
+            .deserialize(&message.data)
+        {
             Ok(p) => p,
             Err(_) => return Ok(()),
         };
@@ -1905,7 +1923,10 @@ impl MeshDriver {
 
     async fn handle_dtn_sync(&mut self, message: GossipsubMessage) -> Result<()> {
         let handshake: crate::core::dtn::epidemic::DtnSyncHandshake =
-            match bincode::deserialize(&message.data) {
+            match bincode::options()
+                .with_limit(1024 * 1024)
+                .deserialize(&message.data)
+            {
                 Ok(h) => h,
                 Err(_) => return Ok(()),
             };
@@ -2301,6 +2322,11 @@ pub struct MeshStats {
     pub security_stats: SecurityStats,
 }
 
+// SAFETY: MeshTransport wraps libp2p Swarm which contains non-Send/Sync types
+// (tokio tasks, channel receivers). All mutable access is through Arc<RwLock<>>,
+// and the Swarm is only accessed from tokio tasks on the runtime. The Send/Sync
+// impls are required to shuttle MeshTransport across task boundaries.
+// If libp2p internals change their thread-safety guarantees, this will need review.
 unsafe impl Sync for MeshTransport {}
 unsafe impl Send for MeshTransport {}
 

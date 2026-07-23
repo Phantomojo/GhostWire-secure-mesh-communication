@@ -525,13 +525,16 @@ async fn handle_manage(core: &Arc<Core>, subcommand: ManageCommand) -> Result<()
         }
         ManageCommand::Logs { follow, lines } => {
             info!("📋 Viewing logs (last {} lines)...", lines);
-            let log_file = "/tmp/ghostwire.log"; // Default for now
+            let log_file = "/tmp/ghostwire.log";
             if std::path::Path::new(log_file).exists() {
-                let tail_cmd = if follow { "tail -f" } else { "tail -n" };
-                let mut child = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(format!("{} {} {}", tail_cmd, lines, log_file))
-                    .spawn()?;
+                let mut cmd = std::process::Command::new("tail");
+                if follow {
+                    cmd.arg("-f");
+                } else {
+                    cmd.arg("-n");
+                }
+                cmd.arg(lines.to_string()).arg(log_file);
+                let mut child = cmd.spawn()?;
                 child.wait()?;
             } else {
                 println!("⚠️ Log file not found at {}", log_file);

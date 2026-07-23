@@ -22,7 +22,8 @@ use tracing::{info, warn};
 
 /// The public key used to sign Ghostwire release manifests.
 /// This is baked into the binary at compile time — no TOFU, no trust-on-update.
-/// REPLACE WITH YOUR ACTUAL RELEASE SIGNING KEY.
+/// SECURITY: Replace before any public release. The all-zero placeholder is
+/// rejected at runtime to prevent shipping with an insecure key.
 const RELEASE_SIGNING_KEY: &[u8; 32] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PLACEHOLDER
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Replace before release
@@ -48,6 +49,11 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Check if an update is available.
 /// Returns the manifest if there's a newer version, None if up-to-date.
 pub async fn check_for_update() -> Option<UpdateManifest> {
+    if *RELEASE_SIGNING_KEY == [0u8; 32] {
+        warn!("Update system disabled: RELEASE_SIGNING_KEY is all zeros");
+        return None;
+    }
+
     info!("Checking for updates (current: {})", CURRENT_VERSION);
 
     let manifest = match fetch_manifest().await {

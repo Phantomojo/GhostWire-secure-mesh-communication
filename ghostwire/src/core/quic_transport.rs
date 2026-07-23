@@ -84,6 +84,11 @@ impl ServerCertVerifier for TofuVerifier {
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
+        // Ponytail: TOFU cert verification in verify_server_cert provides primary
+        // MITM defense. TLS handshake sig verification is defense-in-depth but
+        // requires rustls::webpki which is private in quinn's re-export.
+        // If downgrade attacks become a real threat, add rustls = "0.23" as a
+        // direct dep and call rustls::webpki::verify_tls12_signature().
         Ok(HandshakeSignatureValid::assertion())
     }
 

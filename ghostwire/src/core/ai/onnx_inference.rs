@@ -7,6 +7,7 @@ use ort::{
     session::Session,
     value::{Tensor, ValueType},
 };
+use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 /// Main ONNX inference engine for GhostWire
@@ -19,12 +20,30 @@ pub struct OnnxInferenceEngine {
 }
 
 impl OnnxInferenceEngine {
-    /// Load an ONNX model from file
     pub fn new(model_path: &str, model_name: &str) -> Result<Self> {
-        // Build session and commit from file (ort 2.0 API)
-        let mut builder = Session::builder().context("Failed to create ONNX session builder")?;
+        Self::new_with_hash_check(model_path, model_name, None)
+    }
 
-        // Enable max optimization — ignore error since this isn't available in minimal builds
+    pub fn new_with_hash_check(
+        model_path: &str,
+        model_name: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<Self> {
+        if let Some(expected) = expected_sha256 {
+            let data = std::fs::read(model_path)
+                .context(format!("Failed to read model file {}", model_path))?;
+            let hash = hex::encode(Sha256::digest(&data));
+            if hash != expected {
+                anyhow::bail!(
+                    "Model integrity check failed for {}: expected {}, got {}",
+                    model_path,
+                    expected,
+                    hash
+                );
+            }
+        }
+
+        let mut builder = Session::builder().context("Failed to create ONNX session builder")?;
         builder = builder
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
             .unwrap_or_else(|e| e.recover());

@@ -180,15 +180,13 @@ pub async fn auth_middleware(
     tracing::debug!("Checking auth path: {}", path);
 
     // Public endpoints (no auth required)
-    if path == "/api/dev/token"
-        || path == "/api/auth/login"
+    if path == "/api/auth/login"
         || path.starts_with("/api/v2/health")
         || path.starts_with("/api/v2/ready")
         || path.starts_with("/api/v2/live")
         || path.starts_with("/api/profile")
         || path.starts_with("/api/identity")
         || path.starts_with("/api/ble")
-    // BLE transport endpoints
     {
         return Ok(next.run(req).await);
     }
@@ -209,6 +207,11 @@ pub async fn auth_middleware(
     } else if let Some(auth_val) = auth_header {
         if auth_val.starts_with("Bearer ") {
             let jwt = &auth_val[7..];
+            let mut validation = jsonwebtoken::Validation::default();
+            validation.validate_exp = true;
+            // Ponytail: no audience/issuer set because JWTs are self-issued at login
+            // with no external IdP. Add validation.set_audience() / .set_issuer() if
+            // an external identity provider is ever integrated.
             jsonwebtoken::decode::<Claims>(
                 jwt,
                 &jsonwebtoken::DecodingKey::from_secret(JWT_SECRET.as_bytes()),
@@ -286,7 +289,8 @@ pub async fn start_web_server(
     let _ = &*AUTH_TOKEN;
 
     let cors = CorsLayer::new()
-        // Restrict origins to localhost, 192.168.x.x, and Docker bridge
+        // Restrict origins to localhost only — private ranges (192.168.*, 172.*)
+        // are too permissive; any device on the LAN can issue cross-origin requests.
         .allow_origin(tower_http::cors::AllowOrigin::predicate(
             |origin: &HeaderValue, _request_parts: &axum::http::request::Parts| {
                 if let Ok(origin_str) = origin.to_str() {
@@ -294,10 +298,7 @@ pub async fn start_web_server(
                         .trim_start_matches("http://")
                         .trim_start_matches("https://");
                     let host_no_port = host.split(':').next().unwrap_or("");
-                    host_no_port == "localhost"
-                        || host_no_port == "127.0.0.1"
-                        || host_no_port.starts_with("192.168.")
-                        || host_no_port.starts_with("172.")
+                    host_no_port == "localhost" || host_no_port == "127.0.0.1"
                 } else {
                     false
                 }

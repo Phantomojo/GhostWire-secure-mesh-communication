@@ -718,8 +718,15 @@ impl EncryptionManager {
             );
         }
 
-        // Derive session key using HKDF-SHA256 (Robust way)
-        let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"GhostWire-Salt-v1");
+        // Derive session key using HKDF-SHA256
+        // Ponytail: per-peer salt derived from shared_secret instead of static string.
+        // Prevents cross-peer key derivation if HKDF state were ever leaked.
+        let mut salt_bytes = [0u8; 32];
+        let ss = shared_secret.as_bytes();
+        for i in 0..32 {
+            salt_bytes[i] = ss[i] ^ b"GhostWire-Salt-v2"[i % 18];
+        }
+        let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &salt_bytes);
         let prk = salt.extract(shared_secret.as_bytes());
         let info_str = cryptify::encrypt_string!("GhostWire-Session-Key-v2");
         let info = [info_str.as_bytes()];
