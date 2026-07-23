@@ -456,12 +456,22 @@ impl FunctionGemmaClient {
         let system_prompt = registry.build_system_prompt();
         drop(registry);
 
+        // Ponytail: sanitize user input to prevent prompt injection.
+        // Strip control characters and enforce length limit.
+        // The <|END_SYSTEM|> delimiter makes injection harder — model treats
+        // everything after it as user-provided data, not instructions.
+        let sanitized: String = user_input
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+            .take(2048)
+            .collect();
+
         let prompt = format!(
-            "{}\n\nUser command: {}\n\nReturn a JSON object with:\n\
+            "{}\n\n<|END_SYSTEM|>\nUser command: {}\n\nReturn a JSON object with:\n\
              - function_call: {{\"name\": \"tool_name\", \"arguments\": {{...}}}} or null\n\
              - explanation: natural language response\n\
              - confidence: 0.0-1.0 confidence in the function call",
-            system_prompt, user_input
+            system_prompt, sanitized
         );
 
         let response = self
