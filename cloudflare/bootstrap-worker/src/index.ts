@@ -14,8 +14,13 @@ interface PeerRecord {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const path = url.pathname;
+    let path = url.pathname;
     const method = request.method;
+
+    // Strip /bootstrap prefix if present (routed via ghostwire.cc/bootstrap/*)
+    if (path.startsWith("/bootstrap")) {
+      path = path.slice("/bootstrap".length) || "/";
+    }
 
     if (method === "OPTIONS") {
       return corsHeaders(null, 204);
