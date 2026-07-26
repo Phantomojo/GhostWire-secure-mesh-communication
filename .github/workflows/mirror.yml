@@ -1,0 +1,38 @@
+# Auto-mirror to GitLab and Codeberg on every push
+# Requires secrets: GITLAB_TOKEN, CODEBERG_TOKEN
+
+name: Mirror to GitLab & Codeberg
+
+on:
+  push:
+    branches: [main, develop, security/*]
+  workflow_dispatch:
+
+jobs:
+  mirror-gitlab:
+    name: Mirror → GitLab
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GitLab
+        run: |
+          git remote add gitlab "https://Phantomojo:${{ secrets.GITLAB_TOKEN }}@gitlab.com/Phantomojo/GhostWire-secure-mesh-communication.git"
+          git push gitlab "${{ github.ref_name }}" --force --no-verify
+
+  mirror-codeberg:
+    name: Mirror → Codeberg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to Codeberg
+        run: |
+          git remote add codeberg "https://PHANTOMOJO:${{ secrets.CODEBERG_TOKEN }}@codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git"
+          git push codeberg "${{ github.ref_name }}" --force --no-verify
