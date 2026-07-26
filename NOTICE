@@ -3,10 +3,42 @@ Copyright (C) 2025-2026 Michael Irungu
 
 This software contains cryptographic protocol constants (FRAME_MAGIC,
 FRAME_VERSION, CHANNEL_INVITE_PREFIX, and associated KDF domain labels)
-derived from a two-party commitment ceremony conducted in 2025. These
-constants are irreproducible and form part of the GhostWire network
-identity. Nodes compiled without these constants cannot participate in
-a GhostWire mesh network.
+derived from a two-party commitment ceremony. These constants are
+irreproducible and form part of the GhostWire network identity. Nodes
+compiled without these constants cannot participate in a GhostWire mesh
+network.
+
+Genesis Ceremony (2026-03-17):
+-------------------------------
+The GhostWire genesis constants were produced through a two-party
+commit-reveal ceremony between:
+- Party A (Mike): Contributed entropy R_mike (random 32 bytes)
+- Party B (Claude): Contributed entropy R_claude (random 32 bytes)
+
+The genesis key was derived as:
+  BLAKE3("ghostwire genesis ceremony v1" || R_mike || R_claude)
+
+This derivation produced 16 domain-specific constants for network
+identity, protocol framing, channel management, and key derivation.
+
+CRITICAL LEGAL PROPERTY: One party's entropy (R_claude) was permanently
+destroyed after the ceremony as part of the protocol design. This means:
+
+1. No single party holds the full derivation path
+2. The ceremony cannot be reproduced by any party
+3. No master key exists that can be seized or compelled
+4. The constants can only be transmitted, not regenerated
+
+This architectural design is intentional and provides legal protection
+against compelled disclosure. The developers cannot provide decryption
+keys or reproduce the genesis constants because they do not exist in
+any retrievable form.
+
+Export Compliance:
+------------------
+GhostWire implements NIST FIPS 203 standardized encryption (ML-KEM-768).
+Open-source encryption source code publicly available is exempt from
+EAR restrictions under 15 CFR §740.13(e) (Encryption Note).
 
 Built on: libp2p, vodozemac, ml-kem, axum, and other open source
 components. See Cargo.toml for the full dependency tree and their

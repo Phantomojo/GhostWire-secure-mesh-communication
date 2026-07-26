@@ -10,6 +10,8 @@
 
 > **⚠️ LAWFUL USE ONLY**: GhostWire is designed for privacy-respecting, legitimate communication. Users are solely responsible for compliance with all applicable local, national, and international laws. The developers assume no liability for misuse.
 
+> **🔐 EXPORT COMPLIANCE**: GhostWire implements NIST FIPS 203 standardized encryption (ML-KEM-768). Open-source encryption source code publicly available is exempt from EAR restrictions under 15 CFR §740.13(e) (Encryption Note). Users are responsible for compliance with local export regulations.
+
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](ghostwire/CHANGELOG.md)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/License-Commercial-available.svg)](COMMERCIAL_LICENSE.md)
@@ -292,7 +294,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 **Commercial inquiries:** licensing@ghostwire.cc
 
-**Full terms:** [LICENSE](LICENSE) | [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) | [LICENSE_EXPLANATION.md](LICENSE_EXPLANATION.md)
+**Full terms:** [LICENSE](LICENSE) | [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) | [LICENSE_EXPLANATION.md](LICENSE_EXPLANATION.md) | [TERMS_OF_USE.md](TERMS_OF_USE.md)
 
 ---
 
