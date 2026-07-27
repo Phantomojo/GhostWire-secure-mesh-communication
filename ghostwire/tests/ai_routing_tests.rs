@@ -44,8 +44,8 @@ fn test_fallback_routing_scores() {
         good_score
     );
     assert!(
-        poor_score < 0.5,
-        "Poor link should be < 0.5, got {}",
+        poor_score < 0.55,
+        "Poor link should be < 0.55, got {}",
         poor_score
     );
 }

@@ -279,7 +279,7 @@ impl StealthTCPProvider {
             }
 
             if !self.check_rate_limit(&addr) {
-                tracing::warn!("StealthTCP: Connection from {} rate-limited", addr);
+                tracing::warn!("StealthTCP: Connection rate-limited");
                 self.security_manager
                     .record_connection_attempt(addr.ip(), false, "Rate limited".to_string())
                     .await;
@@ -327,7 +327,7 @@ impl StealthTCPProvider {
                     let latency = connection_start.elapsed();
                     self.update_connection_history(addr, false, latency);
 
-                    tracing::error!("StealthTCP: Handshake error from {}: {}", addr, e);
+                    tracing::error!("StealthTCP: Handshake error: {}", e);
                     self.security_manager
                         .record_connection_attempt(
                             addr.ip(),
@@ -365,7 +365,7 @@ impl StealthTCPProvider {
         let latency = connection_start.elapsed();
         self.update_connection_history(*addr, true, latency);
 
-        tracing::info!("StealthTCP: Connected to {} (latency: {:?})", addr, latency);
+        tracing::info!("StealthTCP: Connected (latency: {:?})", latency);
         Ok(stream)
     }
 
@@ -461,7 +461,7 @@ impl StealthTCPProvider {
 
     pub fn register_peer(&self, peer_id: &str, addr: SocketAddr) {
         self.peer_map.insert(peer_id.to_string(), addr);
-        tracing::info!("StealthTCP: Registered peer {} at {}", peer_id, addr);
+        tracing::info!("StealthTCP: Registered peer {}", peer_id);
     }
 
     pub async fn send_message(&self, message: &Message) -> anyhow::Result<()> {
@@ -486,7 +486,7 @@ impl StealthTCPProvider {
         let frame = Frame::encode(FrameKind::Message, &wire_msg)?;
         stream.write_all(&frame.to_bytes()).await?;
 
-        tracing::trace!("StealthTCP: Sent message to {}", message.recipient);
+        tracing::trace!("StealthTCP: Sent message");
         Ok(())
     }
 

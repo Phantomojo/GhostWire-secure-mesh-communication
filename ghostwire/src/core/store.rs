@@ -26,7 +26,7 @@ use tracing::{debug, info};
 /// - ✅ Replay protection via message deduplication
 pub struct SecureMessageStore {
     persistence: Arc<PersistenceManager>,
-    encryption: Arc<EncryptionManager>,
+    _encryption: Arc<EncryptionManager>,
 }
 
 impl SecureMessageStore {
@@ -34,7 +34,7 @@ impl SecureMessageStore {
     pub fn new(persistence: Arc<PersistenceManager>, encryption: Arc<EncryptionManager>) -> Self {
         Self {
             persistence,
-            encryption,
+            _encryption: encryption,
         }
     }
 

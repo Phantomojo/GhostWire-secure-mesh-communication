@@ -507,7 +507,10 @@ mod tests {
 
         graph.receive_request(request).await.unwrap();
 
-        // Should emit ConnectionRequestReceived
+        // First event is PeerDiscovered (register_discovered fires before ConnectionRequestReceived)
+        let first = rx.try_recv().unwrap();
+        assert!(matches!(first, SocialEvent::PeerDiscovered { .. }));
+
         let event = rx.try_recv().unwrap();
         assert!(matches!(
             event,

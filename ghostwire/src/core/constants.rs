@@ -142,7 +142,6 @@ pub mod security {
 /// Mesh networking constants
 pub mod mesh {
     use super::buffer;
-    use super::network::*;
     use super::time::*;
 
     /// Maximum message hops
@@ -171,11 +170,11 @@ pub mod mesh {
 /// Protocol identifiers and strings
 pub mod protocol {
     /// GhostWire version
-    pub const VERSION: &str = "0.1.0";
+    pub const VERSION: &str = "0.2.0";
     /// Protocol version
     pub const PROTOCOL_VERSION: &str = "1.0.0";
     /// User agent string
-    pub const USER_AGENT: &str = "ghostwire/0.1.0";
+    pub const USER_AGENT: &str = "ghostwire/0.2.0";
     /// Libp2p identify protocol
     pub const IDENTIFY_PROTOCOL: &str = "/ghostwire/mesh/2.0.0";
     /// Kademlia protocol path
@@ -205,8 +204,29 @@ pub mod topics {
     pub const SPHINX: &str = "c93b642a5e02da27dda6344fbfbe7866";
     /// DTN sync topic
     pub const DTN_SYNC: &str = "5ee92e52d560f4904ef25e4265349e3d";
+    /// CRL (Certificate Revocation List) gossip topic
+    pub const CRL_GOSSIP: &str = "a3f1c8d7e6b2940518e7d3c6a5f9b0e2";
     /// Default mesh messages topic
     pub const MESSAGES: &str = "ghostwire-messages";
+}
+
+pub mod log_privacy {
+    pub fn redact_ip(addr: &str) -> String {
+        let parts: Vec<&str> = addr.split('.').collect();
+        if parts.len() == 4 {
+            format!("{}.{}.{}.x", parts[0], parts[1], parts[2])
+        } else {
+            "x.x.x.x".to_string()
+        }
+    }
+
+    pub fn short_peer(peer_id: &str) -> String {
+        if peer_id.len() > 8 {
+            format!("{}…", &peer_id[..8])
+        } else {
+            peer_id.to_string()
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -417,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_protocol_constants_module() {
-        assert_eq!(protocol::VERSION, "0.1.0");
+        assert_eq!(protocol::VERSION, "0.2.0");
         assert!(protocol::IDENTIFY_PROTOCOL.starts_with("/ghostwire"));
         assert_eq!(protocol::TLS_HOSTNAME, "ghostwire.local");
     }

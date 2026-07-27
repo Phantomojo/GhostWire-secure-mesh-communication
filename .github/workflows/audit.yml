@@ -1,0 +1,45 @@
+name: Security Audit
+
+permissions: {}
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  push:
+    branches: ["main"]
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+
+jobs:
+  cargo-audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: rustsec/audit-check@4819ed60b82271e35428fc350be4534685c79f04 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  cargo-deny:
+    name: Cargo Deny (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks: [advisories, bans, licenses, sources]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 # v2.0.18
+        with:
+          command: check ${{ matrix.checks }}
+          arguments: --workspace
+          working-directory: ghostwire

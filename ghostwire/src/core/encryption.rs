@@ -724,7 +724,7 @@ impl EncryptionManager {
         let mut salt_bytes = [0u8; 32];
         let ss = shared_secret.as_bytes();
         for i in 0..32 {
-            salt_bytes[i] = ss[i] ^ b"GhostWire-Salt-v2"[i % 18];
+            salt_bytes[i] = ss[i] ^ b"GhostWire-Salt-v2"[i % 17];
         }
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &salt_bytes);
         let prk = salt.extract(shared_secret.as_bytes());

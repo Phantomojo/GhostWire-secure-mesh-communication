@@ -29,7 +29,7 @@ pub struct GuardianInfo {
 
 pub struct RecoveryController;
 
-fn now_secs() -> u64 {
+fn _now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

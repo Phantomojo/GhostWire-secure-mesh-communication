@@ -1,132 +1,134 @@
 name: GhostWire Rust CI
 
 permissions: {}
+
 on:
   push:
     branches: ["main", "master", "develop"]
   pull_request:
     branches: ["main", "master", "develop"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   build:
-    name: 🔨 Build
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable # pinned
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
-      - name: Prepare workspace
-        run: mkdir -p webui/dist
-      - name: cargo build
-        run: cargo build --release
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: mkdir -p webui/dist
+      - run: cargo build --release
         working-directory: ghostwire
 
   test:
-    name: 🧪 Test Suite
+    name: Test Suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable # pinned
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libudev-dev
-      - name: Prepare workspace
-        run: mkdir -p webui/dist
-      - name: Run tests
-        run: cargo test --lib --tests
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libudev-dev
+      - run: mkdir -p webui/dist
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci
+        working-directory: ghostwire
+      - run: cargo test --doc
         working-directory: ghostwire
 
   lint:
-    name: 🧹 Lints
+    name: Lints
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable # pinned
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
-      - name: Prepare workspace
-        run: mkdir -p webui/dist
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: mkdir -p webui/dist
+      - run: cargo fmt --all -- --check
         working-directory: ghostwire
-      - name: Clippy
-        run: cargo clippy --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
         working-directory: ghostwire
 
   features:
-    name: 🧩 Feature Check (default)
+    name: Feature Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable # pinned
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
-      - name: Prepare workspace
-        run: mkdir -p webui/dist
-      - name: Check default features
-        run: cargo check
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: mkdir -p webui/dist
+      - run: cargo check
         working-directory: ghostwire
 
+  semver:
+    name: Semver Checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: mkdir -p webui/dist
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: ghostwire
+
   coverage:
-    name: 📊 Test Coverage
-    if: success() || failure()
+    name: Test Coverage
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable # pinned
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libudev-dev
-      - name: Prepare workspace
-        run: mkdir -p webui/dist
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Run coverage
-        run: cargo tarpaulin --no-fail-fast --out xml --output-dir coverage
-        working-directory: ghostwire
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          files: ghostwire/coverage/cobertura.xml
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libudev-dev
+      - run: mkdir -p webui/dist
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov nextest --workspace --lcov --output-path lcov.info
+        working-directory: ghostwire
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ghostwire/lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
-      - name: Coverage Report
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cargo tarpaulin --print-summary 2>&1 | tail -20 >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY

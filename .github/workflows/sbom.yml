@@ -1,0 +1,53 @@
+name: SBOM Generation
+
+permissions: {}
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: ["main"]
+    paths:
+      - 'ghostwire/Cargo.lock'
+  workflow_dispatch:
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: cargo install cargo-cyclonedx
+      - run: mkdir -p webui/dist
+      - name: Generate CycloneDX SBOM
+        run: |
+          cd ghostwire
+          cargo cyclonedx --format json --spec-version 1.5
+      - name: Attest SBOM
+        uses: actions/attest@v2
+        with:
+          subject-path: ghostwire/*.cdx.json
+      - name: Upload SBOM to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@c95fe605befc8b0e8a5e37329b5eb9e3ef96aa62 # v2
+        with:
+          files: ghostwire/*.cdx.json
+      - name: Upload SBOM as artifact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: ghostwire/*.cdx.json
+          retention-days: 30

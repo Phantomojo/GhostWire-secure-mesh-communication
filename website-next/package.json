@@ -64,9 +64,9 @@
     "react-hook-form": "^7.60.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.3",
-    "react-syntax-highlighter": "^15.6.1",
+    "react-syntax-highlighter": "^16.1.1",
     "recharts": "^2.15.4",
-    "sharp": "^0.34.3",
+    "sharp": "^0.35.3",
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
@@ -75,6 +75,15 @@
     "z-ai-web-dev-sdk": "^0.0.18",
     "zod": "^4.0.2",
     "zustand": "^5.0.6"
+  },
+  "overrides": {
+    "next": {
+      "sharp": "^0.35.3",
+      "postcss": "^8.5.23"
+    },
+    "brace-expansion": "^5.0.8",
+    "js-yaml": "^4.3.0",
+    "prismjs": "^1.30.0"
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.20.1",

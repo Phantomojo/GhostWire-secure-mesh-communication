@@ -81,6 +81,7 @@ pub struct EncryptionConfig {
 pub struct FeatureFlags {
     pub matrix_bridge: bool,
     pub meshtastic_bridge: bool,
+    pub irc_bridge: bool,
     pub web_ui: bool,
     pub cli: bool,
     pub api: bool,
@@ -147,6 +148,7 @@ impl Default for Config {
             features: FeatureFlags {
                 matrix_bridge: false,
                 meshtastic_bridge: false,
+                irc_bridge: false,
                 web_ui: true,
                 cli: true,
                 api: true,

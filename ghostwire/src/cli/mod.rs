@@ -10,7 +10,7 @@ use tracing::{error, info};
 #[derive(Parser)]
 #[command(name = "ghostwire")]
 #[command(about = "GhostWire - Secure Mesh Networking and Messaging")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -85,6 +85,12 @@ pub enum Commands {
     Tui,
     /// Setup dependencies and environment
     Setup,
+    /// Update GhostWire to the latest release
+    Update {
+        /// Check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -192,6 +198,9 @@ async fn dispatch_cli_command(
         Commands::Setup => {
             handle_setup().await?;
         }
+        Commands::Update { check } => {
+            handle_update(check).await?;
+        }
     }
 
     Ok(())
@@ -211,7 +220,12 @@ async fn init_identity(core: &Arc<Core>, username: Option<String>) -> Result<()>
     );
 
     if let Some(name) = username {
+        core.identity
+            .write()
+            .await
+            .update_metadata(Some(name.clone()), None, None, None);
         println!("Username: {}", name);
+        println!("💡 Username will be published to DHT when mesh starts.");
     }
 
     Ok(())
@@ -360,22 +374,34 @@ async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
 }
 
 pub async fn list_peers(core: &Arc<Core>) -> Result<()> {
-    if let Some(mesh_stats) = core.get_mesh_stats().await {
-        println!("📡 Mesh Network Peers:");
-        println!("Total nodes: {}", mesh_stats.total_nodes);
-        println!("Online nodes: {}", mesh_stats.online_nodes);
-        println!("Routes count: {}", mesh_stats.routes_count);
+    if let Some(topology) = core.get_mesh_topology().await {
+        let online: Vec<_> = topology
+            .nodes
+            .values()
+            .filter(|n| n.is_online)
+            .collect();
+
+        println!("📡 Mesh Network Peers ({} online):", online.len());
+
+        if online.is_empty() {
+            println!("  No peers connected");
+        } else {
+            for node in &online {
+                let display = if node.username.is_empty() {
+                    node.id.chars().take(12).collect::<String>()
+                } else {
+                    node.username.clone()
+                };
+                println!(
+                    "  {} ({}) quality={:.0}%",
+                    display,
+                    node.id.chars().take(8).collect::<String>(),
+                    node.connection_quality * 100.0
+                );
+            }
+        }
     } else {
         println!("❌ Mesh network not initialized");
-    }
-
-    if let Some(reticulum_stats) = core.get_reticulum_stats().await {
-        println!("\n🕸️  Reticulum Network:");
-        println!("Total nodes: {}", reticulum_stats.total_nodes);
-        println!("Online nodes: {}", reticulum_stats.online_nodes);
-        println!("Routes count: {}", reticulum_stats.routes_count);
-    } else {
-        println!("❌ Reticulum network not initialized");
     }
 
     Ok(())
@@ -703,4 +729,32 @@ async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
     crate::tui::run_tui(port, false)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {}", e))
+}
+
+async fn handle_update(check_only: bool) -> Result<()> {
+    use crate::core::updater;
+
+    let current = env!("CARGO_PKG_VERSION");
+    println!("GhostWire updater");
+    println!("  Current version: v{}", current);
+    println!("  Checking GitHub releases...");
+
+    match updater::check_for_update().await {
+        Some((version, notes)) => {
+            println!("  📦 New version available: v{}", version);
+            if !notes.is_empty() {
+                let preview: String = notes.chars().take(200).collect();
+                println!("  {}", preview);
+            }
+            if check_only {
+                println!("\nRun `ghostwire update` to install.");
+                return Ok(());
+            }
+            updater::apply_update_async().await
+        }
+        None => {
+            println!("  ✅ Already up to date (v{})", current);
+            Ok(())
+        }
+    }
 }

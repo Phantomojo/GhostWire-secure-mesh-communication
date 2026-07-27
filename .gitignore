@@ -195,6 +195,17 @@ src-tauri/Cargo.lock
 # Build artifacts
 ghostwire/target/
 ghostwire-libs/target/
+src-tauri/target/
+src-tauri/binaries/
+
+# Vendored dependencies (too large for git)
+ghostwire/vendor/
+
+# Release binaries
+release/
+
+# Large images (use Git LFS for these)
+webui/cebrus_logo_refined.png
 
 # Bundle archives
 *.zip

@@ -1,0 +1,23 @@
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 3 }
+fail-fast = false
+
+[profile.ci]
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 3 }
+retries = 1
+
+[[profile.ci.overrides]]
+filter = 'test(node_to_node)'
+test-group = 'network-integration'
+threads-required = 1
+
+[[profile.ci.overrides]]
+filter = 'test(irc_adapter)'
+test-group = 'network-integration'
+threads-required = 1
+
+[[profile.default.overrides]]
+filter = 'test(flaky)'
+retries = 3
+flaky-result = "pass"

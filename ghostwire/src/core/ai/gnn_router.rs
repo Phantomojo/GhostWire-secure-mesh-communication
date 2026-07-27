@@ -828,7 +828,8 @@ mod tests {
 
         assert_eq!(topology.num_nodes, 3);
         assert_eq!(topology.node_features.len(), 3);
-        let peer1_idx = 0;
-        assert!(topology.adjacency.contains_key(&peer1_idx));
+        assert_eq!(topology.adjacency.len(), 1);
+        let peer1_idx = topology.adjacency.keys().next().copied().unwrap();
+        assert!(topology.adjacency[&peer1_idx].len() >= 1);
     }
 }

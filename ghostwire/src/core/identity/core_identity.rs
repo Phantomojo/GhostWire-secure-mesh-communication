@@ -772,8 +772,10 @@ mod tests {
         // Load it back
         let loaded = Identity::load_or_create(profile).unwrap();
         assert_eq!(loaded.id, original_id);
-        assert!(loaded.is_locked());
+        // load_or_create auto-unlocks via keyfile when password matches
+        assert!(!loaded.is_locked());
 
+        // unlock is a no-op when already unlocked — verify key matches
         loaded.unlock("secret").unwrap();
         assert_eq!(
             loaded.public_key().unwrap(),

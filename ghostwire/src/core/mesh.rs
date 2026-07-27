@@ -423,7 +423,7 @@ impl MeshTransport {
         swarm.listen_on(listen_addr.clone())?;
 
         // Subscribe to broadcast topic
-        let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
+        let topic = IdentTopic::new(crate::core::constants::topics::BROADCAST);
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
         // Get local peer ID before moving swarm into driver
@@ -431,13 +431,17 @@ impl MeshTransport {
 
         // Subscribe to shared DM topic (all DMs go here, content encrypted end-to-end)
         // Using a single topic avoids leaking recipient PeerId in gossipsub metadata
-        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+        let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
         swarm.behaviour_mut().gossipsub.subscribe(&dm_topic)?;
         tracing::info!("Subscribed to shared DM topic");
 
-        let dtn_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+        let dtn_topic = IdentTopic::new(crate::core::constants::topics::DTN_SYNC);
         swarm.behaviour_mut().gossipsub.subscribe(&dtn_topic)?;
         tracing::info!("Subscribed to DTN sync topic");
+
+        let crl_topic = IdentTopic::new(crate::core::constants::topics::CRL_GOSSIP);
+        swarm.behaviour_mut().gossipsub.subscribe(&crl_topic)?;
+        tracing::info!("Subscribed to CRL gossip topic");
 
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
@@ -448,7 +452,7 @@ impl MeshTransport {
                     None
                 }
             }) {
-                tracing::info!("Adding bootstrap node: {} ({})", peer_id, addr);
+                tracing::info!("Adding bootstrap node: {}", crate::core::constants::log_privacy::short_peer(&peer_id.to_string()));
                 swarm
                     .behaviour_mut()
                     .kad
@@ -497,6 +501,7 @@ impl MeshTransport {
                 .ok_or_else(|| anyhow::anyhow!("X25519 secret not available for Sphinx"))?,
             mixing_tx: None,
             cover_rx,
+            rate_limits: HashMap::new(),
         };
 
         tokio::spawn(driver.run());
@@ -726,15 +731,16 @@ struct MeshDriver {
     mixing_tx: Option<mpsc::Sender<crate::core::routing::mixing_delay::QueuedSphinxPacket>>,
     /// Cover traffic receiver — drains dummy frames from scheduler, publishes to DM topic
     cover_rx: mpsc::Receiver<crate::core::traffic_armor::PaddedFrame>,
+    rate_limits: HashMap<String, Vec<std::time::Instant>>,
 }
 
 impl MeshDriver {
     async fn run(mut self) {
-        let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+        let sphinx_topic = IdentTopic::new(crate::core::constants::topics::SPHINX);
         if let Err(e) = self.swarm.behaviour_mut().gossipsub.subscribe(&sphinx_topic) {
             tracing::warn!("Failed to subscribe to Sphinx topic: {}", e);
         } else {
-            tracing::info!("Subscribed to Sphinx topic: {}", crate::core::constants::SPHINX_TOPIC);
+            tracing::info!("Subscribed to Sphinx topic: {}", crate::core::constants::topics::SPHINX);
         }
 
         let (mixing_tx, mut mixing_rx) = mpsc::channel::<crate::core::routing::mixing_delay::QueuedSphinxPacket>(64);
@@ -814,7 +820,7 @@ impl MeshDriver {
                     self.forward_sphinx_packet(&ready_pkt.next_hop, &ready_pkt.packet_bytes).await;
                 }
                 Some(cover_frame) = self.cover_rx.recv() => {
-                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                     let cover = crate::core::wire_protocol::Frame::new(
                         crate::core::wire_protocol::FrameKind::CoverTraffic,
                         cover_frame.data,
@@ -866,7 +872,7 @@ impl MeshDriver {
     }
 
     async fn forward_sphinx_packet(&mut self, next_hop: &str, packet_bytes: &[u8]) {
-        let topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+        let topic = IdentTopic::new(crate::core::constants::topics::SPHINX);
         if let Err(e) = self
             .swarm
             .behaviour_mut()
@@ -909,7 +915,7 @@ impl MeshDriver {
                 self.vector_clock.increment(&crate::core::vector_clock::redact_node_id(&self.local_peer_id.to_string()));
                 message.vector_clock = self.vector_clock.clone();
 
-                let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
+                let topic = IdentTopic::new(crate::core::constants::topics::BROADCAST);
                 use crate::core::wire_protocol::{Frame, FrameKind};
                 let frame = match Frame::encode(FrameKind::Message, &message) {
                     Ok(f) => f,
@@ -1110,7 +1116,7 @@ impl MeshDriver {
                         Ok(packet) => {
                             match bincode::serialize(&packet) {
                                 Ok(pkt_bytes) => {
-                                    let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+                                    let sphinx_topic = IdentTopic::new(crate::core::constants::topics::SPHINX);
                                     let mut sphinx_res = self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic.clone(), pkt_bytes.clone());
                                     for attempt in 1..=3u32 {
                                         if let Err(PublishError::NoPeersSubscribedToTopic) = &sphinx_res {
@@ -1130,8 +1136,8 @@ impl MeshDriver {
                                             );
                                             true
                                         }
-                                        Err(e) => {
-                                            tracing::warn!("Sphinx publish failed: {}, falling back to direct DM", e);
+                        Err(_e) => {
+                            tracing::warn!("Sphinx publish failed, falling back to direct DM");
                                             false
                                         }
                                     }
@@ -1152,7 +1158,7 @@ impl MeshDriver {
                 };
 
                 if !sent_via_sphinx {
-                    let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let topic = IdentTopic::new(crate::core::constants::topics::DM);
                     let mut dm_res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
                     for attempt in 1..=3u32 {
                         if let Err(PublishError::NoPeersSubscribedToTopic) = &dm_res {
@@ -1234,7 +1240,7 @@ impl MeshDriver {
         ))) = &event
         {
             for (peer_id, addr) in peers {
-                tracing::info!("mDNS discovered peer {} at {}", peer_id, addr);
+                tracing::info!("mDNS discovered peer {}", crate::core::constants::log_privacy::short_peer(&peer_id.to_string()));
                 // Add to Kademlia routing table
                 self.swarm
                     .behaviour_mut()
@@ -1242,8 +1248,8 @@ impl MeshDriver {
                     .add_address(peer_id, addr.clone());
                 // Attempt to connect
                 match self.swarm.dial(addr.clone()) {
-                    Ok(()) => tracing::info!("Initiated dial to {} ({})", peer_id, addr),
-                    Err(e) => tracing::warn!("Failed to dial {} at {}: {}", peer_id, addr, e),
+                    Ok(()) => tracing::info!("Initiated dial to {}", crate::core::constants::log_privacy::short_peer(&peer_id.to_string())),
+                    Err(e) => tracing::warn!("Failed to dial {}: {}", crate::core::constants::log_privacy::short_peer(&peer_id.to_string()), e),
                 }
             }
             return;
@@ -1371,7 +1377,7 @@ impl MeshDriver {
                 drop(bundles);
 
                 if !to_deliver.is_empty() {
-                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                     for bundle in &to_deliver {
                         let _ = self
                             .swarm
@@ -1392,7 +1398,7 @@ impl MeshDriver {
                 // Trigger epidemic sync handshake (bloom-filter exchange)
                 let handshake = crate::core::dtn::epidemic::DtnSyncHandshake::build(dtn_store).await;
                 if let Ok(hs_bytes) = bincode::serialize(&handshake) {
-                    let sync_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+                    let sync_topic = IdentTopic::new(crate::core::constants::topics::DTN_SYNC);
                     let _ = self.swarm.behaviour_mut().gossipsub.publish(sync_topic, hs_bytes);
                     tracing::debug!("DTN: published sync handshake to new peer {}", peer_id);
                 }
@@ -1401,7 +1407,7 @@ impl MeshDriver {
             if let Some(ref mailbox) = self.mailbox_store {
                 if let Ok(deliveries) = mailbox.get_pending_deliveries(&peer_id.to_string()) {
                     if !deliveries.is_empty() {
-                        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                        let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                         let mut delivered_ids = Vec::new();
                         for (msg_id, frame_bytes) in &deliveries {
                             if self
@@ -1429,20 +1435,19 @@ impl MeshDriver {
 
         if let SwarmEvent::OutgoingConnectionError {
             peer_id,
-            error,
             ..
         } = &event
         {
-            tracing::warn!("Outgoing connection to {:?} failed: {}", peer_id, error);
+            tracing::warn!("Outgoing connection to {} failed", peer_id.map(|p| crate::core::constants::log_privacy::short_peer(&p.to_string())).unwrap_or_default());
         }
 
         if let SwarmEvent::ConnectionClosed {
             peer_id,
-            cause: Some(ref e),
+            cause: Some(ref _e),
             ..
         } = &event
         {
-            tracing::warn!("Connection closed with {}: {}", peer_id, e);
+            tracing::warn!("Connection closed with {}", peer_id);
 
             {
                 let mut topo = self.topology.write().await;
@@ -1549,6 +1554,10 @@ impl MeshDriver {
                                     username_record.username,
                                     username_record.peer_id
                                 );
+                                let mut topo = self.topology.write().await;
+                                if let Some(node) = topo.get_mut(&username_record.peer_id) {
+                                    node.username = username_record.username;
+                                }
                             }
                         }
                     }
@@ -1621,18 +1630,22 @@ impl MeshDriver {
     ) -> Result<()> {
         let topic_str = message.topic.as_str();
 
-        if topic_str == crate::core::constants::SPHINX_TOPIC {
+        if topic_str == crate::core::constants::topics::SPHINX {
             return self.handle_sphinx_packet(peer_id, message).await;
         }
 
-        if topic_str == crate::core::constants::DTN_SYNC_TOPIC {
+        if topic_str == crate::core::constants::topics::DTN_SYNC {
             return self.handle_dtn_sync(message).await;
         }
 
-        let is_dm_for_us = topic_str == crate::core::constants::DM_TOPIC;
+        if topic_str == crate::core::constants::topics::CRL_GOSSIP {
+            return self.handle_crl_gossip(message).await;
+        }
+
+        let is_dm_for_us = topic_str == crate::core::constants::topics::DM;
         let is_dm_topic = is_dm_for_us;
 
-        if !is_dm_for_us && !is_dm_topic && topic_str != crate::core::constants::BROADCAST_TOPIC {
+        if !is_dm_for_us && !is_dm_topic && topic_str != crate::core::constants::topics::BROADCAST {
             return Ok(());
         }
 
@@ -1652,7 +1665,7 @@ impl MeshDriver {
         if let Some(ip) = peer_ip {
             let sm = self.security_manager.clone();
             if !sm.is_ip_allowed(&ip).await {
-                tracing::warn!("Rejected message from blacklisted peer: {}", peer_id);
+                tracing::warn!("Rejected message from blacklisted peer");
                 return Ok(());
             }
         }
@@ -1667,7 +1680,7 @@ impl MeshDriver {
                     use crate::core::wire_protocol::{Frame, FrameKind, WirePong};
                     let pong = WirePong { ts: ping.ts };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
-                        let pong_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                        let pong_topic = IdentTopic::new(crate::core::constants::topics::DM);
                         let _ = self
                             .swarm
                             .behaviour_mut()
@@ -1741,7 +1754,7 @@ impl MeshDriver {
                 MAX_HOPS,
                 forwarded.recipient
             );
-            let relay_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+            let relay_topic = IdentTopic::new(crate::core::constants::topics::DM);
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
                 let _ = self
@@ -1752,7 +1765,7 @@ impl MeshDriver {
             }
         }
 
-        if !is_dm_for_us && topic_str != crate::core::constants::BROADCAST_TOPIC {
+        if !is_dm_for_us && topic_str != crate::core::constants::topics::BROADCAST {
             return Ok(());
         }
 
@@ -1820,8 +1833,8 @@ impl MeshDriver {
                             msg.encryption_status = "decrypted".to_string();
                             msg.message_type = "text".to_string();
                         }
-                        Err(e) => {
-                            tracing::warn!("Failed to decrypt message from {}: {}", msg.sender, e);
+                        Err(_e) => {
+                            tracing::warn!("Failed to decrypt message");
                             msg.encryption_status = "decrypt_failed".to_string();
                         }
                     }
@@ -1854,7 +1867,7 @@ impl MeshDriver {
 
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &ack_msg) {
-                let ack_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let ack_topic = IdentTopic::new(crate::core::constants::topics::DM);
                 let _ = self
                     .swarm
                     .behaviour_mut()
@@ -1944,7 +1957,7 @@ impl MeshDriver {
 
             // Send bundles we have that they need
             if !bundles_to_send.is_empty() {
-                let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                 for bundle in &bundles_to_send {
                     let _ = self
                         .swarm
@@ -1969,13 +1982,34 @@ impl MeshDriver {
                     .as_secs(),
             };
             if let Ok(hs_bytes) = bincode::serialize(&reply) {
-                let sync_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
+                let sync_topic = IdentTopic::new(crate::core::constants::topics::DTN_SYNC);
                 let _ = self
                     .swarm
                     .behaviour_mut()
                     .gossipsub
                     .publish(sync_topic, hs_bytes);
             }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_crl_gossip(&mut self, message: GossipsubMessage) -> Result<()> {
+        let payloads: Vec<crate::core::crl::CrlGossipPayload> =
+            match bincode::options()
+                .with_limit(1024 * 1024)
+                .deserialize(&message.data)
+            {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            };
+
+        let (accepted, duplicates, invalid) = self.encryption_manager.handle_crl_gossip(&payloads);
+        if accepted > 0 {
+            tracing::info!(
+                "CRL gossip: {} accepted, {} duplicates, {} invalid from {}",
+                accepted, duplicates, invalid, message.source.map(|p| p.to_string()).unwrap_or_default()
+            );
         }
 
         Ok(())
@@ -2043,7 +2077,7 @@ impl MeshDriver {
                     .behaviour_mut()
                     .request_response
                     .send_request(&peer_id, ChatRequest(reply));
-                tracing::info!("Sent handshake reply via request_response to {}", peer_id);
+                tracing::info!("Sent handshake reply");
             } else {
                 tracing::info!(
                     "Already exchanged handshakes with {}, skipping reply",
@@ -2051,11 +2085,23 @@ impl MeshDriver {
                 );
             }
         } else {
-            tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
+            tracing::warn!("Failed to decode Handshake key");
         }
     }
 
     async fn handle_incoming_message(&mut self, _peer_id: PeerId, msg: Message) -> Result<()> {
+        let peer_str = _peer_id.to_string();
+        {
+            let now = std::time::Instant::now();
+            let window = std::time::Duration::from_secs(60);
+            let timestamps = self.rate_limits.entry(peer_str.clone()).or_default();
+            timestamps.retain(|t| now.duration_since(*t) < window);
+            if timestamps.len() >= 100 {
+                tracing::warn!("Rate limit hit for peer {} — dropping message", peer_str);
+                return Ok(());
+            }
+            timestamps.push(now);
+        }
         // Persist to store (skip for broadcast or failed decryption)
         if msg.recipient != "broadcast" && msg.encryption_status != "decrypt_failed" {
             if let Err(e) = self.message_store.save_message(&msg) {
@@ -2088,7 +2134,7 @@ impl MeshDriver {
         for msg_id in timed_out {
             if let Some(original) = self.pending_messages.get(&msg_id) {
                 let recipient = original.recipient.clone();
-                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let topic = IdentTopic::new(crate::core::constants::topics::DM);
 
                 let mut retransmit = original.clone();
                 retransmit.hops = 0;
@@ -2132,7 +2178,7 @@ impl MeshDriver {
                 .as_millis() as u32;
             let ping = WirePing { ts };
             if let Ok(frame) = Frame::encode(FrameKind::Ping, &ping) {
-                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let topic = IdentTopic::new(crate::core::constants::topics::DM);
                 if let Err(e) = self
                     .swarm
                     .behaviour_mut()
@@ -2293,6 +2339,10 @@ impl MeshManager {
         self.transport
             .publish_to_topic(topic, message.as_bytes().to_vec())
             .await
+    }
+
+    pub async fn publish_raw(&self, topic: &str, data: Vec<u8>) -> Result<()> {
+        self.transport.publish_to_topic(topic, data).await
     }
 
     /// Get all messages received by this node (in-memory history)

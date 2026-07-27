@@ -31,6 +31,7 @@ pub enum FrameKind {
     MailboxDeposit = 0x0020,
     MailboxDrain = 0x0021,
     CoverTraffic = 0x0030, // NEW: dummy frames for traffic analysis resistance
+    Crl = 0x0040,
     Ping = 0x00F0,
     Pong = 0x00F1,
     Handshake = 0x00FF,

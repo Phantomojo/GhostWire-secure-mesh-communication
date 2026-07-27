@@ -1,0 +1,51 @@
+name: Fuzz Tests
+
+permissions: {}
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly Monday 3am UTC
+  push:
+    branches: ["main"]
+    paths:
+      - 'ghostwire/src/**'
+      - 'ghostwire/fuzz/**'
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_target_1
+          - frame_parser
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - run: mkdir -p webui/dist
+      - uses: taiki-e/install-action@cargo-fuzz
+      - name: Build fuzz target
+        run: cargo fuzz build ${{ matrix.target }}
+        working-directory: ghostwire
+      - name: Run fuzz target (100k iterations)
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=120 -max_len=4096
+        working-directory: ghostwire

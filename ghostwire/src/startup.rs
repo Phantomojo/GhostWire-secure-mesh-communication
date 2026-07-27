@@ -19,7 +19,7 @@
 //! same LAN will find each other automatically after Phase 3.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;

@@ -10,3 +10,15 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## Research Pipeline
+
+Every background agent (librarian, explore, etc.) that produces research output MUST save it to `research/`:
+
+1. Save output: `echo "$CONTENT" | ./research/save-research.sh <topic> <agent_type> <session_id>`
+2. File lands at: `research/<topic>-<date>.md`
+3. Graphify auto-updates to incorporate new knowledge
+
+Naming: `research/{topic}-{YYYY-MM-DD}.md`
+
+Files in `research/` are part of the knowledge base. Query them via `graphify query "<question>"`.

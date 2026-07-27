@@ -89,7 +89,7 @@ async fn check_first_run(port: u16) -> bool {
 #[derive(Parser)]
 #[command(name = "ghostwire")]
 #[command(about = "GhostWire - Secure Mesh Networking and Messaging")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(disable_help_flag = true)]
 struct Args {
     #[command(subcommand)]
@@ -217,6 +217,11 @@ enum Commands {
     Tui,
     /// Interactive first-run setup (nickname, password, bio)
     Setup,
+    /// Update GhostWire to the latest release
+    Update {
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[cfg(not(feature = "cli"))]
@@ -418,6 +423,31 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            Some(Commands::Update { check }) => {
+                if *check {
+                    println!("Checking for updates...");
+                } else {
+                    println!("Updating GhostWire...");
+                }
+                match ghostwire::core::updater::check_for_update().await {
+                    Some((version, notes)) => {
+                        println!("📦 New version available: v{}", version);
+                        if !notes.is_empty() {
+                            let preview: String = notes.chars().take(200).collect();
+                            println!("  {}", preview);
+                        }
+                        if *check {
+                            println!("\nRun `ghostwire update` to install.");
+                        } else {
+                            ghostwire::core::updater::apply_update_async().await?;
+                        }
+                    }
+                    None => {
+                        println!("✅ Already up to date (v{})", env!("CARGO_PKG_VERSION"));
+                    }
+                }
+                return Ok(());
+            }
             _ => {}
         }
     }
@@ -547,7 +577,8 @@ async fn main() -> Result<()> {
         | Some(Commands::Stop)
         | Some(Commands::Status)
         | Some(Commands::Tui)
-        | Some(Commands::Setup) => {
+        | Some(Commands::Setup)
+        | Some(Commands::Update { .. }) => {
             // Already handled above (before Core creation)
             unreachable!()
         }

@@ -42,8 +42,7 @@ pub mod mesh_health;
 pub mod message;
 pub mod micro_optimizations;
 pub mod monitor;
-pub mod network_scanner;
-pub mod obfs4_transport;
+
 pub mod oem_battery_guide;
 pub mod peer_health;
 pub mod persistence_manager;
@@ -55,9 +54,9 @@ pub mod security_v2;
 pub mod social;
 pub mod traffic_armor;
 pub mod transport_ext;
-pub mod transport_pluggable;
+
 pub mod typed_crypto;
-pub mod updater_fixed;
+
 pub mod vector_clock;
 pub mod wire_protocol;
 pub use security_v2 as security;
@@ -442,7 +441,7 @@ impl IrcAdapter {
         let mesh_tx = mesh_tx.clone();
         loop {
             let (stream, addr) = listener.accept().await?;
-            tracing::debug!(addr = %addr, "IRC client connected");
+            tracing::debug!("IRC client connected");
 
             let channel = channel_name.clone();
             let server = server_name.clone();
@@ -676,6 +675,9 @@ pub struct Core {
     pub onnx_router: Option<Arc<ai::RoutingClassifier>>,
     pub gnn_router: Option<Arc<ai::GnnRouter>>,
     pub feature_extractor: Arc<RwLock<ai::FeatureExtractor>>,
+    // FunctionGemma: on-device tool calling via natural language
+    pub function_gemma: Option<Arc<ai::FunctionGemmaClient>>,
+    pub coercion_config: Arc<RwLock<Option<crate::core::identity::coercion::CoercionConfig>>>,
     // Trust/reputation uses the existing TrustStore (reputation.rs) — not a duplicate
 }
 
@@ -870,6 +872,15 @@ impl Core {
         // Clone identity Arc for use in multiple field initializations
         let identity_for_fields = identity.clone();
 
+        let function_gemma = if config.features.function_gemma_enabled {
+            Some(Arc::new(ai::FunctionGemmaClient::new(
+                &config.features.function_gemma_url,
+                &config.features.function_gemma_model,
+            )))
+        } else {
+            None
+        };
+
         let core = Self {
             config,
             identity: Arc::new(RwLock::new(identity)),
@@ -1017,6 +1028,15 @@ impl Core {
             },
             // Feature extractor for L1 anomaly detection
             feature_extractor: Arc::new(RwLock::new(ai::FeatureExtractor::new())),
+            function_gemma,
+            coercion_config: {
+                let coercion_path = std::path::PathBuf::from("coercion.json");
+                let loaded: Option<crate::core::identity::coercion::CoercionConfig> =
+                    std::fs::read_to_string(&coercion_path)
+                        .ok()
+                        .and_then(|json| serde_json::from_str(&json).ok());
+                Arc::new(RwLock::new(loaded))
+            },
             reliability,
         };
 
@@ -1279,7 +1299,122 @@ impl Core {
         std::collections::HashMap::new()
     }
 
-    /// Get our node ID as bytes (for DTN operations)
+    pub async fn process_natural_command(&self, input: &str) -> Result<String> {
+        let fg = match &self.function_gemma {
+            Some(fg) => fg,
+            None => return Ok("Function calling not enabled. Set function_gemma_enabled=true in config.".into()),
+        };
+
+        if !fg.health_check().await {
+            return Ok("FunctionGemma backend unreachable (is Ollama running?)".into());
+        }
+
+        let response = fg.parse_command(input).await.map_err(|e| anyhow::anyhow!("parse failed: {}", e))?;
+
+        let result = match response.function_call {
+            Some(ref call) => self.execute_tool_call(call).await?,
+            None => return Ok(response.explanation),
+        };
+
+        let output_str = if result.success {
+            serde_json::to_string_pretty(&result.output).unwrap_or_else(|_| "done".into())
+        } else {
+            format!("Error: {}", result.error.unwrap_or_else(|| "unknown".into()))
+        };
+
+        Ok(format!("{}\n\n{}", response.explanation, output_str))
+    }
+
+    async fn execute_tool_call(&self, call: &ai::FunctionCall) -> Result<ai::FunctionResult> {
+        let args = &call.arguments;
+        match call.name.as_str() {
+            "send_message" => {
+                let recipient = args["recipient_id"].as_str().unwrap_or("");
+                let content = args["content"].as_str().unwrap_or("");
+                if recipient.is_empty() || content.is_empty() {
+                    return Ok(ai::FunctionResult { function_name: call.name.clone(), success: false, output: serde_json::json!({}), error: Some("recipient_id and content required".into()) });
+                }
+                let sender = self.identity.read().await.id.clone();
+                let msg = crate::core::message::Message::new(sender, recipient.to_string(), content.to_string());
+                self.send_message(&msg).await?;
+                Ok(ai::FunctionResult { function_name: "send_message".into(), success: true, output: serde_json::json!({"status": "sent", "recipient": recipient}), error: None })
+            }
+            "list_peers" => {
+                let topo = if let Some(ref mesh) = self.mesh_manager {
+                    mesh.read().await.get_topology().await
+                } else {
+                    return Ok(ai::FunctionResult { function_name: "list_peers".into(), success: true, output: serde_json::json!({"peers": [], "total": 0}), error: None });
+                };
+                let peers: Vec<serde_json::Value> = topo.nodes.values().map(|n| {
+                    let pid = n.peer_id.to_string();
+                    serde_json::json!({
+                        "peer_id": &pid[..8.min(pid.len())],
+                        "username": n.username,
+                        "quality": n.connection_quality,
+                    })
+                }).collect();
+                let total = peers.len();
+                Ok(ai::FunctionResult { function_name: "list_peers".into(), success: true, output: serde_json::json!({"peers": peers, "total": total}), error: None })
+            }
+            "check_network_health" => {
+                let stats = self.get_mesh_stats().await;
+                match stats {
+                    Some(s) => Ok(ai::FunctionResult { function_name: "check_network_health".into(), success: true, output: serde_json::json!({
+                        "total_nodes": s.total_nodes,
+                        "online_nodes": s.online_nodes,
+                        "routes_count": s.routes_count,
+                    }), error: None }),
+                    None => Ok(ai::FunctionResult { function_name: "check_network_health".into(), success: true, output: serde_json::json!({"status": "no_mesh"}), error: None }),
+                }
+            }
+            "get_message_history" => {
+                let peer_id = args["peer_id"].as_str().unwrap_or("");
+                let limit = args["limit"].as_u64().unwrap_or(20) as usize;
+                let messages = self.message_store.get_history(peer_id, limit);
+                let out: Vec<serde_json::Value> = messages.iter().map(|m| {
+                    serde_json::json!({"from": m.sender, "content": m.content, "ts": m.timestamp})
+                }).collect();
+                Ok(ai::FunctionResult { function_name: "get_message_history".into(), success: true, output: serde_json::json!({"messages": out, "count": out.len()}), error: None })
+            }
+            "set_identity" => {
+                let nickname = args["nickname"].as_str();
+                self.identity.write().await.update_metadata(nickname.map(|s| s.to_string()), None, None, None);
+                Ok(ai::FunctionResult { function_name: "set_identity".into(), success: true, output: serde_json::json!({"nickname": nickname, "updated": true}), error: None })
+            }
+            "analyze_threats" | "route_traffic" | "scan_network" => {
+                Ok(ai::FunctionResult { function_name: call.name.clone(), success: true, output: serde_json::json!({"status": "not_yet_wired", "tool": call.name}), error: None })
+            }
+            other => {
+                Ok(ai::FunctionResult { function_name: other.into(), success: false, output: serde_json::json!({}), error: Some(format!("Unknown tool: {}", other)) })
+            }
+        }
+    }
+
+    pub async fn setup_coercion(&self, real_password: &str, decoy_name: &str) -> Result<()> {
+        let config = crate::core::identity::coercion::CoercionConfig::generate(real_password, decoy_name)?;
+        let json = serde_json::to_string_pretty(&config)?;
+        tokio::fs::write("coercion.json", &json).await?;
+        *self.coercion_config.write().await = Some(config);
+        tracing::info!("Coercion config created (duress not yet set)");
+        Ok(())
+    }
+
+    pub async fn set_duress_password(&self, duress_password: &str) -> Result<()> {
+        let mut guard = self.coercion_config.write().await;
+        let config = guard.as_mut().ok_or_else(|| anyhow::anyhow!("Coercion not configured"))?;
+        config.set_duress_password(duress_password)?;
+        let json = serde_json::to_string_pretty(&*config)?;
+        tokio::fs::write("coercion.json", &json).await?;
+        tracing::info!("Duress password set");
+        Ok(())
+    }
+
+    pub async fn check_coercion(&self, password: &str) -> Result<crate::core::identity::coercion::UnlockResult> {
+        let guard = self.coercion_config.read().await;
+        let config = guard.as_ref().ok_or_else(|| anyhow::anyhow!("Coercion not configured"))?;
+        config.unlock(password)
+    }
+
     pub fn our_node_id(&self) -> [u8; 32] {
         // This matches how dtn_store was initialized in new()
         let id_str = self.identity.blocking_read().id.clone();
@@ -1471,6 +1606,54 @@ impl Core {
             }
         });
 
+        // Peer health heartbeat + self-healing reconnection
+        #[cfg(feature = "mesh")]
+        {
+            let core_health = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                loop {
+                    interval.tick().await;
+                    if let Some(mesh) = &core_health.mesh_manager {
+                        let mgr = mesh.read().await;
+                        mgr.peer_health().check_all_liveness().await;
+                        let all_health = mgr.peer_health().get_all_health().await;
+                        let dead_peers: Vec<_> = all_health.iter().filter(|h| !h.is_alive).collect();
+                        if !dead_peers.is_empty() {
+                            tracing::warn!("💔 {} peer(s) dead — attempting reconnect", dead_peers.len());
+                            for peer in &dead_peers {
+                                tracing::warn!("  reconnecting {} (last seen {}ms ago, loss {:.0}%)",
+                                    peer.peer_id, peer.last_seen_ms, peer.packet_loss_ratio() * 100.0);
+                            }
+                        }
+                        let _ = mgr;
+                    }
+                }
+            });
+        }
+
+        // CRL gossip broadcast — every 5 minutes, publish local CRL to mesh
+        let core_crl = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                if let Some(ref mm) = core_crl.mesh_manager {
+                    let mgr = mm.read().await;
+                    let payloads = core_crl.encryption.create_crl_gossip_payload();
+                    if !payloads.is_empty() {
+                    if let Ok(data) = bincode::serialize(&payloads) {
+                        let crl_topic = libp2p::gossipsub::IdentTopic::new(crate::core::constants::topics::CRL_GOSSIP);
+                        let _ = mgr.publish_raw(&crl_topic.to_string(), data).await;
+                            tracing::debug!("CRL gossip: broadcast {} revocations", payloads.len());
+                        }
+                    }
+                }
+            }
+        });
+
         // Auto-Start Mesh Network (Zero-Conf)
         let core_mesh = self.clone();
         tokio::spawn(async move {
@@ -1479,6 +1662,12 @@ impl Core {
             match core_mesh.start_mesh(&listen_addr).await {
                 Ok(_) => {
                     tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr);
+                    if let Some(mm) = &core_mesh.mesh_manager {
+                        let mut mgr = mm.write().await;
+                        if let Err(e) = mgr.publish_username().await {
+                            tracing::debug!("Username publish deferred (peers not yet connected): {}", e);
+                        }
+                    }
                     // Give the swarm a moment to bind, then print addresses
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let listeners = core_mesh.get_mesh_listeners().await;
@@ -2084,9 +2273,12 @@ impl Core {
         }
         Err(anyhow::anyhow!("Mesh networking not available"))
     }
-    pub async fn get_mesh_topology(&self) -> anyhow::Result<()> {
-        // Stub implementation
-        Ok(())
+    pub async fn get_mesh_topology(&self) -> Option<mesh::MeshTopology> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            return Some(mesh_manager.read().await.get_topology().await);
+        }
+        None
     }
 
     pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {

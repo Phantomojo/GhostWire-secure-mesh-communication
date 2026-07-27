@@ -219,7 +219,6 @@ impl QuicTransportProvider {
 
     /// Derive encryption key from machine-specific secret
     fn derive_encryption_key() -> [u8; 32] {
-        use ring::rand::{SecureRandom, SystemRandom};
         // Use machine ID + process-specific entropy as key material
         let machine_id = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
@@ -332,7 +331,7 @@ impl QuicTransportProvider {
         self.peer_map.insert(peer_id.to_string(), addr);
         self.save_fingerprints();
 
-        tracing::info!("QUIC connected to {} at {}", peer_id, addr);
+        tracing::info!("QUIC connected to {}", peer_id);
         Ok(())
     }
 
