@@ -254,14 +254,16 @@ async fn main() -> Result<()> {
         quick: false,
     };
 
-    let log_filter = if args.quiet {
-        "ghostwire=warn"
+    let log_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        rust_log
+    } else if args.quiet {
+        "ghostwire=warn".to_string()
     } else if args.verbose {
-        "ghostwire=debug,libp2p_gossipsub=debug"
+        "ghostwire=debug,libp2p_gossipsub=debug".to_string()
     } else {
-        "ghostwire=info"
+        "ghostwire=info".to_string()
     };
-    init_logging(log_filter);
+    init_logging(&log_filter);
     install_panic_hook();
 
     // Anti-debug: abort if being traced (must run before any key material loads)
@@ -466,10 +468,19 @@ async fn main() -> Result<()> {
     };
 
     // Auto-update check (skip for daemon mode — it runs forever)
-    if !args.daemon && config.server.auto_update && updater::is_update_available() {
-        info!("✨ Applying automatic update...");
-        if let Err(e) = updater::apply_update() {
-            error!("❌ Automatic update failed: {}", e);
+    // Run blocking HTTP check in spawn_blocking to avoid tokio runtime panic
+    if !args.daemon && config.server.auto_update {
+        let has_update = tokio::task::spawn_blocking(updater::is_update_available)
+            .await
+            .unwrap_or(false);
+        if has_update {
+            info!("✨ Applying automatic update...");
+            if let Err(e) = tokio::task::spawn_blocking(updater::apply_update)
+                .await
+                .unwrap_or(Err(anyhow::anyhow!("update task panicked")))
+            {
+                error!("❌ Automatic update failed: {}", e);
+            }
         }
     }
 

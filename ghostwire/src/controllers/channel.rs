@@ -36,7 +36,7 @@ impl ChannelController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -63,7 +63,7 @@ impl ChannelController {
             .into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("JOIN_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("JOIN_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -142,7 +142,7 @@ impl ChannelController {
             }
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", e.to_string())),
             )
                 .into_response(),
         }

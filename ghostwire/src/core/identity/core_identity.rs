@@ -6,6 +6,19 @@ use parking_lot::RwLock;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+static TEST_GHOST_DIR: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+pub fn set_test_ghost_dir(dir: std::path::PathBuf) {
+    *TEST_GHOST_DIR.lock().unwrap() = Some(dir);
+}
+
+#[cfg(test)]
+pub fn clear_test_ghost_dir() {
+    *TEST_GHOST_DIR.lock().unwrap() = None;
+}
+
 pub struct EphemeralIdentity {
     pub identity_id: String,
     keypair: Keypair,
@@ -82,6 +95,17 @@ pub struct Identity {
     state: RwLock<IdentityState>,
     #[serde(skip)]
     pub profile: Option<String>,
+    /// Password used to encrypt the identity. Stored so save_to_disk() can
+    /// re-encrypt with the same password (avoids breaking keyfile auto-unlock).
+    #[serde(skip)]
+    unlock_password: RwLock<Option<String>>,
+    /// Master seed (32 bytes) for deterministic transport key derivation.
+    /// Only available when identity is unlocked. Stored encrypted on disk.
+    #[serde(skip)]
+    master_seed: RwLock<Option<[u8; 32]>>,
+    /// Encrypted master seed blob, held while locked so unlock() can decrypt it.
+    #[serde(skip)]
+    encrypted_master_seed: RwLock<Option<EncryptedIdentity>>,
 }
 
 impl Identity {
@@ -131,6 +155,7 @@ impl Identity {
         tracing::info!("Creating new identity...");
         let identity = Self::create_new(profile)?;
         let initial_password = Self::generate_initial_password()?;
+        *identity.unlock_password.write() = Some(initial_password.clone());
         identity.save_to_disk(&initial_password)?;
 
         let keyfile_path = Self::get_storage_path(None)?.with_file_name(".initial-password");
@@ -153,15 +178,29 @@ impl Identity {
             );
         }
 
+        // SECURITY: Delete plaintext initial password — keyfile now holds the wrapped version
+        let keyfile_path = Self::get_storage_path(None)?.with_file_name(".initial-password");
+        if keyfile_path.exists() {
+            if let Err(e) = std::fs::remove_file(&keyfile_path) {
+                tracing::debug!("Failed to remove .initial-password: {}", e);
+            }
+        }
+
         Ok(identity)
     }
 
     fn create_new(profile: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
-        let keypair = Keypair::generate_ed25519();
+        let mut master_seed = [0u8; 32];
+        ring::rand::SystemRandom::new()
+            .fill(&mut master_seed)
+            .map_err(|e| anyhow::anyhow!("RNG failed: {:?}", e))?;
+
+        let keypair = Keypair::ed25519_from_bytes(master_seed.to_vec())
+            .map_err(|e| anyhow::anyhow!("Failed to derive keypair from seed: {}", e))?;
+
         let pub_key = keypair.public();
         let pk_bytes = pub_key.encode_protobuf();
 
-        // Generate a DID for the identity
         use ring::digest;
         let pk_hash = hex::encode(digest::digest(&digest::SHA256, &pk_bytes).as_ref());
         let did = format!("did:ghost:{}", pk_hash);
@@ -186,6 +225,9 @@ impl Identity {
             metadata: RwLock::new(metadata),
             state: RwLock::new(IdentityState::Unlocked(keypair, None)),
             profile,
+            unlock_password: RwLock::new(None),
+            master_seed: RwLock::new(Some(master_seed)),
+            encrypted_master_seed: RwLock::new(None),
         })
     }
 
@@ -370,7 +412,6 @@ impl Identity {
 
     pub fn from_keypair(keypair: Keypair) -> Self {
         let pk_bytes = keypair.public().encode_protobuf();
-        // Generate a DID for the identity
         use ring::digest;
         let pk_hash = hex::encode(digest::digest(&digest::SHA256, &pk_bytes).as_ref());
         let did = format!("did:ghost:{}", pk_hash);
@@ -395,13 +436,21 @@ impl Identity {
             metadata: RwLock::new(metadata),
             state: RwLock::new(IdentityState::Unlocked(keypair, None)),
             profile: None,
+            unlock_password: RwLock::new(None),
+            master_seed: RwLock::new(None),
+            encrypted_master_seed: RwLock::new(None),
         }
     }
 
     pub fn from_seed(seed: &[u8]) -> Result<Self> {
+        let seed_arr: [u8; 32] = seed
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Seed must be exactly 32 bytes"))?;
         let keypair = Keypair::ed25519_from_bytes(seed.to_vec())
             .map_err(|e| anyhow::anyhow!("Failed to create keypair from seed: {}", e))?;
-        Ok(Self::from_keypair(keypair))
+        let id = Self::from_keypair(keypair);
+        *id.master_seed.write() = Some(seed_arr);
+        Ok(id)
     }
 
     /// Create a new identity with nickname and password in one step (for profile creation with setup).
@@ -419,6 +468,18 @@ impl Identity {
     fn get_storage_path(
         profile: Option<String>,
     ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+        #[cfg(test)]
+        if let Some(dir) = TEST_GHOST_DIR.lock().unwrap().as_ref() {
+            if !dir.exists() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let filename = match profile {
+                Some(p) => format!("identity_{}.json", p),
+                None => "identity.json".to_string(),
+            };
+            return Ok(dir.join(&filename));
+        }
+
         let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
             std::path::PathBuf::from(ghost_home)
         } else {
@@ -437,17 +498,10 @@ impl Identity {
     }
 
     fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        // Read file contents
         let file_content = std::fs::read(path)?;
 
-        // Try to deserialize as new EncryptedIdentity format
         if let Ok(persisted) = serde_json::from_slice::<PersistedEncryptedIdentity>(&file_content) {
-            // CRITICAL FIX: Extract public key bytes for use when locked
-            let pub_key_bytes = persisted.public_key_bytes.clone().unwrap_or_else(|| {
-                // Try to extract from encrypted data if not stored separately
-                // For backward compat, return empty - will be populated on next save
-                vec![]
-            });
+            let pub_key_bytes = persisted.public_key_bytes.clone().unwrap_or_else(|| vec![]);
             return Ok(Identity {
                 id: persisted.id,
                 did: persisted.did,
@@ -456,23 +510,34 @@ impl Identity {
                     persisted.encrypted_keypair,
                     pub_key_bytes,
                 )),
-                profile: None, // Will be set by caller
+                profile: None,
+                unlock_password: RwLock::new(None),
+                master_seed: RwLock::new(None),
+                encrypted_master_seed: RwLock::new(persisted.encrypted_master_seed),
             });
         }
 
-        // Fallback: Try old format (migration)
-        // For now, return error if not new format
         Err("Unknown identity format".into())
     }
 
     pub fn save_to_disk(&self, password: &str) -> Result<(), Box<dyn std::error::Error>> {
         let path = Self::get_storage_path(self.profile.clone())?;
 
+        let effective_password = if password.is_empty() {
+            self.unlock_password
+                .read()
+                .clone()
+                .unwrap_or_else(|| password.to_string())
+        } else {
+            *self.unlock_password.write() = Some(password.to_string());
+            password.to_string()
+        };
+
         tracing::info!(
             target: "identity",
             msg = "💾 Saving identity to disk",
             path = ?path,
-            password_len = password.len(),
+            password_len = effective_password.len(),
         );
 
         let mut state_guard = self.state.write();
@@ -499,7 +564,7 @@ impl Identity {
             target: "identity",
             msg = "🔐 Encrypting identity with password"
         );
-        let encrypted_keypair = encrypt_identity(&keypair_bytes, password)?;
+        let encrypted_keypair = encrypt_identity(&keypair_bytes, &effective_password)?;
 
         // Important: Update the cached encrypted identity so we can lock later!
         if let IdentityState::Unlocked(_, ref mut cached_encrypted) = *state_guard {
@@ -511,8 +576,10 @@ impl Identity {
             did: self.did.clone(),
             metadata: self.metadata.read().clone(),
             encrypted_keypair,
-            // CRITICAL FIX: Store public key in plaintext for use when locked
             public_key_bytes: Some(keypair_bytes.clone()),
+            encrypted_master_seed: self.master_seed.read().and_then(|seed| {
+                encrypt_identity(&seed, &effective_password).ok()
+            }),
         };
 
         let json = serde_json::to_string_pretty(&persisted)?;
@@ -563,16 +630,23 @@ impl Identity {
         let mut state = self.state.write();
 
         if let IdentityState::Locked(ref encrypted, _) = *state {
-            // Decrypt
             let decrypted_bytes = decrypt_identity(encrypted, password)?;
             let keypair = Keypair::from_protobuf_encoding(&decrypted_bytes)?;
 
-            // Store Unlocked state WITH the encrypted form cached (so we can lock again)
+            let seed = self.encrypted_master_seed.read().as_ref().and_then(|enc| {
+                decrypt_identity(enc, password).ok().and_then(|bytes| {
+                    let arr: [u8; 32] = bytes.try_into().ok()?;
+                    Some(arr)
+                })
+            });
+
             *state = IdentityState::Unlocked(keypair, Some(encrypted.clone()));
+            *self.master_seed.write() = seed;
+            *self.unlock_password.write() = Some(password.to_string());
             tracing::info!("🔓 Identity unlocked successfully");
             Ok(())
         } else {
-            Ok(()) // Already unlocked
+            Ok(())
         }
     }
 
@@ -591,14 +665,13 @@ impl Identity {
 
             let old = std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
             if let IdentityState::Unlocked(kp, _) = old {
-                // try_into_ed25519() consumes kp; inner ed25519_dalek::SigningKey
-                // implements ZeroizeOnDrop, so dropping zeroizes the secret key.
                 match kp.try_into_ed25519() {
                     Ok(ed_kp) => drop(ed_kp),
                     Err(kp) => drop(kp),
                 }
             }
 
+            *self.master_seed.write() = None;
             tracing::info!("🔒 Identity locked (secret key zeroized)");
             Ok(())
         } else {
@@ -680,6 +753,22 @@ impl Identity {
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.get_public_key()
     }
+
+    pub fn master_seed(&self) -> Option<[u8; 32]> {
+        *self.master_seed.read()
+    }
+
+    /// Derive a 32-byte transport-specific seed from the master seed.
+    /// Uses genesis_derive (BLAKE3 keyed hash) — deterministic, no ceremony needed.
+    pub fn derive_transport_key(&self, transport_name: &str) -> Option<[u8; 32]> {
+        let seed = (*self.master_seed.read())?;
+        let domain = crate::genesis_constants::genesis_derive(
+            crate::genesis_constants::SPHINX_KDF_DOMAIN,
+            b"ghostwire-transport-identity-v1",
+        );
+        let label = format!("{}-{}", "ghostwire", transport_name);
+        Some(crate::genesis_constants::genesis_derive(&domain, &[&seed[..], label.as_bytes()].concat()))
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -688,9 +777,10 @@ struct PersistedEncryptedIdentity {
     did: String,
     metadata: IdentityMetadata,
     encrypted_keypair: EncryptedIdentity,
-    // CRITICAL FIX: Store public key in plaintext so get_public_key() works when locked
     #[serde(default)]
     public_key_bytes: Option<Vec<u8>>,
+    #[serde(default)]
+    encrypted_master_seed: Option<EncryptedIdentity>,
 }
 
 #[cfg(test)]
@@ -761,7 +851,7 @@ mod tests {
     fn test_storage_roundtrip() {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+        super::set_test_ghost_dir(dir.path().to_path_buf());
 
         let profile = Some("test_profile".to_string());
         let identity = Identity::create_new(profile.clone()).unwrap();
@@ -769,18 +859,16 @@ mod tests {
 
         identity.save_to_disk("secret").unwrap();
 
-        // Load it back
         let loaded = Identity::load_or_create(profile).unwrap();
         assert_eq!(loaded.id, original_id);
-        // load_or_create auto-unlocks via keyfile when password matches
         assert!(!loaded.is_locked());
 
-        // unlock is a no-op when already unlocked — verify key matches
         loaded.unlock("secret").unwrap();
         assert_eq!(
             loaded.public_key().unwrap(),
             identity.public_key().unwrap()
         );
+        super::clear_test_ghost_dir();
     }
 
     #[test]

@@ -56,7 +56,7 @@ impl TrustController {
             .into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("VERIFY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("VERIFY_ERROR", e.to_string())),
             )
                 .into_response(),
         }

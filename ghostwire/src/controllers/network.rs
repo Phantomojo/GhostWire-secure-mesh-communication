@@ -122,7 +122,7 @@ impl NetworkController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("QR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -138,7 +138,7 @@ impl NetworkController {
             Ok(card) => Json(ApiV2Response::success(card)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", e.to_string())),
             )
                 .into_response(),
         }

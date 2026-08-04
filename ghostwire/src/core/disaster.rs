@@ -2,6 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 
+pub const CAPABILITY_TCP: u16 = 0x0001;
+pub const CAPABILITY_QUIC: u16 = 0x0002;
+pub const CAPABILITY_MESH: u16 = 0x0004;
+pub const CAPABILITY_WIFI: u16 = 0x0008;
+pub const CAPABILITY_BLUETOOTH: u16 = 0x0010;
+pub const CAPABILITY_LORA: u16 = 0x0020;
+pub const CAPABILITY_COMPRESSION: u16 = 0x0040;
+pub const CAPABILITY_RELAY: u16 = 0x0080;
+pub const CAPABILITY_RETICULUM: u16 = 0x0100;
+
 /// Real-time network health metrics for GhostWire.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisasterMetrics {
@@ -53,6 +63,7 @@ pub enum TransportType {
     WiFi,
     Bluetooth,
     LoRa,
+    Reticulum,
 }
 
 impl TransportType {
@@ -64,7 +75,39 @@ impl TransportType {
             TransportType::WiFi => "wifi",
             TransportType::Bluetooth => "bluetooth",
             TransportType::LoRa => "lora",
+            TransportType::Reticulum => "reticulum",
         }
+    }
+
+    pub fn capability_flag(&self) -> u16 {
+        match self {
+            TransportType::StealthTcp => CAPABILITY_TCP,
+            TransportType::Quic => CAPABILITY_QUIC,
+            TransportType::Mesh => CAPABILITY_MESH,
+            TransportType::WiFi => CAPABILITY_WIFI,
+            TransportType::Bluetooth => CAPABILITY_BLUETOOTH,
+            TransportType::LoRa => CAPABILITY_LORA,
+            TransportType::Reticulum => CAPABILITY_RETICULUM,
+        }
+    }
+
+    pub fn supports(remote_capabilities: u16) -> Vec<TransportType> {
+        let mut supported = Vec::new();
+        let flags = [
+            (CAPABILITY_TCP, TransportType::StealthTcp),
+            (CAPABILITY_QUIC, TransportType::Quic),
+            (CAPABILITY_MESH, TransportType::Mesh),
+            (CAPABILITY_WIFI, TransportType::WiFi),
+            (CAPABILITY_BLUETOOTH, TransportType::Bluetooth),
+            (CAPABILITY_LORA, TransportType::LoRa),
+            (CAPABILITY_RETICULUM, TransportType::Reticulum),
+        ];
+        for (flag, transport) in flags {
+            if remote_capabilities & flag != 0 {
+                supported.push(transport);
+            }
+        }
+        supported
     }
 }
 

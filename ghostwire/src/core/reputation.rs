@@ -377,10 +377,39 @@ mod tests {
         assert_eq!(record.trust_level, TrustLevel::Blocked);
         assert!(!record.trust_level.is_usable());
     }
+
+    #[test]
+    fn sybil_detector_allows_normal() {
+        let mut detector = SybilDetector::new();
+        let now = 1000000;
+        assert!(!detector.record_first_contact(now));
+    }
+
+    #[test]
+    fn sybil_detector_blocks_rapid() {
+        let mut detector = SybilDetector::new();
+        let now = 1000000;
+        for _ in 0..11 {
+            detector.record_first_contact(now);
+        }
+        assert!(detector.is_sybil());
+    }
+
+    #[test]
+    fn decay_recency() {
+        let score_new = compute_score_with_decay(0.6, 100, 100, 10, 200);
+        let score_old = compute_score_with_decay(0.6, 100, 100, 10, 100 + 86400 * 30);
+        assert!(score_new > score_old);
+    }
+
+    #[test]
+    fn decay_negative_passthrough() {
+        let score = compute_score_with_decay(-1.0, 100, 100, 10, 200);
+        assert_eq!(score, -1.0);
+    }
 }
 
 impl TrustStore {
-    /// Count of blocked peers (used by mesh_health)
     pub async fn blocked_count(&self) -> usize {
         self.peers
             .read()
@@ -390,7 +419,6 @@ impl TrustStore {
             .count()
     }
 
-    /// Average trust score across all known peers (used by mesh_health)
     pub async fn average_trust_score(&self) -> f32 {
         let peers = self.peers.read().await;
         if peers.is_empty() {
@@ -399,4 +427,77 @@ impl TrustStore {
         let sum: f32 = peers.values().map(|r| r.trust_level.score()).sum();
         sum / peers.len() as f32
     }
+
+    pub async fn ranked_peers(&self) -> Vec<(String, f32)> {
+        let peers = self.peers.read().await;
+        let attester_scores = self.our_trust_scores.read().await;
+        let mut scores: Vec<(String, f32)> = peers
+            .iter()
+            .filter(|(_, r)| r.trust_level.is_usable())
+            .map(|(id, r)| (id.clone(), r.computed_trust_score(&attester_scores)))
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores
+    }
+}
+
+const DECAY_HALF_LIFE_SECS: f64 = 86400.0 * 7.0;
+const SYBIL_WINDOW_SECS: u64 = 60;
+const SYBIL_THRESHOLD: usize = 10;
+
+pub struct SybilDetector {
+    recent_first_contacts: std::collections::VecDeque<u64>,
+}
+
+impl SybilDetector {
+    pub fn new() -> Self {
+        Self {
+            recent_first_contacts: std::collections::VecDeque::new(),
+        }
+    }
+
+    pub fn record_first_contact(&mut self, now: u64) -> bool {
+        self.recent_first_contacts.push_back(now);
+        while let Some(&front) = self.recent_first_contacts.front() {
+            if now.saturating_sub(front) > SYBIL_WINDOW_SECS {
+                self.recent_first_contacts.pop_front();
+            } else {
+                break;
+            }
+        }
+        self.recent_first_contacts.len() > SYBIL_THRESHOLD
+    }
+
+    pub fn is_sybil(&self) -> bool {
+        self.recent_first_contacts.len() > SYBIL_THRESHOLD
+    }
+}
+
+pub fn compute_score_with_decay(
+    base_trust: f32,
+    first_seen: u64,
+    last_seen: u64,
+    interaction_count: u32,
+    now: u64,
+) -> f32 {
+    if base_trust < 0.0 {
+        return base_trust;
+    }
+
+    let age_secs = now.saturating_sub(first_seen) as f64;
+    let recency_secs = now.saturating_sub(last_seen) as f64;
+
+    let age_decay = (-0.693 * age_secs / DECAY_HALF_LIFE_SECS).exp();
+    let recency_boost = if recency_secs < 86400.0 {
+        1.0
+    } else if recency_secs < 86400.0 * 7.0 {
+        0.8
+    } else {
+        0.5
+    };
+
+    let interaction_bonus = (interaction_count as f32 / 100.0).min(0.1);
+
+    let score = (base_trust * age_decay as f32 + interaction_bonus) * recency_boost;
+    score.clamp(0.0, 1.0)
 }

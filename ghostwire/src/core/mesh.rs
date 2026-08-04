@@ -37,9 +37,6 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 use uuid::Uuid;
 
-/// Maximum hop count for multi-hop relay
-const MAX_HOPS: u8 = 5;
-
 /// Maximum number of message IDs to track for deduplication
 const SEEN_MSGS_MAX: usize = 10_000;
 const IN_MEMORY_MSGS_MAX: usize = 5_000;
@@ -110,6 +107,7 @@ pub struct MeshNode {
     pub last_seen_addresses: Vec<Multiaddr>,
     pub username: String,
     pub public_key: Vec<u8>,
+    pub reticulum_address: Option<String>,
     pub last_seen: u64,
     pub connection_quality: f32,
     pub is_online: bool,
@@ -167,6 +165,50 @@ pub async fn fetch_cloudflare_peers() -> Vec<Multiaddr> {
     addrs
 }
 
+pub const CLOUDFLARE_REGISTER_URL: &str = "https://ghostwire-bootstrap.st02563362023.workers.dev/api/register";
+
+pub async fn register_with_bootstrap(
+    peer_id: &str,
+    multiaddrs: &[String],
+    reticulum_address: Option<&str>,
+) -> bool {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let mut body = serde_json::json!({
+        "peer_id": peer_id,
+        "multiaddrs": multiaddrs,
+    });
+    if let Some(addr) = reticulum_address {
+        body["reticulum_address"] = serde_json::json!(addr);
+    }
+
+    let resp = match client.post(CLOUDFLARE_REGISTER_URL)
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Cloudflare bootstrap register failed: {}", e);
+            return false;
+        }
+    };
+
+    let ok = resp.status().is_success();
+    if ok {
+        tracing::info!("Registered with Cloudflare bootstrap");
+    } else {
+        tracing::warn!("Cloudflare bootstrap register returned {}", resp.status());
+    }
+    ok
+}
+
 /// Mesh network topology
 #[derive(Debug, Clone, Serialize)]
 pub struct MeshTopology {
@@ -183,7 +225,9 @@ pub struct MeshBehaviour {
     pub mdns: Mdns,
     pub autonat: libp2p::autonat::Behaviour,
     pub relay: libp2p::relay::client::Behaviour,
+    pub relay_server: libp2p::relay::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
+    pub connection_limits: libp2p::connection_limits::Behaviour,
     pub request_response: libp2p::request_response::cbor::Behaviour<ChatRequest, ChatResponse>,
 }
 
@@ -219,7 +263,6 @@ pub struct MeshTransport {
     username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
-    /// Step 4: Shared routes map for topology API
     routes: Arc<RwLock<HashMap<String, Vec<String>>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
@@ -227,6 +270,7 @@ pub struct MeshTransport {
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
     _pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
+    reticulum_address: Option<String>,
 }
 
 impl MeshTransport {
@@ -241,6 +285,7 @@ impl MeshTransport {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         _handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+        reticulum_address: Option<String>,
     ) -> Result<Self> {
         let local_key = identity.keypair().ok_or_else(|| {
             anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
@@ -288,14 +333,18 @@ impl MeshTransport {
         // Create network behavior with hardened S/Kademlia parameters
         // FIXED: replaced GossipsubConfig::default() with hardened config from skademlia.rs
         // This prevents relay score inflation, sybil dominance, and gossip flooding.
-        // Wave 7 FIX: Simplified API — peer scoring can be re-added after first live test
-        use crate::core::routing::skademlia::hardened_gossipsub_config;
+        use crate::core::routing::skademlia::{
+            hardened_gossipsub_config, hardened_peer_score_params, hardened_peer_score_thresholds,
+        };
         let gossipsub_config = hardened_gossipsub_config();
-        let gossipsub = Gossipsub::new(
+        let mut gossipsub = Gossipsub::new(
             MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
         )
         .map_err(|e| anyhow::anyhow!(e))?;
+        gossipsub
+            .with_peer_score(hardened_peer_score_params(), hardened_peer_score_thresholds())
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         let identify = Identify::new(IdentifyConfig::new(
             "/ghostwire/mesh/2.0.0".to_string(),
@@ -320,6 +369,25 @@ impl MeshTransport {
 
         let dcutr = libp2p::dcutr::Behaviour::new(local_peer_id);
 
+        let relay_server = libp2p::relay::Behaviour::new(
+            local_peer_id,
+            libp2p::relay::Config {
+                max_reservations: 128,
+                max_circuits: 16,
+                max_circuit_bytes: 1 << 17, // 128 KiB
+                ..Default::default()
+            },
+        );
+
+        let connection_limits = libp2p::connection_limits::Behaviour::new(
+            libp2p::connection_limits::ConnectionLimits::default()
+                .with_max_established_incoming(Some(200))
+                .with_max_established_outgoing(Some(200))
+                .with_max_established_per_peer(Some(2))
+                .with_max_pending_incoming(Some(32))
+                .with_max_pending_outgoing(Some(32)),
+        );
+
         let request_response =
             libp2p::request_response::cbor::Behaviour::<ChatRequest, ChatResponse>::new(
                 [(
@@ -336,7 +404,9 @@ impl MeshTransport {
             mdns,
             autonat,
             relay: relay_client,
+            relay_server,
             dcutr,
+            connection_limits,
             request_response,
         };
 
@@ -385,6 +455,7 @@ impl MeshTransport {
                 std::time::Duration::from_secs(30),
             )),
             _pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
+            reticulum_address,
         })
     }
 
@@ -443,23 +514,36 @@ impl MeshTransport {
         swarm.behaviour_mut().gossipsub.subscribe(&crl_topic)?;
         tracing::info!("Subscribed to CRL gossip topic");
 
-        // Connect to bootstrap nodes
+        // Connect to bootstrap nodes — dial every address directly, with or without PeerId.
+        // Without PeerId we still learn it from the Noise handshake; Kademlia gets it from Identify.
+        let mut has_peer_id_bootstrap = false;
         for addr in &self.bootstrap_nodes {
-            if let Some(peer_id) = addr.iter().find_map(|p| {
-                if let libp2p::multiaddr::Protocol::P2p(peer_id) = p {
-                    Some(peer_id)
+            let peer_id = addr.iter().find_map(|p| {
+                if let libp2p::multiaddr::Protocol::P2p(pid) = p {
+                    Some(pid)
                 } else {
                     None
                 }
-            }) {
-                tracing::info!("Adding bootstrap node: {}", crate::core::constants::log_privacy::short_peer(&peer_id.to_string()));
-                swarm
-                    .behaviour_mut()
-                    .kad
-                    .add_address(&peer_id, addr.clone());
+            });
+            if let Some(pid) = peer_id {
+                tracing::info!(
+                    "Adding bootstrap node: {}",
+                    crate::core::constants::log_privacy::short_peer(&pid.to_string())
+                );
+                swarm.behaviour_mut().kad.add_address(&pid, addr.clone());
+                has_peer_id_bootstrap = true;
             } else {
-                tracing::warn!("Bootstrap address missing PeerId: {}", addr);
+                tracing::info!("Dialing bootstrap node (no PeerId yet): {}", addr);
             }
+            // Always dial — we need the TCP connection regardless
+            match swarm.dial(addr.clone()) {
+                Ok(()) => tracing::info!("Dial issued to {}", addr),
+                Err(e) => tracing::warn!("Failed to dial bootstrap {}: {}", addr, e),
+            }
+        }
+        // Kick Kademlia into action — it will route through the connections we just dialed
+        if has_peer_id_bootstrap {
+            let _ = swarm.behaviour_mut().kad.bootstrap();
         }
 
         let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);
@@ -483,7 +567,6 @@ impl MeshTransport {
             core_messages: self._core_messages.clone(),
             seen_messages: VecDeque::new(),
             topology: self.topology.clone(),
-            // Step 2 & 4: Use shared routes from MeshTransport
             routes: self.routes.clone(),
             peer_count_cache: self.peer_count_cache.clone(),
             dtn_store: self.dtn_store.clone(),
@@ -502,6 +585,8 @@ impl MeshTransport {
             mixing_tx: None,
             cover_rx,
             rate_limits: HashMap::new(),
+            ping_seq: std::sync::atomic::AtomicU32::new(0),
+            reticulum_address: self.reticulum_address.clone(),
         };
 
         tokio::spawn(driver.run());
@@ -732,6 +817,8 @@ struct MeshDriver {
     /// Cover traffic receiver — drains dummy frames from scheduler, publishes to DM topic
     cover_rx: mpsc::Receiver<crate::core::traffic_armor::PaddedFrame>,
     rate_limits: HashMap<String, Vec<std::time::Instant>>,
+    ping_seq: std::sync::atomic::AtomicU32,
+    reticulum_address: Option<String>,
 }
 
 impl MeshDriver {
@@ -759,6 +846,18 @@ impl MeshDriver {
         dtn_purge_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut key_rotation_interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         key_rotation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        {
+            let listen_addrs: Vec<String> = self.swarm.listeners()
+                .map(|a| a.to_string())
+                .collect();
+            let peer_id_str = self.local_peer_id.to_string();
+            let ret_addr = self.reticulum_address.clone();
+            tokio::spawn(async move {
+                register_with_bootstrap(&peer_id_str, &listen_addrs, ret_addr.as_deref()).await;
+            });
+        }
+
         loop {
             tokio::select! {
                 event = self.swarm.next() => {
@@ -810,10 +909,9 @@ impl MeshDriver {
                     }
                 }
                 _ = key_rotation_interval.tick() => {
-                    if let Some(enc) = Arc::get_mut(&mut self.encryption_manager) {
-                        if let Err(e) = enc.rotate_keys_if_needed() {
-                            tracing::warn!("Key rotation failed: {}", e);
-                        }
+                    // ponytail: interior mutability via RwLock+AtomicU64, no need for Arc::get_mut
+                    if let Err(e) = self.encryption_manager.rotate_keys_if_needed() {
+                        tracing::warn!("Key rotation failed: {}", e);
                     }
                 }
                 Some(ready_pkt) = mixing_rx.recv() => {
@@ -839,29 +937,54 @@ impl MeshDriver {
         let _our_pub = self.encryption_manager.x25519_public_key()?;
         let recipient_str = recipient.to_string();
 
-        let mut candidates: Vec<(String, [u8; 32], f32)> = topo
-            .iter()
-            .filter(|(id, node)| {
-                **id != self.local_peer_id.to_string()
-                    && **id != recipient_str
-                    && node.is_online
-                    && node.public_key.len() >= 32
-            })
-            .filter_map(|(id, node)| {
-                let key_bytes: [u8; 32] = node.public_key[..32].try_into().ok()?;
-                Some((id.clone(), key_bytes, node.connection_quality))
-            })
-            .collect();
+        let candidates: Vec<(String, [u8; 32], f32)> = {
+            let health_tracker = self.peer_health.clone();
+            let health_map: std::collections::HashMap<String, crate::core::peer_health::PeerHealth> = {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async { health_tracker.get_all_health().await })
+                    .into_iter()
+                    .map(|h| (h.peer_id.clone(), h))
+                    .collect()
+            };
+
+            topo.iter()
+                .filter(|(id, node)| {
+                    **id != self.local_peer_id.to_string()
+                        && **id != recipient_str
+                        && node.is_online
+                        && node.public_key.len() >= 32
+                })
+                .filter_map(|(id, node)| {
+                    let key_bytes: [u8; 32] = node.public_key[..32].try_into().ok()?;
+
+                    let score = if let Some(health) = health_map.get(id.as_str()) {
+                        let latency_ms = health.ewma_rtt_ms as u64;
+                        let packet_loss = health.packet_loss_ratio() as f32;
+                        crate::core::ai::routing_classifier::fallback::calculate_delivery_predictivity(
+                            0,
+                            latency_ms,
+                            packet_loss,
+                            node.connection_quality,
+                        ) as f32
+                    } else {
+                        node.connection_quality
+                    };
+
+                    Some((id.clone(), key_bytes, score))
+                })
+                .collect()
+        };
 
         if candidates.len() < 2 {
             return None;
         }
 
-        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        candidates.truncate(2);
+        let mut sorted = candidates;
+        sorted.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.truncate(2);
 
-        let mut route_keys = vec![candidates[0].1, candidates[1].1];
-        let mut route_ids = vec![candidates[0].0.clone(), candidates[1].0.clone()];
+        let mut route_keys = vec![sorted[0].1, sorted[1].1];
+        let mut route_ids = vec![sorted[0].0.clone(), sorted[1].0.clone()];
 
         let recipient_node = topo.get(&recipient_str)?;
         let recipient_key: [u8; 32] = recipient_node.public_key[..32].try_into().ok()?;
@@ -917,13 +1040,16 @@ impl MeshDriver {
 
                 let topic = IdentTopic::new(crate::core::constants::topics::BROADCAST);
                 use crate::core::wire_protocol::{Frame, FrameKind};
-                let frame = match Frame::encode(FrameKind::Message, &message) {
+                let mut frame = match Frame::encode(FrameKind::Message, &message) {
                     Ok(f) => f,
                     Err(e) => { let _ = reply.send(Err(e)); return; }
                 };
+                if let Err(e) = frame.compress_payload() {
+                    tracing::debug!("Broadcast compression skipped: {}", e);
+                }
                 let data = frame.to_bytes();
                 // ponytail: mark as seen before publish so gossipsub loopback is deduped
-                self.seen_messages.push_back(message.id.clone());
+                self.seen_messages.push_back(message.id);
                 let mut res = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), data.clone());
                 for attempt in 1..=3u32 {
                     if let Err(PublishError::NoPeersSubscribedToTopic) = &res {
@@ -1084,7 +1210,7 @@ impl MeshDriver {
                 self.reliability.on_message_sent(encrypted_msg.id);
 
                 use crate::core::wire_protocol::{Frame, FrameKind};
-                let frame = match Frame::encode(FrameKind::Message, &encrypted_msg) {
+                let mut frame = match Frame::encode(FrameKind::Message, &encrypted_msg) {
                     Ok(f) => f,
                     Err(e) => {
                         tracing::warn!("Failed to encode frame for {}: {}", recipient, e);
@@ -1092,6 +1218,9 @@ impl MeshDriver {
                         return;
                     }
                 };
+                if let Err(e) = frame.compress_payload() {
+                    tracing::debug!("Compression skipped for {}: {}", recipient, e);
+                }
                 let data = frame.to_bytes();
 
                 if let Some(ref mailbox) = self.mailbox_store {
@@ -1268,10 +1397,16 @@ impl MeshDriver {
         // Log connection events for debugging
         if let SwarmEvent::ConnectionEstablished {
             peer_id,
+            endpoint,
             num_established,
             ..
         } = &event
         {
+            let observed_addr = endpoint.get_remote_address().clone();
+            self.swarm
+                .behaviour_mut()
+                .kad
+                .add_address(peer_id, observed_addr.clone());
             tracing::info!(
                 "Connection established with {} ({} total)",
                 peer_id,
@@ -1280,7 +1415,11 @@ impl MeshDriver {
             let my_id = self._identity.id.clone();
             let my_pubkey = base64::engine::general_purpose::STANDARD
                 .encode(self.encryption_manager.get_public_key());
-            let mut handshake = Message::new(my_id, peer_id.to_string(), my_pubkey);
+            let handshake_payload = serde_json::json!({
+                "public_key": my_pubkey,
+                "reticulum_address": self.reticulum_address,
+            });
+            let mut handshake = Message::new(my_id, peer_id.to_string(), handshake_payload.to_string());
             handshake.message_type = "handshake".to_string();
             self.swarm
                 .behaviour_mut()
@@ -1301,6 +1440,7 @@ impl MeshDriver {
                         last_seen_addresses: Vec::new(),
                         username: String::new(),
                         public_key: Vec::new(),
+                        reticulum_address: None,
                         last_seen: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
@@ -1508,6 +1648,13 @@ impl MeshDriver {
                 info.protocols
             );
 
+            for addr in &info.listen_addrs {
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(peer_id, addr.clone());
+            }
+
             let mut topo = self.topology.write().await;
             let entry = topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
                 id: peer_id.to_string(),
@@ -1515,6 +1662,7 @@ impl MeshDriver {
                 last_seen_addresses: Vec::new(),
                 username: String::new(),
                 public_key: Vec::new(),
+                reticulum_address: None,
                 last_seen: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -1618,7 +1766,6 @@ impl MeshDriver {
                     debug!("Received chat response from {}: {}", peer, response.0);
                 }
             }
-            return;
         }
     }
 
@@ -1678,7 +1825,7 @@ impl MeshDriver {
                 if let Ok(ping) = frame.decode::<crate::core::wire_protocol::WirePing>() {
                     self.peer_health.record_activity(&peer_id.to_string()).await;
                     use crate::core::wire_protocol::{Frame, FrameKind, WirePong};
-                    let pong = WirePong { ts: ping.ts };
+                    let pong = WirePong { ts: ping.ts, seq: ping.seq };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
                         let pong_topic = IdentTopic::new(crate::core::constants::topics::DM);
                         let _ = self
@@ -1739,30 +1886,6 @@ impl MeshDriver {
                 }
             }
             return Ok(());
-        }
-
-        if !msg.is_broadcast()
-            && msg.recipient != self.local_peer_id.to_string()
-            && msg.hops < MAX_HOPS
-        {
-            let mut forwarded = msg.clone();
-            forwarded.hops += 1;
-            tracing::trace!(
-                "Relaying message {} (hop {}/{}) to {}",
-                forwarded.id,
-                forwarded.hops,
-                MAX_HOPS,
-                forwarded.recipient
-            );
-            let relay_topic = IdentTopic::new(crate::core::constants::topics::DM);
-            use crate::core::wire_protocol::{Frame, FrameKind};
-            if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
-                let _ = self
-                    .swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(relay_topic, frame.to_bytes());
-            }
         }
 
         if !is_dm_for_us && topic_str != crate::core::constants::topics::BROADCAST {
@@ -2025,67 +2148,87 @@ impl MeshDriver {
             peer_id,
             msg.sender
         );
-        if let Ok(pub_key_bytes) = base64::engine::general_purpose::STANDARD.decode(&msg.content) {
-            let key_len = pub_key_bytes.len();
-            let key_type = if key_len >= 1248 {
-                crate::core::encryption::KeyType::Ultimate
-            } else {
-                crate::core::encryption::KeyType::Hybrid
-            };
-            self.encryption_manager.add_peer_key(
-                peer_id.to_string(),
-                pub_key_bytes.clone(),
-                key_type.clone(),
-            );
-            self.encryption_manager
-                .add_peer_key(msg.sender.clone(), pub_key_bytes.clone(), key_type);
-            
-            // Step 1: Update topology with peer's public key for Sphinx routing
-            {
-                let mut topo = self.topology.write().await;
-                if let Some(node) = topo.get_mut(&peer_id.to_string()) {
-                    if node.public_key.is_empty() && key_len >= 32 {
-                        node.public_key = pub_key_bytes.clone();
-                        tracing::info!(
-                            "Updated topology with peer {} public key ({} bytes)",
-                            peer_id,
-                            key_len
-                        );
+
+        let mut pub_key_bytes: Option<Vec<u8>> = None;
+        let mut peer_reticulum_address: Option<String> = None;
+
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.content) {
+            if let Some(pk_b64) = payload.get("public_key").and_then(|v| v.as_str()) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(pk_b64) {
+                    pub_key_bytes = Some(bytes);
+                    peer_reticulum_address = payload
+                        .get("reticulum_address")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+            }
+        }
+
+        if pub_key_bytes.is_none() {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&msg.content) {
+                pub_key_bytes = Some(bytes);
+            }
+        }
+
+        let pub_key_bytes = match pub_key_bytes {
+            Some(k) => k,
+            None => {
+                tracing::warn!("Failed to decode Handshake key");
+                return;
+            }
+        };
+
+        let key_len = pub_key_bytes.len();
+        let key_type = if key_len >= 1248 {
+            crate::core::encryption::KeyType::Ultimate
+        } else {
+            crate::core::encryption::KeyType::Hybrid
+        };
+        self.encryption_manager.add_peer_key(
+            peer_id.to_string(),
+            pub_key_bytes.clone(),
+            key_type.clone(),
+        );
+        self.encryption_manager
+            .add_peer_key(msg.sender.clone(), pub_key_bytes.clone(), key_type);
+
+        {
+            let mut topo = self.topology.write().await;
+            if let Some(node) = topo.get_mut(&peer_id.to_string()) {
+                if node.public_key.is_empty() && key_len >= 32 {
+                    node.public_key = pub_key_bytes.clone();
+                }
+                if let Some(ref addr) = peer_reticulum_address {
+                    if node.reticulum_address.is_none() {
+                        node.reticulum_address = Some(addr.clone());
+                        tracing::info!("Stored Reticulum address for peer {}: {}", peer_id, addr);
                     }
                 }
             }
+        }
 
-            tracing::info!(
-                "✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})",
-                peer_id,
-                key_len,
-                if key_len >= 1248 {
-                    "Ultimate"
-                } else {
-                    "Hybrid"
-                }
-            );
+        tracing::info!(
+            "✅ Stored encryption key for peer {} (key: {} bytes)",
+            peer_id,
+            key_len,
+        );
 
-            if !self.completed_handshakes.contains(&peer_id) {
-                self.completed_handshakes.insert(peer_id);
-                let my_id = self._identity.id.clone();
-                let my_pubkey = base64::engine::general_purpose::STANDARD
-                    .encode(self.encryption_manager.get_public_key());
-                let mut reply = Message::new(my_id, peer_id.to_string(), my_pubkey);
-                reply.message_type = "handshake".to_string();
-                self.swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_request(&peer_id, ChatRequest(reply));
-                tracing::info!("Sent handshake reply");
-            } else {
-                tracing::info!(
-                    "Already exchanged handshakes with {}, skipping reply",
-                    peer_id
-                );
-            }
-        } else {
-            tracing::warn!("Failed to decode Handshake key");
+        if !self.completed_handshakes.contains(&peer_id) {
+            self.completed_handshakes.insert(peer_id);
+            let my_id = self._identity.id.clone();
+            let my_pubkey = base64::engine::general_purpose::STANDARD
+                .encode(self.encryption_manager.get_public_key());
+            let handshake_payload = serde_json::json!({
+                "public_key": my_pubkey,
+                "reticulum_address": self.reticulum_address,
+            });
+            let mut reply = Message::new(my_id, peer_id.to_string(), handshake_payload.to_string());
+            reply.message_type = "handshake".to_string();
+            self.swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, ChatRequest(reply));
+            tracing::info!("Sent handshake reply with transport IDs");
         }
     }
 
@@ -2162,6 +2305,24 @@ impl MeshDriver {
     }
 
     async fn send_periodic_pings(&mut self) {
+        let timeout_ms = self.peer_health.ping_interval_ms() as u32 * 3;
+        {
+            let mut pending = self.pending_pings.lock().await;
+            let stale = pending.cleanup_stale_with_misses(timeout_ms);
+            for peer_id in stale {
+                self.peer_health.record_miss(&peer_id).await;
+            }
+        }
+
+        let to_disconnect = self.peer_health.peers_to_disconnect().await;
+        for peer_id_str in &to_disconnect {
+            if let Ok(pid) = peer_id_str.parse::<PeerId>() {
+                tracing::warn!("Disconnecting peer {} after 3 consecutive ping misses", peer_id_str);
+                self.swarm.disconnect_peer_id(pid).ok();
+                self.peer_health.remove_peer(peer_id_str).await;
+            }
+        }
+
         let peers: Vec<PeerId> = self
             .topology
             .read()
@@ -2176,7 +2337,8 @@ impl MeshDriver {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u32;
-            let ping = WirePing { ts };
+            let seq = self.ping_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let ping = WirePing { ts, seq };
             if let Ok(frame) = Frame::encode(FrameKind::Ping, &ping) {
                 let topic = IdentTopic::new(crate::core::constants::topics::DM);
                 if let Err(e) = self
@@ -2190,7 +2352,7 @@ impl MeshDriver {
                     self.peer_health.record_ping(&peer_id.to_string()).await;
                     let mut pending = self.pending_pings.lock().await;
                     pending.insert(ts, peer_id.to_string());
-                    tracing::debug!("Sent ping to {}", peer_id);
+                    tracing::debug!("Sent ping to {} seq={}", peer_id, seq);
                 }
             }
         }
@@ -2217,6 +2379,7 @@ impl MeshManager {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+        reticulum_address: Option<String>,
     ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
@@ -2232,6 +2395,7 @@ impl MeshManager {
             event_bus,
             handshake_secret,
             reliability.clone(),
+            reticulum_address,
         )
         .await?;
 
@@ -2395,6 +2559,7 @@ mod tests {
             last_seen_addresses: vec!["/ip4/127.0.0.1/tcp/4001".parse().unwrap()],
             username: "test-user".to_string(),
             public_key: vec![1, 2, 3],
+            reticulum_address: None,
             last_seen: 123456789,
             connection_quality: 0.9,
             is_online: true,
@@ -2457,6 +2622,7 @@ mod tests {
             last_seen_addresses: Vec::new(),
             username: String::new(),
             public_key: public_key.clone(),
+            reticulum_address: None,
             last_seen: 0,
             connection_quality: 1.0,
             is_online: true,

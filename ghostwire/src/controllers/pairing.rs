@@ -28,7 +28,7 @@ impl PairingController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("PAIR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PAIR_ERROR", e.to_string())),
             )
                 .into_response(),
         }

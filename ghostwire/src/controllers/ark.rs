@@ -80,7 +80,7 @@ impl ArkController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("ARK_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("ARK_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -113,7 +113,7 @@ impl ArkController {
             .into_response(),
             Err(e) => (
                 StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("DELETE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("DELETE_ERROR", e.to_string())),
             )
                 .into_response(),
         }

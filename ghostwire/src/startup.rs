@@ -20,7 +20,7 @@
 
 use anyhow::Result;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
@@ -145,7 +145,7 @@ impl StartupSequence {
     pub async fn phase1_identity(
         &mut self,
         profile: Option<&str>,
-        data_dir: &PathBuf,
+        data_dir: &Path,
     ) -> Result<IdentityBootResult> {
         let t = Instant::now();
         self.emit(BootEvent::PhaseStart { phase: 1, name: "Identity".into() });
@@ -190,7 +190,7 @@ impl StartupSequence {
     }
 
     /// PHASE 2 — Storage
-    pub async fn phase2_storage(&mut self, data_dir: &PathBuf) -> Result<()> {
+    pub async fn phase2_storage(&mut self, data_dir: &Path) -> Result<()> {
         let t = Instant::now();
         self.emit(BootEvent::PhaseStart { phase: 2, name: "Storage".into() });
 
@@ -253,7 +253,7 @@ impl StartupSequence {
         let listen_port = config.listen_port;
         if !is_port_in_use(listen_port) {
             self.check(
-                &format!("listen port {}", listen_port),
+                format!("listen port {}", listen_port),
                 CheckStatus::Pass,
                 None,
             );
@@ -304,7 +304,7 @@ impl StartupSequence {
     }
 
     /// PHASE 4 — Knowledge Ark init
-    pub async fn phase4_knowledge(&mut self, data_dir: &PathBuf) -> Result<KnowledgeBootResult> {
+    pub async fn phase4_knowledge(&mut self, data_dir: &Path) -> Result<KnowledgeBootResult> {
         let t = Instant::now();
         self.emit(BootEvent::PhaseStart { phase: 4, name: "Knowledge Ark".into() });
 
@@ -410,7 +410,7 @@ fn is_port_in_use(port: u16) -> bool {
     std::net::TcpListener::bind(format!("127.0.0.1:{}", port)).is_err()
 }
 
-fn available_space(path: &PathBuf) -> Result<u64> {
+fn available_space(path: &Path) -> Result<u64> {
     // Simplified: read statvfs on Linux
     #[cfg(target_os = "linux")]
     {

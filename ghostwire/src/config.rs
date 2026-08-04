@@ -36,6 +36,8 @@ pub struct SecurityConfig {
 pub struct NetworkConfig {
     pub mesh_enabled: bool,
     pub reticulum_enabled: bool,
+    #[serde(default = "default_reticulum_interfaces")]
+    pub reticulum_interfaces: String,
     pub briar_enabled: bool,
     pub stealth_tcp_enabled: bool,
     pub max_peers: usize,
@@ -53,6 +55,7 @@ impl std::fmt::Debug for NetworkConfig {
         f.debug_struct("NetworkConfig")
             .field("mesh_enabled", &self.mesh_enabled)
             .field("reticulum_enabled", &self.reticulum_enabled)
+            .field("reticulum_interfaces", &"[redacted]")
             .field("briar_enabled", &self.briar_enabled)
             .field("stealth_tcp_enabled", &self.stealth_tcp_enabled)
             .field("max_peers", &self.max_peers)
@@ -110,6 +113,10 @@ pub struct FeatureFlags {
     pub available_ram_mb: u64,    // Available RAM in MB (0 = auto-detect)
 }
 
+fn default_reticulum_interfaces() -> String {
+    "[interfaces]\ninterface 0 = AutoInterface".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -132,6 +139,7 @@ impl Default for Config {
             network: NetworkConfig {
                 mesh_enabled: true,
                 reticulum_enabled: false,
+                reticulum_interfaces: default_reticulum_interfaces(),
                 briar_enabled: false,
                 stealth_tcp_enabled: false,
                 max_peers: 50,

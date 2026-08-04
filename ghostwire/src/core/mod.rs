@@ -25,6 +25,8 @@ pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
+pub mod chunking;
+pub mod compression;
 pub mod constants;
 pub mod crl;
 pub mod db;
@@ -63,6 +65,7 @@ pub use security_v2 as security;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
+pub mod transport_selector;
 pub mod tutorial;
 pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
@@ -172,6 +175,12 @@ impl AdapterKind {
 // Adapter Registry
 pub struct AdapterRegistry {
     adapters: HashMap<String, AdapterKind>,
+}
+
+impl Default for AdapterRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AdapterRegistry {
@@ -840,6 +849,16 @@ impl Core {
                     crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
                 );
 
+                #[cfg(feature = "reticulum")]
+                let reticulum_address = identity.derive_transport_key("reticulum")
+                    .map(|seed| crate::core::reticulum::compute_reticulum_address(&seed))
+                    .map(|addr| {
+                        tracing::info!("Reticulum address (derived): {}", addr);
+                        addr
+                    });
+                #[cfg(not(feature = "reticulum"))]
+                let reticulum_address: Option<String> = None;
+
                 Some(Arc::new(RwLock::new(
                     MeshManager::new(
                         identity.clone(),
@@ -851,6 +870,7 @@ impl Core {
                         Some(event_bus.clone()),
                         handshake_secret.clone(),
                         reliability.clone(),
+                        reticulum_address,
                     )
                     .await?,
                 )))
@@ -881,7 +901,9 @@ impl Core {
             None
         };
 
-        let core = Self {
+        let reticulum_enabled = config.network.reticulum_enabled;
+
+        let mut core = Self {
             config,
             identity: Arc::new(RwLock::new(identity)),
             encryption,
@@ -907,11 +929,17 @@ impl Core {
             audit_logger: Arc::new(AuditLogger::default()),
             // Wave 2-6 subsystems
             mailbox_store: {
-                let db_path = dirs::data_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("ghostwire")
-                    .join(profile.as_deref().unwrap_or("default"))
-                    .join("db");
+                let db_path = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+                    std::path::PathBuf::from(ghost_home)
+                        .join(profile.as_deref().unwrap_or("default"))
+                        .join("db")
+                } else {
+                    dirs::data_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                        .join("ghostwire")
+                        .join(profile.as_deref().unwrap_or("default"))
+                        .join("db")
+                };
                 Arc::new(
                     crate::core::mailbox::MailboxStore::open(Arc::new(
                         sled::open(&db_path).unwrap_or_else(|_| {
@@ -1040,6 +1068,13 @@ impl Core {
             reliability,
         };
 
+        #[cfg(feature = "reticulum")]
+        if reticulum_enabled {
+            if let Err(e) = core.init_reticulum().await {
+                tracing::warn!("Failed to initialize Reticulum: {}", e);
+            }
+        }
+
         Ok(core)
     }
 
@@ -1067,7 +1102,7 @@ impl Core {
 
                 // Register all peers in the GNN mapper
                 for peer in peers.keys() {
-                    gnn.register_peer(peer.clone()).await;
+                    gnn.register_peer(*peer).await;
                 }
 
                 // Build GNN decisions for each bundle destination
@@ -1146,7 +1181,7 @@ impl Core {
                                                 peer_features.insert(cand, features);
                                             }
 
-                                            match gnn
+                                            if let Ok(decision) = gnn
                                                 .select_next_hop(
                                                     &topology,
                                                     src_idx,
@@ -1154,44 +1189,40 @@ impl Core {
                                                     neighbors,
                                                     &peer_features,
                                                 )
-                                                .await
-                                            {
-                                                Ok(decision) => {
-                                                    // Check if encountered peer is the recommended next-hop
-                                                    let their_peer = mapper
-                                                        .peers()
-                                                        .iter()
-                                                        .find(|p| {
-                                                            let mut buf = [0u8; 32];
-                                                            let id_bytes = p.to_bytes();
-                                                            let len = id_bytes.len().min(32);
-                                                            buf[..len]
-                                                                .copy_from_slice(&id_bytes[..len]);
-                                                            &buf == their_node_id
-                                                        })
-                                                        .cloned();
+                                                .await {
+                                                // Check if encountered peer is the recommended next-hop
+                                                let their_peer = mapper
+                                                    .peers()
+                                                    .iter()
+                                                    .find(|p| {
+                                                        let mut buf = [0u8; 32];
+                                                        let id_bytes = p.to_bytes();
+                                                        let len = id_bytes.len().min(32);
+                                                        buf[..len]
+                                                            .copy_from_slice(&id_bytes[..len]);
+                                                        &buf == their_node_id
+                                                    })
+                                                    .cloned();
 
-                                                    if let Some(their_peer) = their_peer {
-                                                        let their_idx =
-                                                            mapper.get_index(&their_peer);
-                                                        let should_forward = their_idx
-                                                            .map(|idx| {
-                                                                decision
-                                                                    .scored_candidates
-                                                                    .iter()
-                                                                    .any(|(p, _)| {
-                                                                        mapper.get_index(p)
-                                                                            == Some(idx)
-                                                                    })
-                                                            })
-                                                            .unwrap_or(false);
-                                                        gnn_decisions.insert(
-                                                            *dest,
-                                                            (should_forward, decision.confidence),
-                                                        );
-                                                    }
+                                                if let Some(their_peer) = their_peer {
+                                                    let their_idx =
+                                                        mapper.get_index(&their_peer);
+                                                    let should_forward = their_idx
+                                                        .map(|idx| {
+                                                            decision
+                                                                .scored_candidates
+                                                                .iter()
+                                                                .any(|(p, _)| {
+                                                                    mapper.get_index(p)
+                                                                        == Some(idx)
+                                                                })
+                                                        })
+                                                        .unwrap_or(false);
+                                                    gnn_decisions.insert(
+                                                        *dest,
+                                                        (should_forward, decision.confidence),
+                                                    );
                                                 }
-                                                Err(_) => {}
                                             }
                                         }
                                     }
@@ -1654,20 +1685,36 @@ impl Core {
             }
         });
 
+        // Presence obfuscation: dummy activity loop
+        {
+            let core_dummy = self.clone();
+            let (dummy_tx, mut dummy_rx) = tokio::sync::mpsc::channel(32);
+            crate::core::network::presence_obfuscation::start_dummy_activity_loop(
+                crate::core::network::presence_obfuscation::PresenceConfig::default(),
+                dummy_tx,
+            );
+            tokio::spawn(async move {
+                while let Some(_activity) = dummy_rx.recv().await {
+                    tracing::trace!("Dummy activity emitted");
+                    let _ = &core_dummy;
+                }
+            });
+        }
+
         // Auto-Start Mesh Network (Zero-Conf)
         let core_mesh = self.clone();
         tokio::spawn(async move {
             // Bind to the specified IP, with a random port (0) for P2P
             let listen_addr = format!("/ip4/{}/tcp/{}", mesh_bind_ip, mesh_port);
+
+            crate::core::network::presence_obfuscation::apply_connect_jitter(
+                &crate::core::network::presence_obfuscation::PresenceConfig::default(),
+            ).await;
+
             match core_mesh.start_mesh(&listen_addr).await {
                 Ok(_) => {
                     tracing::info!("✅ Mesh Network Auto-Started on {}", listen_addr);
-                    if let Some(mm) = &core_mesh.mesh_manager {
-                        let mut mgr = mm.write().await;
-                        if let Err(e) = mgr.publish_username().await {
-                            tracing::debug!("Username publish deferred (peers not yet connected): {}", e);
-                        }
-                    }
+                    // publish_username() moved into start_mesh() inner task to avoid deadlock
                     // Give the swarm a moment to bind, then print addresses
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let listeners = core_mesh.get_mesh_listeners().await;
@@ -1723,10 +1770,8 @@ impl Core {
             if let Err(e) = self.message_store.save_message_plain(message) {
                 tracing::error!("⚠️ Persistence failure for broadcast: {}", e);
             }
-        } else {
-            if let Err(e) = self.message_store.save_message(message) {
-                tracing::error!("⚠️ Persistence failure: {}", e);
-            }
+        } else if let Err(e) = self.message_store.save_message(message) {
+            tracing::error!("⚠️ Persistence failure: {}", e);
         }
 
         // Add to in-memory history
@@ -1789,20 +1834,29 @@ impl Core {
         // Record message for security stats
         self.security_manager.record_message(&message.sender).await;
 
-        // We do NOT broadcast direct messages to the event bus indiscriminately
-        // But we might want to emit a "MessageSent" event for UI updates
+        let _ = self.event_bus.send(CoreEvent::NewMessage(message.clone()));
 
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = &self.mesh_manager {
             let mut mgr = mesh_manager.write().await;
             if let Ok(peer_id) = recipient.parse::<libp2p::PeerId>() {
-                return mgr.send_direct_message(peer_id, message.clone()).await;
-            } else {
-                return Err(anyhow::anyhow!("Invalid P2P Recipient ID: {}", recipient));
+                match mgr.send_direct_message(peer_id, message.clone()).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        tracing::warn!("Mesh send failed ({}), trying active transport", e);
+                    }
+                }
             }
         }
 
-        Err(anyhow::anyhow!("Mesh network not available"))
+        if let Some(transport) = self.active_transport.read().await.as_ref() {
+            return transport.send_message(message).await;
+        }
+
+        Err(anyhow::anyhow!(
+            "No transport available for recipient: {}",
+            recipient
+        ))
     }
 
     /// Initialize a default transport for basic functionality
@@ -2078,6 +2132,12 @@ impl Core {
                     crate::core::username_discovery::UsernameDiscovery::new(peer_id, username),
                 );
 
+                #[cfg(feature = "reticulum")]
+                let reticulum_address = self.identity.read().await.derive_transport_key("reticulum")
+                    .map(|seed| crate::core::reticulum::compute_reticulum_address(&seed));
+                #[cfg(not(feature = "reticulum"))]
+                let reticulum_address: Option<String> = None;
+
                 let mesh_manager = MeshManager::new(
                     self.identity.read().await.clone(),
                     self.encryption.clone(),
@@ -2088,6 +2148,7 @@ impl Core {
                     Some(self.event_bus.clone()),
                     self.handshake_secret.clone(),
                     self.reliability.clone(),
+                    reticulum_address,
                 )
                 .await?;
                 let mut mesh_manager = mesh_manager;
@@ -2149,13 +2210,16 @@ impl Core {
         Err(anyhow::anyhow!("Mesh feature not enabled"))
     }
 
-    /// Initialize Reticulum network
     pub async fn init_reticulum(&mut self) -> Result<()> {
         #[cfg(feature = "reticulum")]
         {
             if self.reticulum_manager.is_none() {
+                let identity_arc: Arc<crate::core::identity::Identity> = (*self.identity.read().await).clone();
                 let reticulum_manager =
-                    ReticulumManager::new(self.identity.read().await.clone()).await?;
+                    ReticulumManager::new(
+                        identity_arc,
+                        &self.config.network.reticulum_interfaces,
+                    ).await?;
                 self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
                 tracing::info!("Reticulum network initialized");
             }
@@ -2188,21 +2252,12 @@ impl Core {
         }
     }
 
-    /// Get Reticulum network statistics
     pub async fn get_reticulum_stats(&self) -> Option<ReticulumStats> {
         #[cfg(feature = "reticulum")]
         {
             if let Some(reticulum_manager) = &self.reticulum_manager {
-                let _manager = reticulum_manager.read().await;
-                Some(ReticulumStats {
-                    total_nodes: 0,
-                    online_nodes: 0,
-                    local_node_id: self.get_identity_id().await.to_string(),
-                    routes_count: 0,
-                    onion_routes_count: 0,
-                    messages_relayed: 0,
-                    encryption_errors: 0,
-                })
+                let manager = reticulum_manager.read().await;
+                Some(manager.get_stats().await)
             } else {
                 None
             }
@@ -2267,6 +2322,10 @@ impl Core {
                 let mut mgr = mesh_manager.write().await;
                 if let Err(e) = mgr.start(addr).await {
                     tracing::error!("Mesh loop failed: {}", e);
+                    return;
+                }
+                if let Err(e) = mgr.publish_username().await {
+                    tracing::debug!("Username publish deferred (peers not yet connected): {}", e);
                 }
             });
             return Ok(());

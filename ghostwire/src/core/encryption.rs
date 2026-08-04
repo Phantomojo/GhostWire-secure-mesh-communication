@@ -9,6 +9,7 @@
 
 use crate::core::crl;
 use crate::core::double_ratchet;
+use obfstr::obfstr;
 use rand_core::OsRng;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -18,10 +19,24 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[cfg(test)]
+static TEST_GHOST_DIR: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+pub fn set_test_ghost_dir(dir: std::path::PathBuf) {
+    *TEST_GHOST_DIR.lock().unwrap() = Some(dir);
+}
+
+#[cfg(test)]
+pub fn clear_test_ghost_dir() {
+    *TEST_GHOST_DIR.lock().unwrap() = None;
+}
 
 /// ✅ NEW: Secure error types (no panic on invalid input)
 #[derive(Debug, thiserror::Error)]
@@ -113,12 +128,12 @@ impl KeyRotationAnnouncer for NoOpKeyRotationAnnouncer {
 
 /// Enhanced encryption manager with advanced security features
 pub struct EncryptionManager {
-    key_pair: GhostKeyPair,
+    key_pair: std::sync::RwLock<GhostKeyPair>,
     peer_keys: Arc<Mutex<HashMap<String, PeerKey>>>,
     rng: SystemRandom,
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
     key_rotation_interval: u64,
-    last_key_rotation: u64,
+    last_key_rotation: AtomicU64,
     pub crl: Arc<crl::CrlStore>,
     pub ratchet_sessions: Arc<double_ratchet::RatchetSessionManager>,
 }
@@ -139,7 +154,7 @@ impl EncryptionManager {
     /// Extract the X25519 static secret for Sphinx packet processing.
     /// Returns None if the key pair is too short (legacy format).
     pub fn x25519_secret(&self) -> Option<x25519_dalek::StaticSecret> {
-        let pk = &self.key_pair.private_key;
+        let pk = self.key_pair.read().unwrap().private_key.clone();
         if pk.len() < 34 {
             return None;
         }
@@ -154,7 +169,7 @@ impl EncryptionManager {
 
     /// Extract our X25519 public key bytes (32 bytes).
     pub fn x25519_public_key(&self) -> Option<[u8; 32]> {
-        let pk = &self.key_pair.private_key;
+        let pk = self.key_pair.read().unwrap().private_key.clone();
         if pk.len() < 34 {
             return None;
         }
@@ -177,7 +192,7 @@ impl EncryptionManager {
                 Ok(manager) => {
                     info!(
                         "🔐 Loaded persistent encryption keys for key_id: {}",
-                        manager.key_pair.key_id
+                        manager.key_pair.read().unwrap().key_id
                     );
                     return Ok(manager);
                 }
@@ -203,15 +218,15 @@ impl EncryptionManager {
         let key_pair = Self::generate_hybrid_key_pair(&rng)?;
 
         Ok(EncryptionManager {
-            key_pair,
+            key_pair: std::sync::RwLock::new(key_pair),
             peer_keys: Arc::new(Mutex::new(HashMap::new())),
             rng,
             session_keys: Arc::new(Mutex::new(HashMap::new())),
             key_rotation_interval: 86400 * 7, // 7 days
-            last_key_rotation: SystemTime::now()
+            last_key_rotation: AtomicU64::new(SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs(),
+                .as_secs()),
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
@@ -231,25 +246,33 @@ impl EncryptionManager {
         Ok(ghost_dir.join("encryption.json"))
     }
 
-    fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    fn load_from_disk(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         // Use secure load
         let persisted: PersistedEncryption = Self::secure_load(path)?;
 
         let rng = SystemRandom::new();
         // Reconstruct manager from persisted state
         Ok(EncryptionManager {
-            key_pair: persisted.key_pair,
+            key_pair: std::sync::RwLock::new(persisted.key_pair),
             peer_keys: Arc::new(Mutex::new(HashMap::new())),
             rng,
             session_keys: Arc::new(Mutex::new(HashMap::new())),
             key_rotation_interval: persisted.key_rotation_interval,
-            last_key_rotation: persisted.last_key_rotation,
+            last_key_rotation: AtomicU64::new(persisted.last_key_rotation),
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
         })
     }
 
-    fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn get_ghost_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+        #[cfg(test)]
+        if let Some(dir) = TEST_GHOST_DIR.lock().unwrap().as_ref() {
+            if !dir.exists() {
+                std::fs::create_dir_all(dir)?;
+            }
+            return Ok(dir.clone());
+        }
+
         let ghost_dir =
             if let Ok(ghost_home) = std::env::var(cryptify::encrypt_string!("GHOSTWIRE_HOME")) {
                 std::path::PathBuf::from(ghost_home)
@@ -257,34 +280,131 @@ impl EncryptionManager {
                 let home = dirs::home_dir().ok_or("No home dir")?;
                 home.join(cryptify::encrypt_string!(".ghostwire"))
             };
-
         if !ghost_dir.exists() {
             std::fs::create_dir_all(&ghost_dir)?;
         }
+        Ok(ghost_dir)
+    }
+
+    fn derive_keyfile_key_with(
+        key_path: &std::path::Path,
+        salt: &[u8; 16],
+    ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        let machine_id = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| obfstr!("ghostwire-default").to_string());
+        let seed = format!(
+            "ghostwire-master-v1-{}-{}",
+            machine_id,
+            key_path.display()
+        );
+
+        let argon2 = argon2::Argon2::new(
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            argon2::Params::new(65536, 3, 4, Some(32))
+                .map_err(|e| anyhow::anyhow!("Argon2 params: {}", e))?,
+        );
+        let mut key_bytes = [0u8; 32];
+        argon2
+            .hash_password_into(seed.as_bytes(), salt, &mut key_bytes)
+            .map_err(|e| anyhow::anyhow!("Argon2 derivation failed: {}", e))?;
+        Ok(key_bytes)
+    }
+
+    fn generate_wrapping_salt() -> Result<[u8; 16], Box<dyn std::error::Error>> {
+        let mut salt = [0u8; 16];
+        SystemRandom::new().fill(&mut salt).map_err(|_| "RNG failed")?;
+        Ok(salt)
+    }
+
+    fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
+
+        let ghost_dir = Self::get_ghost_dir()?;
         let key_path = ghost_dir.join(cryptify::encrypt_string!("master.key"));
 
         if key_path.exists() {
-            let key = std::fs::read(&key_path)?;
-            if key.len() != 32 {
-                return Err("Invalid master key length".into());
-            }
-            Ok(key)
-        } else {
-            let mut key = [0u8; 32];
-            SystemRandom::new()
-                .fill(&mut key[..])
-                .map_err(|_| "RNG failed")?;
+            let data = std::fs::read(&key_path)?;
 
-            // save with 600
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .mode(0o600)
-                .open(&key_path)?;
-            file.write_all(&key)?;
-            tracing::info!("🔑 Generated new Master Key for secure storage");
-            Ok(key.to_vec())
+            if data.first() == Some(&0x01) && data.len() > 41 {
+                // v1 wrapped format: [0x01][salt 16][nonce 24][ciphertext]
+                let salt_bytes: [u8; 16] = data[1..17]
+                    .try_into()
+                    .map_err(|_| "Invalid master.key v1: salt too short")?;
+                let nonce_bytes: [u8; 24] = data[17..41]
+                    .try_into()
+                    .map_err(|_| "Invalid master.key v1: nonce too short")?;
+                let ciphertext = &data[41..];
+
+                let key_bytes = Self::derive_keyfile_key_with(&key_path, &salt_bytes)?;
+
+                let key = Key::from_slice(&key_bytes);
+                let cipher = XChaCha20Poly1305::new(key);
+                let nonce = XNonce::from_slice(&nonce_bytes);
+                let plaintext = cipher
+                    .decrypt(nonce, ciphertext)
+                    .map_err(|_| "master.key v1 decryption failed — machine identity may have changed")?;
+
+                if plaintext.len() != 32 {
+                    return Err("Decrypted master key wrong length".into());
+                }
+                return Ok(plaintext);
+            } else if data.len() == 32 {
+                // Legacy raw 32-byte format — re-wrap to v1
+                let key: [u8; 32] = data.try_into().map_err(|_| "Legacy key wrong length")?;
+                Self::wrap_and_save_master_key(&ghost_dir, &key_path, &key)?;
+                tracing::info!("Migrated master.key to wrapped v1 format");
+                return Ok(key.to_vec());
+            } else {
+                return Err("Invalid master.key format".into());
+            }
         }
+
+        let mut key = [0u8; 32];
+        SystemRandom::new()
+            .fill(&mut key[..])
+            .map_err(|_| "RNG failed")?;
+
+        Self::wrap_and_save_master_key(&ghost_dir, &key_path, &key)?;
+        tracing::info!("Generated new wrapped Master Key for secure storage");
+        Ok(key.to_vec())
+    }
+
+    fn wrap_and_save_master_key(
+        _ghost_dir: &std::path::Path,
+        key_path: &std::path::Path,
+        raw_key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
+
+        let salt = Self::generate_wrapping_salt()?;
+        let wrapping_key = Self::derive_keyfile_key_with(key_path, &salt)?;
+
+        let mut nonce_bytes = [0u8; 24];
+        SystemRandom::new().fill(&mut nonce_bytes).map_err(|_| "RNG failed")?;
+
+        let key = Key::from_slice(&wrapping_key);
+        let cipher = XChaCha20Poly1305::new(key);
+        let nonce = XNonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, raw_key.as_ref())
+            .map_err(|e| anyhow::anyhow!("master.key encryption: {:?}", e))?;
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(key_path)?;
+        file.write_all(&[0x01])?;
+        file.write_all(&salt)?;
+        file.write_all(&nonce_bytes)?;
+        file.write_all(&ciphertext)?;
+        Ok(())
     }
 
     pub fn secure_save<T: Serialize>(
@@ -344,9 +464,9 @@ impl EncryptionManager {
     pub fn save_to_disk(&self) -> Result<(), Box<dyn std::error::Error>> {
         let path = Self::get_storage_path()?;
         let persisted = PersistedEncryption {
-            key_pair: self.key_pair.clone(),
+            key_pair: self.key_pair.read().unwrap().clone(),
             key_rotation_interval: self.key_rotation_interval,
-            last_key_rotation: self.last_key_rotation,
+            last_key_rotation: self.last_key_rotation.load(Ordering::Relaxed),
         };
 
         Self::secure_save(&path, &persisted)?;
@@ -418,12 +538,12 @@ impl EncryptionManager {
         format!("key_{:x}", timestamp)
     }
 
-    pub fn get_public_key(&self) -> &[u8] {
-        &self.key_pair.public_key
+    pub fn get_public_key(&self) -> Vec<u8> {
+        self.key_pair.read().unwrap().public_key.clone()
     }
 
     pub fn get_key_id(&self) -> String {
-        self.key_pair.key_id.clone()
+        self.key_pair.read().unwrap().key_id.clone()
     }
 
     pub fn add_peer_key(&self, peer_id: String, public_key: Vec<u8>, key_type: KeyType) {
@@ -500,12 +620,12 @@ impl EncryptionManager {
             ciphertext: encrypted_data.ciphertext,
             nonce: encrypted_data.nonce,
             signature,
-            sender_id: self.key_pair.key_id.clone(),
+            sender_id: self.key_pair.read().unwrap().key_id.clone(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            key_id: self.key_pair.key_id.clone(),
+            key_id: self.key_pair.read().unwrap().key_id.clone(),
             message_type,
             version: 0x03, // XChaCha20-Poly1305 encryption
             pq_key: pq_key_out,
@@ -550,7 +670,7 @@ impl EncryptionManager {
             use pqcrypto_traits::kem::{Ciphertext as _, SecretKey as _};
 
             // Extract our Kyber Secret Key from private key blob
-            let priv_key_bytes = &self.key_pair.private_key;
+            let priv_key_bytes = self.key_pair.read().unwrap().private_key.clone();
             let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
             let pq_sk_bytes = &priv_key_bytes[2 + ed_len + 32..];
 
@@ -698,7 +818,7 @@ impl EncryptionManager {
         let peer_x_pub = XPublicKey::from(x25519_peer_pub_bytes);
 
         // Our private key structure: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 Private (32)]
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.key_pair.read().unwrap().private_key.clone();
         if priv_key_bytes.len() < 34 {
             return Err("Private key too short".into());
         }
@@ -719,12 +839,12 @@ impl EncryptionManager {
         }
 
         // Derive session key using HKDF-SHA256
-        // Ponytail: per-peer salt derived from shared_secret instead of static string.
-        // Prevents cross-peer key derivation if HKDF state were ever leaked.
-        let mut salt_bytes = [0u8; 32];
+        // Salt must be deterministic — both encrypt and decrypt derive independently
+        // without exchanging salt. Using shared_secret XOR domain separator.
         let ss = shared_secret.as_bytes();
+        let mut salt_bytes = [0u8; 32];
         for i in 0..32 {
-            salt_bytes[i] = ss[i] ^ b"GhostWire-Salt-v2"[i % 17];
+            salt_bytes[i] = ss[i] ^ b"GhostWire-Session-Key-v2"[i % 24];
         }
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &salt_bytes);
         let prk = salt.extract(shared_secret.as_bytes());
@@ -785,8 +905,8 @@ impl EncryptionManager {
         let mut ctx = digest::Context::new(&digest::SHA256);
         let domain = cryptify::encrypt_string!("GhostWire-CLI-v1");
         ctx.update(domain.as_bytes()); // Domain separation
-        ctx.update(&self.key_pair.private_key[..]);
-        ctx.update(&self.key_pair.public_key[..]);
+        ctx.update(&self.key_pair.read().unwrap().private_key[..]);
+        ctx.update(&self.key_pair.read().unwrap().public_key[..]);
 
         ctx.finish().as_ref().to_vec()
     }
@@ -819,7 +939,7 @@ impl EncryptionManager {
     pub fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Use Ed25519 for signing
         // Extract plain Ed25519 PKCS8 bytes from binary hybrid key
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.key_pair.read().unwrap().private_key.clone();
         if priv_key_bytes.len() < 2 {
             return Err("Invalid private key length".into());
         }
@@ -867,11 +987,11 @@ impl EncryptionManager {
     fn increment_key_usage(&self) {
         // In a real implementation, this would be thread-safe
         // For now, we'll just log the usage
-        tracing::debug!(key_id = %self.key_pair.key_id, "Key usage incremented");
+        tracing::debug!(key_id = %self.key_pair.read().unwrap().key_id, "Key usage incremented");
     }
 
     pub fn export_public_key(&self) -> Vec<u8> {
-        self.key_pair.public_key.clone()
+        self.key_pair.read().unwrap().public_key.clone()
     }
 
     pub fn get_peer_count(&self) -> usize {
@@ -884,18 +1004,18 @@ impl EncryptionManager {
             .unwrap()
             .as_secs();
 
-        now - self.last_key_rotation > self.key_rotation_interval
+        now - self.last_key_rotation.load(Ordering::Relaxed) > self.key_rotation_interval
     }
 
-    pub fn rotate_keys_if_needed(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn rotate_keys_if_needed(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.should_rotate_keys() {
             tracing::info!(msg = "Rotating encryption keys");
             let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
-            self.key_pair = new_key_pair;
-            self.last_key_rotation = SystemTime::now()
+            *self.key_pair.write().unwrap() = new_key_pair;
+            self.last_key_rotation.store(SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs();
+                .as_secs(), Ordering::Relaxed);
 
             self.session_keys.lock().unwrap().clear();
             self.save_to_disk()?;
@@ -905,7 +1025,7 @@ impl EncryptionManager {
 
     pub fn revoke_key(&self, key_id: &str) -> crl::RevocationEntry {
         let key_id_owned = key_id.to_string();
-        let signer_id = self.key_pair.key_id.clone();
+        let signer_id = self.key_pair.read().unwrap().key_id.clone();
         self.crl.revoke(&key_id_owned, &signer_id, &|payload| {
             self.sign_message(payload).unwrap_or_default()
         })
@@ -961,7 +1081,7 @@ impl EncryptionManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let session_key = self.derive_session_key(
             peer_id,
-            &[self.key_pair.public_key[32..64].to_vec()].concat(),
+            &[self.key_pair.read().unwrap().public_key[32..64].to_vec()].concat(),
         )?;
 
         let mut shared_secret = [0u8; 32];
@@ -979,14 +1099,14 @@ impl EncryptionManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let session_key = self.derive_session_key(
             peer_id,
-            &[self.key_pair.public_key[32..64].to_vec()].concat(),
+            &[self.key_pair.read().unwrap().public_key[32..64].to_vec()].concat(),
         )?;
 
         let mut shared_secret = [0u8; 32];
         shared_secret.copy_from_slice(&session_key);
 
         // Extract X25519 private key from hybrid key: [ed_len_u16][ed25519_pkcs8][x25519_32]
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.key_pair.read().unwrap().private_key.clone();
         if priv_key_bytes.len() < 36 {
             return Err("Private key too short for X25519 extraction".into());
         }
@@ -1028,7 +1148,7 @@ impl EncryptionManager {
             ciphertext: ratchet_msg.ciphertext,
             nonce: ratchet_msg.nonce,
             signature,
-            sender_id: self.key_pair.key_id.clone(),
+            sender_id: self.key_pair.read().unwrap().key_id.clone(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1141,12 +1261,12 @@ mod tests {
 
         // Verify with own public key
         assert!(encryption
-            .verify_signature(message, &signature, encryption.get_public_key())
+            .verify_signature(message, &signature, &encryption.get_public_key())
             .is_ok());
 
         // Fail with wrong message
         assert!(encryption
-            .verify_signature(b"Wrong", &signature, encryption.get_public_key())
+            .verify_signature(b"Wrong", &signature, &encryption.get_public_key())
             .is_err());
     }
 
@@ -1173,8 +1293,8 @@ mod tests {
         let alice = EncryptionManager::create_new().unwrap();
         let bob = EncryptionManager::create_new().unwrap();
 
-        assert_eq!(alice.key_pair.key_type, KeyType::Ultimate);
-        assert_eq!(alice.key_pair.public_key.len(), 1248);
+        assert_eq!(alice.key_pair.read().unwrap().key_type, KeyType::Ultimate);
+        assert_eq!(alice.key_pair.read().unwrap().public_key.len(), 1248);
 
         alice.add_peer_key(
             bob.get_key_id(),
@@ -1201,7 +1321,10 @@ mod tests {
 
     #[test]
     fn test_secure_storage() {
-        let file_path = std::path::Path::new("test_secure_storage.json");
+        let tmp = tempfile::tempdir().unwrap();
+        super::set_test_ghost_dir(tmp.path().to_path_buf());
+
+        let file_path = tmp.path().join("test_secure_storage.json");
 
         #[derive(Serialize, Deserialize, PartialEq, Debug)]
         struct TestData {
@@ -1217,9 +1340,7 @@ mod tests {
         let loaded: TestData = EncryptionManager::secure_load(&file_path).unwrap();
 
         assert_eq!(data, loaded);
-
-        // Cleanup
-        let _ = std::fs::remove_file(file_path);
+        super::clear_test_ghost_dir();
     }
 }
 

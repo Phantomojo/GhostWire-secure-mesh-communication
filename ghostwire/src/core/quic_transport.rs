@@ -276,7 +276,7 @@ impl QuicTransportProvider {
         let nonce = chacha20poly1305::XNonce::from_slice(&data[..24]);
         let ciphertext = &data[24..];
         
-        key.decrypt(&nonce, ciphertext)
+        key.decrypt(nonce, ciphertext)
             .map_err(|_| anyhow::anyhow!("Decryption failed"))
     }
 

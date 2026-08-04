@@ -1,0 +1,252 @@
+version: '3.8'
+
+# GhostWire 2-Node Playground
+# Usage: docker compose -f docker-compose.playground.yml up --build
+# Tests: docker compose -f docker-compose.playground.yml run --rm test
+
+services:
+  # ─── Node 1 (Alice) ────────────────────────────────────────────
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node1
+    hostname: node1
+    ports:
+      - "127.0.0.1:9001:9000"   # API
+      - "127.0.0.1:3001:3000"   # Web UI
+      - "4001:4001"              # libp2p TCP
+      - "4001:4001/udp"          # libp2p QUIC
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info,tower_http=error
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=alice
+    volumes:
+      - gw_node1_data:/home/ghostwire/.ghostwire
+      - gw_node1_config:/app/config
+      - ./ghostwire/src:/app/src:ro  # Hot reload source (dev only)
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node2/tcp/4001"]
+    networks:
+      gw_mesh:
+        aliases:
+          - alice
+    # Resource limits for testing
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ─── Node 2 (Bob) ──────────────────────────────────────────────
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node2
+    hostname: node2
+    ports:
+      - "127.0.0.1:9002:9000"   # API
+      - "127.0.0.1:3002:3000"   # Web UI
+      - "4002:4001"              # libp2p TCP
+      - "4002:4001/udp"          # libp2p QUIC
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info,tower_http=error
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=bob
+    volumes:
+      - gw_node2_data:/home/ghostwire/.ghostwire
+      - gw_node2_config:/app/config
+      - ./ghostwire/src:/app/src:ro  # Hot reload source (dev only)
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node1/tcp/4001"]
+    networks:
+      gw_mesh:
+        aliases:
+          - bob
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ─── Test Runner ───────────────────────────────────────────────
+  test:
+    image: alpine:3.19
+    container_name: gw-test-runner
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+    volumes:
+      - ./tests:/tests:ro
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "=== GhostWire Playground ==="
+        echo "Node1 (alice): http://node1:9000"
+        echo "Node2 (bob):   http://node2:9000"
+        echo ""
+        echo "Running transport selection tests..."
+        sh /tests/test_transport_selection.sh
+
+  # ─── Adversarial Test Runner ────────────────────────────────────
+  attacks:
+    image: alpine:3.19
+    container_name: gw-attacks
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+    volumes:
+      - ./tests:/tests:ro
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache wget tcpdump python3 iproute2 bash curl
+        echo "=== GhostWire Adversarial Suite ==="
+        echo "Alice: http://alice:9000"
+        echo "Bob:   http://bob:9000"
+        echo ""
+        sh /tests/run_attacks.sh
+
+  # ─── Attacker Container (MITM / Packet Capture) ────────────────
+  attacker:
+    image: alpine:3.19
+    container_name: gw-attacker
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./tests:/tests:ro
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache tcpdump iproute2 bash curl wget python3
+        echo "Attacker container ready."
+        echo "Usage:"
+        echo "  docker compose run --rm attacker sh /tests/attacks/01_mitm_intercept.sh"
+        echo "  docker compose run --rm attacker tcpdump -i eth0 -w /tmp/capture.pcap"
+        sleep infinity
+
+  # ─── Network Condition Simulator ────────────────────────────────
+  # Run manually: docker compose -f docker-compose.playground.yml run --rm netem <command>
+  netem:
+    image: alpine:3.19
+    container_name: gw-netem
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "Network simulator ready."
+        echo "Usage:"
+        echo "  docker compose run --rm netem delay 100ms node1"
+        echo "  docker compose run --rm netem loss 10% node2"
+        echo "  docker compose run --rm netem bandwidth 1mbit node1"
+        echo "  docker compose run --rm netem reset"
+        echo ""
+        echo "Installing iproute2 and tc..."
+        apk add --no-cache iproute2 bash curl
+        echo "Ready. Awaiting commands."
+        sleep infinity
+
+  # ─── Load Test Runner ──────────────────────────────────────────
+  # Run: docker compose -f docker-compose.playground.yml run --rm loadtest
+  loadtest:
+    image: alpine:3.19
+    container_name: gw-loadtest
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl jq bash
+        echo "=== GhostWire Load Test ==="
+        echo "Target: http://node1:9000"
+        echo ""
+        echo "--- Health check baseline ---"
+        for i in $(seq 1 10); do
+          start=$(date +%s%N)
+          curl -s -o /dev/null -w "%{http_code}" http://node1:9000/api/v2/health
+          end=$(date +%s%N)
+          echo "  Request $i: $(( (end - start) / 1000000 ))ms"
+        done
+        echo ""
+        echo "--- Peer list latency ---"
+        for i in $(seq 1 10); do
+          start=$(date +%s%N)
+          curl -s -o /dev/null -w "%{http_code}" http://node1:9000/api/v2/peers
+          end=$(date +%s%N)
+          echo "  Request $i: $(( (end - start) / 1000000 ))ms"
+        done
+        echo ""
+        echo "--- Concurrent connections ---"
+        for concurrency in 5 10 20; do
+          echo "  Concurrency=$concurrency:"
+          pids=""
+          start=$(date +%s%N)
+          for i in $(seq 1 $concurrency); do
+            curl -s -o /dev/null http://node1:9000/api/v2/health &
+            pids="$pids $!"
+          done
+          for pid in $pids; do wait $pid; done
+          end=$(date +%s%N)
+          total_ms=$(( (end - start) / 1000000 ))
+          avg_ms=$(( total_ms / concurrency ))
+          echo "    Total: ${total_ms}ms, Avg: ${avg_ms}ms"
+        done
+        echo ""
+        echo "--- Cross-node API ---"
+        for i in $(seq 1 5); do
+          start=$(date +%s%N)
+          curl -s -o /dev/null -w "%{http_code}" http://node2:9000/api/v2/peers
+          end=$(date +%s%N)
+          echo "  Node2 request $i: $(( (end - start) / 1000000 ))ms"
+        done
+        echo ""
+        echo "=== Load test complete ==="
+
+volumes:
+  gw_node1_data:
+  gw_node1_config:
+  gw_node2_data:
+  gw_node2_config:
+
+networks:
+  gw_mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

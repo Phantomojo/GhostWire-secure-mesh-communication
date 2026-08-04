@@ -169,12 +169,12 @@ pub mod mesh {
 // ═══════════════════════════════════════════════════════════
 /// Protocol identifiers and strings
 pub mod protocol {
-    /// GhostWire version
-    pub const VERSION: &str = "0.2.0";
+    /// GhostWire version — derived from Cargo.toml at compile time
+    pub const VERSION: &str = env!("CARGO_PKG_VERSION");
     /// Protocol version
     pub const PROTOCOL_VERSION: &str = "1.0.0";
     /// User agent string
-    pub const USER_AGENT: &str = "ghostwire/0.2.0";
+    pub const USER_AGENT: &str = concat!("ghostwire/", env!("CARGO_PKG_VERSION"));
     /// Libp2p identify protocol
     pub const IDENTIFY_PROTOCOL: &str = "/ghostwire/mesh/2.0.0";
     /// Kademlia protocol path
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_protocol_constants_module() {
-        assert_eq!(protocol::VERSION, "0.2.0");
+        assert_eq!(protocol::VERSION, env!("CARGO_PKG_VERSION"));
         assert!(protocol::IDENTIFY_PROTOCOL.starts_with("/ghostwire"));
         assert_eq!(protocol::TLS_HOSTNAME, "ghostwire.local");
     }

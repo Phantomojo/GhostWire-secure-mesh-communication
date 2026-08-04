@@ -67,7 +67,7 @@ impl RoutingClassifier {
                 features.trust_score,
             ) as f32;
 
-            scored_candidates.push((peer_id.clone(), confidence));
+            scored_candidates.push((*peer_id, confidence));
         }
 
         // Sort by confidence descending
@@ -75,10 +75,9 @@ impl RoutingClassifier {
             .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Select best
-        let (selected_peer, confidence) = scored_candidates
+        let (selected_peer, confidence) = *scored_candidates
             .first()
-            .context("No candidates after scoring")?
-            .clone();
+            .context("No candidates after scoring")?;
 
         // Get top alternatives (up to 3)
         let alternatives: Vec<_> = scored_candidates.into_iter().skip(1).take(3).collect();
@@ -118,15 +117,14 @@ pub mod fallback {
         let loss_score = 1.0 - packet_loss as f64;
 
         // Weighted combination
-        let base_score =
-            rssi_score * 0.3 + latency_score * 0.3 + loss_score * 0.2 + trust_score as f64 * 0.2;
+        
 
-        base_score
+        rssi_score * 0.3 + latency_score * 0.3 + loss_score * 0.2 + trust_score as f64 * 0.2
     }
 
     /// Select best peer using formula-based approach
     pub fn select_next_hop_formula(candidates: Vec<(PeerId, RoutingFeatures)>) -> PeerId {
-        let first_candidate = candidates.first().map(|(p, _)| p.clone());
+        let first_candidate = candidates.first().map(|(p, _)| *p);
         candidates
             .into_iter()
             .max_by(|a, b| {

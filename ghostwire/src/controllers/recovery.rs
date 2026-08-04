@@ -66,7 +66,7 @@ impl RecoveryController {
                         StatusCode::BAD_REQUEST,
                         Json(ApiV2Response::<()>::error(
                             "INVALID_KEY",
-                            &format!("Invalid X25519 key for guardian {}", g.name),
+                            format!("Invalid X25519 key for guardian {}", g.name),
                         )),
                     )
                         .into_response()
@@ -149,24 +149,35 @@ impl RecoveryController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", e.to_string())),
             )
                 .into_response(),
         }
     }
 
     pub async fn list_my_shares(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        // Query mailbox for incoming recovery shares
         let core = state.core.read().await;
-        let share_count = match core.mailbox_store.drain_inbox() {
-            Ok(envelopes) => envelopes.len(),
-            Err(_) => 0,
+        let envelopes = match core.mailbox_store.peek_inbox() {
+            Ok(e) => e,
+            Err(_) => vec![],
         };
 
+        let share_count = envelopes.len();
+        let metadata: Vec<serde_json::Value> = envelopes
+            .iter()
+            .map(|env| {
+                serde_json::json!({
+                    "message_id": env.message_id,
+                    "created_at": env.created_at,
+                    "attempts": env.attempts,
+                })
+            })
+            .collect();
+
         Json(ApiV2Response::success(serde_json::json!({
-            "shares": [],
+            "shares": metadata,
             "count": share_count,
-            "note": "Shares stored encrypted in mailbox; use reconstruct endpoint to recover"
+            "note": "Shares are encrypted; use reconstruct endpoint to recover"
         })))
     }
 
@@ -204,7 +215,7 @@ impl RecoveryController {
                 StatusCode::BAD_REQUEST,
                 Json(ApiV2Response::<()>::error(
                     "INSUFFICIENT_SHARES",
-                    &format!("Need {} shares, got {}", threshold, raw_shares.len()),
+                    format!("Need {} shares, got {}", threshold, raw_shares.len()),
                 )),
             )
                 .into_response();
@@ -242,13 +253,13 @@ impl RecoveryController {
                         .into_response(),
                         Err(e) => (
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ApiV2Response::<()>::error("SAVE_ERROR", &e.to_string())),
+                            Json(ApiV2Response::<()>::error("SAVE_ERROR", e.to_string())),
                         )
                             .into_response(),
                     },
                     Err(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", &e.to_string())),
+                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", e.to_string())),
                     )
                         .into_response(),
                 }
@@ -257,7 +268,7 @@ impl RecoveryController {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiV2Response::<()>::error(
                     "RECONSTRUCTION_ERROR",
-                    &e.to_string(),
+                    e.to_string(),
                 )),
             )
                 .into_response(),

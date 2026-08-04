@@ -135,7 +135,7 @@ impl NodeIdMapper {
         }
         let idx = self.next_index;
         self.next_index += 1;
-        self.peer_to_index.insert(peer.clone(), idx);
+        self.peer_to_index.insert(peer, idx);
         self.index_to_peer.insert(idx, peer);
         idx
     }
@@ -154,6 +154,9 @@ impl NodeIdMapper {
 
     pub fn len(&self) -> usize {
         self.peer_to_index.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.peer_to_index.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -403,7 +406,7 @@ impl GnnRouter {
                 let mut scored: Vec<(PeerId, f32)> = candidate_peers
                     .iter()
                     .zip(scores.iter())
-                    .map(|(peer, &score)| (peer.clone(), score))
+                    .map(|(peer, &score)| (*peer, score))
                     .collect();
 
                 scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -437,7 +440,7 @@ impl GnnRouter {
                 peer_features
                     .get(&cand_idx)
                     .cloned()
-                    .unwrap_or_else(|| RoutingFeatures {
+                    .unwrap_or(RoutingFeatures {
                         rssi: -70,
                         latency_ms: 100,
                         packet_loss: 0.1,
@@ -460,7 +463,7 @@ impl GnnRouter {
                 features.packet_loss,
                 features.trust_score,
             ) as f32;
-            scored.push((peer.clone(), score));
+            scored.push((*peer, score));
         }
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -469,7 +472,7 @@ impl GnnRouter {
             (
                 candidates_with_features
                     .first()
-                    .map(|(p, _)| p.clone())
+                    .map(|(p, _)| *p)
                     .unwrap_or_else(PeerId::random),
                 0.0,
             )
@@ -607,7 +610,7 @@ pub fn build_topology_from_mesh(
     let peer_to_idx: HashMap<PeerId, usize> = peer_list
         .iter()
         .enumerate()
-        .map(|(i, p)| (p.clone(), i))
+        .map(|(i, p)| (*p, i))
         .collect();
 
     let mut node_features = vec![GnnNodeFeatures::default(); num_nodes];

@@ -171,6 +171,9 @@ impl PeerAddressCache {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
 }
 
 // ── 3. O(1) message deduplication ────────────────────────────────────────────
@@ -224,6 +227,9 @@ impl MessageDeduplicator {
 
     pub fn len(&self) -> usize {
         self.seen.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
     }
 }
 

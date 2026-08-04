@@ -288,8 +288,7 @@ pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> R
     let mut final_recipient = recipient.to_string();
 
     // Resolve @username if provided
-    if recipient.starts_with('@') {
-        let username = &recipient[1..];
+    if let Some(username) = recipient.strip_prefix('@') {
         println!("🔍 Discovering peer for username: {}...", username);
 
         #[cfg(feature = "mesh")]
