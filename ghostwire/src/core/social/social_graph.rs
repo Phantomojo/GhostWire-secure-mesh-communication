@@ -340,10 +340,8 @@ impl SocialGraph {
                 is_online: true,
             })
             .await;
-        } else {
-            if let Some(peer) = self.peers.write().await.get_mut(&request.from_node_id) {
-                peer.connection_state = ConnectionState::PendingInbound;
-            }
+        } else if let Some(peer) = self.peers.write().await.get_mut(&request.from_node_id) {
+            peer.connection_state = ConnectionState::PendingInbound;
         }
 
         let event = SocialEvent::ConnectionRequestReceived {

@@ -188,16 +188,15 @@ impl StealthTCPProvider {
             return Ok(false);
         }
 
-        if &magic_buf[..] != &MAGIC_BYTES[..] {
+        if magic_buf[..] != MAGIC_BYTES[..] {
             return Ok(false);
         }
 
         // Layer 3: Challenge-response (if stealth mode enabled)
-        if self.enable_stealth_mode {
-            if !self.perform_challenge_response(stream).await? {
+        if self.enable_stealth_mode
+            && !self.perform_challenge_response(stream).await? {
                 return Ok(false);
             }
-        }
 
         let handshake_time = start_time.elapsed();
         tracing::debug!("Stealth handshake completed in {:?}", handshake_time);
@@ -212,7 +211,7 @@ impl StealthTCPProvider {
         let rng = SystemRandom::new();
         let mut challenge = [0u8; 16];
         rng.fill(&mut challenge[..])
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to generate challenge"))?;
+            .map_err(|_| io::Error::other("Failed to generate challenge"))?;
 
         // Send challenge
         stream.write_all(&challenge).await?;
@@ -386,11 +385,10 @@ impl StealthTCPProvider {
         stream.write_all(&MAGIC_BYTES[..]).await?;
 
         // Handle challenge-response if stealth mode enabled
-        if self.enable_stealth_mode {
-            if !self.handle_outbound_challenge_response(stream).await? {
+        if self.enable_stealth_mode
+            && !self.handle_outbound_challenge_response(stream).await? {
                 return Ok(false);
             }
-        }
 
         Ok(true)
     }
@@ -453,7 +451,7 @@ impl StealthTCPProvider {
                 kv.value()
                     .last_seen
                     .duration_since(Instant::now())
-                    .as_secs() as u64
+                    .as_secs()
             })
             .max()
             .unwrap_or(0);
@@ -474,12 +472,11 @@ impl StealthTCPProvider {
     }
 
     pub async fn send_message(&self, message: &Message) -> anyhow::Result<()> {
-        let addr = self
+        let addr = *self
             .peer_map
             .get(&message.recipient)
             .ok_or_else(|| anyhow::anyhow!("Peer {} not registered", message.recipient))?
-            .value()
-            .clone();
+            .value();
 
         let mut stream = self.connect(&addr).await?;
 

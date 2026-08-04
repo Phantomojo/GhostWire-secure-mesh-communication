@@ -14,45 +14,84 @@ use tracing::debug;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerHealth {
     pub peer_id: String,
-    /// Rolling average RTT in milliseconds
     pub avg_rtt_ms: f64,
-    /// Number of pings sent
+    pub ewma_rtt_ms: f64,
+    pub jitter_ms: f64,
+    pub p95_rtt_ms: f64,
     pub pings_sent: u64,
-    /// Number of pongs received
     pub pongs_received: u64,
-    /// Last time we received any traffic from this peer (epoch millis)
     pub last_seen_ms: u64,
-    /// Whether we consider this peer currently alive
     pub is_alive: bool,
-    /// Recent RTT samples (capped at 60 entries)
+    pub consecutive_misses: u32,
     #[serde(skip)]
     rtt_samples: Vec<f64>,
 }
 
 impl PeerHealth {
+    const EWMA_ALPHA: f64 = 0.125;
+    const MAX_SAMPLES: usize = 100;
+
     fn new(peer_id: String) -> Self {
         Self {
             peer_id,
             avg_rtt_ms: 0.0,
+            ewma_rtt_ms: 0.0,
+            jitter_ms: 0.0,
+            p95_rtt_ms: 0.0,
             pings_sent: 0,
             pongs_received: 0,
             last_seen_ms: now_ms(),
             is_alive: true,
-            rtt_samples: Vec::with_capacity(60),
+            consecutive_misses: 0,
+            rtt_samples: Vec::with_capacity(Self::MAX_SAMPLES),
         }
     }
 
-    /// Record an RTT sample and update rolling average
     pub fn record_rtt(&mut self, rtt_ms: f64) {
         self.rtt_samples.push(rtt_ms);
-        // Keep last 60 samples (≈ 2 minutes at 2s interval)
-        if self.rtt_samples.len() > 60 {
-            self.rtt_samples.drain(..self.rtt_samples.len() - 60);
+        if self.rtt_samples.len() > Self::MAX_SAMPLES {
+            self.rtt_samples.drain(..self.rtt_samples.len() - Self::MAX_SAMPLES);
         }
+
         self.avg_rtt_ms = self.rtt_samples.iter().sum::<f64>() / self.rtt_samples.len() as f64;
+
+        // EWMA: exponentially weighted — recent samples matter more
+        if self.pongs_received == 0 {
+            self.ewma_rtt_ms = rtt_ms;
+        } else {
+            self.ewma_rtt_ms =
+                Self::EWMA_ALPHA * rtt_ms + (1.0 - Self::EWMA_ALPHA) * self.ewma_rtt_ms;
+        }
+
+        // Jitter: standard deviation of RTT samples
+        if self.rtt_samples.len() >= 2 {
+            let mean = self.avg_rtt_ms;
+            let variance = self.rtt_samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>()
+                / (self.rtt_samples.len() - 1) as f64;
+            self.jitter_ms = variance.sqrt();
+        }
+
+        // P95: sort and take 95th percentile
+        let mut sorted = self.rtt_samples.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = (sorted.len() as f64 * 0.95) as usize;
+        self.p95_rtt_ms = sorted[idx.min(sorted.len() - 1)];
+
         self.pongs_received += 1;
         self.last_seen_ms = now_ms();
         self.is_alive = true;
+        self.consecutive_misses = 0;
+    }
+
+    pub fn record_miss(&mut self) {
+        self.consecutive_misses += 1;
+        if self.consecutive_misses >= 3 {
+            self.is_alive = false;
+        }
+    }
+
+    pub fn should_disconnect(&self) -> bool {
+        self.consecutive_misses >= 3
     }
 
     /// Record that a ping was sent
@@ -137,6 +176,26 @@ impl PeerHealthTracker {
         }
     }
 
+    pub async fn record_miss(&self, peer_id: &str) {
+        let mut map = self.peers.write().await;
+        if let Some(health) = map.get_mut(peer_id) {
+            health.record_miss();
+            if health.should_disconnect() {
+                debug!("Peer {} exceeded 3 consecutive misses, marking for disconnect", peer_id);
+            }
+        }
+    }
+
+    pub async fn peers_to_disconnect(&self) -> Vec<String> {
+        self.peers
+            .read()
+            .await
+            .iter()
+            .filter(|(_, h)| h.should_disconnect())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     /// Record any activity from a peer
     pub async fn record_activity(&self, peer_id: &str) {
         let mut map = self.peers.write().await;
@@ -210,6 +269,19 @@ impl PendingPings {
         let now_ms = now_ms_u32();
         self.pings
             .retain(|ts, _| now_ms.saturating_sub(*ts) < timeout_ms);
+    }
+
+    pub fn cleanup_stale_with_misses(&mut self, timeout_ms: u32) -> Vec<String> {
+        let now_ms = now_ms_u32();
+        let stale: Vec<String> = self
+            .pings
+            .iter()
+            .filter(|(ts, _)| now_ms.saturating_sub(**ts) >= timeout_ms)
+            .map(|(_, peer_id)| peer_id.clone())
+            .collect();
+        self.pings
+            .retain(|ts, _| now_ms.saturating_sub(*ts) < timeout_ms);
+        stale
     }
 }
 
@@ -303,5 +375,80 @@ mod tests {
     fn test_pending_pings_unknown_pong() {
         let mut pending = PendingPings::new();
         assert!(pending.resolve(999).is_none());
+    }
+
+    #[test]
+    fn test_ewma_converges() {
+        let mut health = PeerHealth::new("peer1".to_string());
+        // Feed constant RTT
+        for _ in 0..20 {
+            health.record_rtt(100.0);
+        }
+        assert!(
+            (health.ewma_rtt_ms - 100.0).abs() < 0.01,
+            "EWMA should converge to 100.0, got {}",
+            health.ewma_rtt_ms
+        );
+    }
+
+    #[test]
+    fn test_ewma_responds_to_change() {
+        let mut health = PeerHealth::new("peer1".to_string());
+        for _ in 0..10 {
+            health.record_rtt(100.0);
+        }
+        assert!((health.ewma_rtt_ms - 100.0).abs() < 1.0);
+
+        // Spike to 200
+        health.record_rtt(200.0);
+        assert!(
+            health.ewma_rtt_ms > 100.0,
+            "EWMA should respond to spike"
+        );
+        assert!(
+            health.ewma_rtt_ms < 200.0,
+            "EWMA should not jump to spike value"
+        );
+    }
+
+    #[test]
+    fn test_jitter_increases_with_variance() {
+        let mut stable = PeerHealth::new("stable".to_string());
+        for _ in 0..20 {
+            stable.record_rtt(50.0);
+        }
+        assert!(
+            stable.jitter_ms < 1.0,
+            "Stable RTT should have low jitter, got {}",
+            stable.jitter_ms
+        );
+
+        let mut variable = PeerHealth::new("variable".to_string());
+        for i in 0..20 {
+            variable.record_rtt(50.0 + (i % 2) as f64 * 100.0);
+        }
+        assert!(
+            variable.jitter_ms > 5.0,
+            "Variable RTT should have high jitter, got {}",
+            variable.jitter_ms
+        );
+    }
+
+    #[test]
+    fn test_p95_captures_tail() {
+        let mut health = PeerHealth::new("peer1".to_string());
+        // 95 samples at 10ms, 5 samples at 100ms
+        for _ in 0..95 {
+            health.record_rtt(10.0);
+        }
+        for _ in 0..5 {
+            health.record_rtt(100.0);
+        }
+        // P95 should be at least 100 (the tail)
+        assert!(
+            health.p95_rtt_ms >= 10.0,
+            "P95 should capture tail, got {}",
+            health.p95_rtt_ms
+        );
     }
 }

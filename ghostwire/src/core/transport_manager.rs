@@ -1,14 +1,15 @@
 use crate::core::disaster::{
     DisasterLevel, DisasterManager, DisasterMetrics, DisasterPolicy, TransportType,
 };
+use crate::core::transport_selector::{TransportSelector, TransportSelectorConfig, TransportMetrics};
 use tracing::{info, warn};
 
-/// Decides which transport to use based on network conditions and policy.
 pub struct AutoTransportSwitcher {
     disaster_manager: DisasterManager,
     policy: DisasterPolicy,
     current_level: DisasterLevel,
     current_transport: TransportType,
+    selector: TransportSelector,
 }
 
 impl AutoTransportSwitcher {
@@ -17,11 +18,11 @@ impl AutoTransportSwitcher {
             disaster_manager,
             policy,
             current_level: DisasterLevel::Normal,
-            current_transport: TransportType::StealthTcp, // Default start
+            current_transport: TransportType::StealthTcp,
+            selector: TransportSelector::new(TransportSelectorConfig::default()),
         }
     }
 
-    /// Evaluates metrics and returns the recommended transport if a change is needed.
     pub fn update_and_evaluate(&mut self, metrics: &DisasterMetrics) -> Option<TransportType> {
         let new_level = self.disaster_manager.evaluate(metrics);
 
@@ -41,7 +42,45 @@ impl AutoTransportSwitcher {
             }
         }
 
+        let transport_metrics: TransportMetrics = metrics.into();
+        let available = self.available_transports();
+        let selected = self.selector.select(&transport_metrics, &available);
+
+        if selected != self.current_transport {
+            info!(
+                "ADAPTIVE SELECTION: {:?} -> {:?} (score-based)",
+                self.current_transport, selected
+            );
+            self.current_transport = selected;
+            return Some(selected);
+        }
+
         None
+    }
+
+    fn available_transports(&self) -> Vec<TransportType> {
+        match self.current_level {
+            DisasterLevel::Normal => vec![
+                TransportType::Quic,
+                TransportType::StealthTcp,
+                TransportType::Mesh,
+                TransportType::WiFi,
+            ],
+            DisasterLevel::Congested => vec![
+                TransportType::Mesh,
+                TransportType::WiFi,
+                TransportType::StealthTcp,
+            ],
+            DisasterLevel::Isolation => vec![
+                TransportType::WiFi,
+                TransportType::Bluetooth,
+                TransportType::Mesh,
+            ],
+            DisasterLevel::Blackout => vec![
+                TransportType::Bluetooth,
+                TransportType::LoRa,
+            ],
+        }
     }
 
     pub fn current_level(&self) -> DisasterLevel {
@@ -50,5 +89,14 @@ impl AutoTransportSwitcher {
 
     pub fn current_transport(&self) -> TransportType {
         self.current_transport
+    }
+
+    pub fn force_transport(&mut self, transport: TransportType) {
+        self.selector.force_transport(transport);
+        self.current_transport = transport;
+    }
+
+    pub fn selector(&self) -> &TransportSelector {
+        &self.selector
     }
 }

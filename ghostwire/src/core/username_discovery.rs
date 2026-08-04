@@ -221,52 +221,49 @@ impl UsernameDiscovery {
 
     /// Handle DHT events (call this from swarm event loop)
     pub async fn handle_kad_event(&self, event: &KademliaEvent) -> Result<()> {
-        match event {
-            KademliaEvent::OutboundQueryProgressed { result, .. } => {
-                match result {
-                    QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
-                        // Got a username record from DHT
-                        match UsernameRecord::from_bytes(&record.record.value) {
-                            Ok(username_record) => {
-                                // Verify signature
-                                if let Err(e) = username_record.verify() {
-                                    warn!("Invalid signature on username record: {}", e);
-                                    return Ok(());
-                                }
-
-                                info!(
-                                    "Found username '{}' -> PeerID {}",
-                                    username_record.username, username_record.peer_id
-                                );
-
-                                // Cache it
-                                let mut cache = self.username_cache.write().await;
-                                cache.insert(
-                                    username_record.username.clone(),
-                                    username_record.clone(),
-                                );
-
-                                let mut peer_cache = self.peer_cache.write().await;
-                                peer_cache.insert(
-                                    username_record.peer_id.clone(),
-                                    username_record.username.clone(),
-                                );
+        if let KademliaEvent::OutboundQueryProgressed { result, .. } = event {
+            match result {
+                QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
+                    // Got a username record from DHT
+                    match UsernameRecord::from_bytes(&record.record.value) {
+                        Ok(username_record) => {
+                            // Verify signature
+                            if let Err(e) = username_record.verify() {
+                                warn!("Invalid signature on username record: {}", e);
+                                return Ok(());
                             }
-                            Err(e) => {
-                                warn!("Failed to parse username record: {}", e);
-                            }
+
+                            info!(
+                                "Found username '{}' -> PeerID {}",
+                                username_record.username, username_record.peer_id
+                            );
+
+                            // Cache it
+                            let mut cache = self.username_cache.write().await;
+                            cache.insert(
+                                username_record.username.clone(),
+                                username_record.clone(),
+                            );
+
+                            let mut peer_cache = self.peer_cache.write().await;
+                            peer_cache.insert(
+                                username_record.peer_id.clone(),
+                                username_record.username.clone(),
+                            );
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse username record: {}", e);
                         }
                     }
-                    QueryResult::PutRecord(Ok(_)) => {
-                        info!("Username record published to DHT");
-                    }
-                    QueryResult::GetRecord(Err(e)) => {
-                        debug!("DHT get record failed: {:?}", e);
-                    }
-                    _ => {}
                 }
+                QueryResult::PutRecord(Ok(_)) => {
+                    info!("Username record published to DHT");
+                }
+                QueryResult::GetRecord(Err(e)) => {
+                    debug!("DHT get record failed: {:?}", e);
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         Ok(())

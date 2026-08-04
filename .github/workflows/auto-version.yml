@@ -1,0 +1,69 @@
+name: Auto Version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Bump version
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
+      - name: Determine next version
+        id: version
+        run: |
+          NEXT=$(git cliff --bump -p 2>/dev/null | grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          CURRENT=$(grep '^version' ghostwire/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          if [ -z "$NEXT" ] || [ "$NEXT" = "$CURRENT" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Cargo.toml
+        if: steps.version.outputs.changed == 'true'
+        run: sed -i "s/^version = \".*\"/version = \"${{ steps.version.outputs.next }}\"/" ghostwire/Cargo.toml
+
+      - name: Generate changelog
+        if: steps.version.outputs.changed == 'true'
+        id: changelog
+        run: |
+          git cliff --tag "v${{ steps.version.outputs.next }}" -o CHANGELOG.md
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          git cliff --tag "v${{ steps.version.outputs.next }}" -p | head -50 >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ghostwire/Cargo.toml CHANGELOG.md
+          git commit -m "chore(release): prepare for v${{ steps.version.outputs.next }}"
+          git tag "v${{ steps.version.outputs.next }}"
+          git push && git push --tags
+
+      - name: Create GitHub release
+        if: steps.version.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.next }}
+          name: v${{ steps.version.outputs.next }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: false

@@ -69,6 +69,7 @@ async fn build_test_mesh_manager(
         None, // no event bus
         None, // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
+        None,
     )
     .await?;
 

@@ -20,6 +20,15 @@ impl PersistenceManager {
             home.join(".ghostwire").join("vault")
         };
 
+        Self::new_with_base_dir(base_dir, profile_name)
+    }
+
+    /// Create a PersistenceManager with an explicit base directory (bypasses env var).
+    /// Use this in tests to avoid GHOSTWIRE_HOME races.
+    pub fn new_with_base_dir(
+        base_dir: std::path::PathBuf,
+        profile_name: Option<String>,
+    ) -> Result<Self> {
         if !base_dir.exists() {
             std::fs::create_dir_all(&base_dir)?;
         }
@@ -161,9 +170,8 @@ mod tests {
     #[test]
     fn test_persistence_roundtrip() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-
-        let manager = PersistenceManager::new(None).expect("Failed to create PersistenceManager");
+        let manager = PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None)
+            .expect("Failed to create PersistenceManager");
 
         #[derive(Serialize, Deserialize, Debug, PartialEq)]
         struct TestData {
@@ -194,9 +202,8 @@ mod tests {
     #[test]
     fn test_list_keys() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-
-        let manager = PersistenceManager::new(Some("profile1".to_string())).unwrap();
+        let manager =
+            PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), Some("profile1".to_string())).unwrap();
 
         manager.store_secure("tree_a", "key1", &"val1").unwrap();
         manager.store_secure("tree_a", "key2", &"val2").unwrap();
@@ -215,8 +222,7 @@ mod tests {
     #[test]
     fn test_load_all() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-        let manager = PersistenceManager::new(None).unwrap();
+        let manager = PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None).unwrap();
 
         manager.store_secure("items", "1", &10).unwrap();
         manager.store_secure("items", "2", &20).unwrap();

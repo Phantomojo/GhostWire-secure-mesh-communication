@@ -52,7 +52,7 @@ pub fn pad_message(plaintext: &[u8], rng: &SystemRandom) -> Result<Vec<u8>> {
 
     // Next block boundary
     let raw_size = content_len + 3; // +3 for marker + 2-byte length
-    let padded_size = ((raw_size + PAD_BLOCK_SIZE - 1) / PAD_BLOCK_SIZE) * PAD_BLOCK_SIZE;
+    let padded_size = raw_size.div_ceil(PAD_BLOCK_SIZE) * PAD_BLOCK_SIZE;
     let pad_len = padded_size - raw_size;
 
     let mut buf = Vec::with_capacity(padded_size);

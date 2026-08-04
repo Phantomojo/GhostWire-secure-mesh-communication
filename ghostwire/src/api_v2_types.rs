@@ -119,7 +119,7 @@ impl<T: Serialize> ApiV2Response<T> {
             total,
             page,
             per_page,
-            pages: (total + per_page - 1) / per_page,
+            pages: total.div_ceil(per_page),
         });
         self
     }

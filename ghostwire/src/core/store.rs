@@ -118,6 +118,7 @@ impl SecureMessageStore {
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all messages from store");
         self.persistence.clear_tree("messages")?;
+        self.persistence.clear_tree("messages_plain")?;
         Ok(())
     }
 
@@ -137,7 +138,10 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
-        let persistence = Arc::new(PersistenceManager::new(None).unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(
+            PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None).unwrap(),
+        );
         let encryption = Arc::new(EncryptionManager::new().unwrap());
         let store = SecureMessageStore::new(persistence, encryption);
 

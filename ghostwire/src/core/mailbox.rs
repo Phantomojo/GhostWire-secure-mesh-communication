@@ -209,6 +209,19 @@ impl MailboxStore {
         Ok(())
     }
 
+    /// Read all messages from inbox without removing them
+    pub fn peek_inbox(&self) -> Result<Vec<MailboxEnvelope>> {
+        let prefix = format!("{}inbox:", MAILBOX_PREFIX);
+        let mut envelopes = Vec::new();
+        for result in self.db.scan_prefix(prefix.as_bytes()) {
+            if let Ok((_, val)) = result {
+                let envelope: MailboxEnvelope = bincode::deserialize(&val)?;
+                envelopes.push(envelope);
+            }
+        }
+        Ok(envelopes)
+    }
+
     /// Drain all messages from our inbox
     pub fn drain_inbox(&self) -> Result<Vec<MailboxEnvelope>> {
         let prefix = format!("{}inbox:", MAILBOX_PREFIX);

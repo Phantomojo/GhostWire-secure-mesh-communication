@@ -186,7 +186,7 @@ fn raw_dh(scalar_bytes: &[u8; 32], point_bytes: &[u8; 32]) -> [u8; 32] {
 
     let scalar = Scalar::from_bytes_mod_order(*scalar_bytes);
     let point = MontgomeryPoint(*point_bytes);
-    let result = &point * &scalar;
+    let result = point * scalar;
     result.0
 }
 
@@ -349,7 +349,7 @@ pub fn create_sphinx_packet(
         let mac_beta = if i == 0 {
             header_at_hop[i].clone()
         } else {
-            let nid_len = route_ids[i].as_bytes().len().min(255);
+            let nid_len = route_ids[i].len().min(255);
             let mut rb = header_at_hop[i][..SPHINX_HEADER_SIZE - 1 - nid_len].to_vec();
             rb.resize(SPHINX_HEADER_SIZE, 0u8);
             rb

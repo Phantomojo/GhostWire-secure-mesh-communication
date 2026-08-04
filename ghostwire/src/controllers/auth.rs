@@ -65,8 +65,54 @@ impl AuthController {
     }
 
     /// V2 Verify Token Handler
-    pub async fn verify_token(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success("Token is valid".to_string()))
+    pub async fn verify_token(
+        State(_state): State<Arc<AppState>>,
+        req: Request<Body>,
+    ) -> impl IntoResponse {
+        let auth_header = req
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+
+        let jwt = match auth_header {
+            Some(t) => t,
+            None => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::Unauthorized.as_str(),
+                        "Missing Authorization header",
+                    )),
+                )
+                    .into_response();
+            }
+        };
+
+        let validation = jsonwebtoken::Validation::default();
+        match jsonwebtoken::decode::<crate::web::Claims>(
+            jwt,
+            &jsonwebtoken::DecodingKey::from_secret(crate::web::JWT_SECRET.as_bytes()),
+            &validation,
+        ) {
+            Ok(token_data) => (
+                StatusCode::OK,
+                Json(ApiV2Response::success(serde_json::json!({
+                    "valid": true,
+                    "sub": token_data.claims.sub,
+                    "exp": token_data.claims.exp,
+                }))),
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::Unauthorized.as_str(),
+                    format!("Invalid token: {}", e),
+                )),
+            )
+                .into_response(),
+        }
     }
 
     /// Get Dev Token - Restricted to local access + DEBUG builds only

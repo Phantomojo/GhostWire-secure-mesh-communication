@@ -31,13 +31,16 @@ pub struct RespondRequestBody {
 impl PeerController {
     /// GET /api/v2/peers — All known peers with their connection states
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        use crate::core::social::social_graph::PeerFilter;
+        use crate::core::social::social_graph::{ConnectionState, PeerFilter};
 
         let core = state.core.read().await;
         let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
-        let connected = core.social_graph.connected_peers().await;
         let pending_inbound = core.social_graph.pending_inbound().await;
         let peer_count = core.get_peer_count();
+
+        let connected_count = all_peers.iter()
+            .filter(|p| matches!(p.connection_state, ConnectionState::Connected))
+            .count();
 
         let peers_json: Vec<serde_json::Value> = all_peers
             .iter()
@@ -59,7 +62,7 @@ impl PeerController {
         tracing::debug!(
             target: "peers",
             total = peer_count,
-            connected = connected.len(),
+            connected = connected_count,
             pending = pending_inbound.len(),
             "Peer list requested"
         );
@@ -68,7 +71,7 @@ impl PeerController {
             "count": peer_count,
             "peers": peers_json,
             "pending_requests": pending_inbound.len(),
-            "connected": connected.len(),
+            "connected": connected_count,
         })))
     }
 

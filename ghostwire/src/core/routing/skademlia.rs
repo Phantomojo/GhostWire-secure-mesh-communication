@@ -231,6 +231,9 @@ impl DiverseRoutingTable {
     pub async fn len(&self) -> usize {
         self.entries.read().await.len()
     }
+    pub async fn is_empty(&self) -> bool {
+        self.entries.read().await.is_empty()
+    }
 
     pub async fn subnet_distribution(&self) -> HashMap<String, usize> {
         self.subnet_counts.read().await.clone()
