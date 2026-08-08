@@ -255,3 +255,47 @@ build_errors.txt
 *.rs.bak
 probe_sss.rs
 test_dalek.rs
+
+# === Cleanup additions ===
+
+# Datasets (ML training data, 12GB+)
+datasets/
+
+# Zip bundles
+*.zip
+
+# Cross-compilation binary
+cross
+
+# ESP-IDF SDK (2.2GB)
+esp-idf/
+
+# Tool configs
+.opencode/
+.sisyphus/
+
+# Build artifacts
+ghostwire-libs/target/
+
+# Graphify outputs
+graphify/
+
+# Log directories (raw session logs)
+raw_logs_*/
+
+# Testing session data
+testing/
+
+# Website backups
+website-backup-*/
+
+# ESP32 firmware projects (move to separate repo if needed)
+esp32-firmware-*/
+
+# Empty/error files
+404
+429
+
+# Build logs (already covered by *.log, but explicit)
+build.log
+build2.log
