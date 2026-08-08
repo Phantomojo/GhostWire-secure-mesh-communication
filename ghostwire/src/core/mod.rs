@@ -7,6 +7,7 @@ pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
+pub mod compression;
 pub mod constants;
 pub mod crl;
 pub mod db;
@@ -46,6 +47,7 @@ pub use security_v2 as security;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
+pub mod transport_selector;
 pub mod tutorial;
 pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
@@ -1680,8 +1682,10 @@ impl Core {
         #[cfg(feature = "reticulum")]
         {
             if self.reticulum_manager.is_none() {
+                let identity = self.identity.read().await.clone();
+                let node_id = identity.id.clone();
                 let reticulum_manager =
-                    ReticulumManager::new(self.identity.read().await.clone()).await?;
+                    ReticulumManager::new(identity, "AUTO", &node_id).await?;
                 self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
                 tracing::info!("Reticulum network initialized");
             }
@@ -1799,9 +1803,12 @@ impl Core {
         }
         Err(anyhow::anyhow!("Mesh networking not available"))
     }
-    pub async fn get_mesh_topology(&self) -> anyhow::Result<()> {
-        // Stub implementation
-        Ok(())
+    pub async fn get_mesh_topology(&self) -> Option<MeshTopology> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            return Some(mesh_manager.read().await.get_topology().await);
+        }
+        None
     }
 
     pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {

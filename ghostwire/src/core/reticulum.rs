@@ -423,7 +423,7 @@ impl ReticulumManager {
         let node_id = destination_name.to_string();
         let transport_seed = identity.derive_transport_key("reticulum");
         let transport =
-            ReticulumTransport::new(interfaces_ini, destination_name, transport_seed).await?;
+            ReticulumTransport::new(interfaces_ini, destination_name, Some(transport_seed)).await?;
 
         let topology = Arc::new(RwLock::new(ReticulumTopology {
             nodes: HashMap::new(),

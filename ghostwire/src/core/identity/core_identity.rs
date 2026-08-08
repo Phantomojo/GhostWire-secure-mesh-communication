@@ -404,6 +404,21 @@ impl Identity {
         Ok(Self::from_keypair(keypair))
     }
 
+    /// Derive a deterministic 32-byte transport-specific key from this identity.
+    /// Same identity + transport name → same key. Different identities → different keys.
+    /// Used by transports (e.g. Reticulum) that need a persistent seed.
+    pub fn derive_transport_key(&self, transport_name: &str) -> [u8; 32] {
+        use ring::digest;
+        let pk = self.get_public_key();
+        let mut input = Vec::with_capacity(pk.len() + transport_name.len());
+        input.extend_from_slice(&pk);
+        input.extend_from_slice(transport_name.as_bytes());
+        let hash = digest::digest(&digest::SHA256, &input);
+        let mut key = [0u8; 32];
+        key.copy_from_slice(hash.as_ref());
+        key
+    }
+
     /// Create a new identity with nickname and password in one step (for profile creation with setup).
     pub fn create_with_setup(
         profile: Option<String>,
