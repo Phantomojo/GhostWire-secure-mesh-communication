@@ -1684,8 +1684,7 @@ impl Core {
             if self.reticulum_manager.is_none() {
                 let identity = self.identity.read().await.clone();
                 let node_id = identity.id.clone();
-                let reticulum_manager =
-                    ReticulumManager::new(identity, "AUTO", &node_id).await?;
+                let reticulum_manager = ReticulumManager::new(identity, "AUTO", &node_id).await?;
                 self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
                 tracing::info!("Reticulum network initialized");
             }

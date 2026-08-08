@@ -160,7 +160,10 @@ struct BetaPosterior {
 
 impl BetaPosterior {
     fn new() -> Self {
-        Self { alpha: 1.0, beta: 1.0 } // Uniform prior
+        Self {
+            alpha: 1.0,
+            beta: 1.0,
+        } // Uniform prior
     }
 
     /// Sample from Beta(alpha, beta) using Jöhnk's algorithm
@@ -190,12 +193,12 @@ fn gamma_sample(shape: f64) -> f64 {
         return gamma_sample(shape + 1.0) * rand_f64().powf(1.0 / shape);
     }
 
-        let d = shape - 1.0 / 3.0;
-        let c = 1.0 / (9.0 * d).sqrt();
+    let d = shape - 1.0 / 3.0;
+    let c = 1.0 / (9.0 * d).sqrt();
 
-        loop {
-            let mut x;
-            let mut v;
+    loop {
+        let mut x;
+        let mut v;
         loop {
             x = rand_normal();
             v = 1.0 + c * x;
@@ -247,8 +250,8 @@ fn rand_f64() -> f64 {
 /// Discretized context for per-context Thompson Sampling
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContextKey {
-    battery_tier: u8,   // 0=low, 1=mid, 2=high
-    signal_tier: u8,    // 0=weak, 1=mid, 2=strong
+    battery_tier: u8,    // 0=low, 1=mid, 2=high
+    signal_tier: u8,     // 0=weak, 1=mid, 2=strong
     congestion_tier: u8, // 0=clear, 1=moderate, 2=congested
 }
 
@@ -262,7 +265,13 @@ impl ContextKey {
     }
 
     fn tier(value: f64, low: f64, high: f64) -> u8 {
-        if value < low { 0 } else if value < high { 1 } else { 2 }
+        if value < low {
+            0
+        } else if value < high {
+            1
+        } else {
+            2
+        }
     }
 }
 
@@ -283,8 +292,8 @@ struct BlackHoleDetector {
     state: BlackHoleState,
     success_count: u32,
     total_count: u32,
-    window_size: u32,      // Number of recent attempts to consider
-    min_successes: u32,    // Minimum successes in window to stay allowed
+    window_size: u32,   // Number of recent attempts to consider
+    min_successes: u32, // Minimum successes in window to stay allowed
 }
 
 impl BlackHoleDetector {
@@ -349,12 +358,7 @@ struct HysteresisState {
 }
 
 impl HysteresisState {
-    fn new(
-        initial: TransportType,
-        cooldown: Duration,
-        min_delta: f64,
-        window_size: usize,
-    ) -> Self {
+    fn new(initial: TransportType, cooldown: Duration, min_delta: f64, window_size: usize) -> Self {
         Self {
             current_transport: initial,
             current_score: 0.5,
@@ -543,10 +547,7 @@ impl TransportSelector {
     /// Get Thompson Sampling score for a transport in a context
     fn thompson_sample(&mut self, context: &ContextKey, transport: &TransportType) -> f64 {
         let key = (context.clone(), *transport);
-        let posterior = self
-            .bandit
-            .entry(key)
-            .or_insert_with(BetaPosterior::new);
+        let posterior = self.bandit.entry(key).or_insert_with(BetaPosterior::new);
 
         // With probability exploration_rate, sample from posterior
         // Otherwise use posterior mean (exploitation)
@@ -566,10 +567,7 @@ impl TransportSelector {
     ) {
         let reward = if success { 1.0 } else { 0.0 };
         let key = (context.clone(), *transport);
-        let posterior = self
-            .bandit
-            .entry(key)
-            .or_insert_with(BetaPosterior::new);
+        let posterior = self.bandit.entry(key).or_insert_with(BetaPosterior::new);
         posterior.update(reward);
 
         // Also update black-hole detector
@@ -594,7 +592,11 @@ impl TransportSelector {
     }
 
     /// Main selection function: given current metrics, return best transport
-    pub fn select(&mut self, metrics: &TransportMetrics, available: &[TransportType]) -> TransportType {
+    pub fn select(
+        &mut self,
+        metrics: &TransportMetrics,
+        available: &[TransportType],
+    ) -> TransportType {
         let context = ContextKey::from_metrics(metrics);
 
         // Filter out black-holed transports
@@ -612,7 +614,10 @@ impl TransportSelector {
 
         if candidates.is_empty() {
             warn!("All transports black-holed! Falling back to first available");
-            return available.first().copied().unwrap_or(TransportType::StealthTcp);
+            return available
+                .first()
+                .copied()
+                .unwrap_or(TransportType::StealthTcp);
         }
 
         // Score each candidate
@@ -674,7 +679,12 @@ impl TransportSelector {
         self.bandit
             .iter()
             .find(|((_, t), _)| t == transport)
-            .map(|(_, posterior)| (posterior.mean(), posterior.alpha / (posterior.alpha + posterior.beta)))
+            .map(|(_, posterior)| {
+                (
+                    posterior.mean(),
+                    posterior.alpha / (posterior.alpha + posterior.beta),
+                )
+            })
     }
 
     /// Get all transport scores for current metrics (for diagnostics)
@@ -791,12 +801,7 @@ mod tests {
 
     #[test]
     fn test_hysteresis_cooldown() {
-        let mut hyst = HysteresisState::new(
-            TransportType::Quic,
-            Duration::from_secs(30),
-            0.1,
-            10,
-        );
+        let mut hyst = HysteresisState::new(TransportType::Quic, Duration::from_secs(30), 0.1, 10);
 
         // Should not switch immediately (cooldown)
         assert!(
@@ -885,8 +890,8 @@ mod tests {
         };
 
         let key = ContextKey::from_metrics(&metrics);
-        assert_eq!(key.battery_tier, 2);   // high (0.7 > 0.66)
-        assert_eq!(key.signal_tier, 2);    // strong (0.8 > 0.66)
+        assert_eq!(key.battery_tier, 2); // high (0.7 > 0.66)
+        assert_eq!(key.signal_tier, 2); // strong (0.8 > 0.66)
         assert_eq!(key.congestion_tier, 0); // clear (0.3 < 0.33)
     }
 }

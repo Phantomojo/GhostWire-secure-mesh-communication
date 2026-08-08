@@ -1550,7 +1550,10 @@ impl MeshDriver {
                 if let Ok(ping) = frame.decode::<crate::core::wire_protocol::WirePing>() {
                     self.peer_health.record_activity(&peer_id.to_string()).await;
                     use crate::core::wire_protocol::{Frame, FrameKind, WirePong};
-                    let pong = WirePong { ts: ping.ts, seq: ping.seq };
+                    let pong = WirePong {
+                        ts: ping.ts,
+                        seq: ping.seq,
+                    };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
                         let pong_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
                         let _ = self
