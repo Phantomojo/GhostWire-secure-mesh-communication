@@ -426,14 +426,20 @@ pub async fn start_web_server(
         .route("/lockdown", post(SystemController::lockdown))
         .route("/backup", post(SystemController::backup_system))
         .route("/logs", get(SystemController::get_system_logs))
-        .route("/upgrade-encryption", post(SystemController::upgrade_encryption))
+        .route(
+            "/upgrade-encryption",
+            post(SystemController::upgrade_encryption),
+        )
         .route("/firewall", post(SystemController::configure_firewall))
         .route("/firewall/test", post(SystemController::test_firewall))
         .route("/users", get(SystemController::get_auth_users))
         .route("/security-scan", post(SystemController::security_scan))
         .route("/threat-hunt", post(SystemController::threat_hunt))
         .route("/backup-security", post(SystemController::backup_security))
-        .route("/analyze-communications", post(SystemController::analyze_communications));
+        .route(
+            "/analyze-communications",
+            post(SystemController::analyze_communications),
+        );
 
     let identity_routes: Router<Arc<AppState>> = Router::new()
         .route("/", get(IdentityController::get_profile))
@@ -776,7 +782,10 @@ async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResp
 
     m.push_str("# HELP ghostwire_security_events_total Total security events\n");
     m.push_str("# TYPE ghostwire_security_events_total counter\n");
-    m.push_str(&format!("ghostwire_security_events_total {}\n", sec.total_events));
+    m.push_str(&format!(
+        "ghostwire_security_events_total {}\n",
+        sec.total_events
+    ));
 
     m.push_str("# HELP ghostwire_blocked_connections_total Blocked connections\n");
     m.push_str("# TYPE ghostwire_blocked_connections_total counter\n");
@@ -792,7 +801,9 @@ async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResp
         sec.rate_limit_violations
     ));
 
-    m.push_str("# HELP ghostwire_threat_level Current threat level (0=low 1=medium 2=high 3=critical)\n");
+    m.push_str(
+        "# HELP ghostwire_threat_level Current threat level (0=low 1=medium 2=high 3=critical)\n",
+    );
     m.push_str("# TYPE ghostwire_threat_level gauge\n");
     m.push_str(&format!(
         "ghostwire_threat_level {}\n",
@@ -804,7 +815,13 @@ async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResp
         }
     ));
 
-    ([(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], m)
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        m,
+    )
 }
 
 #[derive(Deserialize)]

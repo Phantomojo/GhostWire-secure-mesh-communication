@@ -57,8 +57,7 @@ pub enum EntryKind {
     Answer { question_id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AccessLevel {
     /// Visible to all mesh nodes
     Public,
@@ -70,7 +69,6 @@ pub enum AccessLevel {
     #[default]
     Private,
 }
-
 
 // ── Core entry ────────────────────────────────────────────────────────────────
 

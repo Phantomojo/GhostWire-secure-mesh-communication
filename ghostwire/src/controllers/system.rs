@@ -139,14 +139,20 @@ impl SystemController {
     pub async fn rotate_keys(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
         (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Key rotation is not yet implemented")),
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Key rotation is not yet implemented",
+            )),
         )
     }
 
     pub async fn upgrade_encryption(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
         (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Encryption upgrade is not yet implemented")),
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Encryption upgrade is not yet implemented",
+            )),
         )
     }
 
@@ -250,21 +256,30 @@ impl SystemController {
     pub async fn security_audit(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
         (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Security audit is not yet implemented")),
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Security audit is not yet implemented",
+            )),
         )
     }
 
     pub async fn security_scan(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
         (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Security scan is not yet implemented")),
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Security scan is not yet implemented",
+            )),
         )
     }
 
     pub async fn threat_hunt(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
         (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Threat hunt is not yet implemented")),
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Threat hunt is not yet implemented",
+            )),
         )
     }
 

@@ -44,8 +44,7 @@ impl SecureMessageStore {
     /// with master key). No peer-key ECDH — that's for in-transit only.
     pub fn save_message(&self, message: &Message) -> Result<()> {
         let key = format!("msg_{}_{}", message.timestamp, message.id);
-        self.persistence
-            .store_secure("messages", &key, message)?;
+        self.persistence.store_secure("messages", &key, message)?;
 
         info!(
             message_id = %message.id,
@@ -72,9 +71,8 @@ impl SecureMessageStore {
 
     /// Load all messages from the encrypted store
     pub fn load(&self) -> Result<Vec<Message>> {
-        let mut all_messages: Vec<Message> = self
-            .persistence
-            .load_all_secure::<Message>("messages")?;
+        let mut all_messages: Vec<Message> =
+            self.persistence.load_all_secure::<Message>("messages")?;
 
         let plain_messages: Vec<Message> = self
             .persistence

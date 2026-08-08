@@ -487,9 +487,7 @@ impl NetworkController {
         // CRITICAL FIX: Sign the contact card with identity keypair
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
         let identity = core.identity.read().await;
-        let signature = identity
-            .sign(&card_bytes)
-            .unwrap_or_default();
+        let signature = identity.sign(&card_bytes).unwrap_or_default();
         card.signature = signature;
 
         match card.to_qr_string() {

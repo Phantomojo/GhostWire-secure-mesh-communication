@@ -240,10 +240,7 @@ impl UsernameDiscovery {
 
                             // Cache it
                             let mut cache = self.username_cache.write().await;
-                            cache.insert(
-                                username_record.username.clone(),
-                                username_record.clone(),
-                            );
+                            cache.insert(username_record.username.clone(), username_record.clone());
 
                             let mut peer_cache = self.peer_cache.write().await;
                             peer_cache.insert(

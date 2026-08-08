@@ -163,9 +163,8 @@ impl EncryptionManager {
         if pk.len() < start + 32 {
             return None;
         }
-        let secret = x25519_dalek::StaticSecret::from(
-            <[u8; 32]>::try_from(&pk[start..start + 32]).ok()?,
-        );
+        let secret =
+            x25519_dalek::StaticSecret::from(<[u8; 32]>::try_from(&pk[start..start + 32]).ok()?);
         Some(*x25519_dalek::PublicKey::from(&secret).as_bytes())
     }
 

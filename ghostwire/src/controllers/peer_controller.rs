@@ -80,8 +80,13 @@ impl PeerController {
         }
 
         let peer_count = peers_json.len();
-        let connected_count = peers_json.iter()
-            .filter(|p| p.get("is_online").and_then(|v| v.as_bool()).unwrap_or(false))
+        let connected_count = peers_json
+            .iter()
+            .filter(|p| {
+                p.get("is_online")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
             .count();
 
         tracing::debug!(

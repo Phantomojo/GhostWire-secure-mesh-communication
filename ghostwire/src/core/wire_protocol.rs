@@ -89,9 +89,8 @@ impl Frame {
         let compressed = compression::compress(&self.payload, codec)?;
         if compressed.len() < self.payload.len() {
             self.payload = compressed;
-            self.kind = num_traits::FromPrimitive::from_u16(
-                (self.kind as u16) | COMPRESSED_BIT,
-            ).ok_or_else(|| anyhow::anyhow!("Invalid frame kind for compression"))?;
+            self.kind = num_traits::FromPrimitive::from_u16((self.kind as u16) | COMPRESSED_BIT)
+                .ok_or_else(|| anyhow::anyhow!("Invalid frame kind for compression"))?;
         }
         Ok(())
     }
@@ -104,9 +103,8 @@ impl Frame {
         let codec = Codec::Zstd;
         let decompressed = compression::decompress(&self.payload, codec)?;
         self.payload = decompressed;
-        self.kind = num_traits::FromPrimitive::from_u16(
-            (self.kind as u16) & !COMPRESSED_BIT,
-        ).ok_or_else(|| anyhow::anyhow!("Invalid frame kind after decompression"))?;
+        self.kind = num_traits::FromPrimitive::from_u16((self.kind as u16) & !COMPRESSED_BIT)
+            .ok_or_else(|| anyhow::anyhow!("Invalid frame kind after decompression"))?;
         Ok(())
     }
 
@@ -157,14 +155,19 @@ impl Frame {
 
         if compressed {
             use crate::core::compression::{self, Codec};
-            payload = compression::decompress(&payload, Codec::Zstd)
-                .unwrap_or_else(|_| {
-                    tracing::debug!("Frame decompression failed, falling back to raw");
-                    payload
-                });
+            payload = compression::decompress(&payload, Codec::Zstd).unwrap_or_else(|_| {
+                tracing::debug!("Frame decompression failed, falling back to raw");
+                payload
+            });
         }
 
-        Ok((Frame { kind: base_kind, payload }, HEADER_LEN + payload_len))
+        Ok((
+            Frame {
+                kind: base_kind,
+                payload,
+            },
+            HEADER_LEN + payload_len,
+        ))
     }
 
     /// Generate a cover traffic frame: looks like a real frame but carries

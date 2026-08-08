@@ -97,7 +97,6 @@ pub enum MessageType {
     Encrypted,
 }
 
-
 /// Encryption status of the message
 ///
 /// **Security Note:** This is a **local state** indicator, not a security guarantee.
@@ -116,7 +115,6 @@ pub enum EncryptionStatus {
     /// Message encryption failed (error state)
     Failed,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MediaMetadata {
@@ -382,12 +380,7 @@ impl Message {
         msg
     }
 
-    pub fn with_cid(
-        sender: String,
-        recipient: String,
-        cid: String,
-        content_type: String,
-    ) -> Self {
+    pub fn with_cid(sender: String, recipient: String, cid: String, content_type: String) -> Self {
         let mut msg = Self::new(sender, recipient, String::new());
         msg.content_type = content_type;
         msg.content_cid = Some(cid);
@@ -403,7 +396,10 @@ impl Message {
         self.content_cid.is_some()
     }
 
-    pub fn compress(&mut self, codec: crate::core::compression::Codec) -> Result<(), anyhow::Error> {
+    pub fn compress(
+        &mut self,
+        codec: crate::core::compression::Codec,
+    ) -> Result<(), anyhow::Error> {
         if self.compressed {
             return Ok(());
         }
@@ -428,11 +424,15 @@ impl Message {
         if !self.compressed {
             return Ok(());
         }
-        let codec = self.compression_algo.as_deref().map(|s| match s {
-            "Zstd" => crate::core::compression::Codec::Zstd,
-            "Lz4" => crate::core::compression::Codec::Lz4,
-            _ => crate::core::compression::Codec::None,
-        }).unwrap_or(crate::core::compression::Codec::None);
+        let codec = self
+            .compression_algo
+            .as_deref()
+            .map(|s| match s {
+                "Zstd" => crate::core::compression::Codec::Zstd,
+                "Lz4" => crate::core::compression::Codec::Lz4,
+                _ => crate::core::compression::Codec::None,
+            })
+            .unwrap_or(crate::core::compression::Codec::None);
 
         if let Some(ref bytes) = self.content_bytes {
             let decompressed = crate::core::compression::decompress(bytes, codec)?;
@@ -621,11 +621,7 @@ mod tests {
     fn test_compress_roundtrip() {
         use crate::core::compression::Codec;
 
-        let mut msg = Message::new(
-            "Alice".to_string(),
-            "Bob".to_string(),
-            "x".repeat(1024),
-        );
+        let mut msg = Message::new("Alice".to_string(), "Bob".to_string(), "x".repeat(1024));
         msg.compress(Codec::Zstd).unwrap();
         assert!(msg.compressed);
         assert!(msg.content_bytes.is_some());

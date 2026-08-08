@@ -186,7 +186,10 @@ async fn dispatch_cli_command(
         Commands::Decrypt { encrypted } => {
             decrypt_message(core_arc, &encrypted).await?;
         }
-        Commands::Connect { username, anonymous } => {
+        Commands::Connect {
+            username,
+            anonymous,
+        } => {
             if anonymous {
                 connect_anonymous(core_arc, &username).await?;
             } else {
@@ -441,7 +444,13 @@ async fn connect_anonymous(core: &Arc<Core>, username: &str) -> Result<()> {
         .x25519_public_key()
         .ok_or_else(|| anyhow::anyhow!("X25519 key not available"))?;
 
-    match generate_intro_invite(&route_keys, &route_ids, ed25519_pub, x25519_pub, Some(nickname)) {
+    match generate_intro_invite(
+        &route_keys,
+        &route_ids,
+        ed25519_pub,
+        x25519_pub,
+        Some(nickname),
+    ) {
         Ok(invite) => {
             let invite_str = invite
                 .to_invite_string()

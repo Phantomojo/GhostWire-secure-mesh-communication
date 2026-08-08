@@ -57,12 +57,8 @@ impl TransportKind {
                 tracing::trace!("Dummy transport sending message to {}", message.recipient);
                 Ok(())
             }
-            TransportKind::StealthTCP(provider) => {
-                provider.send_message(message).await
-            }
-            TransportKind::Quic(provider) => {
-                provider.send_message(message).await
-            }
+            TransportKind::StealthTCP(provider) => provider.send_message(message).await,
+            TransportKind::Quic(provider) => provider.send_message(message).await,
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
                 let transport = transport.read().await;
@@ -92,12 +88,10 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
-            TransportKind::StealthTCP(provider) => {
-                match provider.poll_receive().await {
-                    Some((_addr, msg)) => Ok(Some(msg)),
-                    None => Ok(None),
-                }
-            }
+            TransportKind::StealthTCP(provider) => match provider.poll_receive().await {
+                Some((_addr, msg)) => Ok(Some(msg)),
+                None => Ok(None),
+            },
             TransportKind::Quic(_) => Ok(None),
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),

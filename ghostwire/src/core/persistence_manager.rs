@@ -202,8 +202,11 @@ mod tests {
     #[test]
     fn test_list_keys() {
         let dir = tempdir().unwrap();
-        let manager =
-            PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), Some("profile1".to_string())).unwrap();
+        let manager = PersistenceManager::new_with_base_dir(
+            dir.path().to_path_buf(),
+            Some("profile1".to_string()),
+        )
+        .unwrap();
 
         manager.store_secure("tree_a", "key1", &"val1").unwrap();
         manager.store_secure("tree_a", "key2", &"val2").unwrap();
@@ -222,7 +225,8 @@ mod tests {
     #[test]
     fn test_load_all() {
         let dir = tempdir().unwrap();
-        let manager = PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None).unwrap();
+        let manager =
+            PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None).unwrap();
 
         manager.store_secure("items", "1", &10).unwrap();
         manager.store_secure("items", "2", &20).unwrap();

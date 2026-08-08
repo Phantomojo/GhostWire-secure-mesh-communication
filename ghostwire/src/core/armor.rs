@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Higher tiers = more padding + slower cover = better privacy but more overhead.
 /// Lower tiers = less padding + faster cover = less privacy but battery/CPU friendly.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum DeviceTier {
     /// Desktop, laptop on AC, server. Aggressive padding, slow cover.
     High,
@@ -15,7 +14,6 @@ pub enum DeviceTier {
     /// IoT, old phone, constrained device. Light padding, fast cover.
     Low,
 }
-
 
 impl DeviceTier {
     /// (min_packet_size, max_padding, max_chaff_delay_ms, cover_min_ms, cover_max_ms)

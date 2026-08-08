@@ -201,7 +201,11 @@ pub struct DisasterPolicy {
 impl Default for DisasterPolicy {
     fn default() -> Self {
         Self {
-            normal_priority: vec![TransportType::Quic, TransportType::StealthTcp, TransportType::Mesh],
+            normal_priority: vec![
+                TransportType::Quic,
+                TransportType::StealthTcp,
+                TransportType::Mesh,
+            ],
             congested_priority: vec![TransportType::Mesh, TransportType::WiFi],
             isolation_priority: vec![TransportType::WiFi, TransportType::Bluetooth],
             blackout_priority: vec![TransportType::LoRa],

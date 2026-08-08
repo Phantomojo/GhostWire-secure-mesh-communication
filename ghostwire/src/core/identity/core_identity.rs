@@ -589,7 +589,8 @@ impl Identity {
             let pub_key_bytes = kp.public().encode_protobuf();
             let encrypted = encrypted.clone();
 
-            let old = std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
+            let old =
+                std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
             if let IdentityState::Unlocked(kp, _) = old {
                 // try_into_ed25519() consumes kp; inner ed25519_dalek::SigningKey
                 // implements ZeroizeOnDrop, so dropping zeroizes the secret key.
@@ -775,10 +776,7 @@ mod tests {
         assert!(loaded.is_locked());
 
         loaded.unlock("secret").unwrap();
-        assert_eq!(
-            loaded.public_key().unwrap(),
-            identity.public_key().unwrap()
-        );
+        assert_eq!(loaded.public_key().unwrap(), identity.public_key().unwrap());
     }
 
     #[test]

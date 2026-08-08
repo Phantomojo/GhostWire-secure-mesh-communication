@@ -358,8 +358,6 @@ impl Wantlist {
     fn entries(&self) -> Vec<WantEntry> {
         self.entries.values().cloned().collect()
     }
-
-
 }
 
 // ── Ledger ────────────────────────────────────────────────────────────────────

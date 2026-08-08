@@ -115,7 +115,10 @@ impl ReticulumTransport {
                                 id
                             }
                             Err(e) => {
-                                warn!("Failed to deserialize RNS identity: {}, generating random", e);
+                                warn!(
+                                    "Failed to deserialize RNS identity: {}, generating random",
+                                    e
+                                );
                                 let id = PrivateIdentity::new_from_rand(OsRng);
                                 let _ = std::fs::create_dir_all(identity_path.parent().unwrap());
                                 let _ = std::fs::write(&identity_path, id.to_private_key_bytes());
@@ -161,10 +164,16 @@ impl ReticulumTransport {
                 let mut mgr = iface_mgr.lock().await;
                 for line in interfaces_ini.lines() {
                     let line = line.trim();
-                    if let Some(addr) = line.strip_prefix("target ").and_then(|s| s.split_once('=').map(|(_, v)| v.trim())) {
+                    if let Some(addr) = line
+                        .strip_prefix("target ")
+                        .and_then(|s| s.split_once('=').map(|(_, v)| v.trim()))
+                    {
                         info!("Registering TCP client interface to {}", addr);
                         let tcp_client = rns_transport::iface::tcp_client::TcpClient::new(addr);
-                        mgr.spawn(tcp_client, rns_transport::iface::tcp_client::TcpClient::spawn);
+                        mgr.spawn(
+                            tcp_client,
+                            rns_transport::iface::tcp_client::TcpClient::spawn,
+                        );
                     }
                 }
             }
@@ -180,13 +189,14 @@ impl ReticulumTransport {
 
             info!(
                 "RNS destination registered as \"{}\" (address: {})",
-                node_name,
-                local_address
+                node_name, local_address
             );
             t.send_announce(&_local_dest, None).await;
 
             (t, rx_data)
-        }).await {
+        })
+        .await
+        {
             Ok(result) => result,
             Err(_elapsed) => {
                 warn!(
@@ -195,11 +205,7 @@ impl ReticulumTransport {
                 );
                 // Create a minimal transport without backbone so the node can still run
                 // with AutoInterface-only for local LAN discovery
-                let t = Transport::new(TransportConfig::new(
-                    node_name,
-                    &identity,
-                    true,
-                ));
+                let t = Transport::new(TransportConfig::new(node_name, &identity, true));
                 let rx_data = t.received_data_events();
                 let _local_dest = t
                     .add_destination(
@@ -409,10 +415,15 @@ pub struct ReticulumManager {
 }
 
 impl ReticulumManager {
-    pub async fn new(identity: Arc<Identity>, interfaces_ini: &str, destination_name: &str) -> Result<Self> {
+    pub async fn new(
+        identity: Arc<Identity>,
+        interfaces_ini: &str,
+        destination_name: &str,
+    ) -> Result<Self> {
         let node_id = destination_name.to_string();
         let transport_seed = identity.derive_transport_key("reticulum");
-        let transport = ReticulumTransport::new(interfaces_ini, destination_name, transport_seed).await?;
+        let transport =
+            ReticulumTransport::new(interfaces_ini, destination_name, transport_seed).await?;
 
         let topology = Arc::new(RwLock::new(ReticulumTopology {
             nodes: HashMap::new(),

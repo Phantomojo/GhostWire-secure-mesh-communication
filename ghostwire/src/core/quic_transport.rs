@@ -63,8 +63,7 @@ impl ServerCertVerifier for TofuVerifier {
                 self.peer_id,
                 hex::encode(&fingerprint[..8])
             );
-            self.trusted
-                .insert(self.peer_id.clone(), fingerprint);
+            self.trusted.insert(self.peer_id.clone(), fingerprint);
         }
 
         Ok(ServerCertVerified::assertion())
@@ -165,13 +164,19 @@ impl QuicTransportProvider {
     fn load_fingerprints(store: &DashMap<String, Vec<u8>>) {
         let path = Self::tofu_path();
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&data) {
+            if let Ok(map) =
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            {
                 for (k, v) in map {
                     if let Ok(bytes) = hex::decode(&v) {
                         store.insert(k, bytes);
                     }
                 }
-                tracing::info!("TOFU: loaded {} fingerprints from {}", store.len(), path.display());
+                tracing::info!(
+                    "TOFU: loaded {} fingerprints from {}",
+                    store.len(),
+                    path.display()
+                );
             }
         }
     }
@@ -275,17 +280,14 @@ impl QuicTransportProvider {
                                         if recv.read_exact(&mut len_buf).await.is_err() {
                                             break;
                                         }
-                                        let payload_len =
-                                            u32::from_be_bytes(len_buf) as usize;
+                                        let payload_len = u32::from_be_bytes(len_buf) as usize;
 
                                         let mut payload = vec![0u8; payload_len];
                                         if recv.read_exact(&mut payload).await.is_err() {
                                             break;
                                         }
 
-                                        if let Ok(msg) =
-                                            bincode::deserialize::<Message>(&payload)
-                                        {
+                                        if let Ok(msg) = bincode::deserialize::<Message>(&payload) {
                                             let _ = tx.send(msg).await;
                                         }
                                     }

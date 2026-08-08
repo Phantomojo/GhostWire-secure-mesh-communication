@@ -125,7 +125,6 @@ pub struct DaemonArgs {
     pub mesh_port: u16,
 }
 
-
 /// Start the daemon in the background
 pub fn start_daemon(port: Option<u16>, extra_args: Option<DaemonArgs>) -> Result<i32> {
     if is_daemon_running() {

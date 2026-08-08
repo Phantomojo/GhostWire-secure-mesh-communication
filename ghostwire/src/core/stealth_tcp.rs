@@ -196,10 +196,9 @@ impl StealthTCPProvider {
         }
 
         // Layer 3: Challenge-response (if stealth mode enabled)
-        if self.enable_stealth_mode
-            && !self.perform_challenge_response(stream).await? {
-                return Ok(false);
-            }
+        if self.enable_stealth_mode && !self.perform_challenge_response(stream).await? {
+            return Ok(false);
+        }
 
         let handshake_time = start_time.elapsed();
         tracing::debug!("Stealth handshake completed in {:?}", handshake_time);
@@ -388,10 +387,9 @@ impl StealthTCPProvider {
         stream.write_all(&MAGIC_BYTES[..]).await?;
 
         // Handle challenge-response if stealth mode enabled
-        if self.enable_stealth_mode
-            && !self.handle_outbound_challenge_response(stream).await? {
-                return Ok(false);
-            }
+        if self.enable_stealth_mode && !self.handle_outbound_challenge_response(stream).await? {
+            return Ok(false);
+        }
 
         Ok(true)
     }
@@ -526,8 +524,7 @@ impl StealthTCPProvider {
                                     Ok(n) => match parser.feed(&buf[..n]) {
                                         Ok(frames) => {
                                             for frame in frames {
-                                                if let Ok(wire_msg) =
-                                                    frame.decode::<WireMessage>()
+                                                if let Ok(wire_msg) = frame.decode::<WireMessage>()
                                                 {
                                                     let msg = Message::new(
                                                         String::from_utf8_lossy(&wire_msg.from)
@@ -546,10 +543,7 @@ impl StealthTCPProvider {
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::warn!(
-                                                "StealthTCP: Frame parse error: {}",
-                                                e
-                                            );
+                                            tracing::warn!("StealthTCP: Frame parse error: {}", e);
                                         }
                                     },
                                     Err(_) => break,
@@ -567,10 +561,7 @@ impl StealthTCPProvider {
         Ok(rx)
     }
 
-    pub async fn start_listener_and_store(
-        &self,
-        listen_addr: SocketAddr,
-    ) -> anyhow::Result<()> {
+    pub async fn start_listener_and_store(&self, listen_addr: SocketAddr) -> anyhow::Result<()> {
         let rx = self.start_listener(listen_addr).await?;
         let mut guard = self.receiver.lock().await;
         *guard = Some(rx);

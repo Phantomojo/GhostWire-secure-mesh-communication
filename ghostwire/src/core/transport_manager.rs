@@ -1,7 +1,9 @@
 use crate::core::disaster::{
     DisasterLevel, DisasterManager, DisasterMetrics, DisasterPolicy, TransportType,
 };
-use crate::core::transport_selector::{TransportSelector, TransportSelectorConfig, TransportMetrics};
+use crate::core::transport_selector::{
+    TransportMetrics, TransportSelector, TransportSelectorConfig,
+};
 use tracing::{info, warn};
 
 pub struct AutoTransportSwitcher {

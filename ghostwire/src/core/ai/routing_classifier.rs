@@ -117,7 +117,6 @@ pub mod fallback {
         let loss_score = 1.0 - packet_loss as f64;
 
         // Weighted combination
-        
 
         rssi_score * 0.3 + latency_score * 0.3 + loss_score * 0.2 + trust_score as f64 * 0.2
     }

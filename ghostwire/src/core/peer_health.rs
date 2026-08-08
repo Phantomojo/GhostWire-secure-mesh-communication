@@ -50,7 +50,8 @@ impl PeerHealth {
     pub fn record_rtt(&mut self, rtt_ms: f64) {
         self.rtt_samples.push(rtt_ms);
         if self.rtt_samples.len() > Self::MAX_SAMPLES {
-            self.rtt_samples.drain(..self.rtt_samples.len() - Self::MAX_SAMPLES);
+            self.rtt_samples
+                .drain(..self.rtt_samples.len() - Self::MAX_SAMPLES);
         }
 
         self.avg_rtt_ms = self.rtt_samples.iter().sum::<f64>() / self.rtt_samples.len() as f64;
@@ -66,7 +67,11 @@ impl PeerHealth {
         // Jitter: standard deviation of RTT samples
         if self.rtt_samples.len() >= 2 {
             let mean = self.avg_rtt_ms;
-            let variance = self.rtt_samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>()
+            let variance = self
+                .rtt_samples
+                .iter()
+                .map(|s| (s - mean).powi(2))
+                .sum::<f64>()
                 / (self.rtt_samples.len() - 1) as f64;
             self.jitter_ms = variance.sqrt();
         }
@@ -181,7 +186,10 @@ impl PeerHealthTracker {
         if let Some(health) = map.get_mut(peer_id) {
             health.record_miss();
             if health.should_disconnect() {
-                debug!("Peer {} exceeded 3 consecutive misses, marking for disconnect", peer_id);
+                debug!(
+                    "Peer {} exceeded 3 consecutive misses, marking for disconnect",
+                    peer_id
+                );
             }
         }
     }
@@ -314,8 +322,6 @@ fn now_ms_u32() -> u32 {
         .as_millis() as u32
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,10 +416,7 @@ mod tests {
 
         // Spike to 200
         health.record_rtt(200.0);
-        assert!(
-            health.ewma_rtt_ms > 100.0,
-            "EWMA should respond to spike"
-        );
+        assert!(health.ewma_rtt_ms > 100.0, "EWMA should respond to spike");
         assert!(
             health.ewma_rtt_ms < 200.0,
             "EWMA should not jump to spike value"

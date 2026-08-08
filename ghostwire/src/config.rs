@@ -136,9 +136,15 @@ fn default_reticulum_interfaces() -> String {
     "[interfaces]\ninterface 0 = AutoInterface\ninterface 1 = TCPClientInterface\ntarget 0 = rmap.world:4242".to_string()
 }
 
-fn default_hybrid_mode() -> String { "hybrid".to_string() }
-fn default_discovery_interval() -> u64 { 60 }
-fn default_rns_announce_interval() -> u64 { 300 }
+fn default_hybrid_mode() -> String {
+    "hybrid".to_string()
+}
+fn default_discovery_interval() -> u64 {
+    60
+}
+fn default_rns_announce_interval() -> u64 {
+    300
+}
 
 impl Default for Config {
     fn default() -> Self {

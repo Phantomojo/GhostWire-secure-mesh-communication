@@ -125,8 +125,16 @@ pub async fn build_snapshot(
                 .values()
                 .map(|n| PeerHealthInfo {
                     node_id: n.id.clone(),
-                    nickname: if n.username.is_empty() { None } else { Some(n.username.clone()) },
-                    connection_state: if n.is_online { "connected".into() } else { "disconnected".into() },
+                    nickname: if n.username.is_empty() {
+                        None
+                    } else {
+                        Some(n.username.clone())
+                    },
+                    connection_state: if n.is_online {
+                        "connected".into()
+                    } else {
+                        "disconnected".into()
+                    },
                     is_online: n.is_online,
                     latency_ms: None,
                     signal_strength: n.connection_quality,

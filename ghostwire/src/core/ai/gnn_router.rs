@@ -42,7 +42,8 @@ pub const EMBEDDING_REFRESH_SECS: u64 = 300;
 /// Expected BLAKE2b-256 hash of the scoring model ONNX file.
 /// Set this after model export: `sha256sum models/gnn_routing/gnn_routing.onnx`
 /// or: `python3 -c "import hashlib; print(hashlib.new('blake2b', open('models/gnn_routing/gnn_routing.onnx','rb').read(), digest_size=32).hexdigest())"`
-pub const EXPECTED_SCORING_HASH: &str = "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
+pub const EXPECTED_SCORING_HASH: &str =
+    "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
 
 // ── Embedding freshness ──────────────────────────────────────────────────────
 
@@ -434,19 +435,18 @@ impl GnnRouter {
 
         let mut candidates_with_features = Vec::new();
         for &cand_idx in candidates {
-            let features =
-                peer_features
-                    .get(&cand_idx)
-                    .cloned()
-                    .unwrap_or(RoutingFeatures {
-                        rssi: -70,
-                        latency_ms: 100,
-                        packet_loss: 0.1,
-                        trust_score: 0.5,
-                        hop_count: 1,
-                        battery_level: 1.0,
-                        time_of_day: 12,
-                    });
+            let features = peer_features
+                .get(&cand_idx)
+                .cloned()
+                .unwrap_or(RoutingFeatures {
+                    rssi: -70,
+                    latency_ms: 100,
+                    packet_loss: 0.1,
+                    trust_score: 0.5,
+                    hop_count: 1,
+                    battery_level: 1.0,
+                    time_of_day: 12,
+                });
             let mapper = self.mapper.read().await;
             if let Some(peer) = mapper.get_peer(cand_idx) {
                 candidates_with_features.push((peer, features));
@@ -605,11 +605,8 @@ pub fn build_topology_from_mesh(
 ) -> MeshTopology {
     let num_nodes = peers.len();
     let peer_list: Vec<PeerId> = peers.keys().cloned().collect();
-    let peer_to_idx: HashMap<PeerId, usize> = peer_list
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (*p, i))
-        .collect();
+    let peer_to_idx: HashMap<PeerId, usize> =
+        peer_list.iter().enumerate().map(|(i, p)| (*p, i)).collect();
 
     let mut node_features = vec![GnnNodeFeatures::default(); num_nodes];
     let mut adjacency: HashMap<usize, Vec<usize>> = HashMap::new();
