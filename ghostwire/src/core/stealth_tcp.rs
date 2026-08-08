@@ -38,6 +38,8 @@ pub struct StealthTCPProvider {
     connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
     /// peer_id → SocketAddr mapping for send_message
     peer_map: Arc<DashMap<String, SocketAddr>>,
+    /// Received messages from the listener (wired by init_default_transport)
+    receiver: Arc<tokio::sync::Mutex<Option<mpsc::Receiver<(SocketAddr, Message)>>>>,
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
@@ -87,6 +89,7 @@ impl StealthTCPProvider {
             enable_stealth_mode,
             connection_history: Arc::new(DashMap::new()),
             peer_map: Arc::new(DashMap::new()),
+            receiver: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -562,6 +565,21 @@ impl StealthTCPProvider {
         });
 
         Ok(rx)
+    }
+
+    pub async fn start_listener_and_store(
+        &self,
+        listen_addr: SocketAddr,
+    ) -> anyhow::Result<()> {
+        let rx = self.start_listener(listen_addr).await?;
+        let mut guard = self.receiver.lock().await;
+        *guard = Some(rx);
+        Ok(())
+    }
+
+    pub async fn poll_receive(&self) -> Option<(SocketAddr, Message)> {
+        let mut guard = self.receiver.lock().await;
+        guard.as_mut()?.recv().await
     }
 }
 

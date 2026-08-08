@@ -131,6 +131,20 @@ impl WeightProfile {
             reliability: 0.15,
         }
     }
+
+    /// Reticulum: store-and-forward overlay for constrained/off-grid networks.
+    /// Optimized for reliability and energy — not throughput or latency.
+    pub fn reticulum() -> Self {
+        Self {
+            signal: 0.15,
+            throughput: 0.05,
+            loss: 0.15,
+            latency: 0.05,
+            energy: 0.25,
+            congestion: 0.10,
+            reliability: 0.25,
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -469,6 +483,7 @@ impl TransportSelector {
         weight_profiles.insert(TransportType::StealthTcp, WeightProfile::tcp());
         weight_profiles.insert(TransportType::Mesh, WeightProfile::mesh());
         weight_profiles.insert(TransportType::LoRa, WeightProfile::lora());
+        weight_profiles.insert(TransportType::Reticulum, WeightProfile::reticulum());
 
         let mut blackholes = HashMap::new();
         for transport in &[
@@ -478,6 +493,7 @@ impl TransportSelector {
             TransportType::StealthTcp,
             TransportType::Mesh,
             TransportType::LoRa,
+            TransportType::Reticulum,
         ] {
             blackholes.insert(
                 *transport,

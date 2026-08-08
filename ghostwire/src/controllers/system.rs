@@ -137,13 +137,17 @@ impl SystemController {
     }
 
     pub async fn rotate_keys(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        Json(ApiV2Response::success("Keys rotated successfully"))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Key rotation is not yet implemented")),
+        )
     }
 
     pub async fn upgrade_encryption(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        Json(ApiV2Response::success("Encryption upgraded to AES-256"))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Encryption upgrade is not yet implemented")),
+        )
     }
 
     pub async fn configure_firewall(
@@ -244,24 +248,24 @@ impl SystemController {
     }
 
     pub async fn security_audit(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(
-            "Security audit completed - No issues found".to_string(),
-        ))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Security audit is not yet implemented")),
+        )
     }
 
     pub async fn security_scan(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "COMPLETED",
-            "threats_found": 0,
-            "vulnerabilities_found": 0
-        })))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Security scan is not yet implemented")),
+        )
     }
 
     pub async fn threat_hunt(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "COMPLETED",
-            "threats_found": 0
-        })))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error("NOT_IMPLEMENTED", "Threat hunt is not yet implemented")),
+        )
     }
 
     pub async fn backup_security(State(state): State<Arc<AppState>>) -> impl IntoResponse {

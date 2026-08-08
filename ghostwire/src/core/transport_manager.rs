@@ -65,20 +65,24 @@ impl AutoTransportSwitcher {
                 TransportType::StealthTcp,
                 TransportType::Mesh,
                 TransportType::WiFi,
+                TransportType::Reticulum,
             ],
             DisasterLevel::Congested => vec![
                 TransportType::Mesh,
                 TransportType::WiFi,
                 TransportType::StealthTcp,
+                TransportType::Reticulum,
             ],
             DisasterLevel::Isolation => vec![
                 TransportType::WiFi,
                 TransportType::Bluetooth,
                 TransportType::Mesh,
+                TransportType::Reticulum,
             ],
             DisasterLevel::Blackout => vec![
                 TransportType::Bluetooth,
                 TransportType::LoRa,
+                TransportType::Reticulum,
             ],
         }
     }

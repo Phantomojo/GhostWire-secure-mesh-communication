@@ -70,6 +70,7 @@ async fn build_test_mesh_manager(
         None, // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
         None,
+        None, // no reticulum_manager
     )
     .await?;
 

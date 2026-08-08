@@ -155,6 +155,59 @@ models/l1_anomaly_detector.onnx — ONNX Isolation Forest for Rust runtime infer
 
 ---
 
+## Debugging Discipline
+
+Before proposing any fix, build a tight feedback loop: one command that
+reliably fails on the bug and passes once it's fixed. Not "doesn't crash" —
+the actual reported symptom. If you can't build this loop, you don't
+understand the bug well enough to fix it yet; gather more evidence first.
+
+Order of preference for the loop:
+1. A failing test at the exact seam that reaches the bug
+2. A curl/CLI command against the running system, diffed against expected output
+3. A replayed log line or captured request
+
+Only once the loop is red should you write the fix. Only claim "fixed" once
+the same loop is green — re-run it, don't infer from cargo build/compile
+success alone.
+
+---
+
+## Root Cause vs. Symptom
+
+When a fix makes the symptom disappear without you being able to explain
+*why the original mechanism was broken*, treat that as unfinished work, not
+a fix. Two acceptable outcomes:
+  a) You found and fixed the actual broken mechanism, or
+  b) You shipped a workaround AND wrote down, in the code and in the
+     handoff, exactly what the real fix is (which function, which call
+     site) and why the workaround isn't it.
+
+A fix with no theory of "why was this broken" behind it is a guess that
+happened to pass the test you had.
+
+---
+
+## Verification Standard
+
+"cargo build passes" or "tests pass" is not sufficient to claim something
+works — it only means the code compiles / the assertions you wrote didn't
+fail. Before reporting success:
+  - State what specific behavior you verified and how (exact command + output)
+  - If a test suite passed, spot-check that the failing case would actually
+    have failed before your fix (a test that always passes regardless of
+    the bug is not testing anything)
+  - Prefer "I verified X by running Y, got Z" over "should now work"
+
+---
+
+## Priority When Rules Conflict
+1. Do not break the build / do not ship unverified fixes (non-negotiable)
+2. Explicit instructions in this session from the user
+3. Conventions in this file
+
+---
+
 ## Progress Report Format (required after every work block)
 
 ```

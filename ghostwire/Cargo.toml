@@ -102,7 +102,7 @@ crossterm = "0.29"          # Terminal manipulation (used by ratatui)
 
 
 [features]
-default = ["web", "cli", "mesh", "security", "stealth", "qr"]
+default = ["web", "cli", "mesh", "security", "stealth", "qr", "reticulum"]
 web = []
 cli = []
 mesh = []

@@ -8,7 +8,7 @@ use axum::body::Body;
 
 use axum::http::{header, HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::{
-    extract::ConnectInfo,
+    extract::{ConnectInfo, State},
     middleware,
     response::IntoResponse,
     response::Response,
@@ -36,13 +36,16 @@ use lazy_static::lazy_static;
 use local_ip_address;
 
 use std::fs;
+use std::sync::LazyLock;
 // use std::sync::Mutex;
-// use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 #[derive(RustEmbed)]
 #[folder = "../webui/dist/"]
 struct Assets;
+
+static START_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let mut path = uri.path().trim_start_matches('/').to_string();
@@ -68,8 +71,7 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
                 .unwrap()
         }
         std::option::Option::None => {
-            // ponytail: SPA fallback only for browser-navigable paths (no file ext, not /api/)
-            if !path.starts_with("api/") && !path.contains('.') {
+            if path.is_empty() {
                 if let Some(index) = Assets::get("index.html") {
                     return Response::builder()
                         .header(header::CONTENT_TYPE, "text/html")
@@ -333,8 +335,10 @@ pub async fn start_web_server(
         Arc::new(guest_core)
     };
 
+    let core_ref = Arc::new(RwLock::new(initial_core));
+    let shutdown_core = core_ref.clone();
     let app_state = Arc::new(AppState {
-        core: Arc::new(RwLock::new(initial_core)),
+        core: core_ref,
         config: StartupConfig {
             bootstrap_nodes,
             sim_addr,
@@ -652,7 +656,24 @@ pub async fn start_web_server(
             get(crate::controllers::PairingController::get_rendezvous_address),
         );
 
+    async fn node_info_page() -> impl IntoResponse {
+        match Assets::get("node-info.html") {
+            Some(content) => Response::builder()
+                .header(header::CONTENT_TYPE, "text/html")
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(Body::from(content.data))
+                .unwrap(),
+            None => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Node info page not found"))
+                .unwrap(),
+        }
+    }
+
     let app: Router = Router::new()
+        .route("/", get(node_info_page))
+        .route("/info", get(node_info_page))
+        .route("/metrics", get(prometheus_metrics))
         .nest(
             "/api",
             api_routes
@@ -693,7 +714,12 @@ pub async fn start_web_server(
 
     let listener = tokio::net::TcpListener::bind(&address).await?;
     let shutdown_signal = async {
-        let _ = tokio::signal::ctrl_c().await;
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
         tracing::info!("Shutdown signal received, draining connections...");
     };
     axum::serve(
@@ -702,6 +728,14 @@ pub async fn start_web_server(
     )
     .with_graceful_shutdown(shutdown_signal)
     .await?;
+
+    // ponytail: this is the only shutdown path for web-server mode — without it,
+    // SIGTERM/SIGINT leaves mesh state and sled persistence unflushed.
+    tracing::info!("HTTP server stopped, flushing core state...");
+    let core_guard = shutdown_core.read().await;
+    if let Err(e) = core_guard.shutdown().await {
+        tracing::error!("Core shutdown error: {}", e);
+    }
     Ok(())
 }
 
@@ -716,6 +750,61 @@ pub async fn get_tutorial() -> impl IntoResponse {
     Json(ApiV2Response::success(
         crate::core::tutorial::get_tutorial_steps(),
     ))
+}
+
+/// Prometheus metrics endpoint — no auth required (scraped by monitoring).
+async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let uptime = START_TIME.elapsed().as_secs();
+    let core = state.core.read().await;
+    let peer_count = core.get_peer_count();
+    let sec = core.get_security_stats().await;
+    let ws = state.ws_count.load(std::sync::atomic::Ordering::Relaxed);
+
+    // ponytail: string-push fmt, not prometheus crate — one endpoint, no dep
+    let mut m = String::with_capacity(1024);
+    m.push_str("# HELP ghostwire_uptime_seconds Process uptime in seconds\n");
+    m.push_str("# TYPE ghostwire_uptime_seconds gauge\n");
+    m.push_str(&format!("ghostwire_uptime_seconds {}\n", uptime));
+
+    m.push_str("# HELP ghostwire_peers_total Number of connected peers\n");
+    m.push_str("# TYPE ghostwire_peers_total gauge\n");
+    m.push_str(&format!("ghostwire_peers_total {}\n", peer_count));
+
+    m.push_str("# HELP ghostwire_websocket_connections Active WebSocket connections\n");
+    m.push_str("# TYPE ghostwire_websocket_connections gauge\n");
+    m.push_str(&format!("ghostwire_websocket_connections {}\n", ws));
+
+    m.push_str("# HELP ghostwire_security_events_total Total security events\n");
+    m.push_str("# TYPE ghostwire_security_events_total counter\n");
+    m.push_str(&format!("ghostwire_security_events_total {}\n", sec.total_events));
+
+    m.push_str("# HELP ghostwire_blocked_connections_total Blocked connections\n");
+    m.push_str("# TYPE ghostwire_blocked_connections_total counter\n");
+    m.push_str(&format!(
+        "ghostwire_blocked_connections_total {}\n",
+        sec.blocked_connections
+    ));
+
+    m.push_str("# HELP ghostwire_rate_limit_violations_total Rate limit violations\n");
+    m.push_str("# TYPE ghostwire_rate_limit_violations_total counter\n");
+    m.push_str(&format!(
+        "ghostwire_rate_limit_violations_total {}\n",
+        sec.rate_limit_violations
+    ));
+
+    m.push_str("# HELP ghostwire_threat_level Current threat level (0=low 1=medium 2=high 3=critical)\n");
+    m.push_str("# TYPE ghostwire_threat_level gauge\n");
+    m.push_str(&format!(
+        "ghostwire_threat_level {}\n",
+        match sec.threat_level {
+            crate::core::security_v2::ThreatLevel::Low => 0,
+            crate::core::security_v2::ThreatLevel::Medium => 1,
+            crate::core::security_v2::ThreatLevel::High => 2,
+            crate::core::security_v2::ThreatLevel::Critical => 3,
+        }
+    ));
+
+    ([(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], m)
 }
 
 #[derive(Deserialize)]

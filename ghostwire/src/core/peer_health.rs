@@ -214,6 +214,15 @@ impl PeerHealthTracker {
         self.peers.read().await.values().cloned().collect()
     }
 
+    /// Non-blocking version for use inside sync functions called from tokio contexts.
+    /// Returns empty vec if the RwLock is contended.
+    pub fn try_get_all_health(&self) -> Vec<PeerHealth> {
+        match self.peers.try_read() {
+            Ok(guard) => guard.values().cloned().collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Check liveness of all peers and mark dead ones
     pub async fn check_all_liveness(&self) {
         let mut map = self.peers.write().await;

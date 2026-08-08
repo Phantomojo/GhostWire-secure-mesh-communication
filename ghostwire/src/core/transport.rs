@@ -92,7 +92,12 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
-            TransportKind::StealthTCP(_) => Ok(None),
+            TransportKind::StealthTCP(provider) => {
+                match provider.poll_receive().await {
+                    Some((_addr, msg)) => Ok(Some(msg)),
+                    None => Ok(None),
+                }
+            }
             TransportKind::Quic(_) => Ok(None),
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),

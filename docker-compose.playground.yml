@@ -1,8 +1,10 @@
 version: '3.8'
 
-# GhostWire 2-Node Playground
+# GhostWire 6-Node Full Mesh Playground
 # Usage: docker compose -f docker-compose.playground.yml up --build
 # Tests: docker compose -f docker-compose.playground.yml run --rm test
+# Logs:  docker compose -f docker-compose.playground.yml logs -f node1 node2 node3 node4 node5 node6
+# Diag:  docker compose -f docker-compose.playground.yml run --rm diagnostics
 
 services:
   # ─── Node 1 (Alice) ────────────────────────────────────────────
@@ -15,36 +17,36 @@ services:
     container_name: gw-node1
     hostname: node1
     ports:
-      - "127.0.0.1:9001:9000"   # API
-      - "127.0.0.1:3001:3000"   # Web UI
-      - "4001:4001"              # libp2p TCP
-      - "4001:4001/udp"          # libp2p QUIC
+      - "127.0.0.1:9001:9000"
+      - "127.0.0.1:3001:3000"
+      - "4001:4001"
+      - "4001:4001/udp"
     environment:
-      - RUST_LOG=ghostwire=debug,libp2p=info,tower_http=error
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
       - GHOSTWIRE_HOST=0.0.0.0
       - GHOSTWIRE_PORT=9000
       - GHOSTWIRE_NODE_NAME=alice
     volumes:
       - gw_node1_data:/home/ghostwire/.ghostwire
       - gw_node1_config:/app/config
-      - ./ghostwire/src:/app/src:ro  # Hot reload source (dev only)
-    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node2/tcp/4001"]
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node2/tcp/4001", "--bootstrap", "/dns4/node3/tcp/4001", "--bootstrap", "/dns4/node4/tcp/4001", "-v"]
     networks:
       gw_mesh:
         aliases:
           - alice
-    # Resource limits for testing
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: '1.0'
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 45s
 
   # ─── Node 2 (Bob) ──────────────────────────────────────────────
   node2:
@@ -56,20 +58,21 @@ services:
     container_name: gw-node2
     hostname: node2
     ports:
-      - "127.0.0.1:9002:9000"   # API
-      - "127.0.0.1:3002:3000"   # Web UI
-      - "4002:4001"              # libp2p TCP
-      - "4002:4001/udp"          # libp2p QUIC
+      - "127.0.0.1:9002:9000"
+      - "127.0.0.1:3002:3000"
+      - "4002:4001"
+      - "4002:4001/udp"
     environment:
-      - RUST_LOG=ghostwire=debug,libp2p=info,tower_http=error
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
       - GHOSTWIRE_HOST=0.0.0.0
       - GHOSTWIRE_PORT=9000
       - GHOSTWIRE_NODE_NAME=bob
     volumes:
       - gw_node2_data:/home/ghostwire/.ghostwire
       - gw_node2_config:/app/config
-      - ./ghostwire/src:/app/src:ro  # Hot reload source (dev only)
-    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node1/tcp/4001"]
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node1/tcp/4001", "--bootstrap", "/dns4/node3/tcp/4001", "--bootstrap", "/dns4/node5/tcp/4001", "-v"]
     networks:
       gw_mesh:
         aliases:
@@ -77,16 +80,180 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: '1.0'
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 45s
 
-  # ─── Test Runner ───────────────────────────────────────────────
+  # ─── Node 3 (Charlie) ──────────────────────────────────────────
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node3
+    hostname: node3
+    ports:
+      - "127.0.0.1:9003:9000"
+      - "127.0.0.1:3003:3000"
+      - "4003:4001"
+      - "4003:4001/udp"
+    environment:
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=charlie
+    volumes:
+      - gw_node3_data:/home/ghostwire/.ghostwire
+      - gw_node3_config:/app/config
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node1/tcp/4001", "--bootstrap", "/dns4/node2/tcp/4001", "--bootstrap", "/dns4/node6/tcp/4001", "-v"]
+    networks:
+      gw_mesh:
+        aliases:
+          - charlie
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  # ─── Node 4 (Diana) ────────────────────────────────────────────
+  node4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node4
+    hostname: node4
+    ports:
+      - "127.0.0.1:9004:9000"
+      - "127.0.0.1:3004:3000"
+      - "4004:4001"
+      - "4004:4001/udp"
+    environment:
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=diana
+    volumes:
+      - gw_node4_data:/home/ghostwire/.ghostwire
+      - gw_node4_config:/app/config
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node1/tcp/4001", "--bootstrap", "/dns4/node5/tcp/4001", "--bootstrap", "/dns4/node6/tcp/4001", "-v"]
+    networks:
+      gw_mesh:
+        aliases:
+          - diana
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  # ─── Node 5 (Eve) ──────────────────────────────────────────────
+  node5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node5
+    hostname: node5
+    ports:
+      - "127.0.0.1:9005:9000"
+      - "127.0.0.1:3005:3000"
+      - "4005:4001"
+      - "4005:4001/udp"
+    environment:
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=eve
+    volumes:
+      - gw_node5_data:/home/ghostwire/.ghostwire
+      - gw_node5_config:/app/config
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node2/tcp/4001", "--bootstrap", "/dns4/node4/tcp/4001", "--bootstrap", "/dns4/node6/tcp/4001", "-v"]
+    networks:
+      gw_mesh:
+        aliases:
+          - eve
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  # ─── Node 6 (Frank) ────────────────────────────────────────────
+  node6:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: "1.88"
+    container_name: gw-node6
+    hostname: frank
+    ports:
+      - "127.0.0.1:9006:9000"
+      - "127.0.0.1:3006:3000"
+      - "4006:4001"
+      - "4006:4001/udp"
+    environment:
+      - RUST_LOG=ghostwire=trace,libp2p=debug,tower_http=debug,mio=debug,trust_dns=debug
+      - GHOSTWIRE_HOST=0.0.0.0
+      - GHOSTWIRE_PORT=9000
+      - GHOSTWIRE_NODE_NAME=frank
+    volumes:
+      - gw_node6_data:/home/ghostwire/.ghostwire
+      - gw_node6_config:/app/config
+      - ./playground-config/config.toml:/home/ghostwire/.config/ghostwire/config.toml:ro
+      - ./ghostwire/src:/app/src:ro
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--port", "9000", "--mesh-port", "4001", "--bootstrap", "/dns4/node3/tcp/4001", "--bootstrap", "/dns4/node4/tcp/4001", "--bootstrap", "/dns4/node5/tcp/4001", "-v"]
+    networks:
+      gw_mesh:
+        aliases:
+          - frank
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  # ─── Full Mesh Test Runner ─────────────────────────────────────
   test:
     image: alpine:3.19
     container_name: gw-test-runner
@@ -95,19 +262,197 @@ services:
         condition: service_healthy
       node2:
         condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+      node5:
+        condition: service_healthy
+      node6:
+        condition: service_healthy
     volumes:
       - ./tests:/tests:ro
+      - gw_test_logs:/logs
     networks:
       - gw_mesh
     entrypoint: ["sh", "-c"]
     command:
       - |
-        echo "=== GhostWire Playground ==="
-        echo "Node1 (alice): http://node1:9000"
-        echo "Node2 (bob):   http://node2:9000"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  GhostWire 6-Node Full Mesh Playground"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo "Running transport selection tests..."
-        sh /tests/test_transport_selection.sh
+        echo "Nodes:"
+        echo "  Alice:   http://alice:9000   (port 9001)"
+        echo "  Bob:     http://bob:9000     (port 9002)"
+        echo "  Charlie: http://charlie:9000 (port 9003)"
+        echo "  Diana:   http://diana:9000   (port 9004)"
+        echo "  Eve:     http://eve:9000     (port 9005)"
+        echo "  Frank:   http://frank:9000   (port 9006)"
+        echo ""
+        echo "Running 6-node mesh tests..."
+        echo ""
+        sh /tests/test_6node_mesh.sh 2>&1 | tee /logs/test_6node_$(date +%Y%m%d_%H%M%S).log
+
+  # ─── RNS Discovery Monitor ─────────────────────────────────────
+  rns-monitor:
+    image: alpine:3.19
+    container_name: gw-rns-monitor
+    depends_on:
+      node1:
+        condition: service_healthy
+    volumes:
+      - gw_rns_logs:/logs
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl jq bash
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  RNS Peer Discovery Monitor"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Monitoring mesh health and RNS discovery across all 6 nodes..."
+        echo "Logs: /logs/rns_discovery_*.log"
+        echo ""
+        NODES="alice:9001 bob:9002 charlie:9003 diana:9004 eve:9005 frank:9006"
+        LOGFILE="/logs/rns_discovery_$(date +%Y%m%d_%H%M%S).log"
+        for node in $$NODES; do
+          name=$$(echo $$node | cut -d: -f1)
+          echo "Waiting for $$name..."
+          for i in $$(seq 1 30); do
+            if curl -sf http://$$name:9000/api/v2/health >/dev/null 2>&1; then
+              echo "  $$name is ready"
+              break
+            fi
+            sleep 2
+          done
+        done
+        echo ""
+        echo "=== Starting RNS Discovery Monitoring ===" | tee $$LOGFILE
+        echo "Timestamp: $$(date -Iseconds)" | tee -a $$LOGFILE
+        for cycle in $$(seq 1 30); do
+          echo "" | tee -a $$LOGFILE
+          echo "━━━ Cycle $$cycle/30 @ $$(date -Iseconds) ━━━" | tee -a $$LOGFILE
+          for node in $$NODES; do
+            name=$$(echo $$node | cut -d: -f1)
+            health=$$(curl -sf http://$$name:9000/api/v2/health 2>/dev/null || echo "UNREACHABLE")
+            peers=$$(curl -sf http://$$name:9000/api/v2/peers 2>/dev/null || echo "{}")
+            peer_count=$$(echo $$peers | jq -r '.peers | length // 0' 2>/dev/null || echo "0")
+            mesh_health=$$(curl -sf http://$$name:9000/api/v2/system/mesh-health 2>/dev/null || echo "{}")
+            routes=$$(echo $$mesh_health | jq -r '.data.routing.active_routes // 0' 2>/dev/null || echo "0")
+            latency=$$(echo $$mesh_health | jq -r '.data.performance.avg_message_latency_ms // 0' 2>/dev/null || echo "0")
+            uptime=$$(echo $$mesh_health | jq -r '.data.network_state.uptime_secs // 0' 2>/dev/null || echo "0")
+            echo "  $$name: peers=$$peer_count routes=$$routes latency=$${latency}ms uptime=$${uptime}s" | tee -a $$LOGFILE
+          done
+          sleep 10
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "=== RNS Discovery Monitoring Complete ===" | tee -a $$LOGFILE
+        echo "Full log: $$LOGFILE"
+
+  # ─── Diagnostics Collector ──────────────────────────────────────
+  diagnostics:
+    image: alpine:3.19
+    container_name: gw-diagnostics
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+      node5:
+        condition: service_healthy
+      node6:
+        condition: service_healthy
+    volumes:
+      - ./tests:/tests:ro
+      - gw_diag_logs:/logs
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl jq bash net-tools iproute2 tcpdump
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  GhostWire 6-Node Diagnostics Collector"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        LOGFILE="/logs/diagnostics_$(date +%Y%m%d_%H%M%S).log"
+        NODES="alice:9001 bob:9002 charlie:9003 diana:9004 eve:9005 frank:9006"
+        for node in $$NODES; do
+          name=$$(echo $$node | cut -d: -f1)
+          for i in $$(seq 1 30); do
+            if curl -sf http://$$name:9000/api/v2/health >/dev/null 2>&1; then
+              echo "$$name ready"
+              break
+            fi
+            sleep 2
+          done
+        done
+        echo "Collecting diagnostics..." | tee $$LOGFILE
+        echo "Timestamp: $$(date -Iseconds)" | tee -a $$LOGFILE
+        echo "" | tee -a $$LOGFILE
+        echo "━━━ Network Topology ━━━" | tee -a $$LOGFILE
+        for node in $$NODES; do
+          name=$$(echo $$node | cut -d: -f1)
+          peers=$$(curl -sf http://$$name:9000/api/v2/peers 2>/dev/null | jq -c '.' 2>/dev/null || echo "{}")
+          echo "  $$name peers: $$peers" | tee -a $$LOGFILE
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "━━━ Network Status ━━━" | tee -a $$LOGFILE
+        for node in $$NODES; do
+          name=$$(echo $$node | cut -d: -f1)
+          stats=$$(curl -sf http://$$name:9000/api/system/stats 2>/dev/null | jq -c '.' 2>/dev/null || echo "{}")
+          echo "  $$name: $$stats" | tee -a $$LOGFILE
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "━━━ API Latency Matrix (ms) ━━━" | tee -a $$LOGFILE
+        printf "  %-12s" "" | tee -a $$LOGFILE
+        for dst in $$NODES; do
+          dname=$$(echo $$dst | cut -d: -f1)
+          printf "%-10s" "$$dname" | tee -a $$LOGFILE
+        done
+        echo "" | tee -a $$LOGFILE
+        for src in $$NODES; do
+          sname=$$(echo $$src | cut -d: -f1)
+          printf "  %-12s" "$$sname" | tee -a $$LOGFILE
+          for dst in $$NODES; do
+            dname=$$(echo $$dst | cut -d: -f1)
+            if [ "$$sname" = "$$dname" ]; then
+              printf "%-10s" "-" | tee -a $$LOGFILE
+            else
+              start=$$(date +%s%N)
+              curl -sf -o /dev/null http://$$dname:9000/api/v2/health 2>/dev/null
+              end=$$(date +%s%N)
+              ms=$$( (end - start) / 1000000 )
+              printf "%-10s" "$${ms}ms" | tee -a $$LOGFILE
+            fi
+          done
+          echo "" | tee -a $$LOGFILE
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "━━━ Message Exchange Test ━━━" | tee -a $$LOGFILE
+        for src in $$NODES; do
+          sname=$$(echo $$src | cut -d: -f1)
+          for dst in $$NODES; do
+            dname=$$(echo $$dst | cut -d: -f1)
+            if [ "$$sname" != "$$dname" ]; then
+              result=$$(curl -sf -X POST http://$$sname:9000/api/v2/messages \
+                -H "Content-Type: application/json" \
+                -d "{\"to\":\"$$dname\",\"payload\":\"diag-$$sname-to-$$dname\"}" 2>/dev/null || echo "FAIL")
+              echo "  $$sname -> $$dname: $$result" | tee -a $$LOGFILE
+            fi
+          done
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" | tee -a $$LOGFILE
+        echo "  Diagnostics complete. Log: $$LOGFILE" | tee -a $$LOGFILE
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" | tee -a $$LOGFILE
 
   # ─── Adversarial Test Runner ────────────────────────────────────
   attacks:
@@ -118,21 +463,37 @@ services:
         condition: service_healthy
       node2:
         condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+      node5:
+        condition: service_healthy
+      node6:
+        condition: service_healthy
     volumes:
       - ./tests:/tests:ro
+      - gw_attack_logs:/logs
     networks:
       - gw_mesh
     entrypoint: ["sh", "-c"]
     command:
       - |
         apk add --no-cache wget tcpdump python3 iproute2 bash curl
-        echo "=== GhostWire Adversarial Suite ==="
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  GhostWire 6-Node Adversarial Suite"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
         echo "Alice: http://alice:9000"
         echo "Bob:   http://bob:9000"
+        echo "Charlie: http://charlie:9000"
+        echo "Diana: http://diana:9000"
+        echo "Eve:   http://eve:9000"
+        echo "Frank: http://frank:9000"
         echo ""
-        sh /tests/run_attacks.sh
+        sh /tests/run_attacks.sh 2>&1 | tee /logs/attacks_$(date +%Y%m%d_%H%M%S).log
 
-  # ─── Attacker Container (MITM / Packet Capture) ────────────────
+  # ─── Attacker Container ─────────────────────────────────────────
   attacker:
     image: alpine:3.19
     container_name: gw-attacker
@@ -141,6 +502,7 @@ services:
       - NET_RAW
     volumes:
       - ./tests:/tests:ro
+      - gw_attack_logs:/logs
     networks:
       - gw_mesh
     entrypoint: ["sh", "-c"]
@@ -148,13 +510,13 @@ services:
       - |
         apk add --no-cache tcpdump iproute2 bash curl wget python3
         echo "Attacker container ready."
+        echo "Targets: alice bob charlie diana eve frank"
         echo "Usage:"
         echo "  docker compose run --rm attacker sh /tests/attacks/01_mitm_intercept.sh"
-        echo "  docker compose run --rm attacker tcpdump -i eth0 -w /tmp/capture.pcap"
+        echo "  docker compose run --rm attacker tcpdump -i eth0 -w /logs/mesh.pcap"
         sleep infinity
 
   # ─── Network Condition Simulator ────────────────────────────────
-  # Run manually: docker compose -f docker-compose.playground.yml run --rm netem <command>
   netem:
     image: alpine:3.19
     container_name: gw-netem
@@ -165,20 +527,17 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - |
+        apk add --no-cache iproute2 bash curl
         echo "Network simulator ready."
+        echo "Targets: alice bob charlie diana eve frank"
         echo "Usage:"
         echo "  docker compose run --rm netem delay 100ms node1"
         echo "  docker compose run --rm netem loss 10% node2"
-        echo "  docker compose run --rm netem bandwidth 1mbit node1"
+        echo "  docker compose run --rm netem partition node1 node2 node3"
         echo "  docker compose run --rm netem reset"
-        echo ""
-        echo "Installing iproute2 and tc..."
-        apk add --no-cache iproute2 bash curl
-        echo "Ready. Awaiting commands."
         sleep infinity
 
   # ─── Load Test Runner ──────────────────────────────────────────
-  # Run: docker compose -f docker-compose.playground.yml run --rm loadtest
   loadtest:
     image: alpine:3.19
     container_name: gw-loadtest
@@ -187,62 +546,151 @@ services:
         condition: service_healthy
       node2:
         condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+      node5:
+        condition: service_healthy
+      node6:
+        condition: service_healthy
+    volumes:
+      - gw_loadtest_logs:/logs
     networks:
       - gw_mesh
     entrypoint: ["sh", "-c"]
     command:
       - |
         apk add --no-cache curl jq bash
-        echo "=== GhostWire Load Test ==="
-        echo "Target: http://node1:9000"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  GhostWire 6-Node Load Test"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo "--- Health check baseline ---"
-        for i in $(seq 1 10); do
-          start=$(date +%s%N)
-          curl -s -o /dev/null -w "%{http_code}" http://node1:9000/api/v2/health
-          end=$(date +%s%N)
-          echo "  Request $i: $(( (end - start) / 1000000 ))ms"
-        done
-        echo ""
-        echo "--- Peer list latency ---"
-        for i in $(seq 1 10); do
-          start=$(date +%s%N)
-          curl -s -o /dev/null -w "%{http_code}" http://node1:9000/api/v2/peers
-          end=$(date +%s%N)
-          echo "  Request $i: $(( (end - start) / 1000000 ))ms"
-        done
-        echo ""
-        echo "--- Concurrent connections ---"
-        for concurrency in 5 10 20; do
-          echo "  Concurrency=$concurrency:"
-          pids=""
-          start=$(date +%s%N)
-          for i in $(seq 1 $concurrency); do
-            curl -s -o /dev/null http://node1:9000/api/v2/health &
-            pids="$pids $!"
+        LOGFILE="/logs/loadtest_$(date +%Y%m%d_%H%M%S).log"
+        NODES="alice:9001 bob:9002 charlie:9003 diana:9004 eve:9005 frank:9006"
+        echo "--- Health check baseline (all nodes) ---" | tee $$LOGFILE
+        for node in $$NODES; do
+          name=$$(echo $$node | cut -d: -f1)
+          echo "  $$name:" | tee -a $$LOGFILE
+          for i in $$(seq 1 5); do
+            start=$$(date +%s%N)
+            curl -sf -o /dev/null -w "%{http_code}" http://$$name:9000/api/v2/health
+            end=$$(date +%s%N)
+            ms=$$( (end - start) / 1000000 )
+            echo "    Request $$i: $${ms}ms" | tee -a $$LOGFILE
           done
-          for pid in $pids; do wait $pid; done
-          end=$(date +%s%N)
-          total_ms=$(( (end - start) / 1000000 ))
-          avg_ms=$(( total_ms / concurrency ))
-          echo "    Total: ${total_ms}ms, Avg: ${avg_ms}ms"
         done
-        echo ""
-        echo "--- Cross-node API ---"
-        for i in $(seq 1 5); do
-          start=$(date +%s%N)
-          curl -s -o /dev/null -w "%{http_code}" http://node2:9000/api/v2/peers
-          end=$(date +%s%N)
-          echo "  Node2 request $i: $(( (end - start) / 1000000 ))ms"
+        echo "" | tee -a $$LOGFILE
+        echo "--- Cross-node latency matrix ---" | tee -a $$LOGFILE
+        for src in $$NODES; do
+          sname=$$(echo $$src | cut -d: -f1)
+          for dst in $$NODES; do
+            dname=$$(echo $$dst | cut -d: -f1)
+            if [ "$$sname" != "$$dname" ]; then
+              start=$$(date +%s%N)
+              curl -sf -o /dev/null http://$$dname:9000/api/v2/health
+              end=$$(date +%s%N)
+              ms=$$( (end - start) / 1000000 )
+              echo "  $$sname -> $$dname: $${ms}ms" | tee -a $$LOGFILE
+            fi
+          done
         done
-        echo ""
-        echo "=== Load test complete ==="
+        echo "" | tee -a $$LOGFILE
+        echo "--- Concurrent connections (all nodes) ---" | tee -a $$LOGFILE
+        for concurrency in 5 10 20; do
+          echo "  Concurrency=$$concurrency:" | tee -a $$LOGFILE
+          pids=""
+          start=$$(date +%s%N)
+          for node in $$NODES; do
+            name=$$(echo $$node | cut -d: -f1)
+            for i in $$(seq 1 $$concurrency); do
+              curl -sf -o /dev/null http://$$name:9000/api/v2/health &
+              pids="$$pids $$!"
+            done
+          done
+          for pid in $$pids; do wait $$pid; done
+          end=$$(date +%s%N)
+          total_ms=$$( (end - start) / 1000000 )
+          avg_ms=$$(total_ms / (concurrency * 6))
+          echo "    Total: $${total_ms}ms, Avg per request: $${avg_ms}ms" | tee -a $$LOGFILE
+        done
+        echo "" | tee -a $$LOGFILE
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" | tee -a $$LOGFILE
+        echo "  Load test complete. Log: $$LOGFILE" | tee -a $$LOGFILE
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" | tee -a $$LOGFILE
+
+  # ─── Stress Test Runner ───────────────────────────────────
+  stress:
+    image: alpine:3.19
+    container_name: gw-stress
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+      node5:
+        condition: service_healthy
+      node6:
+        condition: service_healthy
+    volumes:
+      - ./tests:/tests:ro
+      - gw_loadtest_logs:/logs
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl jq bash wget
+        sh /tests/stress_6node.sh
+
+  # ─── Churn Test Runner ────────────────────────────────────
+  churn:
+    image: alpine:3.19
+    container_name: gw-churn
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+    volumes:
+      - ./tests:/tests:ro
+      - ./docker-compose.playground.yml:/compose/docker-compose.playground.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gw_loadtest_logs:/logs
+    networks:
+      - gw_mesh
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl jq bash wget docker-cli
+        sh /tests/churn_6node.sh
 
 volumes:
   gw_node1_data:
   gw_node1_config:
   gw_node2_data:
   gw_node2_config:
+  gw_node3_data:
+  gw_node3_config:
+  gw_node4_data:
+  gw_node4_config:
+  gw_node5_data:
+  gw_node5_config:
+  gw_node6_data:
+  gw_node6_config:
+  gw_test_logs:
+  gw_rns_logs:
+  gw_diag_logs:
+  gw_attack_logs:
+  gw_loadtest_logs:
 
 networks:
   gw_mesh:
