@@ -358,8 +358,6 @@ impl Wantlist {
     fn entries(&self) -> Vec<WantEntry> {
         self.entries.values().cloned().collect()
     }
-
-
 }
 
 // ── Ledger ────────────────────────────────────────────────────────────────────
@@ -376,7 +374,7 @@ pub struct PeerLedgerEntry {
 impl PeerLedgerEntry {
     /// Debt ratio: bytes_received / bytes_sent
     /// > 1.0 = we've received more than sent (we're in debt)
-    /// < 1.0 = we've sent more than received (we're a good peer)
+    /// > < 1.0 = we've sent more than received (we're a good peer)
     pub fn debt_ratio(&self) -> f64 {
         if self.bytes_sent == 0 {
             return f64::INFINITY; // Full debt — new peer who hasn't contributed yet

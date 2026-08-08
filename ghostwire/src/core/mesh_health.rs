@@ -113,10 +113,39 @@ pub async fn build_snapshot(
         packet_loss_pct: metrics.packet_loss_ratio * 100.0,
     };
 
-    // WIRED: real peer count from Core
     let peer_count = core.get_peer_count();
-    // TODO: iterate social_graph.connected_peers() for full peer details
-    let peers = vec![];
+    let topo = core.get_mesh_topology().await;
+    let topo_peer_count = topo.as_ref().map(|t| t.nodes.len()).unwrap_or(0);
+    let effective_peer_count = peer_count.max(topo_peer_count);
+
+    let peers: Vec<PeerHealthInfo> = topo
+        .as_ref()
+        .map(|t| {
+            t.nodes
+                .values()
+                .map(|n| PeerHealthInfo {
+                    node_id: n.id.clone(),
+                    nickname: if n.username.is_empty() {
+                        None
+                    } else {
+                        Some(n.username.clone())
+                    },
+                    connection_state: if n.is_online {
+                        "connected".into()
+                    } else {
+                        "disconnected".into()
+                    },
+                    is_online: n.is_online,
+                    latency_ms: None,
+                    signal_strength: n.connection_quality,
+                    last_seen_secs_ago: now.saturating_sub(n.last_seen),
+                    messages_exchanged: 0,
+                    trust_level: format!("{:?}", n.threat_level),
+                    discovery_method: "mesh".into(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     // WIRED: peer_cache size from micro_optimizations
     let peer_cache_size = core.peer_cache.len();
@@ -142,10 +171,10 @@ pub async fn build_snapshot(
     };
 
     let routing = RoutingHealthInfo {
-        routing_table_size: peer_count,
+        routing_table_size: effective_peer_count,
         subnet_distribution: HashMap::new(),
-        active_routes: peer_count,
-        sphinx_sessions: peer_count,
+        active_routes: effective_peer_count,
+        sphinx_sessions: effective_peer_count,
         messages_routed_total: 0,
         mixing_queue_depth: 0,
     };

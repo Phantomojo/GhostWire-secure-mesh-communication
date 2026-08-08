@@ -7,6 +7,7 @@ pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;
 pub mod channels;
+pub mod compression;
 pub mod constants;
 pub mod crl;
 pub mod db;
@@ -46,6 +47,7 @@ pub use security_v2 as security;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
+pub mod transport_selector;
 pub mod tutorial;
 pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
@@ -60,10 +62,10 @@ pub mod briar;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 pub mod qr;
+pub mod quic_transport;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
 pub mod sim_transport;
-pub mod quic_transport;
 pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
@@ -429,13 +431,14 @@ impl Core {
         {
             let quic_port = config.server.port.wrapping_add(1).max(5001);
             let quic_addr: std::net::SocketAddr = format!("0.0.0.0:{}", quic_port).parse()?;
-            let quic = match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
-                Ok(q) => Ok(q),
-                Err(_) => {
-                    let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
-                    crate::core::quic_transport::QuicTransportProvider::new(fallback).await
-                }
-            };
+            let quic =
+                match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
+                    Ok(q) => Ok(q),
+                    Err(_) => {
+                        let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
+                        crate::core::quic_transport::QuicTransportProvider::new(fallback).await
+                    }
+                };
             match quic {
                 Ok(quic) => {
                     let quic_kind = crate::core::transport::TransportKind::Quic(Arc::new(quic));
@@ -803,7 +806,8 @@ impl Core {
                                     // Get candidates (our neighbors in topology)
                                     if let Some(neighbors) = topology.adjacency.get(&src_idx) {
                                         if !neighbors.is_empty() {
-                                            let all_health = if let Some(mesh) = &self.mesh_manager {
+                                            let all_health = if let Some(mesh) = &self.mesh_manager
+                                            {
                                                 let mesh = mesh.read().await;
                                                 Some(mesh.peer_health().get_all_health().await)
                                             } else {
@@ -817,12 +821,19 @@ impl Core {
                                                     .and_then(|hl| {
                                                         let peer_id = mapper.get_peer(cand)?;
                                                         let peer_str = peer_id.to_string();
-                                                        hl.iter().find(|h| h.peer_id == peer_str).map(|h| ai::RoutingFeatures {
-                                                            latency_ms: h.avg_rtt_ms as u64,
-                                                            packet_loss: h.packet_loss_ratio() as f32,
-                                                            trust_score: if h.is_alive { 1.0 } else { 0.0 },
-                                                            ..Default::default()
-                                                        })
+                                                        hl.iter()
+                                                            .find(|h| h.peer_id == peer_str)
+                                                            .map(|h| ai::RoutingFeatures {
+                                                                latency_ms: h.avg_rtt_ms as u64,
+                                                                packet_loss: h.packet_loss_ratio()
+                                                                    as f32,
+                                                                trust_score: if h.is_alive {
+                                                                    1.0
+                                                                } else {
+                                                                    0.0
+                                                                },
+                                                                ..Default::default()
+                                                            })
                                                     })
                                                     .unwrap_or_default();
                                                 peer_features.insert(cand, features);
@@ -921,10 +932,8 @@ impl Core {
         let all_health = mesh.peer_health().get_all_health().await;
 
         // peer_health tracks by string peer_id; mesh topology uses the same string keys
-        let health_map: std::collections::HashMap<&str, &peer_health::PeerHealth> = all_health
-            .iter()
-            .map(|h| (h.peer_id.as_str(), h))
-            .collect();
+        let health_map: std::collections::HashMap<&str, &peer_health::PeerHealth> =
+            all_health.iter().map(|h| (h.peer_id.as_str(), h)).collect();
 
         let trust_avg = self.trust_store.average_trust_score().await;
         let now_hour = {
@@ -1186,7 +1195,13 @@ impl Core {
                     let listeners = core_mesh.get_mesh_listeners().await;
                     if !listeners.is_empty() {
                         println!("\n--- GhostWire Mesh Node Started ---");
-                        if let Some(peer_id) = core_mesh.identity.read().await.public_key().map(|pk| pk.to_peer_id()) {
+                        if let Some(peer_id) = core_mesh
+                            .identity
+                            .read()
+                            .await
+                            .public_key()
+                            .map(|pk| pk.to_peer_id())
+                        {
                             println!("Peer ID: {}", peer_id);
                         } else {
                             println!("Peer ID: <Locked>");
@@ -1667,8 +1682,9 @@ impl Core {
         #[cfg(feature = "reticulum")]
         {
             if self.reticulum_manager.is_none() {
-                let reticulum_manager =
-                    ReticulumManager::new(self.identity.read().await.clone()).await?;
+                let identity = self.identity.read().await.clone();
+                let node_id = identity.id.clone();
+                let reticulum_manager = ReticulumManager::new(identity, "AUTO", &node_id).await?;
                 self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
                 tracing::info!("Reticulum network initialized");
             }
@@ -1786,9 +1802,12 @@ impl Core {
         }
         Err(anyhow::anyhow!("Mesh networking not available"))
     }
-    pub async fn get_mesh_topology(&self) -> anyhow::Result<()> {
-        // Stub implementation
-        Ok(())
+    pub async fn get_mesh_topology(&self) -> Option<MeshTopology> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = &self.mesh_manager {
+            return Some(mesh_manager.read().await.get_topology().await);
+        }
+        None
     }
 
     pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {

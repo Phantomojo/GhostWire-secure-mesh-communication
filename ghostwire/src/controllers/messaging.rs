@@ -49,7 +49,7 @@ impl MessagingController {
         if req.message.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
                 StandardErrorCode::InvalidInput.as_str(),
-                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+                format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
 
@@ -104,7 +104,7 @@ impl MessagingController {
         if payload.content.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
                 StandardErrorCode::InvalidInput.as_str(),
-                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+                format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
 
@@ -144,7 +144,7 @@ impl MessagingController {
                 Ok(_) => Json(ApiV2Response::success("Broadcast sent successfully")),
                 Err(e) => Json(ApiV2Response::error(
                     StandardErrorCode::InternalError.as_str(),
-                    &format!("Broadcast failed: {}", e),
+                    format!("Broadcast failed: {}", e),
                 )),
             }
         } else {
@@ -158,7 +158,7 @@ impl MessagingController {
                 Ok(_) => Json(ApiV2Response::success("Direct message sent successfully")),
                 Err(e) => Json(ApiV2Response::error(
                     StandardErrorCode::InternalError.as_str(),
-                    &format!("Transmission failed: {}", e),
+                    format!("Transmission failed: {}", e),
                 )),
             }
         }

@@ -1,0 +1,15 @@
+name = "ghostwire-bootstrap"
+main = "src/index.ts"
+compatibility_date = "2025-07-06"
+
+[vars]
+PEER_TTL_SECONDS = 3600
+MAX_PEERS = 100
+RATE_LIMIT_MAX = "10"
+RATE_LIMIT_WINDOW = "60000"
+ALLOWED_ORIGINS = "https://ghostwire.cc,http://localhost:5173"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ghostwire-newsletter"
+database_id = "9448e839-e05b-40b1-9a07-d829198ac3a4"

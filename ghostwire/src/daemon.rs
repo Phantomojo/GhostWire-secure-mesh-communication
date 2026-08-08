@@ -118,20 +118,11 @@ pub fn get_daemon_pid() -> Option<i32> {
 }
 
 /// Extra args to forward to the daemon child process
+#[derive(Default)]
 pub struct DaemonArgs {
     pub tailscale_bootstrap: Vec<String>,
     pub bootstrap: Vec<String>,
     pub mesh_port: u16,
-}
-
-impl Default for DaemonArgs {
-    fn default() -> Self {
-        Self {
-            tailscale_bootstrap: Vec::new(),
-            bootstrap: Vec::new(),
-            mesh_port: 0,
-        }
-    }
 }
 
 /// Start the daemon in the background
@@ -206,7 +197,7 @@ pub fn start_daemon(port: Option<u16>, extra_args: Option<DaemonArgs>) -> Result
     let pid = child.id() as i32;
 
     // Write PID file
-    fs::write(&pid_file_path(), pid.to_string())?;
+    fs::write(pid_file_path(), pid.to_string())?;
 
     // Detach from child (let it run independently)
     // Don't wait for it — it's a daemon

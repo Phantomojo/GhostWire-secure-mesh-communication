@@ -35,21 +35,23 @@ The reference implementation is written in **Rust** and includes a working mesh 
 ## Protocol Stack
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  APPLICATION:  Messaging │ Knowledge Ark │ Ghost Channels│
-├─────────────────────────────────────────────────────────┤
-│  API:          REST (Axum) │ WebSocket │ CLI │ TUI       │
-├─────────────────────────────────────────────────────────┤
-│  SERVICES:     BlockStore │ Mailbox │ Social │ Sphinx    │
-├─────────────────────────────────────────────────────────┤
-│  AI ROUTING:   LightGBM → Gemma 4 → GNN → PRoPHET       │
-├─────────────────────────────────────────────────────────┤
-│  CRYPTO:       XChaCha20-Poly1305 │ X25519 │ ML-KEM-768  │
-├─────────────────────────────────────────────────────────┤
-│  TRANSPORTS:   StealthTCP │ WebRTC │ BLE │ LoRa │ obfs4  │
-├─────────────────────────────────────────────────────────┤
-│  MESH:         libp2p GossipSub │ Kademlia DHT │ DTN     │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  APPLICATION:  Messaging │ Knowledge Ark │ Ghost Channels   │
+├─────────────────────────────────────────────────────────────┤
+│  API:          REST (Axum) │ WebSocket │ CLI │ TUI          │
+├─────────────────────────────────────────────────────────────┤
+│  SERVICES:     BlockStore │ Mailbox │ Social │ Sphinx       │
+├─────────────────────────────────────────────────────────────┤
+│  AI ROUTING:   LightGBM → Gemma 4 → GNN → PRoPHET          │
+├─────────────────────────────────────────────────────────────┤
+│  CRYPTO:       XChaCha20-Poly1305 │ X25519 │ ML-KEM-768     │
+├─────────────────────────────────────────────────────────────┤
+│  TRANSPORTS:   StealthTCP │ WebRTC │ BLE │ LoRa │ obfs4     │
+│                │ Reticulum (RNS) │                          │
+├─────────────────────────────────────────────────────────────┤
+│  MESH:         libp2p GossipSub │ Kademlia DHT │ DTN        │
+│                │ RNS AutoInterface │ RNS Announces           │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 **Full specification:** [`docs/spec/PROTOCOL.md`](docs/spec/PROTOCOL.md)
@@ -175,6 +177,7 @@ graph TD;
     Swarm["Swarm Controller (libp2p)"]
     Security["Security Manager"]
     Transport["Adaptive Transport System"]
+    Reticulum["Reticulum Manager (RNS)"]
   end
 
   subgraph "Network Layer"
@@ -182,6 +185,7 @@ graph TD;
     WebRTC["WebRTC (P2P)"]
     LoRa["LoRa (Long Range)"]
     BT["Bluetooth LE"]
+    RNS["RNS AutoInterface"]
   end
 
   subgraph "Protocol Bridges"
@@ -204,6 +208,9 @@ graph TD;
   Transport <--> WebRTC
   Transport <--> LoRa
   Transport <--> BT
+
+  Core <--> Reticulum
+  Reticulum <--> RNS
 
   Core <--> Briar
   Core <--> Meshtastic
@@ -359,10 +366,12 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 - [ ] GNN routing optimization (target: 85%+ accuracy)
 - [ ] Mobile clients (Tauri Android/iOS)
 - [ ] ghostwire-dtn crate publication
+- [ ] Reticulum (RNS) transport integration — core bridge complete, hybrid symbiosis in progress
+- [ ] Symbiotic libp2p+RNS architecture — unified peer table, cross-pollinate discovery
 
 ### 📋 Planned
 - [ ] Voice over mesh (VoIP)
-- [ ] LoRa/Reticulum bridge (production)
+- [ ] LoRa transport (production hardening)
 - [ ] Protocol adapters (Matrix, Meshtastic, Briar)
 - [ ] Knowledge Ark — offline content serving
 - [ ] Zero-knowledge proofs

@@ -2,17 +2,25 @@ use crate::core::identity::Identity;
 use crate::core::message::Message;
 use anyhow::Result;
 use rand_core::OsRng;
-// use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// Reticulum-inspired secure mesh networking stack
-/// Based on cryptography-based networking with strong privacy guarantees
+#[cfg(feature = "reticulum")]
+use rns_transport::hash::AddressHash;
+#[cfg(feature = "reticulum")]
+use rns_transport::identity::PrivateIdentity;
+#[cfg(feature = "reticulum")]
+use rns_transport::packet::{
+    ContextFlag, DestinationType, Header, IfacFlag, Packet, PacketContext, PacketDataBuffer,
+    PacketType, PropagationType,
+};
+#[cfg(feature = "reticulum")]
+use rns_transport::transport::{ReceivedData, Transport, TransportConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReticulumNode {
@@ -38,10 +46,10 @@ pub struct ReticulumMessage {
     pub id: String,
     pub sender: String,
     pub recipient: String,
-    pub content: Vec<u8>,           // Encrypted content
-    pub onion_layers: Vec<Vec<u8>>, // For onion routing
+    pub content: Vec<u8>,
+    pub onion_layers: Vec<Vec<u8>>,
     pub timestamp: u64,
-    pub ttl: u32, // Time to live
+    pub ttl: u32,
     pub hop_count: u32,
     pub max_hops: u32,
 }
@@ -57,22 +65,365 @@ pub struct ReticulumStats {
     pub encryption_errors: u64,
 }
 
-/// Secure mesh networking manager inspired by Reticulum
+// ---------------------------------------------------------------------------
+// Real Reticulum transport (feature = "reticulum")
+// ---------------------------------------------------------------------------
+#[cfg(feature = "reticulum")]
+pub struct ReticulumTransport {
+    transport: Transport,
+    local_address: String,
+    local_address_hash: AddressHash,
+    rx: mpsc::Receiver<Message>,
+    _rx_task: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(feature = "reticulum")]
+impl ReticulumTransport {
+    /// Create a new Reticulum transport.
+    ///
+    /// If `master_seed` is provided, the Reticulum identity is deterministically
+    /// derived from it (same master seed → same Reticulum address every time).
+    /// Otherwise falls back to a random identity.
+    pub async fn new(
+        interfaces_ini: &str,
+        node_name: &str,
+        master_seed: Option<[u8; 32]>,
+    ) -> Result<Self> {
+        let identity = match master_seed {
+            Some(seed) => {
+                let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+                let static_secret = x25519_dalek::StaticSecret::from(seed);
+                PrivateIdentity::new(static_secret, sign_key)
+            }
+            None => {
+                // ponytail: persist RNS identity to disk so it survives restarts.
+                // Without this, every restart generates a new random RNS address.
+                let identity_path = dirs::config_dir()
+                    .unwrap_or_default()
+                    .join("ghostwire")
+                    .join("rns_identity.bin");
+
+                match std::fs::read(&identity_path) {
+                    Ok(bytes) if bytes.len() == rns_transport::identity::PRIVATE_KEY_LENGTH => {
+                        match PrivateIdentity::from_private_key_bytes(&bytes) {
+                            Ok(id) => {
+                                info!(
+                                    "Loaded persisted RNS identity from {:?} (address: {})",
+                                    identity_path,
+                                    id.address_hash().to_hex_string()
+                                );
+                                id
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to deserialize RNS identity: {}, generating random",
+                                    e
+                                );
+                                let id = PrivateIdentity::new_from_rand(OsRng);
+                                let _ = std::fs::create_dir_all(identity_path.parent().unwrap());
+                                let _ = std::fs::write(&identity_path, id.to_private_key_bytes());
+                                id
+                            }
+                        }
+                    }
+                    _ => {
+                        let id = PrivateIdentity::new_from_rand(OsRng);
+                        info!(
+                            "Generated new RNS identity (address: {}), persisting to {:?}",
+                            id.address_hash().to_hex_string(),
+                            identity_path
+                        );
+                        if let Some(parent) = identity_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::write(&identity_path, id.to_private_key_bytes());
+                        id
+                    }
+                }
+            }
+        };
+        let local_address = identity.address_hash().to_hex_string();
+        let local_address_hash = *identity.address_hash();
+
+        let mut config = TransportConfig::new(node_name, &identity, true);
+        config.set_transport_enabled(true);
+        config.set_broadcast(true);
+        config.set_link_idle_timeout_secs(900);
+
+        let _rns_config = rns_transport::config::Config::from_ini(interfaces_ini)?;
+
+        // ponytail: wrap transport creation + announce in a timeout.
+        // rmap.world:4242 TCP can hang forever (firewall/stateful inspection issues).
+        // Without timeout, a single unreachable backbone blocks the entire node startup.
+        let init_timeout = std::time::Duration::from_secs(15);
+
+        let (transport, mut rx_data) = match tokio::time::timeout(init_timeout, async {
+            let t = Transport::new(config);
+            {
+                let iface_mgr = t.iface_manager();
+                let mut mgr = iface_mgr.lock().await;
+                for line in interfaces_ini.lines() {
+                    let line = line.trim();
+                    if let Some(addr) = line
+                        .strip_prefix("target ")
+                        .and_then(|s| s.split_once('=').map(|(_, v)| v.trim()))
+                    {
+                        info!("Registering TCP client interface to {}", addr);
+                        let tcp_client = rns_transport::iface::tcp_client::TcpClient::new(addr);
+                        mgr.spawn(
+                            tcp_client,
+                            rns_transport::iface::tcp_client::TcpClient::spawn,
+                        );
+                    }
+                }
+            }
+
+            let mut rx_data = t.received_data_events();
+
+            let _local_dest = t
+                .add_destination(
+                    identity.clone(),
+                    rns_transport::destination::DestinationName::new(node_name, "mesh"),
+                )
+                .await;
+
+            info!(
+                "RNS destination registered as \"{}\" (address: {})",
+                node_name, local_address
+            );
+            t.send_announce(&_local_dest, None).await;
+
+            (t, rx_data)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                warn!(
+                    "Reticulum transport init timed out after {}s — node will run without RNS backbone",
+                    init_timeout.as_secs()
+                );
+                // Create a minimal transport without backbone so the node can still run
+                // with AutoInterface-only for local LAN discovery
+                let t = Transport::new(TransportConfig::new(node_name, &identity, true));
+                let rx_data = t.received_data_events();
+                let _local_dest = t
+                    .add_destination(
+                        identity.clone(),
+                        rns_transport::destination::DestinationName::new("ghostwire", "mesh"),
+                    )
+                    .await;
+                (t, rx_data)
+            }
+        };
+        let (tx, rx) = mpsc::channel::<Message>(256);
+        let rx_task = tokio::spawn(async move {
+            loop {
+                match rx_data.recv().await {
+                    Ok(received) => {
+                        if let Some(msg) = decode_received_data(&received) {
+                            if tx.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("Reticulum receive channel lagged, dropped {} messages", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        info!(
+            "Reticulum transport created for {} (address: {})",
+            node_name, local_address
+        );
+
+        Ok(Self {
+            transport,
+            local_address,
+            local_address_hash,
+            rx,
+            _rx_task: rx_task,
+        })
+    }
+
+    pub async fn send_message(&mut self, message: &Message) -> Result<()> {
+        let payload = serde_json::to_vec(message)?;
+
+        let recipient_hash = parse_address_hash(&message.recipient).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid Reticulum address hash in recipient field: {}",
+                message.recipient
+            )
+        })?;
+
+        let packet = Packet {
+            header: Header {
+                ifac_flag: IfacFlag::Open,
+                header_type: rns_transport::packet::HeaderType::Type1,
+                context_flag: ContextFlag::Unset,
+                propagation_type: PropagationType::Transport,
+                destination_type: DestinationType::Single,
+                packet_type: PacketType::Data,
+                hops: 0,
+            },
+            ifac: None,
+            destination: recipient_hash,
+            transport: None,
+            context: PacketContext::None,
+            data: PacketDataBuffer::new_from_slice(&payload),
+        };
+
+        self.transport.send_packet(packet).await;
+        info!("Sent message {} via Reticulum", message.id);
+        Ok(())
+    }
+
+    pub async fn send_broadcast(&self, message: &Message) -> Result<()> {
+        let payload = serde_json::to_vec(message)?;
+
+        let packet = Packet {
+            header: Header {
+                ifac_flag: IfacFlag::Open,
+                header_type: rns_transport::packet::HeaderType::Type1,
+                context_flag: ContextFlag::Unset,
+                propagation_type: PropagationType::Broadcast,
+                destination_type: DestinationType::Single,
+                packet_type: PacketType::Data,
+                hops: 0,
+            },
+            ifac: None,
+            destination: AddressHash::new_empty(),
+            transport: None,
+            context: PacketContext::None,
+            data: PacketDataBuffer::new_from_slice(&payload),
+        };
+
+        self.transport.send_broadcast(packet, None).await;
+        info!("Broadcast message {} via Reticulum", message.id);
+        Ok(())
+    }
+
+    pub async fn receive_message(&mut self) -> Result<Option<Message>> {
+        match self.rx.try_recv() {
+            Ok(msg) => Ok(Some(msg)),
+            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                anyhow::bail!("Reticulum receive channel closed")
+            }
+        }
+    }
+
+    pub fn local_address(&self) -> String {
+        self.local_address.clone()
+    }
+
+    pub fn local_address_hash(&self) -> AddressHash {
+        self.local_address_hash
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        // Transport's CancellationToken fires on drop, cleaning up interface tasks
+        info!("Reticulum transport stopped");
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stub transport (feature not enabled)
+// ---------------------------------------------------------------------------
+#[cfg(not(feature = "reticulum"))]
+pub struct ReticulumTransport;
+
+#[cfg(not(feature = "reticulum"))]
+impl ReticulumTransport {
+    pub async fn new(
+        _interfaces_ini: &str,
+        _node_name: &str,
+        _master_seed: Option<[u8; 32]>,
+    ) -> Result<Self> {
+        Err(anyhow::anyhow!(
+            "Reticulum feature not enabled — compile with --features reticulum"
+        ))
+    }
+
+    pub async fn send_message(&mut self, _message: &Message) -> Result<()> {
+        Err(anyhow::anyhow!("Reticulum feature not enabled"))
+    }
+
+    pub async fn send_broadcast(&self, _message: &Message) -> Result<()> {
+        Err(anyhow::anyhow!("Reticulum feature not enabled"))
+    }
+
+    pub async fn receive_message(&mut self) -> Result<Option<Message>> {
+        Err(anyhow::anyhow!("Reticulum feature not enabled"))
+    }
+
+    pub fn local_address(&self) -> String {
+        String::new()
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "reticulum"))]
+pub fn compute_reticulum_address(_master_seed: &[u8; 32]) -> String {
+    String::new()
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Decode a `ReceivedData` event into a GhostWire `Message`.
+/// The transport delivers the raw payload bytes; we JSON-deserialize them.
+#[cfg(feature = "reticulum")]
+fn decode_received_data(received: &ReceivedData) -> Option<Message> {
+    let bytes = received.data.as_slice();
+    if bytes.is_empty() {
+        return None;
+    }
+    match serde_json::from_slice::<Message>(bytes) {
+        Ok(msg) => Some(msg),
+        Err(e) => {
+            warn!("Failed to decode Reticulum payload as Message: {}", e);
+            None
+        }
+    }
+}
+
+/// Parse a hex-encoded Reticulum address hash string into `AddressHash`.
+#[cfg(feature = "reticulum")]
+fn parse_address_hash(hex_str: &str) -> Option<AddressHash> {
+    let hex = hex_str.trim().trim_start_matches("0x");
+    let bytes = hex::decode(hex).ok()?;
+    Some(AddressHash::new_from_slice(&bytes))
+}
+
+// ---------------------------------------------------------------------------
+// Manager — orchestrates transport lifecycle
+// ---------------------------------------------------------------------------
 pub struct ReticulumManager {
-    identity: Arc<Identity>,
+    _identity: Arc<Identity>,
     topology: Arc<RwLock<ReticulumTopology>>,
-    message_queue: Arc<RwLock<Vec<ReticulumMessage>>>,
     stats: Arc<RwLock<ReticulumStats>>,
-    encryption_key: Vec<u8>, // AES-256 key for message encryption
-    onion_routing_enabled: bool,
+    transport: Arc<RwLock<ReticulumTransport>>,
 }
 
 impl ReticulumManager {
-    pub async fn new(identity: Arc<Identity>) -> Result<Self> {
-        let node_id = Uuid::new_v4().to_string();
-
-        // Generate encryption key from identity
-        let encryption_key = Self::derive_encryption_key(&identity)?;
+    pub async fn new(
+        identity: Arc<Identity>,
+        interfaces_ini: &str,
+        destination_name: &str,
+    ) -> Result<Self> {
+        let node_id = destination_name.to_string();
+        let transport_seed = identity.derive_transport_key("reticulum");
+        let transport =
+            ReticulumTransport::new(interfaces_ini, destination_name, Some(transport_seed)).await?;
 
         let topology = Arc::new(RwLock::new(ReticulumTopology {
             nodes: HashMap::new(),
@@ -92,311 +443,65 @@ impl ReticulumManager {
         }));
 
         Ok(Self {
-            identity,
+            _identity: identity,
             topology,
-            message_queue: Arc::new(RwLock::new(Vec::new())),
             stats,
-            encryption_key,
-            onion_routing_enabled: true,
+            transport: Arc::new(RwLock::new(transport)),
         })
     }
 
-    /// Derive encryption key from identity (AES-256)
-    fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
-        // Use BLAKE2b to derive a 32-byte key from the identity's public key
-        let public_key = identity
-            .public_key_bytes();
-        let mut key = [0u8; 32];
+    pub async fn send_message(&self, message: &Message) -> Result<()> {
+        let mut transport = self.transport.write().await;
+        transport.send_message(message).await?;
 
-        // Simple key derivation - in production, use proper KDF
-        let mut hasher = blake2b_simd::State::new();
-        hasher.update(&public_key);
-        hasher.update(b"ghostwire-reticulum-key");
-        let hash = hasher.finalize();
-        key.copy_from_slice(&hash.as_bytes()[..32]);
-
-        Ok(key.to_vec())
-    }
-
-    /// Encrypt message content using AES-256-GCM
-    pub fn encrypt_message(&self, content: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm,
-        };
-
-        let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
-
-        use rand_core::RngCore;
-
-        let mut nonce = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce);
-
-        let ciphertext = cipher
-            .encrypt(&nonce.into(), content)
-            .map_err(|e| anyhow::anyhow!("Failed to encrypt: {}", e))?;
-
-        // Prepend nonce to ciphertext
-        let mut result = Vec::with_capacity(12 + ciphertext.len());
-        result.extend_from_slice(&nonce);
-        result.extend_from_slice(&ciphertext);
-
-        Ok(result)
-    }
-
-    /// Decrypt message content using AES-256-GCM
-    pub fn decrypt_message(&self, encrypted_content: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm,
-        };
-
-        if encrypted_content.len() < 12 {
-            return Err(anyhow::anyhow!("Invalid encrypted content length"));
-        }
-
-        let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
-
-        let nonce = &encrypted_content[..12];
-        let ciphertext = &encrypted_content[12..];
-
-        let plaintext = cipher
-            .decrypt(nonce.into(), ciphertext)
-            .map_err(|e| anyhow::anyhow!("Failed to decrypt: {}", e))?;
-
-        Ok(plaintext)
-    }
-
-    /// Create onion routing layers for anonymous communication
-    pub fn create_onion_message(
-        &self,
-        content: &[u8],
-        route: &[String],
-    ) -> Result<ReticulumMessage> {
-        let mut onion_layers = Vec::new();
-        let mut current_content = content.to_vec();
-
-        // Build onion layers from destination to source
-        for node_id in route.iter().rev() {
-            let layer = self.create_onion_layer(&current_content, node_id)?;
-            onion_layers.push(layer.clone());
-            current_content = layer; // Next layer will encrypt this layer
-        }
-
-        let message = ReticulumMessage {
-            id: Uuid::new_v4().to_string(),
-            sender: self.identity.id.clone(),
-            recipient: route.last().unwrap_or(&"unknown".to_string()).clone(),
-            content: current_content,
-            onion_layers,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            ttl: 300, // 5 minutes
-            hop_count: 0,
-            max_hops: route.len() as u32,
-        };
-
-        Ok(message)
-    }
-
-    /// Create a single onion layer
-    fn create_onion_layer(&self, content: &[u8], target_node: &str) -> Result<Vec<u8>> {
-        // In a real implementation, this would use the target node's public key
-        // For now, we'll use a simple encryption with a derived key
-        let mut layer_data = Vec::new();
-        layer_data.extend_from_slice(target_node.as_bytes());
-        layer_data.extend_from_slice(content);
-
-        self.encrypt_message(&layer_data)
-    }
-
-    /// Process incoming message and handle onion routing
-    pub async fn process_message(&mut self, message: ReticulumMessage) -> Result<Option<Vec<u8>>> {
-        // Check TTL
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        if current_time > message.timestamp + message.ttl as u64 {
-            warn!("Message expired: {}", message.id);
-            return Ok(None);
-        }
-
-        // Update stats
-        {
-            let mut stats = self.stats.write().await;
-            stats.messages_relayed += 1;
-        }
-
-        // Handle onion routing
-        if !message.onion_layers.is_empty() {
-            return self.process_onion_message(message).await;
-        }
-
-        // Direct message
-        if message.recipient == self.identity.id {
-            let decrypted = self.decrypt_message(&message.content)?;
-            Ok(Some(decrypted))
-        } else {
-            // Relay message
-            self.relay_message(message).await?;
-            Ok(None)
-        }
-    }
-
-    /// Process onion-routed message
-    async fn process_onion_message(
-        &mut self,
-        mut message: ReticulumMessage,
-    ) -> Result<Option<Vec<u8>>> {
-        if message.onion_layers.is_empty() {
-            return Ok(None);
-        }
-
-        // Peel one layer
-        let layer = message.onion_layers.remove(0);
-        let decrypted_layer = self.decrypt_message(&layer)?;
-
-        if decrypted_layer.len() < 4 {
-            return Err(anyhow::anyhow!("Invalid onion layer"));
-        }
-
-        // Extract target node ID (first 4 bytes for simplicity)
-        let target_node_len = u32::from_le_bytes([
-            decrypted_layer[0],
-            decrypted_layer[1],
-            decrypted_layer[2],
-            decrypted_layer[3],
-        ]) as usize;
-        if decrypted_layer.len() < 4 + target_node_len {
-            return Err(anyhow::anyhow!("Invalid onion layer structure"));
-        }
-
-        let target_node =
-            String::from_utf8_lossy(&decrypted_layer[4..4 + target_node_len]).to_string();
-        let remaining_content = &decrypted_layer[4 + target_node_len..];
-
-        // Check if we're the target
-        if target_node == self.identity.id {
-            if message.onion_layers.is_empty() {
-                // Final destination
-                let decrypted = self.decrypt_message(remaining_content)?;
-                Ok(Some(decrypted))
-            } else {
-                // We're an intermediate node, continue routing
-                message.content = remaining_content.to_vec();
-                self.relay_message(message).await?;
-                Ok(None)
-            }
-        } else {
-            // We're an intermediate node, relay to next hop
-            message.content = remaining_content.to_vec();
-            message.recipient = target_node;
-            self.relay_message(message).await?;
-            Ok(None)
-        }
-    }
-
-    /// Relay message to next hop
-    async fn relay_message(&self, message: ReticulumMessage) -> Result<()> {
-        // In a real implementation, this would send to the next hop
-        // For now, we'll just queue it
-        let mut queue = self.message_queue.write().await;
-        queue.push(message);
-
-        info!("Relayed message to next hop");
+        let mut stats = self.stats.write().await;
+        stats.messages_relayed += 1;
         Ok(())
     }
 
-    /// Send message with optional onion routing
-    pub async fn send_message(&mut self, message: &Message) -> Result<()> {
-        let content = format!("{}: {}", message.sender, message.content);
-        let encrypted_content = self.encrypt_message(content.as_bytes())?;
+    pub async fn send_broadcast(&self, message: &Message) -> Result<()> {
+        let transport = self.transport.read().await;
+        transport.send_broadcast(message).await?;
 
-        if message.encrypted && self.onion_routing_enabled {
-            // Find onion route to recipient
-            let route = self.find_onion_route(&message.recipient).await?;
-            let message = self.create_onion_message(&encrypted_content, &route)?;
-            self.relay_message(message).await?;
-        } else {
-            // Direct message
-            let message = ReticulumMessage {
-                id: Uuid::new_v4().to_string(),
-                sender: message.sender.clone(),
-                recipient: message.recipient.clone(),
-                content: encrypted_content,
-                onion_layers: Vec::new(),
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                ttl: 300,
-                hop_count: 0,
-                max_hops: 1,
-            };
-            self.relay_message(message).await?;
-        }
-
+        let mut stats = self.stats.write().await;
+        stats.messages_relayed += 1;
         Ok(())
     }
 
-    /// Find onion route to recipient
-    async fn find_onion_route(&self, recipient: &str) -> Result<Vec<String>> {
-        let topology = self.topology.read().await;
-
-        // Simple route finding - in production, use proper routing algorithm
-        if let Some(route) = topology.onion_routes.get(recipient) {
-            Ok(route.clone())
-        } else {
-            // Create a simple route through available nodes
-            let available_nodes: Vec<String> = topology
-                .nodes
-                .values()
-                .filter(|node| node.is_online && node.onion_routing_capable)
-                .map(|node| node.id.clone())
-                .collect();
-
-            if available_nodes.is_empty() {
-                return Err(anyhow::anyhow!("No onion routing nodes available"));
-            }
-
-            // Simple 2-hop route for now
-            let mut route = Vec::new();
-            route.push(available_nodes[0].clone());
-            route.push(recipient.to_string());
-
-            Ok(route)
-        }
+    pub async fn receive_message(&self) -> Result<Option<Message>> {
+        let mut transport = self.transport.write().await;
+        transport.receive_message().await
     }
 
-    /// Get network statistics
     pub async fn get_stats(&self) -> ReticulumStats {
         let mut stats = self.stats.read().await.clone();
         let topology = self.topology.read().await;
-
         stats.total_nodes = topology.nodes.len();
         stats.online_nodes = topology.nodes.values().filter(|n| n.is_online).count();
         stats.routes_count = topology.routes.len();
         stats.onion_routes_count = topology.onion_routes.len();
-
         stats
     }
 
-    /// Add node to topology
+    pub async fn get_topology(&self) -> ReticulumTopology {
+        self.topology.read().await.clone()
+    }
+
+    pub async fn local_address(&self) -> String {
+        let transport = self.transport.read().await;
+        transport.local_address()
+    }
+
+    pub fn transport_arc(&self) -> Arc<RwLock<ReticulumTransport>> {
+        self.transport.clone()
+    }
+
     pub async fn add_node(&mut self, node: ReticulumNode) -> Result<()> {
         let mut topology = self.topology.write().await;
         topology.nodes.insert(node.id.clone(), node);
-
-        info!("Added node to Reticulum topology");
         Ok(())
     }
 
-    /// Update node status
     pub async fn update_node_status(
         &mut self,
         node_id: &str,
@@ -406,18 +511,115 @@ impl ReticulumManager {
         let mut topology = self.topology.write().await;
         if let Some(node) = topology.nodes.get_mut(node_id) {
             node.is_online = is_online;
-            node.connection_quality = quality.max(0.0).min(1.0);
+            node.connection_quality = quality.clamp(0.0, 1.0);
             node.last_seen = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
         }
-
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
-        info!("Stopping ReticulumManager...");
+        let transport = self.transport.read().await;
+        transport.stop().await?;
         Ok(())
+    }
+}
+
+/// Compute a Reticulum address hex string from a master seed without starting a transport.
+/// Used by the mesh handshake to include our reticulum address in peer exchange.
+#[cfg(feature = "reticulum")]
+pub fn compute_reticulum_address(master_seed: &[u8; 32]) -> String {
+    let sign_key = ed25519_dalek::SigningKey::from_bytes(master_seed);
+    let static_secret = x25519_dalek::StaticSecret::from(*master_seed);
+    let identity = PrivateIdentity::new(static_secret, sign_key);
+    identity.address_hash().to_hex_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_reticulum_address_deterministic() {
+        let seed = [0x42u8; 32];
+        let addr1 = compute_reticulum_address(&seed);
+        let addr2 = compute_reticulum_address(&seed);
+        assert_eq!(addr1, addr2);
+        assert!(!addr1.is_empty());
+    }
+
+    #[test]
+    fn compute_reticulum_address_different_seeds() {
+        let seed_a = [0x01u8; 32];
+        let seed_b = [0x02u8; 32];
+        let addr_a = compute_reticulum_address(&seed_a);
+        let addr_b = compute_reticulum_address(&seed_b);
+        assert_ne!(addr_a, addr_b);
+    }
+
+    #[test]
+    fn reticulum_stats_default() {
+        let stats = ReticulumStats {
+            total_nodes: 0,
+            online_nodes: 0,
+            local_node_id: "test".into(),
+            routes_count: 0,
+            onion_routes_count: 0,
+            messages_relayed: 0,
+            encryption_errors: 0,
+        };
+        assert_eq!(stats.total_nodes, 0);
+        assert_eq!(stats.messages_relayed, 0);
+    }
+
+    #[test]
+    fn reticulum_node_serialization() {
+        let node = ReticulumNode {
+            id: "node1".into(),
+            public_key: vec![1, 2, 3],
+            address: "abc123".into(),
+            last_seen: 1000,
+            connection_quality: 0.95,
+            is_online: true,
+            onion_routing_capable: false,
+        };
+        let json = serde_json::to_string(&node).unwrap();
+        let parsed: ReticulumNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, "node1");
+        assert!(parsed.is_online);
+        assert!((parsed.connection_quality - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn reticulum_message_serialization() {
+        let msg = ReticulumMessage {
+            id: "msg1".into(),
+            sender: "alice".into(),
+            recipient: "bob".into(),
+            content: b"hello".to_vec(),
+            onion_layers: vec![],
+            timestamp: 1000,
+            ttl: 60,
+            hop_count: 0,
+            max_hops: 10,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ReticulumMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.sender, "alice");
+        assert_eq!(parsed.content, b"hello");
+    }
+
+    #[test]
+    fn reticulum_topology_default() {
+        let topo = ReticulumTopology {
+            nodes: HashMap::new(),
+            routes: HashMap::new(),
+            local_node_id: "local".into(),
+            onion_routes: HashMap::new(),
+        };
+        assert!(topo.nodes.is_empty());
+        assert!(topo.routes.is_empty());
     }
 }

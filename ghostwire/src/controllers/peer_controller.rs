@@ -30,36 +30,69 @@ pub struct RespondRequestBody {
 
 impl PeerController {
     /// GET /api/v2/peers — All known peers with their connection states
+    ///
+    /// ponytail: merges social_graph + mesh topology. social_graph isn't populated
+    /// from libp2p events yet, so topology is the real source. When social_graph
+    /// gets wired to swarm events, this deduplicates naturally.
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        use crate::core::social::social_graph::PeerFilter;
+        use crate::core::social::social_graph::{ConnectionState, PeerFilter};
 
         let core = state.core.read().await;
         let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
-        let connected = core.social_graph.connected_peers().await;
         let pending_inbound = core.social_graph.pending_inbound().await;
-        let peer_count = core.get_peer_count();
 
-        let peers_json: Vec<serde_json::Value> = all_peers
+        let topo = core.get_mesh_topology().await;
+        let topo_nodes = topo.as_ref().map(|t| &t.nodes);
+
+        let mut seen = std::collections::HashSet::new();
+        let mut peers_json: Vec<serde_json::Value> = Vec::new();
+
+        for p in &all_peers {
+            seen.insert(p.node_id.clone());
+            peers_json.push(serde_json::json!({
+                "node_id": p.node_id,
+                "did": p.did,
+                "nickname": p.nickname,
+                "avatar_cid": p.avatar_cid,
+                "connection_state": format!("{:?}", p.connection_state),
+                "is_online": p.is_online,
+                "signal": p.signal,
+                "discovered_via": format!("{:?}", p.discovered_via),
+                "last_seen": p.last_seen,
+            }));
+        }
+
+        if let Some(nodes) = topo_nodes {
+            for (id, node) in nodes {
+                if seen.contains(id) {
+                    continue;
+                }
+                peers_json.push(serde_json::json!({
+                    "node_id": id,
+                    "nickname": node.username,
+                    "connection_state": if node.is_online { "Connected" } else { "Disconnected" },
+                    "is_online": node.is_online,
+                    "signal": node.connection_quality,
+                    "last_seen": node.last_seen,
+                    "threat_level": format!("{:?}", node.threat_level),
+                }));
+            }
+        }
+
+        let peer_count = peers_json.len();
+        let connected_count = peers_json
             .iter()
-            .map(|p| {
-                serde_json::json!({
-                    "node_id": p.node_id,
-                    "did": p.did,
-                    "nickname": p.nickname,
-                    "avatar_cid": p.avatar_cid,
-                    "connection_state": format!("{:?}", p.connection_state),
-                    "is_online": p.is_online,
-                    "signal": p.signal,
-                    "discovered_via": format!("{:?}", p.discovered_via),
-                    "last_seen": p.last_seen,
-                })
+            .filter(|p| {
+                p.get("is_online")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
             })
-            .collect();
+            .count();
 
         tracing::debug!(
             target: "peers",
             total = peer_count,
-            connected = connected.len(),
+            connected = connected_count,
             pending = pending_inbound.len(),
             "Peer list requested"
         );
@@ -68,7 +101,7 @@ impl PeerController {
             "count": peer_count,
             "peers": peers_json,
             "pending_requests": pending_inbound.len(),
-            "connected": connected.len(),
+            "connected": connected_count,
         })))
     }
 

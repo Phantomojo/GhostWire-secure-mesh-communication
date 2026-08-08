@@ -166,12 +166,10 @@ async fn main() -> Result<()> {
                                 } else {
                                     info!("TX DM PONG to {}", &last.sender[..last.sender.len().min(12)]);
                                 }
+                            } else if let Err(e) = core_arc.send_message(&reply).await {
+                                warn!("Failed to send broadcast PONG: {}", e);
                             } else {
-                                if let Err(e) = core_arc.send_message(&reply).await {
-                                    warn!("Failed to send broadcast PONG: {}", e);
-                                } else {
-                                    info!("TX broadcast PONG");
-                                }
+                                info!("TX broadcast PONG");
                             }
                         }
                     }

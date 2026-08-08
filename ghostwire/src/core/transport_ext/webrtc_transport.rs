@@ -226,7 +226,7 @@ impl WebRtcFragmenter {
         }
 
         let data_per_chunk = self.max_chunk - 9;
-        let total_chunks = (frame.len() + data_per_chunk - 1) / data_per_chunk;
+        let total_chunks = frame.len().div_ceil(data_per_chunk);
         let mut chunks = Vec::with_capacity(total_chunks);
 
         for (idx, chunk_data) in frame.chunks(data_per_chunk).enumerate() {

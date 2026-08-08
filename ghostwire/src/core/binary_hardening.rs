@@ -87,6 +87,9 @@ impl LockedBuffer {
     pub fn len(&self) -> usize {
         self.data.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
 }
 
 impl Drop for LockedBuffer {
@@ -115,7 +118,10 @@ pub fn detect_debugger() {
             if let Some(val) = line.strip_prefix("TracerPid:") {
                 let pid: u32 = val.trim().parse().unwrap_or(0);
                 if pid != 0 {
-                    eprintln!("🚨 Anti-debug: debugger detected (TracerPid={}). Aborting.", pid);
+                    eprintln!(
+                        "🚨 Anti-debug: debugger detected (TracerPid={}). Aborting.",
+                        pid
+                    );
                     std::process::exit(1);
                 }
                 return;

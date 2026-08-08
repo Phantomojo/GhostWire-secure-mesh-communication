@@ -88,7 +88,7 @@ impl ArkController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("ARK_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("ARK_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -121,7 +121,7 @@ impl ArkController {
             .into_response(),
             Err(e) => (
                 StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("DELETE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("DELETE_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -189,7 +189,7 @@ impl ChannelController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -205,7 +205,7 @@ impl ChannelController {
             Ok(ch) => Json(ApiV2Response::success(ch)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_INVITE", &e.to_string())),
+                Json(ApiV2Response::<()>::error("INVALID_INVITE", e.to_string())),
             )
                 .into_response(),
         }
@@ -295,7 +295,7 @@ impl ChannelController {
             }
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -370,7 +370,7 @@ impl TrustController {
             .into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("VERIFY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("VERIFY_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -487,9 +487,7 @@ impl NetworkController {
         // CRITICAL FIX: Sign the contact card with identity keypair
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
         let identity = core.identity.read().await;
-        let signature = identity
-            .sign(&card_bytes)
-            .unwrap_or_default();
+        let signature = identity.sign(&card_bytes).unwrap_or_default();
         card.signature = signature;
 
         match card.to_qr_string() {
@@ -501,7 +499,7 @@ impl NetworkController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("QR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -517,7 +515,7 @@ impl NetworkController {
             Ok(card) => Json(ApiV2Response::success(card)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -543,7 +541,7 @@ impl PairingController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("PAIR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PAIR_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -614,7 +612,7 @@ impl RecoveryController {
                         StatusCode::BAD_REQUEST,
                         Json(ApiV2Response::<()>::error(
                             "INVALID_KEY",
-                            &format!("Invalid X25519 key for guardian {}", g.name),
+                            format!("Invalid X25519 key for guardian {}", g.name),
                         )),
                     )
                         .into_response()
@@ -699,7 +697,7 @@ impl RecoveryController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -759,7 +757,7 @@ impl RecoveryController {
                 StatusCode::BAD_REQUEST,
                 Json(ApiV2Response::<()>::error(
                     "INSUFFICIENT_SHARES",
-                    &format!("Need {} shares, got {}", threshold, raw_shares.len()),
+                    format!("Need {} shares, got {}", threshold, raw_shares.len()),
                 )),
             )
                 .into_response();
@@ -797,13 +795,13 @@ impl RecoveryController {
                         .into_response(),
                         Err(e) => (
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ApiV2Response::<()>::error("SAVE_ERROR", &e.to_string())),
+                            Json(ApiV2Response::<()>::error("SAVE_ERROR", e.to_string())),
                         )
                             .into_response(),
                     },
                     Err(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", &e.to_string())),
+                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", e.to_string())),
                     )
                         .into_response(),
                 }
@@ -812,7 +810,7 @@ impl RecoveryController {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiV2Response::<()>::error(
                     "RECONSTRUCTION_ERROR",
-                    &e.to_string(),
+                    e.to_string(),
                 )),
             )
                 .into_response(),

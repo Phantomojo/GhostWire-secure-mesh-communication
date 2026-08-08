@@ -3,17 +3,18 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// Transport Enum for async dispatch
 #[derive(Clone)]
 pub enum TransportKind {
     #[cfg(feature = "mesh")]
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
-    Dummy, // No-op transport for tests/default
+    Dummy,
     Quic(Arc<crate::core::quic_transport::QuicTransportProvider>),
     StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
     #[cfg(feature = "bluetooth")]
     Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
     Simulated(Arc<tokio::sync::RwLock<crate::core::sim_transport::SimTransport>>),
+    #[cfg(feature = "reticulum")]
+    Reticulum(Arc<tokio::sync::RwLock<crate::core::reticulum::ReticulumTransport>>),
 }
 
 impl TransportKind {
@@ -27,6 +28,8 @@ impl TransportKind {
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "bluetooth",
             TransportKind::Simulated(_) => "simulated",
+            #[cfg(feature = "reticulum")]
+            TransportKind::Reticulum(_) => "reticulum",
         }
     }
     pub fn description(&self) -> &'static str {
@@ -39,6 +42,8 @@ impl TransportKind {
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
             TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
+            #[cfg(feature = "reticulum")]
+            TransportKind::Reticulum(_) => "Reticulum RNS Network",
         }
     }
     pub async fn send_message(&self, message: &Message) -> Result<()> {
@@ -52,12 +57,8 @@ impl TransportKind {
                 tracing::trace!("Dummy transport sending message to {}", message.recipient);
                 Ok(())
             }
-            TransportKind::StealthTCP(provider) => {
-                provider.send_message(message).await
-            }
-            TransportKind::Quic(provider) => {
-                provider.send_message(message).await
-            }
+            TransportKind::StealthTCP(provider) => provider.send_message(message).await,
+            TransportKind::Quic(provider) => provider.send_message(message).await,
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
                 let transport = transport.read().await;
@@ -67,7 +68,6 @@ impl TransportKind {
             }
             TransportKind::Simulated(transport) => {
                 let transport = transport.read().await;
-                // Default to Bluetooth mock for теперь
                 transport
                     .send_simulated(
                         &message.recipient,
@@ -76,6 +76,11 @@ impl TransportKind {
                     )
                     .await
             }
+            #[cfg(feature = "reticulum")]
+            TransportKind::Reticulum(transport) => {
+                let mut transport = transport.write().await;
+                transport.send_message(message).await
+            }
         }
     }
     pub async fn receive_message(&self) -> Result<Option<Message>> {
@@ -83,7 +88,10 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
-            TransportKind::StealthTCP(_) => Ok(None),
+            TransportKind::StealthTCP(provider) => match provider.poll_receive().await {
+                Some((_addr, msg)) => Ok(Some(msg)),
+                None => Ok(None),
+            },
             TransportKind::Quic(_) => Ok(None),
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),
@@ -92,9 +100,14 @@ impl TransportKind {
                 let packet = transport.receive_next().await?;
                 Ok(Some(Message::new(
                     packet.sender_id,
-                    "me".to_string(), // In reality would be our ID
+                    "me".to_string(),
                     String::from_utf8_lossy(&packet.payload).to_string(),
                 )))
+            }
+            #[cfg(feature = "reticulum")]
+            TransportKind::Reticulum(transport) => {
+                let mut transport = transport.write().await;
+                transport.receive_message().await
             }
         }
     }
@@ -103,6 +116,12 @@ impl TransportKind {
 // Registry for all available transports (built-in and plugins)
 pub struct TransportRegistry {
     transports: HashMap<String, TransportKind>,
+}
+
+impl Default for TransportRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransportRegistry {

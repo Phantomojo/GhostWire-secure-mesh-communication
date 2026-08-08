@@ -44,8 +44,7 @@ impl SecureMessageStore {
     /// with master key). No peer-key ECDH — that's for in-transit only.
     pub fn save_message(&self, message: &Message) -> Result<()> {
         let key = format!("msg_{}_{}", message.timestamp, message.id);
-        self.persistence
-            .store_secure("messages", &key, message)?;
+        self.persistence.store_secure("messages", &key, message)?;
 
         info!(
             message_id = %message.id,
@@ -72,9 +71,8 @@ impl SecureMessageStore {
 
     /// Load all messages from the encrypted store
     pub fn load(&self) -> Result<Vec<Message>> {
-        let mut all_messages: Vec<Message> = self
-            .persistence
-            .load_all_secure::<Message>("messages")?;
+        let mut all_messages: Vec<Message> =
+            self.persistence.load_all_secure::<Message>("messages")?;
 
         let plain_messages: Vec<Message> = self
             .persistence
@@ -118,6 +116,7 @@ impl SecureMessageStore {
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all messages from store");
         self.persistence.clear_tree("messages")?;
+        self.persistence.clear_tree("messages_plain")?;
         Ok(())
     }
 
@@ -137,7 +136,10 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
-        let persistence = Arc::new(PersistenceManager::new(None).unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(
+            PersistenceManager::new_with_base_dir(dir.path().to_path_buf(), None).unwrap(),
+        );
         let encryption = Arc::new(EncryptionManager::new().unwrap());
         let store = SecureMessageStore::new(persistence, encryption);
 

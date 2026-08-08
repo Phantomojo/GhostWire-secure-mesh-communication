@@ -145,6 +145,74 @@ scratch/
 graphify-out/
 .playwright-mcp/
 
+# Research & analysis (AI-generated, not code)
+research/
+articles/
+outreach/
+reddit-engagement/
+legalgh/
+
+# Working docs (AI session artifacts, not project docs)
+PLAN-next-sprint.md
+GhostWire-Upgrades-From-BitChat-Session.md
+PRIVACY_NETWORKS_RESEARCH.md
+REFACTORING_REPORT.md
+SECURITY_TEST_REPORT.md
+THREAT_MODEL.md
+TRANSPORT_IMPLEMENTATION_PLAN.md
+GHOSTWIRE_RNS_ARCHITECTURE.md
+DIRECTORY_STRUCTURE.md
+QWEN.md
+MIRROR-INSTRUCTIONS.md
+MIRROR-SETUP.md
+CROSS-POST-TEMPLATES.md
+ESP32_STATUS.md
+LICENSE_EXPLANATION.md
+TERMS_OF_USE.md
+
+# Generated docs/ files (not project docs)
+docs/AUDIT_REPORT.md
+docs/COMPREHENSIVE_CODE_REVIEW.md
+docs/EXTERNAL_PROJECT_LEARNINGS.md
+docs/FIRST_PING.md
+docs/GHOSTWIRE_MANIFESTO.md
+docs/ghostwire-manifesto-framework.md
+docs/GLOBAL_KNOWLEDGE_SOURCES.md
+docs/RECOMMENDATIONS.md
+docs/SECURITY_AUDIT.md
+docs/SECURITY_AUDIT_REPORT_2026.md
+docs/VIBE_SETUP_GUIDE.md
+docs/BACKEND_COMMUNICATION_TEST.md
+docs/BRAND_GUIDELINES.md
+docs/BRANDING_INTEGRATION.md
+docs/INSTALLER_ENHANCEMENTS.md
+docs/POSTMAN_API_GUIDE.md
+docs/TRANSCRIPTION_READY.md
+docs/TRANSCRIPTION_SETUP.md
+docs/AUTOMATIC_UPDATES.md
+docs/ARCHITECTURE_RESEARCH.md
+docs/INTEGRATION_RETICULUM.md
+docs/EVALUATION_RETICULUM_VS_LIBP2P.md
+docs/LIBP2P_NETWORK_CONNECTIVITY.md
+docs/LICENSING-AND-CLA-STRATEGY.md
+docs/API_VERSIONING.md
+docs/CHANGELOG.md
+docs/CODE_OF_CONDUCT.md
+docs/CLA-CORPORATE.md
+docs/CLA.md
+docs/CONTRIBUTING.md
+docs/GOVERNANCE.md
+docs/HOW_GHOSTWIRE_WORKS.md
+docs/README.md
+docs/SECURITY.md
+docs/wiki/
+
+# Test reports (generated, not code)
+tests/*.md
+
+# Website work-in-progress
+website-next/worklog.md
+
 # Log directories
 logs/
 
@@ -187,3 +255,47 @@ build_errors.txt
 *.rs.bak
 probe_sss.rs
 test_dalek.rs
+
+# === Cleanup additions ===
+
+# Datasets (ML training data, 12GB+)
+datasets/
+
+# Zip bundles
+*.zip
+
+# Cross-compilation binary
+cross
+
+# ESP-IDF SDK (2.2GB)
+esp-idf/
+
+# Tool configs
+.opencode/
+.sisyphus/
+
+# Build artifacts
+ghostwire-libs/target/
+
+# Graphify outputs
+graphify/
+
+# Log directories (raw session logs)
+raw_logs_*/
+
+# Testing session data
+testing/
+
+# Website backups
+website-backup-*/
+
+# ESP32 firmware projects (move to separate repo if needed)
+esp32-firmware-*/
+
+# Empty/error files
+404
+429
+
+# Build logs (already covered by *.log, but explicit)
+build.log
+build2.log

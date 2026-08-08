@@ -157,9 +157,8 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut event_rx = state.core.read().await.event_bus.subscribe();
 
     // Send connected confirmation
-    let node_id = state.core.read().await.get_identity_id().await;
     let connected_msg = serde_json::to_string(&WsEvent::Connected {
-        node_id: node_id.clone(),
+        node_id: "redacted".into(),
         version: "2.0.0".into(),
     })
     .unwrap_or_default();
@@ -190,11 +189,8 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("WS encryption failed: {}", e);
-                        // Send unencrypted error as fallback
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
+                        tracing::warn!("WS encryption failed, dropping message: {}", e);
+                        break;
                     }
                 }
             }
@@ -232,10 +228,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    tracing::debug!(
-        "WebSocket session ended for node {}",
-        &node_id[..8.min(node_id.len())]
-    );
+    tracing::debug!("WebSocket session ended");
 }
 
 async fn handle_ws_command(
@@ -277,12 +270,27 @@ async fn handle_ws_command(
         }
 
         WsCommand::SendMessage { recipient, content } => {
-            // Delegate to messaging layer
             let core = state.core.read().await;
             let sender = core.get_identity_id().await;
-            let msg = crate::core::message::Message::new(sender, recipient, content);
-            // core.send_message(msg) — wire when send_message is implemented
-            let _ = msg;
+            let msg = crate::core::message::Message::new(sender, recipient.clone(), content);
+            match core.send_direct_message(recipient, &msg).await {
+                Ok(_) => {
+                    let ack = serde_json::to_string(&WsEvent::Error {
+                        code: "SENT".into(),
+                        message: "Message delivered".into(),
+                    })
+                    .unwrap_or_default();
+                    let _ = socket.send(Message::Text(ack.into())).await;
+                }
+                Err(e) => {
+                    let err = serde_json::to_string(&WsEvent::Error {
+                        code: "SEND_FAILED".into(),
+                        message: format!("Delivery failed: {}", e),
+                    })
+                    .unwrap_or_default();
+                    let _ = socket.send(Message::Text(err.into())).await;
+                }
+            }
         }
 
         WsCommand::Subscribe { events } => {

@@ -114,8 +114,7 @@ impl BriarManager {
 
     /// Derive encryption key from identity
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
-        let public_key = identity
-            .public_key_bytes();
+        let public_key = identity.public_key_bytes();
         let mut key = [0u8; 32];
 
         let mut hasher = blake2b_simd::State::new();
@@ -252,12 +251,8 @@ impl BriarManager {
             Aes256Gcm,
         };
 
-        let cipher = Aes256Gcm::new_from_slice(
-            &self
-                .identity
-                .public_key_bytes(),
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
+        let cipher = Aes256Gcm::new_from_slice(&self.identity.public_key_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
         use rand_core::RngCore;
         let mut nonce = [0u8; 12];
@@ -285,12 +280,8 @@ impl BriarManager {
             return Err(anyhow::anyhow!("Invalid encrypted content length"));
         }
 
-        let cipher = Aes256Gcm::new_from_slice(
-            &self
-                .identity
-                .public_key_bytes(),
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
+        let cipher = Aes256Gcm::new_from_slice(&self.identity.public_key_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
 
         let nonce = &encrypted_content[..12];
         let ciphertext = &encrypted_content[12..];

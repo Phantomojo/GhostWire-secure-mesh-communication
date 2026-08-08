@@ -337,6 +337,12 @@ pub struct RatchetSessionManager {
     sessions: Arc<RwLock<HashMap<String, RatchetState>>>,
 }
 
+impl Default for RatchetSessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RatchetSessionManager {
     pub fn new() -> Self {
         RatchetSessionManager {

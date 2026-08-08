@@ -24,7 +24,7 @@ COPY ghostwire/Cargo.toml ghostwire/Cargo.lock ./
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies (cached layer)
-RUN cargo build --release && rm -rf src
+RUN cargo build --release --features reticulum && rm -rf src
 
 # Create dummy frontend dist for RustEmbed (since we are skipping frontend build)
 RUN mkdir -p /webui/dist && touch /webui/dist/index.html
@@ -35,7 +35,7 @@ COPY ghostwire/Cargo.toml ./
 COPY ghostwire/build.rs ./
 
 # Build the application
-RUN cargo build --release
+RUN cargo build --release --features reticulum
 
 # =============================================================================
 # Stage 2: Frontend Build (OPTIONAL - Commented out for first ping test)
