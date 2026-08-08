@@ -12,11 +12,11 @@ jobs:
     name: 🔐 Gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c099bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@43f48e654a29c3053e55e56e5e5f5c0c8a7f0d2e # v2.3.3
+        uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
