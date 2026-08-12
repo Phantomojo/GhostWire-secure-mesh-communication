@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
+use std::collections::BinaryHeap;
+// use std::cmp::Reverse; // Removed: unused after BinaryHeap optimization using custom Ord
 
 /// Default mean delay in milliseconds (λ = 1/mean_ms)
 /// 200ms mean = most messages < 500ms, rare outliers up to ~2s
@@ -159,18 +161,37 @@ pub struct QueuedSphinxPacket {
     pub forward_at: std::time::Instant,
 }
 
+// Implement Ord for BinaryHeap to create a min-heap based on forward_at
+impl PartialEq for QueuedSphinxPacket {
+    fn eq(&self, other: &Self) -> bool {
+        self.forward_at == other.forward_at
+    }
+}
+impl Eq for QueuedSphinxPacket {}
+impl PartialOrd for QueuedSphinxPacket {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for QueuedSphinxPacket {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse to make it a min-heap (earliest time first)
+        other.forward_at.cmp(&self.forward_at)
+    }
+}
+
 /// A delay queue that holds Sphinx packets until their mixing delay expires.
 /// This is the recommended way to implement mixing at scale — a single
 /// background task drains the queue rather than blocking per-packet.
 pub struct MixingQueue {
-    queue: std::sync::Arc<tokio::sync::Mutex<Vec<QueuedSphinxPacket>>>,
+    queue: std::sync::Arc<tokio::sync::Mutex<BinaryHeap<QueuedSphinxPacket>>>,
     config: MixingConfig,
 }
 
 impl MixingQueue {
     pub fn new(config: MixingConfig) -> Self {
         Self {
-            queue: std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            queue: std::sync::Arc::new(tokio::sync::Mutex::new(BinaryHeap::new())),
             config,
         }
     }
@@ -192,17 +213,15 @@ impl MixingQueue {
         let now = std::time::Instant::now();
         let mut queue = self.queue.lock().await;
         let mut ready = Vec::new();
-        let mut remaining = Vec::new();
 
-        for pkt in queue.drain(..) {
+        while let Some(pkt) = queue.peek() {
             if pkt.forward_at <= now {
-                ready.push(pkt);
+                ready.push(queue.pop().unwrap());
             } else {
-                remaining.push(pkt);
+                break;
             }
         }
 
-        *queue = remaining;
         ready
     }
 

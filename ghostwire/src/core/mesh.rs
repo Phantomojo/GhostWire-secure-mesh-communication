@@ -144,7 +144,7 @@ pub struct MeshBehaviour {
     pub gossipsub: Gossipsub,
     pub kad: Kad<MemoryStore>,
     pub identify: Identify,
-    pub mdns: Mdns,
+    pub mdns: libp2p::swarm::behaviour::toggle::Toggle<Mdns>,
     pub autonat: libp2p::autonat::Behaviour,
     pub relay: libp2p::relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
@@ -168,9 +168,9 @@ impl StealthTransport {
 
 /// Mesh transport implementation with enhanced security
 pub struct MeshTransport {
-    swarm: Option<Swarm<MeshBehaviour>>,
+    swarm: std::sync::Mutex<Option<Swarm<MeshBehaviour>>>,
     command_tx: mpsc::Sender<MeshCommand>,
-    command_rx: Option<mpsc::Receiver<MeshCommand>>,
+    command_rx: std::sync::Mutex<Option<mpsc::Receiver<MeshCommand>>>,
     node_id: String,
     identity: Arc<Identity>,
     security_manager: Arc<SecurityManager>,
@@ -275,7 +275,11 @@ impl MeshTransport {
         // Harden Kademlia: Increase replication and periodic refresh
         kad.set_mode(Some(libp2p::kad::Mode::Server));
 
-        let mdns = Mdns::new(MdnsConfig::default(), local_peer_id)?;
+        let mdns = if security_manager.is_mdns_enabled().await {
+            Some(Mdns::new(MdnsConfig::default(), local_peer_id)?).into()
+        } else {
+            None.into()
+        };
 
         let autonat =
             libp2p::autonat::Behaviour::new(local_peer_id, libp2p::autonat::Config::default());
@@ -314,9 +318,9 @@ impl MeshTransport {
         let (command_tx, command_rx) = mpsc::channel(100);
 
         Ok(Self {
-            swarm: Some(swarm),
+            swarm: std::sync::Mutex::new(Some(swarm)),
             command_tx,
-            command_rx: Some(command_rx),
+            command_rx: std::sync::Mutex::new(Some(command_rx)),
             node_id: node_id.clone(),
             identity,
             security_manager,
@@ -354,10 +358,14 @@ impl MeshTransport {
 
         let mut swarm = self
             .swarm
+            .lock()
+            .unwrap()
             .take()
             .ok_or_else(|| anyhow::anyhow!("Swarm already started or missing"))?;
         let command_rx = self
             .command_rx
+            .lock()
+            .unwrap()
             .take()
             .ok_or_else(|| anyhow::anyhow!("Channels missing"))?;
 
@@ -2157,8 +2165,8 @@ pub struct MeshStats {
     pub security_stats: SecurityStats,
 }
 
-unsafe impl Sync for MeshTransport {}
-unsafe impl Send for MeshTransport {}
+// unsafe impl Sync for MeshTransport {} — Removed: now safe via Mutex wrapping of Swarm and Receiver
+// unsafe impl Send for MeshTransport {} — Removed: now safe via Mutex wrapping of Swarm and Receiver
 
 #[cfg(test)]
 mod tests {

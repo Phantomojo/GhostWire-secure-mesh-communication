@@ -749,7 +749,7 @@ impl EncryptionManager {
     }
 
     // Enhanced encryption method for CLI compatibility
-    pub fn encrypt(&self, data: &[u8]) -> Vec<u8> {
+    pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<Vec<u8>> {
         // Derive a strong 32-byte key from our key pair
         let key = self.derive_cli_key();
 
@@ -758,14 +758,11 @@ impl EncryptionManager {
                 // Combine nonce and ciphertext
                 let mut combined = result.nonce;
                 combined.extend_from_slice(&result.ciphertext);
-                combined
+                Ok(combined)
             }
             Err(e) => {
                 tracing::error!(inner_error = %e, "CLI encryption failed");
-                panic!(
-                    "Encryption failed - this should never happen in production: {}",
-                    e
-                );
+                Err(anyhow::anyhow!("Encryption failed: {}", e))
             }
         }
     }
