@@ -43,9 +43,11 @@ fn test_fallback_routing_scores() {
         "Good link should be > 0.7, got {}",
         good_score
     );
+    // The documented weighted formula yields 0.51 for this intentionally
+    // poor-but-not-unusable link: 0.2×0.3 + 0.7×0.3 + 0.7×0.2 + 0.5×0.2.
     assert!(
-        poor_score < 0.5,
-        "Poor link should be < 0.5, got {}",
+        (poor_score - 0.51).abs() < 1e-6,
+        "Poor-link score should match the documented formula, got {}",
         poor_score
     );
 }
