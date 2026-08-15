@@ -551,7 +551,9 @@ mod tests {
 
         let hs = DtnSyncHandshake::build(&store).await;
         assert_eq!(hs.node_id, [0x01u8; 32]);
-        assert!(hs.have_bloom.contains(&DtnBundle::new(vec![10, 20, 30], [0x02u8; 32]).cid));
+        assert!(hs
+            .have_bloom
+            .contains(&DtnBundle::new(vec![10, 20, 30], [0x02u8; 32]).cid));
         assert!(hs.ts > 0);
 
         let serialized = bincode::serialize(&hs).unwrap();

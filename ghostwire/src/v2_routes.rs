@@ -32,12 +32,12 @@ pub async fn get_security_dashboard(
     let core = state.core.read().await;
 
     // Get security stats from SecurityManager
-    let sec_manager = &core.security_manager;
+    let sec_manager = &core.security_stack.security_manager;
     let stats = sec_manager.get_stats().await;
 
     // Get identity lock status
     let identity_locked = {
-        let identity = core.identity.read().await;
+        let identity = core.identity_stack.identity.read().await;
         identity.is_locked()
     };
 

@@ -20,6 +20,11 @@ impl VectorClock {
         }
     }
 
+    #[cfg(test)]
+    pub fn from_map(clocks: HashMap<String, u64>) -> Self {
+        Self { clocks }
+    }
+
     pub fn increment(&mut self, node_id: &str) {
         *self.clocks.entry(node_id.to_string()).or_insert(0) += 1;
     }
@@ -59,6 +64,10 @@ impl VectorClock {
 
     pub fn get(&self, node_id: &str) -> u64 {
         self.clocks.get(node_id).copied().unwrap_or(0)
+    }
+
+    pub fn clocks(&self) -> &HashMap<String, u64> {
+        &self.clocks
     }
 
     pub fn is_empty(&self) -> bool {

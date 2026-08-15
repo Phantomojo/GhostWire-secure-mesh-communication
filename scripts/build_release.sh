@@ -8,26 +8,18 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}[GhostWire] Starting Clean Release Build...${NC}"
 
-# 1. Build Frontend
-echo -e "${BLUE}[1/3] Building WebUI (Profile & Assets)...${NC}"
-cd webui
-npm install --silent
-npm run build
-cd ..
-
-# 2. Build Backend
-echo -e "${BLUE}[2/3] Compiling Rust Core (Release Mode - Optimized)...${NC}"
+# 1. Build Backend
+# The legacy WebUI was removed from the tracked source tree. The daemon still
+# serves its authenticated API; embedding a WebUI requires the explicit
+# `embedded-webui` feature and a separately supplied, reviewed asset tree.
+echo -e "${BLUE}[1/2] Compiling Rust Core (Release Mode - Optimized)...${NC}"
 cd ghostwire
-# Ensure the dist folder is picked up by rust-embed
-if [ ! -d "../webui/dist" ]; then
-    echo "Error: webui/dist not found!"
-    exit 1
-fi
 cargo build --release
 cd ..
 
-# 3. Package Release
-echo -e "${BLUE}[3/3] Packaging Release...${NC}"
+# 2. Package Release
+echo -e "${BLUE}[2/2] Packaging Release...${NC}"
+
 mkdir -p release
 cp ghostwire/target/release/ghostwire release/ghostwire_node
 chmod +x release/ghostwire_node

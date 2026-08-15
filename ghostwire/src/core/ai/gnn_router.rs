@@ -42,7 +42,8 @@ pub const EMBEDDING_REFRESH_SECS: u64 = 300;
 /// Expected BLAKE2b-256 hash of the scoring model ONNX file.
 /// Set this after model export: `sha256sum models/gnn_routing/gnn_routing.onnx`
 /// or: `python3 -c "import hashlib; print(hashlib.new('blake2b', open('models/gnn_routing/gnn_routing.onnx','rb').read(), digest_size=32).hexdigest())"`
-pub const EXPECTED_SCORING_HASH: &str = "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
+pub const EXPECTED_SCORING_HASH: &str =
+    "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
 
 // ── Embedding freshness ──────────────────────────────────────────────────────
 
@@ -826,7 +827,13 @@ mod tests {
 
         assert_eq!(topology.num_nodes, 3);
         assert_eq!(topology.node_features.len(), 3);
-        let peer1_idx = 0;
-        assert!(topology.adjacency.contains_key(&peer1_idx));
+        // Node indexes are assigned from HashMap iteration and are therefore
+        // intentionally not stable. Both routes share one direct next hop, so
+        // adjacency contains one neighbour while route and edge maps retain
+        // the two destination-specific entries.
+        assert_eq!(topology.adjacency.len(), 1);
+        assert_eq!(topology.adjacency.values().next().unwrap().len(), 1);
+        assert_eq!(topology.edge_features.len(), 2);
+        assert_eq!(topology.routing.values().next().unwrap().len(), 2);
     }
 }

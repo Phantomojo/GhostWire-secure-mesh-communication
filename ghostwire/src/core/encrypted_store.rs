@@ -34,7 +34,6 @@ const STORE_VERSION: u8 = 1;
 const NONCE_LEN: usize = 12;
 const KEY_HASH_PREFIX: &[u8] = b"gw_khash_v1:";
 
-
 /// The encrypted storage layer master key. ZeroizedOnDrop for safety.
 #[derive(Zeroize, ZeroizeOnDrop)]
 struct MasterKey([u8; 32]);

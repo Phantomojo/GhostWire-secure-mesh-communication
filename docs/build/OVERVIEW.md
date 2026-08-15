@@ -6,18 +6,18 @@
 
 ## What Is GhostWire?
 
-GhostWire is a decentralized networking protocol written in Rust that operates without any central servers, cloud infrastructure, or trusted third parties. It provides:
+GhostWire is a decentralized networking protocol written in Rust. The repository is active development: a documented feature, crate, module, or flag is not necessarily a production-supported delivery path. See the authoritative [transport and bridge support status](../TRANSPORT_SUPPORT_STATUS.md) before building on any carrier or adapter.
 
-| Layer | Capability |
+| Layer | Current implementation boundary |
 |-------|-----------|
 | **Mesh Networking** | libp2p GossipSub, Kademlia DHT, mDNS discovery |
-| **Pluggable Transports** | StealthTCP, WebRTC, BLE, LoRa, Reticulum, obfs4, WebSocket Camouflage, Shadowsocks AEAD, TLS Camouflage |
+| **Carrier policy foundation** | Tested capability, eligibility, identity-separation, fragmentation, and protected-envelope handoff planning; concrete automatic switching remains in progress |
 | **Cryptography** | XChaCha20-Poly1305, X25519, Ed25519, ML-KEM-768 (post-quantum), forward secrecy ratchet |
 | **Anonymous Routing** | Sphinx onion routing with Single-Use Reply Blocks (SURBs) |
 | **Delay-Tolerant Networking** | Spray-and-Wait + PRoPHET epidemic routing, store-carry-forward |
 | **AI Routing** | 4-layer ML stack: LightGBM -> Gemma 4 -> GNN -> PRoPHET fallback |
 | **Identity** | Self-sovereign DIDs, device pairing, Shamir secret recovery, coercion resistance |
-| **Knowledge Ark** | Content-addressed offline knowledge distribution |
+| **Knowledge Ark** | Local content-addressed foundations; no supported public swarm/provider discovery claim |
 | **Ghost Channels** | Proof-of-work protected broadcast channels |
 
 ---
@@ -28,14 +28,14 @@ GhostWire is a decentralized networking protocol written in Rust that operates w
 |------------|-------------|------------------------|
 | **Encrypted Messenger** | End-to-end encrypted chat over mesh networks | Sphinx routing, identity, messaging API |
 | **Anonymous Tip Line** | Whistleblower platform with SURB-based anonymous replies | Sphinx SURBs, coercion resistance |
-| **Disaster Communications** | Offline-capable comms for emergency responders | DTN store-carry-forward, BLE, LoRa |
+| **Disaster Communications** | Architecture and future carrier goals for emergency responders | Current mesh/DTN foundations; BLE and LoRa adapters are not yet supported |
 | **Offline Knowledge Distribution** | Share medical guides, legal info, maps without internet | Knowledge Ark, DTN bundles |
-| **Secure File Sharing** | Censorship-resistant file distribution | BlockStore/Bitswap, pluggable transports |
+| **Private Bulk Transfer (foundation)** | Bounded local content-addressed staging and a private-transfer design | No supported Bitswap/IPFS compatibility, public swarm, or network file-transfer API |
 | **Activist Safety Platform** | Panic mode, duress PIN, dead man's switch for at-risk users | Coercion resistance, Shamir recovery |
 | **Mesh Social Network** | Decentralized social feed over local mesh | Ghost Channels, social graph, WoT |
 | **IoT Sensor Network** | Collect and route sensor data across mesh | DTN, lightweight transports |
-| **Censorship-Resistant Gateway** | Bridge censored networks to the open mesh | Pluggable transports (obfs4, Shadowsocks) |
-| **Protocol Bridge** | Connect GhostWire to Matrix, Briar, Meshtastic, Reticulum | Adapter registry, bridge crates |
+| **Censorship-Resistant Gateway (research)** | Future bridge/camouflage design direction | Individual stealth transports require explicit adapter and privacy validation |
+| **Protocol Bridge** | Experimental bounded RNS interoperability; other bridges require independent audit | Matrix, Briar, Meshtastic are not supported bridge claims |
 
 ---
 
@@ -188,9 +188,10 @@ You do not need to run the GhostWire application to use GhostWire protocol compo
 
 1. **[Quick Start](./QUICKSTART.md)** -- Get a minimal GhostWire node running in 5 minutes
 2. **[Embedding Guide](./EMBEDDING.md)** -- Integrate GhostWire into your application
-3. **[Custom Transports](./CUSTOM_TRANSPORT.md)** -- Implement new transport layers
-4. **[Protocol Bridges](./PROTOCOL_BRIDGES.md)** -- Connect to other networks
-5. **[API Reference](./API_REFERENCE.md)** -- Complete REST API documentation
+3. **[Transport Support Status](../TRANSPORT_SUPPORT_STATUS.md)** -- Verified, experimental, planned, and unsupported carrier/bridge boundaries
+4. **[Custom Transports](./CUSTOM_TRANSPORT.md)** -- Carrier-contract design guidance; not proof of existing adapter support
+5. **[Protocol Bridges](./PROTOCOL_BRIDGES.md)** -- Bridge status and required security boundary
+6. **[API Reference](./API_REFERENCE.md)** -- Complete REST API documentation
 
 ---
 

@@ -46,6 +46,7 @@ pub struct NetworkConfig {
     pub obfs4_enabled: bool,
     /// Obfs4 secret key (hex-encoded, if not provided a random key is generated)
     pub obfs4_secret_key: Option<String>,
+    pub bootstrap_nodes: Vec<String>,
 }
 
 impl std::fmt::Debug for NetworkConfig {
@@ -138,6 +139,7 @@ impl Default for Config {
                 stealth_handshake_secret: None,
                 obfs4_enabled: true,    // Always-on obfuscation by default
                 obfs4_secret_key: None, // Generated randomly if not provided
+                bootstrap_nodes: vec![],
             },
             encryption: EncryptionConfig {
                 algorithm: "AES-256-GCM".to_string(),
@@ -258,6 +260,10 @@ impl Config {
         }
         if let Ok(secret) = env::var("GHOSTWIRE_OBFS4_SECRET") {
             config.network.obfs4_secret_key = Some(secret);
+        }
+
+        if let Ok(nodes) = env::var("GHOSTWIRE_BOOTSTRAP_NODES") {
+            config.network.bootstrap_nodes = nodes.split(',').map(|s| s.to_string()).collect();
         }
 
         config

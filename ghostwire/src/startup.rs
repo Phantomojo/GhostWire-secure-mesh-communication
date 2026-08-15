@@ -27,12 +27,31 @@ use tokio::sync::broadcast;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum BootEvent {
-    PhaseStart { phase: u8, name: String },
-    PhaseComplete { phase: u8, duration_ms: u64 },
-    PhaseFailed { phase: u8, reason: String },
-    Check { name: String, status: CheckStatus, detail: Option<String> },
-    Warning { message: String },
-    Ready { node_id: String, transport: String, peer_count: u32 },
+    PhaseStart {
+        phase: u8,
+        name: String,
+    },
+    PhaseComplete {
+        phase: u8,
+        duration_ms: u64,
+    },
+    PhaseFailed {
+        phase: u8,
+        reason: String,
+    },
+    Check {
+        name: String,
+        status: CheckStatus,
+        detail: Option<String>,
+    },
+    Warning {
+        message: String,
+    },
+    Ready {
+        node_id: String,
+        transport: String,
+        peer_count: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,16 +118,30 @@ impl StartupSequence {
     /// PHASE 0 — Pre-flight checks (fast, no I/O)
     pub fn phase0_preflight(&mut self, data_dir: &PathBuf) -> Result<()> {
         let t = Instant::now();
-        self.emit(BootEvent::PhaseStart { phase: 0, name: "Pre-flight".into() });
+        self.emit(BootEvent::PhaseStart {
+            phase: 0,
+            name: "Pre-flight".into(),
+        });
 
         // Check data directory
         if data_dir.exists() {
-            self.check("data directory", CheckStatus::Pass, Some(data_dir.display().to_string()));
+            self.check(
+                "data directory",
+                CheckStatus::Pass,
+                Some(data_dir.display().to_string()),
+            );
         } else {
             match std::fs::create_dir_all(data_dir) {
-                Ok(_) => self.check("data directory (created)", CheckStatus::Pass, Some(data_dir.display().to_string())),
+                Ok(_) => self.check(
+                    "data directory (created)",
+                    CheckStatus::Pass,
+                    Some(data_dir.display().to_string()),
+                ),
                 Err(e) => {
-                    self.emit(BootEvent::PhaseFailed { phase: 0, reason: format!("Cannot create data dir: {}", e) });
+                    self.emit(BootEvent::PhaseFailed {
+                        phase: 0,
+                        reason: format!("Cannot create data dir: {}", e),
+                    });
                     anyhow::bail!("Cannot create data dir: {}", e);
                 }
             }
@@ -117,7 +150,10 @@ impl StartupSequence {
         // Check disk space (warn if < 100MB)
         if let Ok(space) = available_space(data_dir) {
             if space < 100 * 1024 * 1024 {
-                self.warn(format!("Low disk space: {} MB available", space / 1024 / 1024));
+                self.warn(format!(
+                    "Low disk space: {} MB available",
+                    space / 1024 / 1024
+                ));
             } else {
                 self.check(
                     "disk space",
@@ -136,7 +172,10 @@ impl StartupSequence {
             self.warn("Port 8080 already in use — API server may conflict");
         }
 
-        self.emit(BootEvent::PhaseComplete { phase: 0, duration_ms: t.elapsed().as_millis() as u64 });
+        self.emit(BootEvent::PhaseComplete {
+            phase: 0,
+            duration_ms: t.elapsed().as_millis() as u64,
+        });
         Ok(())
     }
 
@@ -147,7 +186,10 @@ impl StartupSequence {
         data_dir: &PathBuf,
     ) -> Result<IdentityBootResult> {
         let t = Instant::now();
-        self.emit(BootEvent::PhaseStart { phase: 1, name: "Identity".into() });
+        self.emit(BootEvent::PhaseStart {
+            phase: 1,
+            name: "Identity".into(),
+        });
 
         let profile_dir = match profile {
             Some(p) => data_dir.join("profiles").join(p),
@@ -157,9 +199,17 @@ impl StartupSequence {
         let is_new_identity = !profile_dir.join("identity.enc").exists();
 
         if is_new_identity {
-            self.check("identity", CheckStatus::Warn, Some("No existing identity — will create on first unlock".into()));
+            self.check(
+                "identity",
+                CheckStatus::Warn,
+                Some("No existing identity — will create on first unlock".into()),
+            );
         } else {
-            self.check("identity file", CheckStatus::Pass, Some(profile_dir.display().to_string()));
+            self.check(
+                "identity file",
+                CheckStatus::Pass,
+                Some(profile_dir.display().to_string()),
+            );
         }
 
         // Check JWT seed
@@ -167,7 +217,11 @@ impl StartupSequence {
         if jwt_seed_path.exists() {
             self.check("JWT secret", CheckStatus::Pass, Some("persisted".into()));
         } else {
-            self.check("JWT secret", CheckStatus::Warn, Some("will generate fresh on startup".into()));
+            self.check(
+                "JWT secret",
+                CheckStatus::Warn,
+                Some("will generate fresh on startup".into()),
+            );
         }
 
         // Verify key files are not corrupted (size check)
@@ -180,7 +234,10 @@ impl StartupSequence {
             }
         }
 
-        self.emit(BootEvent::PhaseComplete { phase: 1, duration_ms: t.elapsed().as_millis() as u64 });
+        self.emit(BootEvent::PhaseComplete {
+            phase: 1,
+            duration_ms: t.elapsed().as_millis() as u64,
+        });
 
         Ok(IdentityBootResult {
             is_new_identity,
@@ -191,7 +248,10 @@ impl StartupSequence {
     /// PHASE 2 — Storage
     pub async fn phase2_storage(&mut self, data_dir: &PathBuf) -> Result<()> {
         let t = Instant::now();
-        self.emit(BootEvent::PhaseStart { phase: 2, name: "Storage".into() });
+        self.emit(BootEvent::PhaseStart {
+            phase: 2,
+            name: "Storage".into(),
+        });
 
         let db_path = data_dir.join("db");
 
@@ -215,7 +275,10 @@ impl StartupSequence {
             }
         }
 
-        self.emit(BootEvent::PhaseComplete { phase: 2, duration_ms: t.elapsed().as_millis() as u64 });
+        self.emit(BootEvent::PhaseComplete {
+            phase: 2,
+            duration_ms: t.elapsed().as_millis() as u64,
+        });
         Ok(())
     }
 
@@ -225,7 +288,10 @@ impl StartupSequence {
         config: &NetworkBootConfig,
     ) -> Result<NetworkBootResult> {
         let t = Instant::now();
-        self.emit(BootEvent::PhaseStart { phase: 3, name: "Network".into() });
+        self.emit(BootEvent::PhaseStart {
+            phase: 3,
+            name: "Network".into(),
+        });
 
         let mut result = NetworkBootResult::default();
 
@@ -235,7 +301,11 @@ impl StartupSequence {
             self.check("internet", CheckStatus::Pass, None);
             result.has_internet = true;
         } else {
-            self.check("internet", CheckStatus::Warn, Some("offline — LAN/BT only".into()));
+            self.check(
+                "internet",
+                CheckStatus::Warn,
+                Some("offline — LAN/BT only".into()),
+            );
             self.warn("No internet detected — operating in local mesh mode");
         }
 
@@ -245,7 +315,11 @@ impl StartupSequence {
             self.check("LAN address", CheckStatus::Pass, Some(ip.to_string()));
             result.lan_ip = Some(ip.to_string());
         } else {
-            self.check("LAN address", CheckStatus::Warn, Some("none detected".into()));
+            self.check(
+                "LAN address",
+                CheckStatus::Warn,
+                Some("none detected".into()),
+            );
         }
 
         // Check listen port availability
@@ -265,7 +339,7 @@ impl StartupSequence {
         }
 
         // Check bootstrap nodes
-        if config.bootstrap_nodes.is_empty() {
+        if config.network_stack.bootstrap_nodes.is_empty() {
             self.check(
                 "bootstrap nodes",
                 CheckStatus::Warn,
@@ -275,9 +349,12 @@ impl StartupSequence {
             self.check(
                 "bootstrap nodes",
                 CheckStatus::Pass,
-                Some(format!("{} configured", config.bootstrap_nodes.len())),
+                Some(format!(
+                    "{} configured",
+                    config.network_stack.bootstrap_nodes.len()
+                )),
             );
-            result.bootstrap_count = config.bootstrap_nodes.len();
+            result.bootstrap_count = config.network_stack.bootstrap_nodes.len();
         }
 
         // Select transport mode
@@ -288,7 +365,11 @@ impl StartupSequence {
         } else {
             "stealth".into()
         };
-        self.check("transport mode", CheckStatus::Pass, Some(result.transport_mode.clone()));
+        self.check(
+            "transport mode",
+            CheckStatus::Pass,
+            Some(result.transport_mode.clone()),
+        );
 
         // Check if obfs4 is requested but known non-functional
         if config.obfs4_enabled {
@@ -305,19 +386,24 @@ impl StartupSequence {
     /// PHASE 4 — Knowledge Ark init
     pub async fn phase4_knowledge(&mut self, data_dir: &PathBuf) -> Result<KnowledgeBootResult> {
         let t = Instant::now();
-        self.emit(BootEvent::PhaseStart { phase: 4, name: "Knowledge Ark".into() });
+        self.emit(BootEvent::PhaseStart {
+            phase: 4,
+            name: "Knowledge Ark".into(),
+        });
 
         let ark_dir = data_dir.join("ark");
         let is_new = !ark_dir.exists();
 
         if is_new {
             std::fs::create_dir_all(&ark_dir).ok();
-            self.check("knowledge ark", CheckStatus::Warn, Some("initialising fresh".into()));
+            self.check(
+                "knowledge ark",
+                CheckStatus::Warn,
+                Some("initialising fresh".into()),
+            );
         } else {
             // Count entry files
-            let entry_count = std::fs::read_dir(&ark_dir)
-                .map(|d| d.count())
-                .unwrap_or(0);
+            let entry_count = std::fs::read_dir(&ark_dir).map(|d| d.count()).unwrap_or(0);
             self.check(
                 "knowledge ark",
                 CheckStatus::Pass,
@@ -325,7 +411,10 @@ impl StartupSequence {
             );
         }
 
-        self.emit(BootEvent::PhaseComplete { phase: 4, duration_ms: t.elapsed().as_millis() as u64 });
+        self.emit(BootEvent::PhaseComplete {
+            phase: 4,
+            duration_ms: t.elapsed().as_millis() as u64,
+        });
         Ok(KnowledgeBootResult { is_new })
     }
 
@@ -348,7 +437,10 @@ impl StartupSequence {
 
     /// Generate the full boot report
     pub fn report(&self, node_id: Option<String>, net: &NetworkBootResult) -> BootReport {
-        let success = !self.events.iter().any(|e| matches!(e, BootEvent::PhaseFailed { .. }));
+        let success = !self
+            .events
+            .iter()
+            .any(|e| matches!(e, BootEvent::PhaseFailed { .. }));
         BootReport {
             events: self.events.clone(),
             total_duration_ms: self.started_at.elapsed().as_millis() as u64,

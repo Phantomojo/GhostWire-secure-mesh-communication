@@ -231,7 +231,7 @@ async fn start_web_server(core: &Arc<Core>, host: String, port: u16, mesh_port: 
         None,
         String::new(),
         mesh_port,
-        core.config.clone(),
+        (**core.config.load()).clone(),
     )
     .await
     .map_err(|e| anyhow::anyhow!("Web server error: {}", e))?;
@@ -279,7 +279,7 @@ pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> R
         println!("🔍 Discovering peer for username: {}...", username);
 
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &core.mesh_manager {
+        if let Some(mesh_manager) = &*core.network_stack.mesh_manager.load() {
             let mut mgr = mesh_manager.write().await;
             if let Ok(Some(record)) = mgr.lookup_username(username).await {
                 final_recipient = record.peer_id.to_string();
@@ -329,7 +329,7 @@ async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
     println!("🔍 Searching for peer: {}...", name);
 
     #[cfg(feature = "mesh")]
-    if let Some(mesh_manager) = &core.mesh_manager {
+    if let Some(mesh_manager) = &*core.network_stack.mesh_manager.load() {
         let mut mgr = mesh_manager.write().await;
         match mgr.lookup_username(name).await {
             Ok(Some(record)) => {
@@ -462,7 +462,7 @@ async fn generate_key(core: &Arc<Core>) -> Result<()> {
 }
 
 async fn encrypt_message(core: &Arc<Core>, message: &str) -> Result<()> {
-    let encrypted = core.encryption.encrypt(message.as_bytes());
+    let encrypted = core.security_stack.encryption.encrypt(message.as_bytes())?;
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &encrypted);
 
     println!("🔐 Encrypted message:");
@@ -476,6 +476,7 @@ async fn decrypt_message(core: &Arc<Core>, encrypted: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Invalid base64: {}", e))?;
 
     let decrypted = core
+        .security_stack
         .encryption
         .decrypt(&decoded)
         .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
@@ -696,7 +697,7 @@ async fn handle_setup() -> Result<()> {
 /// Run the interactive TUI mode — starts node + TUI in one command
 async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
     info!("🖥️  Starting GhostWire TUI (node running in background)...");
-    let port = core.config.server.port;
+    let port = core.config.load().server.port;
     crate::tui::run_tui(port)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {}", e))

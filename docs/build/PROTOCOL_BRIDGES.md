@@ -1,6 +1,8 @@
 # Building Protocol Bridges
 
-GhostWire can bridge to other communication networks, extending its reach beyond the native mesh. This guide covers the available bridges, how to configure them, and how to build your own.
+This file contains bridge design notes and historical examples. **It is not evidence that a named bridge is interoperable, privacy-reviewed, or safe to deploy.** Consult the authoritative [transport and bridge support status](../TRANSPORT_SUPPORT_STATUS.md), [carrier contract](../CARRIER_CONTRACT.md), and [inter-transport handoff contract](../INTER_TRANSPORT_HANDOFF.md) before implementing or enabling a bridge.
+
+> A bridge must carry an already protected GhostWire envelope across an explicit security boundary. It must not decrypt user plaintext merely to translate networks, merge native identities, claim a carrier receipt is end-to-end delivery, or silently fall back to a lower-privacy path.
 
 ---
 
@@ -8,10 +10,10 @@ GhostWire can bridge to other communication networks, extending its reach beyond
 
 | Bridge | Status | Feature Flag | Description |
 |--------|--------|-------------|-------------|
-| **Matrix** | Implemented | `matrix-bridge` | Bridge to Matrix federated chat via `matrix-sdk` |
-| **Meshtastic** | Implemented | `meshtastic` | Bridge to Meshtastic LoRa devices with erasure coding |
-| **Briar** | Planned | `briar` | Bridge to Briar P2P messaging |
-| **Reticulum** | Planned | `reticulum` | Bridge to Reticulum Network Stack |
+| **Matrix** | Planned / unaudited | `matrix-bridge` | Module/feature surface exists; no supported interoperable or privacy-reviewed bridge claim |
+| **Meshtastic** | Planned / unaudited | `meshtastic` | Module/feature surface exists; no supported radio bridge, erasure-coding, or delivery claim |
+| **Briar** | Planned / unavailable | `briar` | No supported Briar bridge |
+| **Reticulum / RNS** | Experimental bounded adapter | `reticulum` | External official-RNS bridge proves isolated bidirectional opaque packet delivery at a 383-byte ceiling; not general Reticulum or cross-carrier support |
 
 ---
 
@@ -33,13 +35,13 @@ GhostWire can bridge to other communication networks, extending its reach beyond
 └─────────────────────────────────────────────────────┘
 ```
 
-The `AdapterRegistry` manages all protocol bridges. Each bridge implements the `AdapterKind` enum with `send_message()` and `receive_message()` methods.
+The diagram is a target architecture, not proof that the adapter registry currently routes all listed bridges. Any future adapter must first publish a factual carrier declaration, pass the shared ingress checks, and use the protected-envelope handoff lifecycle. A `send_message()` method or feature flag alone is not a delivery guarantee.
 
 ---
 
 ## Matrix Bridge
 
-The Matrix bridge connects GhostWire to Matrix federated chat rooms.
+**Status: planned / unaudited. Do not deploy using the following historical example.** A future Matrix bridge requires an explicit external-service, identity-linkage, metadata, retention, consent, and encrypted-envelope review. The example below is retained as development reference only and must not be treated as a supported configuration.
 
 ### Configuration
 

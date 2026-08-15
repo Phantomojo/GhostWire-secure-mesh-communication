@@ -88,6 +88,7 @@ impl SystemController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .calculate_security_score()
@@ -154,6 +155,7 @@ impl SystemController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .get_config()
@@ -176,6 +178,7 @@ impl SystemController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .update_config(new_config)
@@ -186,6 +189,7 @@ impl SystemController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .save_config(path)
@@ -206,7 +210,13 @@ impl SystemController {
     }
 
     pub async fn test_firewall(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        let mgr = &state.core.read().await.security_manager.clone();
+        let mgr = &state
+            .core
+            .read()
+            .await
+            .security_stack
+            .security_manager
+            .clone();
         let is_lockdown = mgr.is_lockdown().await;
 
         let result = if is_lockdown {
@@ -223,7 +233,13 @@ impl SystemController {
     }
 
     pub async fn lockdown(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        let mgr = &state.core.read().await.security_manager.clone();
+        let mgr = &state
+            .core
+            .read()
+            .await
+            .security_stack
+            .security_manager
+            .clone();
         let current = mgr.is_lockdown().await;
         let new_state = !current;
 
@@ -276,6 +292,7 @@ impl SystemController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .save_config(&filename)

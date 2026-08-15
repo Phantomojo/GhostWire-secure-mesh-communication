@@ -164,6 +164,14 @@ impl AckTracker {
         removed
     }
 
+    /// Stop tracking a message without recording a delivery acknowledgement.
+    ///
+    /// Used when a local policy rejects dispatch after tracking began. This
+    /// prevents a privacy-policy rejection from later becoming a retransmit.
+    pub fn cancel(&self, message_id: &Uuid) -> bool {
+        self.pending.remove(message_id).is_some()
+    }
+
     /// Check which messages have timed out and need retry
     ///
     /// Returns message IDs that are past their next_retry time.
@@ -386,6 +394,13 @@ impl ReliabilityLayer {
         true
     }
 
+    /// Cancel delivery tracking without treating the message as acknowledged.
+    pub fn cancel_pending(&self, message_id: &Uuid) -> bool {
+        let removed_ack = self.ack_tracker.cancel(message_id);
+        self.retry_queue.remove(message_id);
+        removed_ack
+    }
+
     /// Called periodically (e.g., every second) to check for timeouts
     ///
     /// Returns message IDs that need retransmission
@@ -492,6 +507,18 @@ mod tests {
 
         let stats = layer.stats();
         assert_eq!(stats.ack.acks_received, 1);
+    }
+
+    #[test]
+    fn test_cancel_pending_does_not_count_as_acknowledgement() {
+        let layer = ReliabilityLayer::with_defaults();
+        let id = Uuid::new_v4();
+        layer.on_message_sent(id);
+
+        assert!(layer.cancel_pending(&id));
+        assert!(!layer.ack_tracker.is_pending(&id));
+        assert_eq!(layer.stats().ack.acks_received, 0);
+        assert_eq!(layer.stats().retry.queued, 0);
     }
 
     #[test]

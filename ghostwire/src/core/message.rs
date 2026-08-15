@@ -492,8 +492,10 @@ mod tests {
     fn test_message_age() {
         let message = Message::new("Alice".to_string(), "Bob".to_string(), "Test".to_string());
 
-        // Message just created, age should be 0 or 1 second
-        assert!(message.age() <= 1);
+        // `Message::new` applies ±30 seconds of timestamp jitter to reduce
+        // correlation risk, so an immediately-created message may appear up
+        // to 30 seconds old while preserving the privacy guarantee.
+        assert!(message.age() <= TIMESTAMP_JITTER_RANGE / 2);
     }
 
     #[test]

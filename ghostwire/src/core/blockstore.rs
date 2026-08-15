@@ -1,24 +1,21 @@
 //! blockstore.rs — Content-addressed block storage with Bitswap-inspired exchange
 //!
-//! Implements the full BlockStore + Bitswap protocol for Ghostwire:
+//! This is a **local, bounded private-bulk foundation**, not a complete
+//! Bitswap/IPFS implementation and not a Kademlia/DHT distribution protocol.
+//! It currently keeps content-addressed blocks and manifests in process memory.
+//! No wire-protocol frame, mesh event-loop handler, public provider discovery,
+//! or automatic seeding path is connected to these types.
 //!
-//!   - Files are split into fixed-size blocks (default 256 KiB)
-//!   - Each block's address = BLAKE3(block_bytes) — content-addressed
-//!   - Blocks are distributed across the Kademlia DHT
-//!   - Peers exchange blocks via wantlist + ledger + strategy engine
-//!   - Receiving a block = start seeding it (Take What You Give)
+//! Safe concepts borrowed from content-distribution systems are immutable block
+//! hashes, ordered manifests, integrity checks, cancellation, and bounded local
+//! scheduling. Public BitTorrent/IPFS swarm behavior is intentionally absent:
+//! GhostWire must not advertise public provider sets, ambient availability, or
+//! wantlists because those expose content-interest metadata.
 //!
-//! Privacy adaptations vs. plain IPFS Bitswap:
-//!   - No public provider announcements (would leak what content you hold)
-//!   - Block requests are routed via private routes, not direct DHT queries
-//!   - Ledger is per-session (resets on restart) to avoid long-term tracking
-//!
-//! INTEGRATION:
-//!   1. Add BlockStore to Core struct
-//!   2. Wire file_send API endpoint → BlockStore::store_file()
-//!   3. Wire file_receive API endpoint → BlockStore::retrieve_file()
-//!   4. Add Bitswap message type to wire_protocol.rs FrameKind
-//!   5. In mesh.rs event loop, handle incoming Bitswap WANT/HAVE/BLOCK messages
+//! Before any network use, a private bulk session must authenticate and bind the
+//! recipient/path, encrypt its manifest and requests, use bounded verified
+//! blocks, route through a policy-approved private carrier, and feed all ingress
+//! through the shared validation pipeline. See `INTER_TRANSPORT_HANDOFF.md`.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -27,13 +24,27 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use zeroize::Zeroize;
 
-/// Default block size: 256 KiB (balances DHT overhead vs. transfer efficiency)
+/// Default local private-bulk block size. This is not a transport MTU and
+/// must never be copied into BLE, RNS packet, LoRa, or wire-frame limits.
 pub const DEFAULT_BLOCK_SIZE: usize = 256 * 1024;
+/// Smallest accepted local block prevents pathological manifest growth.
+pub const MIN_PRIVATE_BLOCK_SIZE: usize = 1024;
+/// Largest accepted block limits memory allocation and matches the default.
+pub const MAX_PRIVATE_BLOCK_SIZE: usize = DEFAULT_BLOCK_SIZE;
+/// Maximum aggregate object that this in-memory foundation will stage. Larger
+/// objects require a future streamed encrypted storage API.
+pub const MAX_PRIVATE_BULK_OBJECT_BYTES: usize =
+    crate::core::fragmentation::MAX_PRIVATE_BULK_OBJECT_BYTES;
+/// Route-scoped private availability hints per block. This is not a public
+/// provider set and must not be serialized into discovery/gossip traffic.
+pub const MAX_PRIVATE_PROVIDERS_PER_BLOCK: usize = 8;
+/// Maximum outstanding local block requests. A private session will later use a
+/// stricter per-session/per-path window; this bounds the unwired local model.
+pub const MAX_PRIVATE_WANTLIST_ENTRIES: usize = 64;
+/// Compatibility name retained for callers that used the old constant.
+pub const MAX_WANTLIST_PER_PEER: usize = MAX_PRIVATE_WANTLIST_ENTRIES;
 
-/// Maximum number of blocks to request from a single peer at once
-pub const MAX_WANTLIST_PER_PEER: usize = 16;
-
-/// How long to remember a block's availability from a peer
+/// How long a route-scoped private availability hint remains useful.
 const PROVIDER_TTL_SECS: u64 = 3600;
 
 /// A content-addressed block
@@ -41,7 +52,8 @@ const PROVIDER_TTL_SECS: u64 = 3600;
 pub struct Block {
     /// BLAKE3 hash of `data` — the block's permanent address
     pub cid: [u8; 32], // Content ID
-    /// Raw block bytes
+    /// Raw block bytes. This process-memory component is not at-rest storage;
+    /// callers must not treat this as encrypted persistence.
     pub data: Vec<u8>,
 }
 
@@ -81,16 +93,44 @@ pub struct FileManifest {
 }
 
 impl FileManifest {
-    /// The manifest's own CID = BLAKE3 of its canonical serialization
-    pub fn cid(&self) -> [u8; 32] {
-        let serialized = bincode::serialize(self).unwrap_or_default();
-        *blake3::hash(&serialized).as_bytes()
+    /// The manifest's local content identifier. This serializes only after
+    /// validating the manifest; a serialization failure is never converted into
+    /// a hash of an empty/default value.
+    pub fn cid(&self) -> Result<[u8; 32]> {
+        self.validate()?;
+        let serialized = bincode::serialize(self)
+            .map_err(|error| anyhow::anyhow!("PRIVATE_MANIFEST_SERIALIZATION_FAILED: {error}"))?;
+        Ok(*blake3::hash(&serialized).as_bytes())
+    }
+
+    fn validate(&self) -> Result<()> {
+        let total_bytes = usize::try_from(self.total_bytes)
+            .map_err(|_| anyhow::anyhow!("PRIVATE_MANIFEST_OBJECT_SIZE_INVALID"))?;
+        if total_bytes > MAX_PRIVATE_BULK_OBJECT_BYTES {
+            anyhow::bail!("PRIVATE_MANIFEST_OBJECT_LIMIT_EXCEEDED");
+        }
+        if !(MIN_PRIVATE_BLOCK_SIZE..=MAX_PRIVATE_BLOCK_SIZE).contains(&self.block_size) {
+            anyhow::bail!("PRIVATE_MANIFEST_BLOCK_SIZE_INVALID");
+        }
+        if self.name.as_ref().is_some_and(|name| name.len() > 255) {
+            anyhow::bail!("PRIVATE_MANIFEST_NAME_LIMIT_EXCEEDED");
+        }
+        let expected_blocks = if self.total_bytes == 0 {
+            0
+        } else {
+            total_bytes.div_ceil(self.block_size)
+        };
+        if self.block_cids.len() != expected_blocks {
+            anyhow::bail!("PRIVATE_MANIFEST_BLOCK_COUNT_INVALID");
+        }
+        Ok(())
     }
 }
 
 // ── Block storage ─────────────────────────────────────────────────────────────
 
-/// Local block storage (backed by sled via EncryptedStore in production)
+/// Local in-memory private-bulk staging. It is deliberately not persistent,
+/// not a public swarm cache, and not yet a network-facing transfer engine.
 pub struct BlockStore {
     /// CID (hex) → Block data
     blocks: Arc<RwLock<HashMap<String, Block>>>,
@@ -113,20 +153,39 @@ struct ProviderSet {
 }
 
 impl BlockStore {
-    pub fn new(block_size: usize) -> Self {
-        Self {
+    /// Create a bounded local private-bulk store. New runtime configuration
+    /// should use this fallible constructor rather than accepting a zero or
+    /// oversized block size that could panic or over-allocate later.
+    pub fn try_new(block_size: usize) -> Result<Self> {
+        if !(MIN_PRIVATE_BLOCK_SIZE..=MAX_PRIVATE_BLOCK_SIZE).contains(&block_size) {
+            anyhow::bail!("PRIVATE_BLOCK_SIZE_INVALID");
+        }
+        Ok(Self {
             blocks: Arc::new(RwLock::new(HashMap::new())),
             manifests: Arc::new(RwLock::new(HashMap::new())),
             providers: Arc::new(RwLock::new(HashMap::new())),
             wantlist: Arc::new(RwLock::new(Wantlist::new())),
             ledger: Arc::new(RwLock::new(Ledger::new())),
             block_size,
-        }
+        })
     }
 
-    /// Split a file into blocks and store them locally.
-    /// Returns the FileManifest (share the CID with the recipient).
+    /// Compatibility constructor for existing fixed internal configuration.
+    /// External configuration must prefer [`Self::try_new`].
+    pub fn new(block_size: usize) -> Self {
+        Self::try_new(block_size).expect("BlockStore requires a bounded private-bulk block size")
+    }
+
+    /// Split a bounded local object into blocks. The returned manifest is local
+    /// metadata only; it must not be shared outside an authorized encrypted
+    /// private bulk-transfer session.
     pub async fn store_file(&self, data: &[u8], name: Option<String>) -> Result<FileManifest> {
+        if data.len() > MAX_PRIVATE_BULK_OBJECT_BYTES {
+            anyhow::bail!("PRIVATE_BULK_OBJECT_LIMIT_EXCEEDED");
+        }
+        if name.as_ref().is_some_and(|value| value.len() > 255) {
+            anyhow::bail!("PRIVATE_MANIFEST_NAME_LIMIT_EXCEEDED");
+        }
         let file_hash = *blake3::hash(data).as_bytes();
         let mut block_cids = Vec::new();
         let mut blocks = self.blocks.write().await;
@@ -146,7 +205,7 @@ impl BlockStore {
             created_at: now_secs(),
         };
 
-        let manifest_cid = hex::encode(manifest.cid());
+        let manifest_cid = hex::encode(manifest.cid()?);
         self.manifests
             .write()
             .await
@@ -155,11 +214,17 @@ impl BlockStore {
         Ok(manifest)
     }
 
-    /// Retrieve a complete file from local storage using a manifest.
-    /// Returns None if any block is missing (needs to be fetched from peers).
+    /// Retrieve a complete bounded local object using a manifest. Returns None
+    /// if a block is missing; this component does not itself fetch from peers.
     pub async fn retrieve_file(&self, manifest: &FileManifest) -> Result<Option<Vec<u8>>> {
+        manifest.validate()?;
+        if manifest.block_size != self.block_size {
+            anyhow::bail!("PRIVATE_MANIFEST_STORE_BLOCK_SIZE_MISMATCH");
+        }
         let blocks = self.blocks.read().await;
-        let mut file_data = Vec::with_capacity(manifest.total_bytes as usize);
+        let total_bytes = usize::try_from(manifest.total_bytes)
+            .map_err(|_| anyhow::anyhow!("PRIVATE_MANIFEST_OBJECT_SIZE_INVALID"))?;
+        let mut file_data = Vec::with_capacity(total_bytes);
 
         for cid in &manifest.block_cids {
             let cid_hex = hex::encode(cid);
@@ -183,8 +248,13 @@ impl BlockStore {
         Ok(Some(file_data))
     }
 
-    /// Store a received block. Returns true if this is a new block.
+    /// Store a verified bounded block from an already-authorized private
+    /// session. This method does not authorize a peer, announce availability,
+    /// or expose the block outside the process.
     pub async fn store_block(&self, block: Block) -> Result<bool> {
+        if block.data.is_empty() || block.data.len() > self.block_size {
+            anyhow::bail!("PRIVATE_BLOCK_SIZE_OUT_OF_BOUNDS");
+        }
         if !block.verify() {
             anyhow::bail!("Received block {} failed integrity check", block.cid_hex());
         }
@@ -214,28 +284,43 @@ impl BlockStore {
             .collect()
     }
 
-    /// Add missing blocks to our wantlist
-    pub async fn want_manifest(&self, manifest: &FileManifest) {
+    /// Add missing blocks to the bounded local wantlist. A future private bulk
+    /// session must scope this list to the authorized recipient/path; this API
+    /// must not be serialized onto public discovery or gossip channels.
+    pub async fn want_manifest(&self, manifest: &FileManifest) -> Result<usize> {
+        manifest.validate()?;
         let missing = self.missing_blocks(manifest).await;
         let mut wantlist = self.wantlist.write().await;
+        let mut added = 0;
         for cid in missing {
-            wantlist.add(hex::encode(cid), 1);
+            if wantlist.add(hex::encode(cid), 1) {
+                added += 1;
+            }
         }
+        Ok(added)
     }
 
-    /// Get our current wantlist as a Bitswap WANT message payload
+    /// Export deterministic local private-session request candidates. This is
+    /// not a network message and must not be broadcast or DHT-routed.
     pub async fn export_wantlist(&self) -> Vec<WantEntry> {
         self.wantlist.read().await.entries()
     }
 
-    /// Process an incoming HAVE announcement from a peer
+    /// Record a route-scoped private availability hint from an already
+    /// authorized session. This method rejects arbitrary identifiers and bounds
+    /// provider cardinality; it is not a public HAVE announcement handler.
     pub async fn process_have(&self, peer_id: &str, cid_hex: &str) {
+        if peer_id.is_empty() || cid_hex.len() != 64 || hex::decode(cid_hex).is_err() {
+            return;
+        }
         let mut providers = self.providers.write().await;
         let entry = providers.entry(cid_hex.to_string()).or_insert(ProviderSet {
             peers: HashSet::new(),
             last_updated: now_secs(),
         });
-        entry.peers.insert(peer_id.to_string());
+        if entry.peers.len() < MAX_PRIVATE_PROVIDERS_PER_BLOCK || entry.peers.contains(peer_id) {
+            entry.peers.insert(peer_id.to_string());
+        }
         entry.last_updated = now_secs();
     }
 
@@ -267,7 +352,7 @@ impl BlockStore {
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates
             .into_iter()
-            .take(max_peers)
+            .take(max_peers.min(MAX_PRIVATE_PROVIDERS_PER_BLOCK))
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -343,12 +428,24 @@ impl Wantlist {
         }
     }
 
-    fn add(&mut self, cid_hex: String, priority: u32) {
-        self.entries.entry(cid_hex.clone()).or_insert(WantEntry {
-            cid_hex,
-            priority,
-            want_type: WantType::Block,
-        });
+    /// Returns true only when a new bounded request was admitted. Existing
+    /// entries remain idempotent and do not consume additional capacity.
+    fn add(&mut self, cid_hex: String, priority: u32) -> bool {
+        if self.entries.contains_key(&cid_hex) {
+            return false;
+        }
+        if self.entries.len() >= MAX_PRIVATE_WANTLIST_ENTRIES {
+            return false;
+        }
+        self.entries.insert(
+            cid_hex.clone(),
+            WantEntry {
+                cid_hex,
+                priority,
+                want_type: WantType::Block,
+            },
+        );
+        true
     }
 
     fn remove(&mut self, cid_hex: &str) {
@@ -356,10 +453,10 @@ impl Wantlist {
     }
 
     fn entries(&self) -> Vec<WantEntry> {
-        self.entries.values().cloned().collect()
+        let mut entries: Vec<_> = self.entries.values().cloned().collect();
+        entries.sort_by(|left, right| left.cid_hex.cmp(&right.cid_hex));
+        entries
     }
-
-
 }
 
 // ── Ledger ────────────────────────────────────────────────────────────────────
@@ -552,5 +649,78 @@ mod tests {
         ledger.record_sent("leecher", 100);
         ledger.record_received("leecher", 10_000);
         assert!(ledger.peer_score("leecher") < 0.1);
+    }
+
+    #[test]
+    fn rejects_invalid_local_block_sizes_without_panicking() {
+        assert!(BlockStore::try_new(0).is_err());
+        assert!(BlockStore::try_new(MIN_PRIVATE_BLOCK_SIZE - 1).is_err());
+        assert!(BlockStore::try_new(MAX_PRIVATE_BLOCK_SIZE + 1).is_err());
+        assert!(BlockStore::try_new(MIN_PRIVATE_BLOCK_SIZE).is_ok());
+    }
+
+    #[tokio::test]
+    async fn rejects_received_block_larger_than_local_contract() {
+        let store = BlockStore::try_new(MIN_PRIVATE_BLOCK_SIZE).unwrap();
+        let block = Block::new(vec![9u8; MIN_PRIVATE_BLOCK_SIZE + 1]);
+        assert!(store.store_block(block).await.is_err());
+    }
+
+    #[test]
+    fn manifest_refuses_oversize_aggregate_object_before_serialization() {
+        let manifest = FileManifest {
+            name: None,
+            total_bytes: (MAX_PRIVATE_BULK_OBJECT_BYTES + 1) as u64,
+            block_cids: vec![],
+            block_size: MIN_PRIVATE_BLOCK_SIZE,
+            file_hash: [0u8; 32],
+            created_at: 0,
+        };
+        assert!(manifest.cid().is_err());
+    }
+
+    #[tokio::test]
+    async fn wantlist_is_bounded_and_deterministic() {
+        let store = BlockStore::try_new(MIN_PRIVATE_BLOCK_SIZE).unwrap();
+        let requested = MAX_PRIVATE_WANTLIST_ENTRIES + 1;
+        let manifest = FileManifest {
+            name: None,
+            total_bytes: (requested * MIN_PRIVATE_BLOCK_SIZE) as u64,
+            block_cids: (0..requested).map(|index| [index as u8; 32]).collect(),
+            block_size: MIN_PRIVATE_BLOCK_SIZE,
+            file_hash: [3u8; 32],
+            created_at: 0,
+        };
+
+        assert_eq!(
+            store.want_manifest(&manifest).await.unwrap(),
+            MAX_PRIVATE_WANTLIST_ENTRIES
+        );
+        let entries = store.export_wantlist().await;
+        assert_eq!(entries.len(), MAX_PRIVATE_WANTLIST_ENTRIES);
+        assert!(entries
+            .windows(2)
+            .all(|pair| pair[0].cid_hex <= pair[1].cid_hex));
+    }
+
+    #[tokio::test]
+    async fn route_scoped_provider_hints_are_bounded() {
+        let store = BlockStore::try_new(MIN_PRIVATE_BLOCK_SIZE).unwrap();
+        let cid = hex::encode([7u8; 32]);
+        for index in 0..(MAX_PRIVATE_PROVIDERS_PER_BLOCK + 3) {
+            store
+                .process_have(&format!("private-peer-{index}"), &cid)
+                .await;
+        }
+        store.process_have("", &cid).await;
+        store.process_have("invalid-cid-peer", "not-a-cid").await;
+
+        assert_eq!(
+            store
+                .strategy_select_peers(&cid, MAX_PRIVATE_PROVIDERS_PER_BLOCK + 5)
+                .await
+                .len(),
+            MAX_PRIVATE_PROVIDERS_PER_BLOCK
+        );
     }
 }

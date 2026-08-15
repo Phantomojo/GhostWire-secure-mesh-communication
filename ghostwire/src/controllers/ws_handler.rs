@@ -1,118 +1,71 @@
-//! ws_handler.rs — Real WebSocket handler replacing the echo stub
+//! Authenticated local WebSocket event and command handler.
 //!
-//! The current handle_socket() just echoes text back. This replaces it
-//! with a full event-streaming implementation:
-//!
-//!   - Subscribes to Core's event_bus on connect
-//!   - Streams CoreEvent as JSON to the frontend in real-time
-//!   - Handles inbound WS commands from the UI (send message, etc.)
-//!   - Sends ping/pong keepalives
-//!   - Cleans up on disconnect
-//!   - ENCRYPTED: All WS messages encrypted with XChaCha20-Poly1305
-//!
-//! INTEGRATION: Replace the existing ws_handler and handle_socket functions
-//! in src/web.rs with these.
+//! The WebSocket route is protected by the daemon authentication middleware.
+//! It intentionally relies on the authenticated local transport (or a future
+//! externally terminated TLS deployment) rather than advertising an ad-hoc
+//! application-layer encryption scheme with no key agreement or client support.
 
-#[allow(unused_imports)]
-use crate::core::CoreEvent;
 use crate::web::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
 
-/// Encrypted WebSocket message format
-/// Format: {"enc": {"nonce": "<base64>", "ct": "<base64>"}}
-#[derive(Debug, Serialize, Deserialize)]
-struct EncryptedWsMessage {
-    nonce: String,
-    ct: String,
-}
+/// Maximum plaintext command content accepted at the WebSocket boundary.
+/// Transport-specific encrypted-frame limits remain enforced lower in the
+/// stack; this early bound avoids passing obviously oversized user input into
+/// routing or storage.
+const MAX_WS_MESSAGE_BYTES: usize = 10 * 1024;
+const MAX_RECIPIENT_BYTES: usize = 256;
+const PRIVATE_DELIVERY_UNAVAILABLE_MARKER: &str = "PRIVATE_DELIVERY_UNAVAILABLE";
 
-/// Encrypt data using XChaCha20-Poly1305
-fn encrypt_ws_message(
-    plaintext: &[u8],
-    session_key: &[u8; 32],
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use base64::Engine;
-    use chacha20poly1305::aead::Aead;
-    use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
-    use rand_core::{OsRng, RngCore};
-
-    // Generate random 24-byte nonce
-    let mut nonce_bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = XNonce::from(nonce_bytes);
-
-    let key = Key::from_slice(session_key);
-    let cipher = XChaCha20Poly1305::new(key);
-
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|e| format!("WS encryption failed: {}", e))?;
-
-    // Encode as JSON
-    let enc_msg = EncryptedWsMessage {
-        nonce: base64::engine::general_purpose::STANDARD.encode(&nonce_bytes),
-        ct: base64::engine::general_purpose::STANDARD.encode(&ciphertext),
-    };
-
-    Ok(serde_json::to_string(&enc_msg)?)
-}
-
-/// Inbound commands the frontend can send over WebSocket
+/// Inbound commands the frontend can send over WebSocket.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum WsCommand {
-    /// Subscribe to specific event types only
+    /// Subscribe to specific event types only. Event filtering remains a
+    /// future capability; current subscriptions receive the authenticated local
+    /// event stream.
     Subscribe { events: Vec<String> },
-    /// Send a message (triggers Core::send_message)
+    /// Dispatch a message through the same core command path used by HTTP.
     SendMessage { recipient: String, content: String },
-    /// Request current peer list
+    /// Request current peer count.
     GetPeers,
-    /// Ping keepalive
+    /// Ping keepalive.
     Ping,
 }
 
-/// Outbound events sent to the frontend
+/// Outbound events sent to an authenticated local frontend.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsEvent {
-    /// A CoreEvent relayed to the frontend
+    /// A CoreEvent relayed to the frontend. All CoreEvent serialization must
+    /// remain privacy-reviewed before remote exposure is ever permitted.
     CoreEvent { payload: serde_json::Value },
-    /// Response to GetPeers
+    /// Response to `GetPeers`.
     PeerList {
         peers: Vec<serde_json::Value>,
         count: usize,
     },
-    /// Pong response
-    Pong { timestamp: u64 },
-    /// Connection established confirmation
-    Connected { node_id: String, version: String },
-    /// Error response
-    Error { code: String, message: String },
-    /// Connection request received (social follow mechanic)
-    ConnectionRequest {
-        from_node_id: String,
-        from_nickname: String,
-        from_did: String,
-        request_id: String,
-        timestamp: u64,
+    /// A message accepted by the local dispatcher. This is not recipient
+    /// acknowledgement or final delivery.
+    MessageDispatched {
+        message_id: String,
+        delivery_class: String,
     },
+    /// Pong response.
+    Pong { timestamp: u64 },
+    /// Connection-established confirmation.
+    Connected { node_id: String, version: String },
+    /// Public-safe command error. Do not include raw source errors, routes,
+    /// peers, secrets, or message content.
+    Error { code: String, message: String },
 }
 
-/// REPLACE in web.rs:
-///
-/// ```rust
-/// async fn ws_handler(
-///     ws: WebSocketUpgrade,
-///     State(state): State<Arc<AppState>>,
-/// ) -> impl IntoResponse {
-///     ws.on_upgrade(move |socket| handle_socket(socket, state))
-/// }
-/// ```
+/// Upgrade an already authenticated WebSocket request.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
@@ -120,175 +73,238 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-/// Generate a per-session WebSocket encryption key derived from the node identity.
-/// This ensures each WS connection uses a unique key, preventing cross-session decryption.
-async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
-    use ring::hkdf::{Salt, HKDF_SHA256};
-    use ring::rand::SecureRandom;
-
-    // Get identity key material (or fallback to a random key if identity not yet set)
-    let ikm = {
-        let core = state.core.read().await;
-        core.get_identity_id().await.as_bytes().to_vec()
-    };
-
-    // Generate random salt for this session
-    let rng = ring::rand::SystemRandom::new();
-    let mut salt_bytes = [0u8; 16];
-    let _ = rng.fill(&mut salt_bytes);
-
-    // Derive 32-byte session key via HKDF
-    let salt = Salt::new(HKDF_SHA256, &salt_bytes);
-    let prk = salt.extract(&ikm);
-    let okm: ring::hkdf::Okm<ring::hkdf::Algorithm> = prk
-        .expand(&[b"ghostwire-ws-session-v2"], HKDF_SHA256)
-        .unwrap();
-    let mut okm_bytes = [0u8; 32];
-    okm.fill(&mut okm_bytes).unwrap();
-    okm_bytes
-}
-
 pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
-    // Generate per-session encryption key from identity + random nonce
-    // SECURITY FIX: replaced hardcoded key with per-session derived key
-    let session_key = generate_ws_session_key(&state).await;
+    state.ws_count.fetch_add(1, Ordering::Relaxed);
 
-    // Subscribe to the core event bus
-    let mut event_rx = state.core.read().await.event_bus.subscribe();
+    // Clone a stable core snapshot before awaiting identity/event operations so
+    // the WebSocket does not retain the application-core outer lock.
+    let core = state.core.read().await.clone();
+    let mut event_rx = core.event_bus.subscribe();
+    let node_id = core.get_identity_id().await;
 
-    // Send connected confirmation
-    let node_id = state.core.read().await.get_identity_id().await;
-    let connected_msg = serde_json::to_string(&WsEvent::Connected {
-        node_id: node_id.clone(),
-        version: "2.0.0".into(),
-    })
-    .unwrap_or_default();
-    let _ = socket.send(Message::Text(connected_msg.into())).await;
+    if send_ws_event(
+        &mut socket,
+        &WsEvent::Connected {
+            node_id: node_id.clone(),
+            version: "2.0.0".into(),
+        },
+    )
+    .await
+    .is_err()
+    {
+        state.ws_count.fetch_sub(1, Ordering::Relaxed);
+        return;
+    }
 
-    // Keepalive ping every 30s
     let mut ping_interval = interval(Duration::from_secs(30));
 
     loop {
         tokio::select! {
-            // Outbound: relay CoreEvent to frontend
             Ok(event) = event_rx.recv() => {
                 let payload = match serde_json::to_value(&event) {
-                    Ok(v) => v,
+                    Ok(value) => value,
                     Err(_) => continue,
                 };
-                let ws_event = WsEvent::CoreEvent { payload };
-                let json = match serde_json::to_string(&ws_event) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                // Encrypt the message before sending
-                match encrypt_ws_message(json.as_bytes(), &session_key) {
-                    Ok(encrypted) => {
-                        if socket.send(Message::Text(encrypted.into())).await.is_err() {
-                            tracing::debug!("WS client disconnected (send failed)");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("WS encryption failed: {}", e);
-                        // Send unencrypted error as fallback
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
-                    }
+                if send_ws_event(&mut socket, &WsEvent::CoreEvent { payload }).await.is_err() {
+                    tracing::debug!("Authenticated WebSocket client disconnected while receiving an event");
+                    break;
                 }
             }
 
-            // Inbound: handle commands from frontend
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        handle_ws_command(&mut socket, &state, &text, &session_key).await;
+                        if !handle_ws_command(&mut socket, &state, &text).await {
+                            break;
+                        }
                     }
                     Some(Ok(Message::Ping(data))) => {
-                        let _ = socket.send(Message::Pong(data)).await;
+                        if socket.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
                     }
                     Some(Ok(Message::Close(_))) | None => {
-                        tracing::debug!("WS client disconnected cleanly");
+                        tracing::debug!("Authenticated WebSocket client disconnected cleanly");
                         break;
                     }
-                    Some(Err(e)) => {
-                        tracing::warn!("WS error: {}", e);
+                    Some(Err(error)) => {
+                        tracing::warn!(error = %error, "WebSocket receive error");
                         break;
                     }
                     _ => {}
                 }
             }
 
-            // Keepalive ping
             _ = ping_interval.tick() => {
-                let pong = serde_json::to_string(&WsEvent::Pong {
-                    timestamp: now_secs(),
-                }).unwrap_or_default();
-                if socket.send(Message::Text(pong.into())).await.is_err() {
+                if send_ws_event(&mut socket, &WsEvent::Pong { timestamp: now_secs() }).await.is_err() {
                     break;
                 }
             }
         }
     }
 
+    state.ws_count.fetch_sub(1, Ordering::Relaxed);
     tracing::debug!(
-        "WebSocket session ended for node {}",
-        &node_id[..8.min(node_id.len())]
+        node = %short_node_id(&node_id),
+        "Authenticated WebSocket session ended"
     );
 }
 
-async fn handle_ws_command(
-    socket: &mut WebSocket,
-    state: &Arc<AppState>,
-    text: &str,
-    _session_key: &[u8; 32],
-) {
-    let cmd: WsCommand = match serde_json::from_str(text) {
-        Ok(c) => c,
+async fn handle_ws_command(socket: &mut WebSocket, state: &Arc<AppState>, text: &str) -> bool {
+    let command: WsCommand = match serde_json::from_str(text) {
+        Ok(command) => command,
         Err(_) => {
-            let err = serde_json::to_string(&WsEvent::Error {
-                code: "PARSE_ERROR".into(),
-                message: "Invalid command JSON".into(),
-            })
-            .unwrap_or_default();
-            let _ = socket.send(Message::Text(err.into())).await;
-            return;
+            return send_ws_event(
+                socket,
+                &WsEvent::Error {
+                    code: "FRAME_MALFORMED".into(),
+                    message: "Invalid command JSON".into(),
+                },
+            )
+            .await
+            .is_ok();
         }
     };
 
-    match cmd {
-        WsCommand::Ping => {
-            let pong = serde_json::to_string(&WsEvent::Pong {
+    match command {
+        WsCommand::Ping => send_ws_event(
+            socket,
+            &WsEvent::Pong {
                 timestamp: now_secs(),
-            })
-            .unwrap_or_default();
-            let _ = socket.send(Message::Text(pong.into())).await;
-        }
+            },
+        )
+        .await
+        .is_ok(),
 
         WsCommand::GetPeers => {
-            let count = state.core.read().await.get_peer_count();
-            let resp = serde_json::to_string(&WsEvent::PeerList {
-                peers: vec![],
-                count,
-            })
-            .unwrap_or_default();
-            let _ = socket.send(Message::Text(resp.into())).await;
+            let core = state.core.read().await.clone();
+            send_ws_event(
+                socket,
+                &WsEvent::PeerList {
+                    peers: Vec::new(),
+                    count: core.get_peer_count(),
+                },
+            )
+            .await
+            .is_ok()
         }
 
         WsCommand::SendMessage { recipient, content } => {
-            // Delegate to messaging layer
-            let core = state.core.read().await;
+            if content.len() > MAX_WS_MESSAGE_BYTES {
+                return send_ws_event(
+                    socket,
+                    &WsEvent::Error {
+                        code: "FRAME_SIZE_LIMIT".into(),
+                        message: "Message exceeds the permitted size".into(),
+                    },
+                )
+                .await
+                .is_ok();
+            }
+            if content.trim().is_empty() {
+                return send_ws_event(
+                    socket,
+                    &WsEvent::Error {
+                        code: "INVALID_INPUT".into(),
+                        message: "Message content cannot be empty".into(),
+                    },
+                )
+                .await
+                .is_ok();
+            }
+            if recipient.len() > MAX_RECIPIENT_BYTES {
+                return send_ws_event(
+                    socket,
+                    &WsEvent::Error {
+                        code: "INVALID_INPUT".into(),
+                        message: "Recipient identifier is too long".into(),
+                    },
+                )
+                .await
+                .is_ok();
+            }
+
+            let core = state.core.read().await.clone();
             let sender = core.get_identity_id().await;
-            let msg = crate::core::message::Message::new(sender, recipient, content);
-            // core.send_message(msg) — wire when send_message is implemented
-            let _ = msg;
+            let is_broadcast = recipient.is_empty() || recipient == "broadcast";
+            let message = crate::core::message::Message::new(
+                sender,
+                if is_broadcast {
+                    "broadcast".to_string()
+                } else {
+                    recipient.clone()
+                },
+                content,
+            );
+
+            let dispatch = if is_broadcast {
+                core.send_message(&message).await
+            } else {
+                core.send_direct_message(recipient, &message).await
+            };
+
+            match dispatch {
+                Ok(()) => send_ws_event(
+                    socket,
+                    &WsEvent::MessageDispatched {
+                        message_id: message.id.to_string(),
+                        delivery_class: if is_broadcast {
+                            "broadcast".into()
+                        } else {
+                            "direct".into()
+                        },
+                    },
+                )
+                .await
+                .is_ok(),
+                Err(error) => {
+                    tracing::warn!(error = %error, message_id = %message.id, "WebSocket message dispatch failed");
+                    let (code, message) = if error
+                        .to_string()
+                        .contains(PRIVATE_DELIVERY_UNAVAILABLE_MARKER)
+                    {
+                        (
+                            "PRIVATE_DELIVERY_UNAVAILABLE",
+                            "Private delivery is unavailable because no privacy-preserving route is ready",
+                        )
+                    } else {
+                        ("TRANSPORT_UNREACHABLE", "Message could not be dispatched")
+                    };
+                    send_ws_event(
+                        socket,
+                        &WsEvent::Error {
+                            code: code.into(),
+                            message: message.into(),
+                        },
+                    )
+                    .await
+                    .is_ok()
+                }
+            }
         }
 
         WsCommand::Subscribe { events } => {
-            tracing::debug!("WS client subscribed to: {:?}", events);
+            // Preserve the current API shape while filtering is designed against
+            // a stable, privacy-reviewed event schema.
+            tracing::debug!(
+                requested_event_types = events.len(),
+                "WebSocket event subscription requested"
+            );
+            true
         }
     }
+}
+
+async fn send_ws_event(socket: &mut WebSocket, event: &WsEvent) -> Result<(), ()> {
+    let json = serde_json::to_string(event).map_err(|_| ())?;
+    socket
+        .send(Message::Text(json.into()))
+        .await
+        .map_err(|_| ())
+}
+
+fn short_node_id(node_id: &str) -> &str {
+    &node_id[..node_id.len().min(8)]
 }
 
 fn now_secs() -> u64 {

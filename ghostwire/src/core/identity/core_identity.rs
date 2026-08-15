@@ -1,13 +1,17 @@
 use crate::core::identity::encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
+use crate::core::identity::transport_derivation::{self, TransportKeyScope};
 use anyhow::Result;
 use libp2p::identity::{Keypair, PublicKey};
 use obfstr::obfstr;
 use parking_lot::RwLock;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct EphemeralIdentity {
     pub identity_id: String,
+    #[zeroize(skip)]
     keypair: Keypair,
 }
 
@@ -398,10 +402,40 @@ impl Identity {
         }
     }
 
-    pub fn from_seed(seed: &[u8]) -> Result<Self> {
+    /// Restore the long-lived root identity from a 32-byte recovery secret.
+    ///
+    /// This API is exclusively for recovery/import material. It must not be
+    /// used to construct carrier identities: transport and interface keys must
+    /// instead be obtained from [`Self::derive_transport_keypair`], which
+    /// domain-separates every carrier, interface instance, and rotation epoch.
+    pub fn from_recovery_seed(seed: &[u8]) -> Result<Self> {
+        if seed.len() != 32 {
+            anyhow::bail!("IDENTITY_RECOVERY_SEED_INVALID_LENGTH");
+        }
         let keypair = Keypair::ed25519_from_bytes(seed.to_vec())
             .map_err(|e| anyhow::anyhow!("Failed to create keypair from seed: {}", e))?;
         Ok(Self::from_keypair(keypair))
+    }
+
+    /// Backwards-compatible alias for recovery/import code.
+    ///
+    /// New transport or interface code must never call this method. Use
+    /// [`Self::derive_transport_keypair`] with an explicit `TransportKeyScope`.
+    pub fn from_seed(seed: &[u8]) -> Result<Self> {
+        Self::from_recovery_seed(seed)
+    }
+
+    /// Derive a GhostWire-side per-carrier/interface authentication key from the
+    /// unlocked root identity. The root key itself is never emitted as a
+    /// transport key. This deliberately does not derive an external identity
+    /// for RNS, BLE, Wi-Fi Direct, or radio stacks; their native runtimes own
+    /// those identities and GhostWire derives only its local binding key.
+    pub fn derive_transport_keypair(&self, scope: TransportKeyScope) -> Result<Keypair> {
+        let state = self.state.read();
+        let IdentityState::Unlocked(keypair, _) = &*state else {
+            anyhow::bail!("TRANSPORT_KEY_IDENTITY_LOCKED");
+        };
+        transport_derivation::derive_transport_keypair(keypair, scope)
     }
 
     /// Create a new identity with nickname and password in one step (for profile creation with setup).
@@ -589,7 +623,8 @@ impl Identity {
             let pub_key_bytes = kp.public().encode_protobuf();
             let encrypted = encrypted.clone();
 
-            let old = std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
+            let old =
+                std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
             if let IdentityState::Unlocked(kp, _) = old {
                 // try_into_ed25519() consumes kp; inner ed25519_dalek::SigningKey
                 // implements ZeroizeOnDrop, so dropping zeroizes the secret key.
@@ -733,13 +768,35 @@ mod tests {
     }
 
     #[test]
-    fn test_identity_from_seed() {
+    fn test_identity_from_recovery_seed() {
         let seed = [0u8; 32];
-        let id1 = Identity::from_seed(&seed).unwrap();
-        let id2 = Identity::from_seed(&seed).unwrap();
+        let id1 = Identity::from_recovery_seed(&seed).unwrap();
+        let id2 = Identity::from_recovery_seed(&seed).unwrap();
 
         assert_eq!(id1.public_key().unwrap(), id2.public_key().unwrap());
         assert_ne!(id1.id, id2.id); // Internal UUIDs should still be unique
+        assert!(Identity::from_recovery_seed(&seed[..31]).is_err());
+    }
+
+    #[test]
+    fn derived_transport_key_requires_an_unlocked_identity() {
+        use crate::core::identity::{
+            InterfaceInstanceId, TransportKeyDomain, TransportKeyScope,
+        };
+
+        let identity = Identity::create_new(None).unwrap();
+        let scope = TransportKeyScope::new(
+            TransportKeyDomain::Libp2pMesh,
+            InterfaceInstanceId::from_private_bytes([1u8; 16]).unwrap(),
+            0,
+        );
+        let root_public = identity.public_key().unwrap();
+        let transport_public = identity.derive_transport_keypair(scope).unwrap().public();
+        assert_ne!(root_public, transport_public);
+
+        identity.save_to_disk("test-password").unwrap();
+        identity.lock().unwrap();
+        assert!(identity.derive_transport_keypair(scope).is_err());
     }
 
     #[test]
@@ -772,13 +829,12 @@ mod tests {
         // Load it back
         let loaded = Identity::load_or_create(profile).unwrap();
         assert_eq!(loaded.id, original_id);
-        assert!(loaded.is_locked());
+        // `load_or_create` automatically unlocks with the locally protected
+        // keyfile when available; a successful round-trip must preserve keys.
+        assert!(!loaded.is_locked());
 
         loaded.unlock("secret").unwrap();
-        assert_eq!(
-            loaded.public_key().unwrap(),
-            identity.public_key().unwrap()
-        );
+        assert_eq!(loaded.public_key().unwrap(), identity.public_key().unwrap());
     }
 
     #[test]

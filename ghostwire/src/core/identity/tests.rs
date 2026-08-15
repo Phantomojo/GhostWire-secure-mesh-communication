@@ -34,11 +34,10 @@ mod tests {
         let encrypted = encrypt_identity(&data[..], correct_password).unwrap();
         let result = decrypt_identity(&encrypted, wrong_password);
 
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Decryption failed"));
+        assert!(matches!(
+            result,
+            Err(crate::core::identity::encryption::IdentityCryptoError::Decryption)
+        ));
     }
 
     #[test]

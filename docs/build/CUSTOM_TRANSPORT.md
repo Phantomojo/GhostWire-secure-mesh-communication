@@ -1,6 +1,6 @@
 # Implementing Custom Transports
 
-GhostWire's pluggable transport system allows you to add new communication mediums without modifying the core protocol. This guide walks through the transport trait, implementing a custom transport, registering it, and adding censorship resistance.
+GhostWire is building a capability-governed multi-carrier system, not a generic transport registry that makes every network interchangeable. This guide is **design and contributor guidance**: a type, trait sketch, or enum variant does not mean an adapter is supported or selected by the current runtime. Read the authoritative [transport support status](../TRANSPORT_SUPPORT_STATUS.md), [carrier contract](../CARRIER_CONTRACT.md), and [inter-transport handoff contract](../INTER_TRANSPORT_HANDOFF.md) before implementing a carrier.
 
 ---
 
@@ -22,7 +22,7 @@ GhostWire's pluggable transport system allows you to add new communication mediu
 └─────────────────────────────────────────────┘
 ```
 
-The `TransportRegistry` manages all available transports and automatically selects the best one based on network conditions. If your transport fails, the registry falls back to the next available transport.
+The current runtime does **not** yet automatically switch every concrete transport. The implemented `TransportCoordinator` is a deterministic policy foundation: a future adapter must declare its native carrier family, identity namespace, discovery model, fragmentation rules, local eligibility, and relay policy before it can be selected. Failure must return an explicit operation result or authorized encrypted store-and-forward decision; it must never trigger an implicit lower-privacy fallback.
 
 ---
 
@@ -55,7 +55,7 @@ fn supported_protocols(&self) -> &[&str];
 
 ### Transport Types
 
-GhostWire defines these built-in transport types:
+The following is a historical/illustrative carrier-type sketch. It is **not** a supported-adapter list and must not be used to infer runtime availability:
 
 ```rust
 pub enum TransportType {
@@ -89,7 +89,7 @@ pub struct TransportMetrics {
 }
 ```
 
-These metrics drive the auto-transport switching logic. When a transport's health degrades (high packet loss, high latency, no connections), the registry switches to a healthier transport.
+Metrics can inform a future bounded health monitor, but they are insufficient authority to switch carriers. Selection must also satisfy the immutable delivery/privacy requirement, native carrier semantics, local device eligibility, relay opt-in, and carrier-specific fragmentation policy. A faster or healthier metadata-visible carrier cannot replace an unavailable privacy-preserving route.
 
 ---
 
@@ -347,27 +347,22 @@ Beyond transport-level obfuscation, GhostWire provides Traffic Armor with three 
 
 ---
 
-## Auto-Transport Switching
+## Carrier Selection and Handoff
 
-The transport registry automatically selects the best transport based on network conditions:
+**Automatic cross-carrier delivery is not yet enabled.** The current policy foundation intentionally refuses to invent performance-only fallback behavior. A future carrier adapter must report its actual native constraints and a future handoff pipeline must select only a compliant next leg.
 
-### Disaster Levels
+| Required decision input | Why a generic health score is unsafe |
+|---|---|
+| Immutable delivery/privacy requirement | Low latency cannot compensate for relationship-metadata or anonymity loss. |
+| Native identity and discovery model | A libp2p peer ID, RNS destination, BLE address, Wi-Fi Direct group, and radio interface are not interchangeable identities. |
+| Local interface eligibility | User enablement, device capability, OS permission, background policy, and energy/radio budget can forbid a carrier even if it is reachable. |
+| Relay opt-in | A GhostWire node can be an endpoint without agreeing to forward other nodes’ traffic. |
+| Carrier fragmentation/resource contract | RNS packet mode, BLE, low-rate radio, streams, and private block exchange have distinct safe object limits. |
+| Per-leg receipt semantics | A local write or carrier receipt is not recipient delivery. |
 
-| Level | Indicators | Preferred Transports |
-|-------|-----------|---------------------|
-| **Normal** | Low latency, low loss, high bandwidth | StealthTCP, WebRTC |
-| **Congested** | Moderate latency, moderate loss | WebRTC, WebSocket Camouflage |
-| **Isolation** | High latency, high loss, few peers | WebSocket Camouflage, Shadowsocks AEAD, obfs4 |
-| **Blackout** | No peers via TCP/WebRTC | BLE, LoRa, Reticulum |
+A carrier-changing request must carry one protected GhostWire envelope ID across legs, validate the source through the common ingress pipeline, and require a destination carrier that meets all the above conditions. No adapter may decrypt user plaintext to convert carriers. See [Inter-Transport Handoff](../INTER_TRANSPORT_HANDOFF.md).
 
-### Hysteresis (Anti-Thrashing)
-
-To prevent rapid oscillation between transports:
-
-- Minimum transport hold time: 60 seconds
-- Switch threshold: Current transport fails 3 consecutive times
-- Re-evaluation interval: 5 minutes
-- Hysteresis margin: New transport must be 20% better to switch
+Hysteresis, route scoring, energy scheduling, and performance adaptation can be added only as **bounded secondary policy** after this fail-closed eligibility check. They must never override a privacy requirement or make a disabled/mobile interface relay unexpectedly.
 
 ---
 

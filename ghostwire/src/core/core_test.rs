@@ -19,7 +19,7 @@ async fn test_core_transport_switching() {
     let core_arc = Arc::new(core);
 
     {
-        let transport = core_arc.active_transport.read().await;
+        let transport = core_arc.network_stack.active_transport.read().await;
         assert!(transport.is_some());
         assert_eq!(transport.as_ref().unwrap().name(), "quic");
     }
@@ -27,20 +27,20 @@ async fn test_core_transport_switching() {
     // 2. Initialize default transport
     core_arc.init_default_transport().await.unwrap();
     {
-        let transport = core_arc.active_transport.read().await;
+        let transport = core_arc.network_stack.active_transport.read().await;
         assert!(transport.is_some());
         assert_eq!(transport.as_ref().unwrap().name(), "stealth_tcp");
     }
 
     // 3. Register and switch to Dummy transport
     {
-        let mut registry = core_arc.transport_registry.write().await;
+        let mut registry = core_arc.network_stack.transport_registry.write().await;
         registry.register(crate::core::transport::TransportKind::Dummy);
     }
 
     core_arc.set_active_transport("dummy").await.unwrap();
     {
-        let transport = core_arc.active_transport.read().await;
+        let transport = core_arc.network_stack.active_transport.read().await;
         assert!(transport.is_some());
         assert_eq!(transport.as_ref().unwrap().name(), "dummy");
     }
@@ -54,7 +54,7 @@ async fn test_core_send_message_via_active_transport() {
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();
     let core_arc = Arc::new(core);
 
-    let mut registry = core_arc.transport_registry.write().await;
+    let mut registry = core_arc.network_stack.transport_registry.write().await;
     registry.register(crate::core::transport::TransportKind::Dummy);
     drop(registry);
     core_arc.set_active_transport("dummy").await.unwrap();
@@ -78,6 +78,7 @@ async fn test_core_clone_shares_active_transport() {
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();
 
     let initial_name = core
+        .network_stack
         .active_transport
         .read()
         .await
@@ -86,7 +87,7 @@ async fn test_core_clone_shares_active_transport() {
     assert_eq!(initial_name.as_deref(), Some("quic"));
 
     {
-        let mut registry = core.transport_registry.write().await;
+        let mut registry = core.network_stack.transport_registry.write().await;
         registry.register(crate::core::transport::TransportKind::Dummy);
     }
     core.set_active_transport("dummy").await.unwrap();
@@ -95,6 +96,7 @@ async fn test_core_clone_shares_active_transport() {
 
     assert_eq!(
         core_clone
+            .network_stack
             .active_transport
             .read()
             .await

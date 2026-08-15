@@ -34,9 +34,13 @@ impl PeerController {
         use crate::core::social::social_graph::PeerFilter;
 
         let core = state.core.read().await;
-        let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
-        let connected = core.social_graph.connected_peers().await;
-        let pending_inbound = core.social_graph.pending_inbound().await;
+        let all_peers = core
+            .social_stack
+            .social_graph
+            .list_peers(PeerFilter::All)
+            .await;
+        let connected = core.social_stack.social_graph.connected_peers().await;
+        let pending_inbound = core.social_stack.social_graph.pending_inbound().await;
         let peer_count = core.get_peer_count();
 
         let peers_json: Vec<serde_json::Value> = all_peers
@@ -77,7 +81,11 @@ impl PeerController {
         use crate::core::social::social_graph::PeerFilter;
 
         let core = state.core.read().await;
-        let nearby_peers = core.social_graph.list_peers(PeerFilter::Nearby).await;
+        let nearby_peers = core
+            .social_stack
+            .social_graph
+            .list_peers(PeerFilter::Nearby)
+            .await;
 
         let peers_json: Vec<serde_json::Value> = nearby_peers
             .iter()
@@ -117,7 +125,7 @@ impl PeerController {
 
         tracing::info!(target: "social", "Connection request sent to {}", &req.node_id[..8.min(req.node_id.len())]);
 
-        // Wire: core.social_graph.send_request(&req.node_id, req.message, sign_fn).await
+        // Wire: core.social_stack.social_graph.send_request(&req.node_id, req.message, sign_fn).await
         Json(ApiV2Response::success(serde_json::json!({
             "status": "request_sent",
             "to": req.node_id,
@@ -129,7 +137,7 @@ impl PeerController {
     /// GET /api/v2/peers/requests — Pending inbound connection requests
     pub async fn list_requests(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let requests = core.social_graph.pending_inbound().await;
+        let requests = core.social_stack.social_graph.pending_inbound().await;
 
         let requests_json: Vec<serde_json::Value> = requests
             .iter()
@@ -165,7 +173,7 @@ impl PeerController {
 
         if req.accept {
             tracing::info!(target: "social", "Accepting connection request {}", req.request_id);
-            // Wire: core.social_graph.accept_request(&req.request_id, x25519_pub, sign_fn).await
+            // Wire: core.social_stack.social_graph.accept_request(&req.request_id, x25519_pub, sign_fn).await
             Json(ApiV2Response::success(serde_json::json!({
                 "status": "accepted",
                 "request_id": req.request_id
@@ -173,7 +181,7 @@ impl PeerController {
             .into_response()
         } else {
             tracing::info!(target: "social", "Denying connection request {}", req.request_id);
-            // Wire: core.social_graph.deny_request(&req.request_id).await
+            // Wire: core.social_stack.social_graph.deny_request(&req.request_id).await
             Json(ApiV2Response::success(serde_json::json!({
                 "status": "denied",
                 "request_id": req.request_id
@@ -188,7 +196,7 @@ impl PeerController {
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Removing connection to {}", &node_id[..8.min(node_id.len())]);
-        // Wire: core.social_graph.remove(&node_id).await
+        // Wire: core.social_stack.social_graph.remove(&node_id).await
         Json(ApiV2Response::success(
             serde_json::json!({ "status": "removed" }),
         ))
@@ -200,7 +208,7 @@ impl PeerController {
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
         tracing::info!(target: "social", "Blocking node {}", &node_id[..8.min(node_id.len())]);
-        // Wire: core.social_graph.block(&node_id).await
+        // Wire: core.social_stack.social_graph.block(&node_id).await
         Json(ApiV2Response::success(
             serde_json::json!({ "status": "blocked" }),
         ))

@@ -93,9 +93,9 @@ pub async fn build_snapshot(
     let now = now_secs();
 
     // WIRED: real metrics from NetworkMonitor
-    let metrics = core.monitor.get_metrics().await;
+    let metrics = core.network_stack.monitor.get_metrics().await;
     let active_transport_name = {
-        let guard = core.active_transport.read().await;
+        let guard = core.network_stack.active_transport.read().await;
         guard
             .as_ref()
             .map(|t| t.name())
@@ -119,21 +119,25 @@ pub async fn build_snapshot(
     let peers = vec![];
 
     // WIRED: peer_cache size from micro_optimizations
-    let peer_cache_size = core.peer_cache.len();
+    let peer_cache_size = core.network_stack.peer_cache.len();
     // WIRED: message dedup cache size
-    let dedup_cache_size = core.message_dedup.size();
+    let dedup_cache_size = core.storage_stack.message_dedup.size();
 
     // WIRED: ark stats
-    let ark_stats = core.knowledge_ark.stats().await;
+    let ark_stats = core.storage_stack.knowledge_ark.stats().await;
 
     // WIRED: identity locked status
     let identity_locked = core.is_locked().await;
 
     // WIRED: trust store blocked peer count
-    let blocked_peers = core.trust_store.blocked_count().await as u32;
+    let blocked_peers = core.security_stack.trust_store.blocked_count().await as u32;
 
     // WIRED: mailbox pending count
-    let mailbox_pending = core.mailbox_store.pending_count().unwrap_or(0);
+    let mailbox_pending = core
+        .storage_stack
+        .mailbox_store
+        .pending_count()
+        .unwrap_or(0);
 
     // WIRED: message store count
     let message_count = {
@@ -154,7 +158,7 @@ pub async fn build_snapshot(
         message_count,
         ark_entry_count: ark_stats.total_entries,
         ark_collection_count: ark_stats.total_collections,
-        block_store_count: core.block_store.block_count().await,
+        block_store_count: core.storage_stack.block_store.block_count().await,
         mailbox_pending,
         encrypted_store_namespaces: 0, // TODO: count encrypted_store namespaces
         db_size_bytes: 0,              // TODO: sled db_size_on_disk()
@@ -166,7 +170,7 @@ pub async fn build_snapshot(
         sybil_rejections_24h: 0, // TODO: counter in DiverseRoutingTable
         audit_events_24h: 0,     // TODO: audit_logger.count_recent(24h)
         identity_locked,
-        trust_score_avg: core.trust_store.average_trust_score().await,
+        trust_score_avg: core.security_stack.trust_store.average_trust_score().await,
         last_key_rotation_days_ago: None, // TODO: track in identity metadata
     };
 

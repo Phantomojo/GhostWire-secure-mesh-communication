@@ -4,11 +4,13 @@
 **Version:** 0.2.0-draft
 **Date:** April 12, 2026
 
+> **Draft target architecture — not a runtime support claim.** This document describes intended transport semantics and historical interface sketches. Current verified behavior is authoritative only in [Transport Support Status](../TRANSPORT_SUPPORT_STATUS.md), [Carrier Contract](../CARRIER_CONTRACT.md), [Inter-Transport Handoff](../INTER_TRANSPORT_HANDOFF.md), and the [Test Matrix](../TEST_MATRIX.md). Until their acceptance criteria pass, no reader may infer automatic switching, a live BLE/Wi-Fi/LoRa adapter, or a production bridge from this draft.
+
 ---
 
 ## Overview
 
-This specification defines the pluggable transport layer of GhostWire, enabling communication over diverse network technologies with built-in censorship resistance. Transports are abstracted behind a common interface, allowing seamless switching between TCP, WebRTC, BLE, LoRa, Reticulum, and censorship-resistant transports (WebSocket Camouflage, Shadowsocks AEAD, TLS Camouflage, obfs4). The transport layer provides Traffic Armor for resistance against deep packet inspection and timing analysis.
+This specification records the intended pluggable-carrier design. Future adapters must preserve an authenticated protected GhostWire envelope while each carrier retains its own native identity, discovery, fragmentation/resource, receipt, and privacy semantics. The current runtime does **not** provide seamless/automatic switching among TCP, WebRTC, BLE, LoRa, Reticulum, or camouflage transports. Traffic Armor and a module/feature flag do not establish anonymity, bridge interoperability, or carrier eligibility by themselves.
 
 ---
 
@@ -98,7 +100,7 @@ Peer-to-peer communication via WebRTC data channels, enabling NAT traversal.
 
 ### BLE (Bluetooth Low Energy)
 
-Short-range communication for opportunistic mesh networking.
+**Target design; no supported GhostWire BLE adapter.** Any future short-range BLE carrier must use rotating rendezvous, application-layer message protection, strict negotiated-MTU framing, platform permission/background policy, and explicit relay opt-in. Bluetooth pairing/link encryption is not a substitute for GhostWire end-to-end protection.
 
 | Property | Value |
 |----------|-------|
@@ -112,7 +114,7 @@ Short-range communication for opportunistic mesh networking.
 
 ### LoRa
 
-Long-range, low-bandwidth communication for rural and remote areas.
+**Target design; no supported GhostWire LoRa/RNode/Meshtastic adapter.** A future long-range radio carrier must use interface-specific airtime/duty-cycle policy, regional regulatory configuration, and native verified resource/fragment behavior. It must not assume a universal 242-byte packet limit or use generic flooding/retry.
 
 | Property | Value |
 |----------|-------|
@@ -129,7 +131,7 @@ Long-range, low-bandwidth communication for rural and remote areas.
 
 ### Reticulum
 
-Reticulum Network Stack for resilient communication over any interface.
+**Experimental bounded RNS bridge, not a general Reticulum transport.** GhostWire currently launches the official RNS runtime externally and has verified isolated two-node opaque packet delivery/receipt over TCP with a 383-byte encrypted packet ceiling. It does not derive an RNS identity from the GhostWire root and it does not yet provide Link/Resource transfer, shared ingress, automatic interface selection, or cross-carrier runtime handoff.
 
 | Property | Value |
 |----------|-------|
@@ -139,13 +141,13 @@ Reticulum Network Stack for resilient communication over any interface.
 | **Encryption** | Built-in (Curve25519 + AES) |
 | **Use case** | Multi-interface mesh networks, fallback connectivity |
 
-Reticulum acts as a meta-transport, automatically selecting the best underlying interface for communication.
+RNS itself may be configured with multiple native interfaces, but GhostWire treats each configured RNS interface as a separate capability-bearing carrier. GhostWire does not yet automatically select or switch those interfaces.
 
 ---
 
 ## Censorship Resistance
 
-GhostWire provides four pluggable censorship-resistant transports.
+**Target design only unless a concrete adapter passes its own verification gate.** The following descriptions are protocol research/interface goals, not a claim that GhostWire currently operates, deploys, or safely falls back through four censorship-resistant transports.
 
 ### WebSocket Camouflage
 
@@ -271,59 +273,30 @@ Messages are encoded with erasure coding to resist packet loss and censorship.
 
 ---
 
-## Auto-Transport Switching
+## Future Adaptive Carrier Policy
 
-The transport registry automatically selects the best available transport based on network conditions.
+**Not implemented as automatic runtime switching.** Network health may eventually be one bounded input into carrier choice, but it can never be the authority that changes a message’s privacy, relay, or fragmentation contract. The current `TransportCoordinator` deliberately selects only predeclared candidates that satisfy privacy, operation kind, native semantics, local interface eligibility, and explicit relay policy.
 
-### Disaster Levels
+### Permissible Inputs to a Future Adaptation Layer
 
-Network conditions are classified into four levels:
+| Input class | Permissible use | Must never override |
+|---|---|---|
+| Link health (loss, latency, connection state) | Rank candidates that already meet all security/eligibility requirements. | The immutable privacy requirement or a rejected carrier. |
+| Device state (battery, thermal state, metered network, radio airtime) | Reduce permitted queue, connection, and relay work for a device/interface. | Owner disablement, OS permission, or explicit non-relay posture. |
+| Carrier-native limits (MTU, RNS resource availability, BLE negotiated MTU, radio duty cycle) | Select a valid direct/native-resource/private-block outcome. | Message authentication, bounds, or carrier-specific resource protocol. |
+| Route/receipt state | Avoid a stale carrier and record truthful per-leg lifecycle. | The distinction between carrier receipt and end-to-end acknowledgement. |
 
-| Level | Description | Indicators |
-|-------|-------------|------------|
-| **Normal** | All transports functional | Low latency, low packet loss, high bandwidth |
-| **Congested** | Some transports degraded | Moderate latency, moderate packet loss |
-| **Isolation** | Most transports unavailable | High latency, high packet loss, few peers reachable |
-| **Blackout** | No standard transports available | No peers reachable via TCP/WebRTC |
+### Anti-Thrashing Is a Future Secondary Control
 
-### Transport Selection by Disaster Level
+A future adaptive policy may use persisted, per-interface hysteresis and bounded health windows **after** the fail-closed candidate filter. Static thresholds such as “three failures”, “five minutes”, or “20% better” are deliberately not normative because each carrier has a different observation model, retry semantics, energy cost, and privacy leakage. Every chosen policy must be device-profile-aware, testable, and forbidden from silently downgrading a message or activating an unapproved radio relay.
 
-| Disaster Level | Preferred Transports |
-|----------------|---------------------|
-| Normal | StealthTCP, WebRTC |
-| Congested | WebRTC, WebSocket Camouflage |
-| Isolation | WebSocket Camouflage, Shadowsocks AEAD, obfs4 |
-| Blackout | BLE, LoRa, Reticulum (any available interface) |
-
-### Hysteresis (Anti-Thrashing)
-
-To prevent rapid oscillation between transports:
-
-| Property | Value |
-|----------|-------|
-| **Minimum transport hold time** | 60 seconds |
-| **Switch threshold** | Current transport fails 3 consecutive times |
-| **Re-evaluation interval** | 5 minutes |
-| **Hysteresis margin** | New transport must be 20% better than current to switch |
-
-**Switch decision:**
-```
-fn should_switch_transport(current_metrics, candidate_metrics) -> bool {
-    if current_metrics.is_healthy() {
-        return false;
-    }
-    if candidate_metrics.score > current_metrics.score * 1.2 {
-        return true;
-    }
-    false
-}
-```
+The historical score-only switch sketch was removed because it would make an unsafe decision: it has no immutable privacy intent, native identity/discovery declaration, device/permission/energy gate, relay consent, carrier-specific fragmentation check, or truthful receipt lifecycle.
 
 ---
 
-## Transport Registry
+## Historical Transport Registry Sketch
 
-The transport registry manages all available transports and their state.
+The following interface sketch is not a current GhostWire runtime API or support contract. A future registry must expose factual `TransportCapability` declarations and route every operation through the policy coordinator and protected-envelope handoff lifecycle rather than keep one globally active transport/fallback chain.
 
 ```rust
 pub struct TransportRegistry {
@@ -339,7 +312,8 @@ impl TransportRegistry {
     /// Register a new transport
     pub fn register(&mut self, transport: Box<dyn Transport>);
 
-    /// Select the best available transport based on current conditions
+    /// Historical sketch only — a future selection API must accept immutable
+    /// delivery policy and return a typed explicit outcome, not a global fallback.
     pub fn select_transport(&mut self) -> TransportType;
 
     /// Update disaster level based on network metrics

@@ -152,6 +152,7 @@ pub enum StandardErrorCode {
     #[allow(dead_code)] // ponytail: standard error code, used in API surface
     IdentityLocked,
     RateLimited,
+    PrivateDeliveryUnavailable,
 }
 
 impl StandardErrorCode {
@@ -166,6 +167,7 @@ impl StandardErrorCode {
             Self::InvalidInput => "INVALID_INPUT",
             Self::IdentityLocked => "IDENTITY_LOCKED",
             Self::RateLimited => "RATE_LIMITED",
+            Self::PrivateDeliveryUnavailable => "PRIVATE_DELIVERY_UNAVAILABLE",
         }
     }
 }

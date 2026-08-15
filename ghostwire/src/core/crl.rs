@@ -33,6 +33,11 @@ pub const DEFAULT_CRL_TTL: u64 = 30 * 24 * 3600;
 /// How often to garbage-collect expired entries (1 hour)
 pub const CRL_GC_INTERVAL: Duration = Duration::from_secs(3600);
 
+/// Maximum tolerated sender clock lead for a revocation entry (five minutes).
+/// Entries further in the future are rejected to prevent revocation pinning via
+/// implausible timestamps while allowing modest peer clock skew.
+pub const MAX_FUTURE_TIMESTAMP_SKEW: u64 = 5 * 60;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /// A single revocation entry — signed by the revoking node.
@@ -68,6 +73,8 @@ pub enum MergeResult {
     InvalidSignature,
     /// Entry timestamp is too old (expired)
     Expired,
+    /// Entry timestamp is implausibly far in the future
+    FutureTimestamp,
 }
 
 // ── CrlStore ──────────────────────────────────────────────────────────────────
@@ -144,8 +151,23 @@ impl CrlStore {
         entry: &RevocationEntry,
         verify_fn: &dyn Fn(&[u8], &[u8], &str) -> bool,
     ) -> MergeResult {
-        // Check expiry
-        let age = now_secs().saturating_sub(entry.timestamp);
+        let now = now_secs();
+
+        // Reject far-future entries before applying expiry logic. Without this
+        // bound, `saturating_sub` would accept arbitrarily future timestamps
+        // and retain a malicious revocation much longer than its intended TTL.
+        if entry.timestamp > now.saturating_add(MAX_FUTURE_TIMESTAMP_SKEW) {
+            warn!(
+                key_id = %entry.key_id,
+                timestamp = entry.timestamp,
+                now = now,
+                "Revocation timestamp exceeds permitted clock skew"
+            );
+            return MergeResult::FutureTimestamp;
+        }
+
+        // Check expiry.
+        let age = now.saturating_sub(entry.timestamp);
         if age > self.entry_ttl {
             debug!(key_id = %entry.key_id, age = age, "Revocation expired, skipping");
             return MergeResult::Expired;
@@ -224,7 +246,7 @@ impl Default for CrlStore {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs()
 }
 
@@ -310,6 +332,23 @@ mod tests {
 
         assert_eq!(store.merge(&entry, &dummy_verify), MergeResult::Expired);
         assert!(!store.is_revoked("key_abc"));
+    }
+
+    #[test]
+    fn test_merge_rejects_far_future_timestamp() {
+        let store = CrlStore::new();
+        let entry = RevocationEntry {
+            key_id: "key_future".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs() + MAX_FUTURE_TIMESTAMP_SKEW + 1,
+            signature: vec![0xAB],
+        };
+
+        assert_eq!(
+            store.merge(&entry, &dummy_verify),
+            MergeResult::FutureTimestamp
+        );
+        assert!(!store.is_revoked("key_future"));
     }
 
     #[test]

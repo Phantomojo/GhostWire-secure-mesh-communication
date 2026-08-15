@@ -64,6 +64,7 @@ pub const BROADCAST_TOPIC: &str = "b7dcd0de7e54fd2732a5244bdbdc0d02";
 pub const DM_TOPIC: &str = "9982f756f600726c3cbc6c8ca321acc9";
 pub const SPHINX_TOPIC: &str = "c93b642a5e02da27dda6344fbfbe7866";
 pub const DTN_SYNC_TOPIC: &str = "5ee92e52d560f4904ef25e4265349e3d";
+pub const CRL_TOPIC: &str = "7b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e";
 
 /// Maximum number of hops for message relay (prevents infinite loops).
 pub const MAX_MESSAGE_HOPS: u8 = 5;

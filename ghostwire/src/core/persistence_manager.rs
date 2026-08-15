@@ -20,12 +20,22 @@ impl PersistenceManager {
             home.join(".ghostwire").join("vault")
         };
 
-        if !base_dir.exists() {
-            std::fs::create_dir_all(&base_dir)?;
-        }
+        Self::open_at(base_dir, profile_name)
+    }
 
-        let db_path = if let Some(p) = &profile_name {
-            base_dir.join(format!("ghost_{}", p))
+    /// Open a persistence database below an explicit vault directory.
+    ///
+    /// This supports isolated integration tests and embedding scenarios without
+    /// relying on the process-global `GHOSTWIRE_HOME` environment variable.
+    pub fn open_at(
+        base_dir: impl AsRef<std::path::Path>,
+        profile_name: Option<String>,
+    ) -> Result<Self> {
+        let base_dir = base_dir.as_ref();
+        std::fs::create_dir_all(base_dir)?;
+
+        let db_path = if let Some(profile) = &profile_name {
+            base_dir.join(format!("ghost_{profile}"))
         } else {
             base_dir.join("ghost_default")
         };
@@ -161,9 +171,8 @@ mod tests {
     #[test]
     fn test_persistence_roundtrip() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-
-        let manager = PersistenceManager::new(None).expect("Failed to create PersistenceManager");
+        let manager = PersistenceManager::open_at(dir.path().join("vault"), None)
+            .expect("Failed to create PersistenceManager");
 
         #[derive(Serialize, Deserialize, Debug, PartialEq)]
         struct TestData {
@@ -194,9 +203,9 @@ mod tests {
     #[test]
     fn test_list_keys() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-
-        let manager = PersistenceManager::new(Some("profile1".to_string())).unwrap();
+        let manager =
+            PersistenceManager::open_at(dir.path().join("vault"), Some("profile1".to_string()))
+                .unwrap();
 
         manager.store_secure("tree_a", "key1", &"val1").unwrap();
         manager.store_secure("tree_a", "key2", &"val2").unwrap();
@@ -215,8 +224,7 @@ mod tests {
     #[test]
     fn test_load_all() {
         let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-        let manager = PersistenceManager::new(None).unwrap();
+        let manager = PersistenceManager::open_at(dir.path().join("vault"), None).unwrap();
 
         manager.store_secure("items", "1", &10).unwrap();
         manager.store_secure("items", "2", &20).unwrap();

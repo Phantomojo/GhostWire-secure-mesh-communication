@@ -204,7 +204,7 @@ fn is_newer(candidate: &str, current: &str) -> bool {
 //   pub fn clear(&self) -> Result<()> {
 //       // Drop the "messages" sled tree entirely and recreate it empty
 //       let tree_name = b"messages";
-//       self.persistence.db()?.drop_tree(tree_name)?;
+//       self.storage_stack.persistence.db()?.drop_tree(tree_name)?;
 //       tracing::info!("Message store cleared");
 //       Ok(())
 //   }

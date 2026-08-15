@@ -10,13 +10,23 @@ use ghostwire::core::mesh::MeshManager;
 use ghostwire::core::message::Message;
 use ghostwire::core::persistence_manager::PersistenceManager;
 use ghostwire::core::reliability::ReliabilityLayer;
-use ghostwire::core::security::{SecurityConfig, SecurityManager};
 use ghostwire::core::store::SecureMessageStore;
 use ghostwire::core::username_discovery::UsernameDiscovery;
 use libp2p::PeerId;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
+
+/// Guard the legacy `GHOSTWIRE_HOME` lookup while test identities are created.
+///
+/// Identity construction currently reads a process-global home directory, so the
+/// guard prevents concurrently running integration tests from selecting each
+/// other's temporary profile directory. Persistence itself uses `open_at` and
+/// remains fully per-node.
+fn identity_home_guard() -> &'static Mutex<()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD.get_or_init(|| Mutex::new(()))
+}
 
 /// Build a minimal MeshManager for testing.
 /// Returns (MeshManager, PeerId, listen_multiaddr).
@@ -27,12 +37,18 @@ async fn build_test_mesh_manager(
     // Use a unique temp directory for each node to avoid DB lock conflicts
     let temp_dir =
         std::env::temp_dir().join(format!("ghostwire_test_{}_{}", port, std::process::id()));
-    let _ = std::fs::create_dir_all(&temp_dir);
-    std::env::set_var("GHOSTWIRE_HOME", temp_dir.to_str().unwrap());
+    let vault_dir = temp_dir.join("vault");
 
-    let identity = Arc::new(
-        Identity::new(profile).map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
-    );
+    let identity = {
+        let _home_guard = identity_home_guard()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Identity home guard was poisoned"))?;
+        std::env::set_var("GHOSTWIRE_HOME", &temp_dir);
+        let created = Identity::new(profile)
+            .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e));
+        std::env::remove_var("GHOSTWIRE_HOME");
+        Arc::new(created?)
+    };
     let keypair = identity
         .keypair()
         .ok_or_else(|| anyhow::anyhow!("Identity is locked"))?;
@@ -43,10 +59,7 @@ async fn build_test_mesh_manager(
             .map_err(|e| anyhow::anyhow!("EncryptionManager creation failed: {}", e))?,
     );
 
-    let security_config = SecurityConfig::default();
-    let _security_manager = Arc::new(SecurityManager::new(security_config));
-
-    let persistence = Arc::new(PersistenceManager::new(None)?);
+    let persistence = Arc::new(PersistenceManager::open_at(vault_dir, None)?);
     let encryption = Arc::new(
         Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
     );
@@ -67,7 +80,7 @@ async fn build_test_mesh_manager(
         vec![], // no bootstrap nodes -- we'll dial directly
         username_discovery,
         None, // no event bus
-        None, // no handshake secret
+        Arc::new(RwLock::new(None)), // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
     )
     .await?;
@@ -97,18 +110,6 @@ async fn test_node_to_node_connectivity() {
             .add_address(peer_id_b, addr_b.clone())
             .await
             .expect("Failed to add address");
-
-        let dm_topic_b = format!("ghostwire-dm-{}", peer_id_b);
-        node_b
-            .subscribe_topic(&dm_topic_b)
-            .await
-            .expect("Failed to subscribe to DM topic");
-
-        let dm_topic_a = format!("ghostwire-dm-{}", peer_id_a);
-        node_a
-            .subscribe_topic(&dm_topic_a)
-            .await
-            .expect("Failed to subscribe to DM topic");
 
         node_a
             .connect_peer(peer_id_b)
@@ -153,7 +154,7 @@ async fn test_node_to_node_connectivity() {
 #[tokio::test]
 async fn test_ping_pong_same_machine() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        let (mut node_a, peer_id_a, _addr_a) =
+        let (mut node_a, _peer_id_a, _addr_a) =
             build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
                 .await
                 .expect("node A");
@@ -166,11 +167,6 @@ async fn test_ping_pong_same_machine() {
             .add_address(peer_id_b, addr_b.clone())
             .await
             .expect("add_address");
-
-        let dm_topic_b = format!("ghostwire-dm-{peer_id_b}");
-        node_b.subscribe_topic(&dm_topic_b).await.expect("sub B");
-        let dm_topic_a = format!("ghostwire-dm-{peer_id_a}");
-        node_a.subscribe_topic(&dm_topic_a).await.expect("sub A");
 
         node_a.connect_peer(peer_id_b).await.expect("connect");
 

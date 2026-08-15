@@ -167,7 +167,7 @@
 //     pub boot_report: Arc<RwLock<Option<crate::startup::BootReport>>>,
 // }
 //
-// The social_graph, knowledge_ark, etc. are accessed via state.core.read().await.social_graph
+// The social_graph, knowledge_ark, etc. are accessed via state.core.read().await.social_stack.social_graph
 // No need to duplicate them in AppState.
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -274,7 +274,7 @@
 //           if let Some(ip) = extract_ip_from_multiaddr(&address) {
 //               // Try to add to diverse routing table — rejects if subnet full
 //               if let Some(core) = &self.core_ref {
-//                   // core.trust_store.verify_or_pin(&peer_id.to_string(), &pub_key).await
+//                   // core.security_stack.trust_store.verify_or_pin(&peer_id.to_string(), &pub_key).await
 //               }
 //           }
 //       }
@@ -299,7 +299,7 @@
 //   let data = frame.to_bytes();
 //
 //   // Deduplication check
-//   if self.message_dedup.is_duplicate(&message.id) {
+//   if self.storage_stack.message_dedup.is_duplicate(&message.id) {
 //       return; // Already seen
 //   }
 //

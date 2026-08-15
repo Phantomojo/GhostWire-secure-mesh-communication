@@ -94,7 +94,7 @@ fn test_cli_encryption_roundtrip() {
     let mgr = EncryptionManager::new().unwrap();
     let plaintext = b"Secret CLI data that needs protection";
 
-    let encrypted = mgr.encrypt(plaintext);
+    let encrypted = mgr.encrypt(plaintext).expect("Encryption should succeed");
     assert!(!encrypted.is_empty(), "Encrypted data should not be empty");
     assert_ne!(
         encrypted.as_slice(),
@@ -116,7 +116,7 @@ fn test_empty_data_encryption() {
     let mgr = EncryptionManager::new().unwrap();
     let plaintext = b"";
 
-    let encrypted = mgr.encrypt(plaintext);
+    let encrypted = mgr.encrypt(plaintext).expect("Encryption should succeed");
     let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
 
     assert_eq!(
@@ -132,7 +132,7 @@ fn test_large_data_encryption() {
     let mgr = EncryptionManager::new().unwrap();
     let plaintext: Vec<u8> = (0u8..=255).cycle().take(100_000).collect();
 
-    let encrypted = mgr.encrypt(&plaintext);
+    let encrypted = mgr.encrypt(&plaintext).expect("Encryption should succeed");
     let decrypted = mgr.decrypt(&encrypted).expect("Decryption should succeed");
 
     assert_eq!(

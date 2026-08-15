@@ -163,9 +163,8 @@ impl EncryptionManager {
         if pk.len() < start + 32 {
             return None;
         }
-        let secret = x25519_dalek::StaticSecret::from(
-            <[u8; 32]>::try_from(&pk[start..start + 32]).ok()?,
-        );
+        let secret =
+            x25519_dalek::StaticSecret::from(<[u8; 32]>::try_from(&pk[start..start + 32]).ok()?);
         Some(*x25519_dalek::PublicKey::from(&secret).as_bytes())
     }
 
@@ -749,7 +748,7 @@ impl EncryptionManager {
     }
 
     // Enhanced encryption method for CLI compatibility
-    pub fn encrypt(&self, data: &[u8]) -> Vec<u8> {
+    pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<Vec<u8>> {
         // Derive a strong 32-byte key from our key pair
         let key = self.derive_cli_key();
 
@@ -758,14 +757,11 @@ impl EncryptionManager {
                 // Combine nonce and ciphertext
                 let mut combined = result.nonce;
                 combined.extend_from_slice(&result.ciphertext);
-                combined
+                Ok(combined)
             }
             Err(e) => {
                 tracing::error!(inner_error = %e, "CLI encryption failed");
-                panic!(
-                    "Encryption failed - this should never happen in production: {}",
-                    e
-                );
+                Err(anyhow::anyhow!("Encryption failed: {}", e))
             }
         }
     }
@@ -1124,6 +1120,53 @@ mod tests {
         let decrypted = bob.decrypt_message(&encrypted).unwrap();
 
         assert_eq!(message, decrypted);
+    }
+
+    #[test]
+    fn test_crl_gossip_accepts_signed_entry_and_deduplicates() {
+        let alice = EncryptionManager::new().unwrap();
+        let bob = EncryptionManager::new().unwrap();
+
+        // A remote verifier must know the revoker's public key before it can
+        // accept the signed CRL entry received through gossip.
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+
+        let entry = alice.revoke_key("compromised-recipient-key");
+        let payloads = alice.create_crl_gossip_payload();
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].entry, entry);
+
+        assert_eq!(bob.handle_crl_gossip(&payloads), (1, 0, 0));
+        assert!(bob.crl.is_revoked("compromised-recipient-key"));
+
+        // Replaying the identical gossip payload is an idempotent duplicate.
+        assert_eq!(bob.handle_crl_gossip(&payloads), (0, 1, 0));
+    }
+
+    #[test]
+    fn test_crl_gossip_rejects_far_future_entry() {
+        let receiver = EncryptionManager::new().unwrap();
+        let payload = crl::CrlGossipPayload {
+            entry: crl::RevocationEntry {
+                key_id: "future-key".to_string(),
+                revoked_by: "untrusted-peer".to_string(),
+                timestamp: crate::core::crl::MAX_FUTURE_TIMESTAMP_SKEW
+                    + SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                    + 1,
+                signature: vec![],
+            },
+            version: 1,
+        };
+
+        assert_eq!(receiver.handle_crl_gossip(&[payload]), (0, 0, 1));
+        assert!(!receiver.crl.is_revoked("future-key"));
     }
 
     #[test]

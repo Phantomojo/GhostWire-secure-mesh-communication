@@ -34,6 +34,8 @@ enum View {
     Contacts,
     /// Dashboard / node status
     Dashboard,
+    /// Network Explorer (Nomadnet style)
+    NetworkExplorer,
 }
 
 /// TUI application state
@@ -246,12 +248,14 @@ impl TuiApp {
             KeyCode::Char('1') => self.view = View::Chat,
             KeyCode::Char('2') => self.view = View::Contacts,
             KeyCode::Char('3') => self.view = View::Dashboard,
+            KeyCode::Char('4') => self.view = View::NetworkExplorer,
             KeyCode::Tab => {
                 // Cycle views
                 self.view = match self.view {
                     View::Chat => View::Contacts,
                     View::Contacts => View::Dashboard,
-                    View::Dashboard => View::Chat,
+                    View::Dashboard => View::NetworkExplorer,
+                    View::NetworkExplorer => View::Chat,
                 };
             }
             KeyCode::Up => {
@@ -406,6 +410,7 @@ impl TuiApp {
             View::Chat => self.render_chat_view(f),
             View::Contacts => self.render_contacts_view(f),
             View::Dashboard => self.render_dashboard_view(f),
+            View::NetworkExplorer => self.render_network_explorer_view(f),
         }
     }
 
@@ -624,7 +629,7 @@ impl TuiApp {
                 ("Enter", "Open chat"),
                 ("i", "Type message"),
                 ("Tab", "Switch view"),
-                ("1/2/3", "Chat/Contacts/Dashboard"),
+                ("1/2/3/4", "Chat/Contacts/Dashboard/Explorer"),
                 ("q", "Quit"),
             ])
         };
@@ -742,7 +747,63 @@ impl TuiApp {
 
         let help = theme::help_bar(&[
             ("Tab", "Switch view"),
-            ("1/2/3", "Chat/Contacts/Dashboard"),
+            ("1/2/3/4", "Chat/Contacts/Dashboard/Explorer"),
+            ("q", "Quit"),
+        ]);
+        f.render_widget(help, main[2]);
+    }
+
+    fn render_network_explorer_view(&self, f: &mut Frame) {
+        let area = f.area();
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(area);
+
+        self.render_status_bar(f, main[0]);
+
+        // Explorer content
+        let explorer_items: Vec<ListItem> = self
+            .contacts
+            .iter()
+            .filter(|c| !c.peer_id.is_empty())
+            .map(|c| {
+                let status_style = if c.online {
+                    theme::online_style()
+                } else {
+                    theme::muted_style()
+                };
+                let status_text = if c.online { "ONLINE" } else { "OFFLINE" };
+
+                let header = Line::from(vec![
+                    Span::styled(format!(" [{}] ", status_text), status_style),
+                    Span::styled(&c.display_name, theme::primary_bold()),
+                    Span::raw(" - "),
+                    Span::styled(&c.peer_id, theme::muted_style()),
+                ]);
+
+                let details = Line::from(vec![
+                    Span::raw("    Link Quality: "),
+                    Span::styled(format!("{:.0}%", c.trust_score * 100.0), theme::text_style()),
+                    Span::raw(" | Last Seen: "),
+                    Span::styled(format_duration(c.last_seen_secs), theme::text_style()),
+                ]);
+
+                ListItem::new(vec![header, details, Line::from("")])
+            })
+            .collect();
+
+        let explorer = List::new(explorer_items).block(theme::themed_block("Network Explorer (Nomadnet Style)"));
+        f.render_widget(explorer, main[1]);
+
+        let help = theme::help_bar(&[
+            ("↑↓", "Browse Nodes"),
+            ("Enter", "Inspect"),
+            ("Tab", "Switch view"),
             ("q", "Quit"),
         ]);
         f.render_widget(help, main[2]);

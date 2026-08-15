@@ -19,7 +19,7 @@ Formal specifications that define the GhostWire Protocol — any implementation 
 | **[Delay-Tolerant Networking](spec/DTN.md)** | PRoPHET epidemic routing, Spray-and-Wait, SyncBloom, buffer management |
 | **[Identity](spec/IDENTITY.md)** | DID format, key management, device pairing, Shamir recovery, coercion resistance |
 | **[Social Protocol](spec/SOCIAL.md)** | Connection state machine, Web of Trust, trust scoring, event bus |
-| **[Pluggable Transports](spec/TRANSPORT.md)** | Transport interface, censorship resistance, traffic armor, auto-switching |
+| **[Pluggable Transports](spec/TRANSPORT.md)** | Historical protocol transport design; check implementation status before relying on auto-switching |
 
 ---
 
@@ -30,10 +30,16 @@ Guides for developers who want to build applications on the GhostWire Protocol.
 | Document | Description |
 |----------|-------------|
 | **[Overview](build/OVERVIEW.md)** | What you can build, protocol vs implementation distinction |
+| **[Transport Support Status](TRANSPORT_SUPPORT_STATUS.md)** | Authoritative supported, experimental, policy-foundation, and planned carrier/bridge boundaries |
+| **[Carrier Contract](CARRIER_CONTRACT.md)** | Native carrier identity, discovery, fragmentation, eligibility, and relay declarations |
+| **[Inter-Transport Handoff](INTER_TRANSPORT_HANDOFF.md)** | Protected-envelope carrier conversion, receipt semantics, and private bulk rules |
+| **[Transport Identity Derivation](TRANSPORT_IDENTITY_DERIVATION.md)** | Domain-separated GhostWire-side carrier/interface key bindings |
+| **[Operating Profiles](OPERATING_PROFILES.md)** | Deterministic desktop/server, mobile/constrained, and low-rate-radio work/relay limits |
+| **[libp2p–RNS Hybrid Contract](LIBP2P_RNS_HYBRID_CONTRACT.md)** | Experimental RNS packet boundary, policy checks, receipt semantics, and required acceptance gaps |
 | **[Quick Start](build/QUICKSTART.md)** | Add GhostWire to a Rust project, send your first mesh message |
 | **[Embedding Guide](build/EMBEDDING.md)** | Run GhostWire as a background service in your application |
 | **[Custom Transport](build/CUSTOM_TRANSPORT.md)** | Implement the Transport trait for new networking mediums |
-| **[Protocol Bridges](build/PROTOCOL_BRIDGES.md)** | Build bridges to Matrix, Meshtastic, Briar, Reticulum |
+| **[Protocol Bridges](build/PROTOCOL_BRIDGES.md)** | Historical bridge design notes and accurate bridge-status boundaries |
 | **[API Reference](build/API_REFERENCE.md)** | Complete REST API + WebSocket event reference |
 
 ---
@@ -61,6 +67,8 @@ Documentation for the GhostWire reference implementation (Rust).
 | **[Web UI](WEB_UI.md)** | Web interface documentation |
 | **[Testing](TESTING.md)** | Running tests, writing new tests |
 | **[Development](DEVELOPMENT.md)** | Development workflow, hot-reloading, debugging |
+| **[Architecture Limits Register](ARCHITECTURE_LIMITS_REGISTER.md)** | Verified limits, containment, long-term designs, and acceptance criteria |
+| **[Test Matrix](TEST_MATRIX.md)** | Required verification tiers, security properties, and feature-profile gates |
 
 ---
 
@@ -96,6 +104,8 @@ Documentation for the GhostWire reference implementation (Rust).
 
 ## Presentations
 
+> **Historical and roadmap material:** Presentation scenarios may illustrate target BLE, Wi-Fi, LoRa, bridge, or automatic-handoff architecture. They are not implementation-status evidence. Use [Transport Support Status](TRANSPORT_SUPPORT_STATUS.md) and the [Architecture Limits Register](ARCHITECTURE_LIMITS_REGISTER.md) for current claims.
+
 Slide decks for talks and presentations about GhostWire.
 
 | Document | Description |
@@ -117,5 +127,5 @@ Slide decks for talks and presentations about GhostWire.
 
 ---
 
-**Last Updated:** April 12, 2026
+**Last Updated:** August 12, 2026
 **Maintained By:** Team GhostWire

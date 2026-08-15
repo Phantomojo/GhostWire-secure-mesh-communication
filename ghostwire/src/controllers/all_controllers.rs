@@ -37,7 +37,7 @@ pub struct CreateEntryRequest {
 impl ArkController {
     pub async fn list_collections(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let collections = core.knowledge_ark.list_collections().await;
+        let collections = core.storage_stack.knowledge_ark.list_collections().await;
         Json(ApiV2Response::success(collections))
     }
 
@@ -47,7 +47,11 @@ impl ArkController {
     ) -> impl IntoResponse {
         let name = req["name"].as_str().unwrap_or("Untitled").to_string();
         let core = state.core.read().await;
-        let col = core.knowledge_ark.create_collection(name).await;
+        let col = core
+            .storage_stack
+            .knowledge_ark
+            .create_collection(name)
+            .await;
         Json(ApiV2Response::success(col))
     }
 
@@ -82,7 +86,7 @@ impl ArkController {
             .with_tags(req.tags.unwrap_or_default())
             .with_access(access);
 
-        match core.knowledge_ark.add_entry(entry).await {
+        match core.storage_stack.knowledge_ark.add_entry(entry).await {
             Ok(cid) => {
                 Json(ApiV2Response::success(serde_json::json!({ "cid": cid }))).into_response()
             }
@@ -99,7 +103,7 @@ impl ArkController {
         Path(cid): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        match core.knowledge_ark.get_entry(&cid).await {
+        match core.storage_stack.knowledge_ark.get_entry(&cid).await {
             Some(entry) => Json(ApiV2Response::success(entry)).into_response(),
             None => (
                 StatusCode::NOT_FOUND,
@@ -114,7 +118,7 @@ impl ArkController {
         Path(cid): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        match core.knowledge_ark.delete_entry(&cid).await {
+        match core.storage_stack.knowledge_ark.delete_entry(&cid).await {
             Ok(_) => Json(ApiV2Response::success(
                 serde_json::json!({ "deleted": cid }),
             ))
@@ -137,7 +141,7 @@ impl ArkController {
                 .into_response();
         }
         let core = state.core.read().await;
-        let results = core.knowledge_ark.search(q).await;
+        let results = core.storage_stack.knowledge_ark.search(q).await;
         let payload: Vec<_> = results
             .into_iter()
             .map(|(entry, score)| serde_json::json!({ "entry": entry, "score": score }))
@@ -150,13 +154,13 @@ impl ArkController {
         Path(tag): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        let entries = core.knowledge_ark.search_by_tag(&tag).await;
+        let entries = core.storage_stack.knowledge_ark.search_by_tag(&tag).await;
         Json(ApiV2Response::success(entries))
     }
 
     pub async fn stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let stats = core.knowledge_ark.stats().await;
+        let stats = core.storage_stack.knowledge_ark.stats().await;
         Json(ApiV2Response::success(stats))
     }
 }
@@ -170,7 +174,7 @@ pub struct ChannelController;
 impl ChannelController {
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let channels = core.ghost_channels.list().await;
+        let channels = core.social_stack.ghost_channels.list().await;
         Json(ApiV2Response::success(channels))
     }
 
@@ -180,7 +184,7 @@ impl ChannelController {
     ) -> impl IntoResponse {
         let name = req["name"].as_str().map(|s| s.to_string());
         let core = state.core.read().await;
-        match core.ghost_channels.create(name).await {
+        match core.social_stack.ghost_channels.create(name).await {
             Ok(ch) => Json(ApiV2Response::success(serde_json::json!({
                 "channel": ch,
                 "invite": ch.invite_string(),
@@ -201,7 +205,7 @@ impl ChannelController {
     ) -> impl IntoResponse {
         let invite = req["invite"].as_str().unwrap_or("");
         let core = state.core.read().await;
-        match core.ghost_channels.join(invite).await {
+        match core.social_stack.ghost_channels.join(invite).await {
             Ok(ch) => Json(ApiV2Response::success(ch)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
@@ -219,7 +223,14 @@ impl ChannelController {
             if bytes.len() == 32 {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(&bytes);
-                state.core.read().await.ghost_channels.leave(&arr).await;
+                state
+                    .core
+                    .read()
+                    .await
+                    .social_stack
+                    .ghost_channels
+                    .leave(&arr)
+                    .await;
             }
         }
         Json(ApiV2Response::success(serde_json::json!({ "left": id })))
@@ -253,7 +264,7 @@ impl ChannelController {
         };
 
         let core = state.core.read().await;
-        let Some(channel) = core.ghost_channels.get(&topic_id).await else {
+        let Some(channel) = core.social_stack.ghost_channels.get(&topic_id).await else {
             return (
                 StatusCode::NOT_FOUND,
                 Json(ApiV2Response::<()>::error(
@@ -265,12 +276,17 @@ impl ChannelController {
         };
 
         // Prepare message (PoW solving — use spawn_blocking in production)
-        match core.ghost_channels.prepare_message(&channel, text).await {
+        match core
+            .social_stack
+            .ghost_channels
+            .prepare_message(&channel, text)
+            .await
+        {
             Ok(msg) => {
                 // CRITICAL FIX: Actually publish via mesh gossipsub
                 #[cfg(feature = "mesh")]
                 {
-                    if let Some(mesh_manager) = &core.mesh_manager {
+                    if let Some(mesh_manager) = &*core.network_stack.mesh_manager.load() {
                         let mgr = mesh_manager.read().await;
                         let topic = format!("ghostwire-channel-{}", hex::encode(topic_id));
                         let content = serde_json::to_string(&msg).unwrap_or_default();
@@ -317,7 +333,11 @@ impl ChannelController {
                 .into_response();
         };
         let core = state.core.read().await;
-        let messages = core.ghost_channels.get_messages(&topic_id).await;
+        let messages = core
+            .social_stack
+            .ghost_channels
+            .get_messages(&topic_id)
+            .await;
         Json(ApiV2Response::success(messages)).into_response()
     }
 }
@@ -334,8 +354,8 @@ impl TrustController {
         Path(peer_id): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        let score = core.trust_store.trust_score(&peer_id).await;
-        let record = core.trust_store.get(&peer_id).await;
+        let score = core.security_stack.trust_store.trust_score(&peer_id).await;
+        let record = core.security_stack.trust_store.get(&peer_id).await;
         Json(ApiV2Response::success(serde_json::json!({
             "peer_id": peer_id,
             "trust_score": score,
@@ -363,7 +383,12 @@ impl TrustController {
             }
         };
         let core = state.core.read().await;
-        match core.trust_store.mark_verified(&peer_id, &pub_key).await {
+        match core
+            .security_stack
+            .trust_store
+            .mark_verified(&peer_id, &pub_key)
+            .await
+        {
             Ok(_) => Json(ApiV2Response::success(
                 serde_json::json!({ "verified": peer_id }),
             ))
@@ -381,7 +406,7 @@ impl TrustController {
         Path(peer_id): Path<String>,
     ) -> impl IntoResponse {
         let core = state.core.read().await;
-        core.trust_store.block(&peer_id).await;
+        core.security_stack.trust_store.block(&peer_id).await;
         Json(ApiV2Response::success(
             serde_json::json!({ "blocked": peer_id }),
         ))
@@ -389,7 +414,7 @@ impl TrustController {
 
     pub async fn list_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let peers = core.trust_store.all_peers().await;
+        let peers = core.security_stack.trust_store.all_peers().await;
         Json(ApiV2Response::success(peers))
     }
 }
@@ -403,11 +428,11 @@ pub struct NetworkController;
 impl NetworkController {
     pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        let metrics = core.monitor.get_metrics().await;
+        let metrics = core.network_stack.monitor.get_metrics().await;
 
         // CRITICAL FIX: Wire actual transport mode and network state
         let transport_mode = {
-            let guard = core.active_transport.read().await;
+            let guard = core.network_stack.active_transport.read().await;
             guard
                 .as_ref()
                 .map(|t| t.name())
@@ -419,7 +444,7 @@ impl NetworkController {
             // Derive from mesh_manager status
             #[cfg(feature = "mesh")]
             {
-                if core.mesh_manager.is_some() {
+                if core.network_stack.mesh_manager.load().is_some() {
                     "full_mesh".to_string()
                 } else {
                     "disconnected".to_string()
@@ -453,12 +478,15 @@ impl NetworkController {
         let core = state.core.read().await;
         let node_id = core.get_identity_id().await;
         let pub_key = core.get_public_key();
-        let rendezvous = core.pairing_manager.rendezvous_address(&pub_key);
+        let rendezvous = core
+            .identity_stack
+            .pairing_manager
+            .rendezvous_address(&pub_key);
 
         use crate::core::identity::device_pairing::ContactCard;
 
         // CRITICAL FIX: Wire x25519_pub from encryption manager
-        let hybrid_pub = core.encryption.export_public_key();
+        let hybrid_pub = core.security_stack.encryption.export_public_key();
         let x25519_pub = if hybrid_pub.len() >= 64 {
             hybrid_pub[32..64].to_vec()
         } else {
@@ -486,10 +514,8 @@ impl NetworkController {
 
         // CRITICAL FIX: Sign the contact card with identity keypair
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
-        let identity = core.identity.read().await;
-        let signature = identity
-            .sign(&card_bytes)
-            .unwrap_or_default();
+        let identity = core.identity_stack.identity.read().await;
+        let signature = identity.sign(&card_bytes).unwrap_or_default();
         card.signature = signature;
 
         match card.to_qr_string() {
@@ -533,7 +559,7 @@ pub struct PairingController;
 impl PairingController {
     pub async fn generate_code(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
-        match core.pairing_manager.initiate_pairing().await {
+        match core.identity_stack.pairing_manager.initiate_pairing().await {
             Ok((code, session)) => Json(ApiV2Response::success(serde_json::json!({
                 "code": code.display,
                 "safety_number": code.safety_number(),
@@ -552,10 +578,13 @@ impl PairingController {
     pub async fn get_rendezvous_address(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
         let pub_key = core.get_public_key();
-        let addr = core.pairing_manager.rendezvous_address(&pub_key);
+        let addr = core
+            .identity_stack
+            .pairing_manager
+            .rendezvous_address(&pub_key);
         Json(ApiV2Response::success(serde_json::json!({
             "rendezvous_address": addr,
-            "dht_key": hex::encode(core.pairing_manager.rendezvous_dht_key(&pub_key)),
+            "dht_key": hex::encode(core.identity_stack.pairing_manager.rendezvous_dht_key(&pub_key)),
         })))
     }
 
@@ -635,7 +664,7 @@ impl RecoveryController {
 
         // Derive master key from identity's Ed25519 public key (32 bytes)
         // In production: use a proper KDF (HKDF-SHA256) with a salt
-        let identity_guard = core.identity.read().await;
+        let identity_guard = core.identity_stack.identity.read().await;
         let master_key = match identity_guard.public_key() {
             Some(pk) => match pk.try_into_ed25519() {
                 Ok(ed_pk) => ed_pk.to_bytes().to_vec(),
@@ -708,7 +737,7 @@ impl RecoveryController {
     pub async fn list_my_shares(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         // CRITICAL FIX: Query mailbox for incoming recovery shares
         let core = state.core.read().await;
-        let share_count = match core.mailbox_store.drain_inbox() {
+        let share_count = match core.storage_stack.mailbox_store.drain_inbox() {
             Ok(envelopes) => {
                 // Count envelopes that might be recovery shares
                 // (In production, would check message type metadata)
@@ -788,7 +817,7 @@ impl RecoveryController {
                 let _core = state.core.read().await;
 
                 // Create new identity from recovered key
-                match crate::core::identity::core_identity::Identity::from_seed(&recovered_key.0) {
+                match crate::core::identity::core_identity::Identity::from_recovery_seed(&recovered_key.0) {
                     Ok(new_identity) => match new_identity.save_to_disk(new_password) {
                         Ok(_) => Json(ApiV2Response::success(serde_json::json!({
                             "status": "key_reconstructed_and_identity_restored",

@@ -1,423 +1,395 @@
-use crate::core::identity::Identity;
-use crate::core::message::Message;
-use anyhow::Result;
-use rand_core::OsRng;
-// use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
-use tracing::{info, warn};
-use uuid::Uuid;
+//! A narrow, fail-closed bridge to the official Reticulum (RNS) runtime.
+//!
+//! GhostWire does **not** reimplement Reticulum's packet format, identity
+//! model, routing, receipt semantics, or physical interfaces. The previous
+//! in-process "Reticulum" code was a local simulation and therefore could not
+//! interoperate with RNS nodes. This manager instead launches the separately
+//! installed `scripts/reticulum_bridge.py`, which owns one official RNS
+//! instance. The bridge speaks a bounded JSON-lines control protocol over a
+//! private child-process pipe.
+//!
+//! The process boundary is intentional. It prevents the RNS identity namespace,
+//! interface configuration, and transport routing state from being silently
+//! conflated with GhostWire's libp2p identity and policy state. The `RNS` Python
+//! package is an optional external runtime, not a vendored Rust dependency.
+//!
+//! ## Security boundary
+//!
+//! * RNS configuration and its bridge identity live in a dedicated directory.
+//! * The bridge accepts only bounded opaque payloads (currently a single RNS
+//!   encrypted-packet MDU); it never receives GhostWire private keys.
+//! * A manager is created only after the official RNS bridge reports a valid
+//!   destination. Missing Python, RNS, bridge script, or malformed startup
+//!   output fails closed.
+//! * RNS transport/interface configuration is caller-owned. GhostWire may
+//!   select or reject a carrier based on privacy policy, but it must not claim
+//!   that an RNS interface has a property that RNS has not established.
 
-/// Reticulum-inspired secure mesh networking stack
-/// Based on cryptography-based networking with strong privacy guarantees
+use crate::core::operating_profile::{DeviceRuntimeState, OperatingProfile};
+use crate::core::rns_hybrid::{
+    plan_rns_packet_submission, RnsHybridError, RnsPacketSubmissionPlan,
+};
+use crate::core::transport_handoff::ProtectedEnvelopeId;
+use crate::core::transport_policy::{DeliveryRequirement, InterfaceEligibility};
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
+use tracing::{debug, warn};
+
+/// The manager accepts only an RNS encrypted packet MDU. Larger GhostWire
+/// envelopes must wait for an explicitly designed RNS `Link`/`Resource` path;
+/// they must never be silently truncated or fragmented into unauthenticated
+/// ad-hoc packets.
+pub const MAX_RNS_BRIDGE_PAYLOAD_BYTES: usize = 383;
+const BRIDGE_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const BRIDGE_EVENT_QUEUE_CAPACITY: usize = 128;
+
+/// Stable configuration error returned when the optional external runtime is
+/// absent or cannot prove its RNS destination at startup.
+pub const RETICULUM_BRIDGE_UNAVAILABLE: &str =
+    "RETICULUM_BRIDGE_UNAVAILABLE: the official RNS bridge could not be started";
+
+/// Compatibility alias retained so callers built against earlier hardening
+/// commits still fail closed. New callers must use `RETICULUM_BRIDGE_UNAVAILABLE`.
+pub const RETICULUM_UNSUPPORTED: &str = RETICULUM_BRIDGE_UNAVAILABLE;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReticulumNode {
+    /// RNS destination hash, never a GhostWire/libp2p identity.
     pub id: String,
-    pub public_key: Vec<u8>,
-    pub address: String,
     pub last_seen: u64,
-    pub connection_quality: f32,
     pub is_online: bool,
-    pub onion_routing_capable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// RNS does not expose a complete network topology to an application. This
+/// type remains for API compatibility only; it represents locally observed,
+/// explicitly supplied bridge information rather than an inferred global map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReticulumTopology {
     pub nodes: HashMap<String, ReticulumNode>,
     pub routes: HashMap<String, Vec<String>>,
     pub local_node_id: String,
-    pub onion_routes: HashMap<String, Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReticulumMessage {
-    pub id: String,
-    pub sender: String,
-    pub recipient: String,
-    pub content: Vec<u8>,           // Encrypted content
-    pub onion_layers: Vec<Vec<u8>>, // For onion routing
-    pub timestamp: u64,
-    pub ttl: u32, // Time to live
-    pub hop_count: u32,
-    pub max_hops: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReticulumStats {
+    /// RNS does not provide a global node count to this bridge.
     pub total_nodes: usize,
+    /// RNS does not provide a global online-node count to this bridge.
     pub online_nodes: usize,
+    /// Local RNS `ghostwire.bridge` destination hash.
     pub local_node_id: String,
+    /// RNS hides its internal next-hop topology by design.
     pub routes_count: usize,
+    /// GhostWire does not claim onion routes from an RNS bridge.
     pub onion_routes_count: usize,
+    /// Count of receipts that RNS accepted for local submission, not a proof of
+    /// application-level receipt or message display.
     pub messages_relayed: u64,
     pub encryption_errors: u64,
 }
 
-/// Secure mesh networking manager inspired by Reticulum
+#[derive(Debug)]
+struct BridgeHandles {
+    child: Child,
+    stdin: ChildStdin,
+}
+
+/// Lifecycle manager for one external official-RNS bridge process.
+///
+/// Incoming bridge events are retained only for the forthcoming unified ingress
+/// pipeline. They are intentionally not delivered to GhostWire application
+/// state yet, because bypassing CRL, trust, replay, causal-ordering, and message
+/// authentication checks would recreate the fragmented-ingress vulnerability.
 pub struct ReticulumManager {
-    identity: Arc<Identity>,
-    topology: Arc<RwLock<ReticulumTopology>>,
-    message_queue: Arc<RwLock<Vec<ReticulumMessage>>>,
-    stats: Arc<RwLock<ReticulumStats>>,
-    encryption_key: Vec<u8>, // AES-256 key for message encryption
-    onion_routing_enabled: bool,
+    destination: String,
+    rns_version: String,
+    handles: Mutex<BridgeHandles>,
+    events: Mutex<Receiver<Value>>,
+    accepted_messages: Mutex<u64>,
 }
 
 impl ReticulumManager {
-    pub async fn new(identity: Arc<Identity>) -> Result<Self> {
-        let node_id = Uuid::new_v4().to_string();
+    /// Launch the official RNS bridge and require a valid RNS destination before
+    /// considering this adapter available.
+    pub async fn new() -> Result<Self> {
+        let bridge_path = bridge_path()?;
+        let python = env::var("GHOSTWIRE_RNS_PYTHON").unwrap_or_else(|_| "python3".to_string());
+        let (config_dir, identity_path) = bridge_paths()?;
 
-        // Generate encryption key from identity
-        let encryption_key = Self::derive_encryption_key(&identity)?;
+        fs::create_dir_all(&config_dir)
+            .with_context(|| "could not create dedicated Reticulum configuration directory")?;
+        if let Some(parent) = identity_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| "could not create dedicated Reticulum identity directory")?;
+        }
 
-        let topology = Arc::new(RwLock::new(ReticulumTopology {
-            nodes: HashMap::new(),
-            routes: HashMap::new(),
-            local_node_id: node_id.clone(),
-            onion_routes: HashMap::new(),
-        }));
+        let mut child = Command::new(python)
+            .arg(bridge_path)
+            .arg("--config-dir")
+            .arg(&config_dir)
+            .arg("--identity-path")
+            .arg(&identity_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
 
-        let stats = Arc::new(RwLock::new(ReticulumStats {
-            total_nodes: 0,
-            online_nodes: 0,
-            local_node_id: node_id,
-            routes_count: 0,
-            onion_routes_count: 0,
-            messages_relayed: 0,
-            encryption_errors: 0,
-        }));
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+
+        let (event_tx, event_rx) = mpsc::sync_channel(BRIDGE_EVENT_QUEUE_CAPACITY);
+        spawn_bridge_reader(stdout, event_tx);
+
+        let ready = event_rx
+            .recv_timeout(BRIDGE_STARTUP_TIMEOUT)
+            .map_err(|_| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+        let (destination, rns_version) = parse_ready_event(&ready)?;
+
+        debug!(
+            rns_destination = %destination,
+            rns_version = %rns_version,
+            "official Reticulum bridge established"
+        );
 
         Ok(Self {
-            identity,
-            topology,
-            message_queue: Arc::new(RwLock::new(Vec::new())),
-            stats,
-            encryption_key,
-            onion_routing_enabled: true,
+            destination,
+            rns_version,
+            handles: Mutex::new(BridgeHandles { child, stdin }),
+            events: Mutex::new(event_rx),
+            accepted_messages: Mutex::new(0),
         })
     }
 
-    /// Derive encryption key from identity (AES-256)
-    fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
-        // Use BLAKE2b to derive a 32-byte key from the identity's public key
-        let public_key = identity
-            .public_key_bytes();
-        let mut key = [0u8; 32];
-
-        // Simple key derivation - in production, use proper KDF
-        let mut hasher = blake2b_simd::State::new();
-        hasher.update(&public_key);
-        hasher.update(b"ghostwire-reticulum-key");
-        let hash = hasher.finalize();
-        key.copy_from_slice(&hash.as_bytes()[..32]);
-
-        Ok(key.to_vec())
+    #[must_use]
+    pub fn destination(&self) -> &str {
+        &self.destination
     }
 
-    /// Encrypt message content using AES-256-GCM
-    pub fn encrypt_message(&self, content: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm,
-        };
-
-        let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
-
-        use rand_core::RngCore;
-
-        let mut nonce = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce);
-
-        let ciphertext = cipher
-            .encrypt(&nonce.into(), content)
-            .map_err(|e| anyhow::anyhow!("Failed to encrypt: {}", e))?;
-
-        // Prepend nonce to ciphertext
-        let mut result = Vec::with_capacity(12 + ciphertext.len());
-        result.extend_from_slice(&nonce);
-        result.extend_from_slice(&ciphertext);
-
-        Ok(result)
+    #[must_use]
+    pub fn rns_version(&self) -> &str {
+        &self.rns_version
     }
 
-    /// Decrypt message content using AES-256-GCM
-    pub fn decrypt_message(&self, encrypted_content: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm,
-        };
-
-        if encrypted_content.len() < 12 {
-            return Err(anyhow::anyhow!("Invalid encrypted content length"));
+    #[must_use]
+    pub fn get_stats(&self) -> ReticulumStats {
+        let accepted_messages = self.accepted_messages.lock().map_or(0, |count| *count);
+        ReticulumStats {
+            total_nodes: 0,
+            online_nodes: 0,
+            local_node_id: self.destination.clone(),
+            routes_count: 0,
+            onion_routes_count: 0,
+            messages_relayed: accepted_messages,
+            encryption_errors: 0,
         }
-
-        let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
-            .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
-
-        let nonce = &encrypted_content[..12];
-        let ciphertext = &encrypted_content[12..];
-
-        let plaintext = cipher
-            .decrypt(nonce.into(), ciphertext)
-            .map_err(|e| anyhow::anyhow!("Failed to decrypt: {}", e))?;
-
-        Ok(plaintext)
     }
 
-    /// Create onion routing layers for anonymous communication
-    pub fn create_onion_message(
+    /// Submit a policy-checked, already protected GhostWire envelope to an
+    /// explicitly known RNS destination. The successful return value means only
+    /// that this local manager accepted the packet for bridge submission; it is
+    /// not an RNS path, remote receipt, or application-delivery acknowledgement.
+    ///
+    /// The caller must keep `requirement` immutable from operation creation.
+    /// This method accepts no `Message` and cannot serialize application
+    /// plaintext for RNS transport.
+    pub fn submit_policy_checked_packet(
         &self,
-        content: &[u8],
-        route: &[String],
-    ) -> Result<ReticulumMessage> {
-        let mut onion_layers = Vec::new();
-        let mut current_content = content.to_vec();
+        profile: OperatingProfile,
+        runtime_state: DeviceRuntimeState,
+        interface: InterfaceEligibility,
+        envelope_id: ProtectedEnvelopeId,
+        destination: &str,
+        requirement: DeliveryRequirement,
+        protected_payload: &[u8],
+    ) -> Result<RnsPacketSubmissionPlan> {
+        let plan = plan_rns_packet_submission(
+            profile,
+            runtime_state,
+            interface,
+            envelope_id,
+            destination,
+            requirement,
+            protected_payload,
+        )
+        .map_err(|error: RnsHybridError| anyhow!(error.to_string()))?;
 
-        // Build onion layers from destination to source
-        for node_id in route.iter().rev() {
-            let layer = self.create_onion_layer(&current_content, node_id)?;
-            onion_layers.push(layer.clone());
-            current_content = layer; // Next layer will encrypt this layer
-        }
-
-        let message = ReticulumMessage {
-            id: Uuid::new_v4().to_string(),
-            sender: self.identity.id.clone(),
-            recipient: route.last().unwrap_or(&"unknown".to_string()).clone(),
-            content: current_content,
-            onion_layers,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            ttl: 300, // 5 minutes
-            hop_count: 0,
-            max_hops: route.len() as u32,
-        };
-
-        Ok(message)
+        self.submit_opaque_packet(&plan.rns_destination, protected_payload)?;
+        Ok(plan)
     }
 
-    /// Create a single onion layer
-    fn create_onion_layer(&self, content: &[u8], target_node: &str) -> Result<Vec<u8>> {
-        // In a real implementation, this would use the target node's public key
-        // For now, we'll use a simple encryption with a derived key
-        let mut layer_data = Vec::new();
-        layer_data.extend_from_slice(target_node.as_bytes());
-        layer_data.extend_from_slice(content);
-
-        self.encrypt_message(&layer_data)
-    }
-
-    /// Process incoming message and handle onion routing
-    pub async fn process_message(&mut self, message: ReticulumMessage) -> Result<Option<Vec<u8>>> {
-        // Check TTL
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        if current_time > message.timestamp + message.ttl as u64 {
-            warn!("Message expired: {}", message.id);
-            return Ok(None);
+    /// Raw local bridge write. It is crate-private so application dispatch must
+    /// pass the hybrid policy/fragmentation/operating-profile checks above.
+    fn submit_opaque_packet(&self, destination: &str, payload: &[u8]) -> Result<()> {
+        if destination.len() != 32 || !destination.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(anyhow!("RETICULUM_INVALID_DESTINATION"));
+        }
+        if payload.is_empty() || payload.len() > MAX_RNS_BRIDGE_PAYLOAD_BYTES {
+            return Err(anyhow!("RETICULUM_PAYLOAD_OUT_OF_BOUNDS"));
         }
 
-        // Update stats
-        {
-            let mut stats = self.stats.write().await;
-            stats.messages_relayed += 1;
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, payload);
+        let command = json!({
+            "op": "send",
+            "destination": destination,
+            "payload_b64": encoded,
+        });
+        let line = serde_json::to_vec(&command).context("could not encode RNS bridge command")?;
+
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| anyhow!("RETICULUM_BRIDGE_LOCK_POISONED"))?;
+        handles
+            .stdin
+            .write_all(&line)
+            .and_then(|_| handles.stdin.write_all(b"\n"))
+            .and_then(|_| handles.stdin.flush())
+            .map_err(|_| anyhow!("RETICULUM_BRIDGE_WRITE_FAILED"))?;
+
+        if let Ok(mut count) = self.accepted_messages.lock() {
+            *count = count.saturating_add(1);
         }
-
-        // Handle onion routing
-        if !message.onion_layers.is_empty() {
-            return self.process_onion_message(message).await;
-        }
-
-        // Direct message
-        if message.recipient == self.identity.id {
-            let decrypted = self.decrypt_message(&message.content)?;
-            Ok(Some(decrypted))
-        } else {
-            // Relay message
-            self.relay_message(message).await?;
-            Ok(None)
-        }
-    }
-
-    /// Process onion-routed message
-    async fn process_onion_message(
-        &mut self,
-        mut message: ReticulumMessage,
-    ) -> Result<Option<Vec<u8>>> {
-        if message.onion_layers.is_empty() {
-            return Ok(None);
-        }
-
-        // Peel one layer
-        let layer = message.onion_layers.remove(0);
-        let decrypted_layer = self.decrypt_message(&layer)?;
-
-        if decrypted_layer.len() < 4 {
-            return Err(anyhow::anyhow!("Invalid onion layer"));
-        }
-
-        // Extract target node ID (first 4 bytes for simplicity)
-        let target_node_len = u32::from_le_bytes([
-            decrypted_layer[0],
-            decrypted_layer[1],
-            decrypted_layer[2],
-            decrypted_layer[3],
-        ]) as usize;
-        if decrypted_layer.len() < 4 + target_node_len {
-            return Err(anyhow::anyhow!("Invalid onion layer structure"));
-        }
-
-        let target_node =
-            String::from_utf8_lossy(&decrypted_layer[4..4 + target_node_len]).to_string();
-        let remaining_content = &decrypted_layer[4 + target_node_len..];
-
-        // Check if we're the target
-        if target_node == self.identity.id {
-            if message.onion_layers.is_empty() {
-                // Final destination
-                let decrypted = self.decrypt_message(remaining_content)?;
-                Ok(Some(decrypted))
-            } else {
-                // We're an intermediate node, continue routing
-                message.content = remaining_content.to_vec();
-                self.relay_message(message).await?;
-                Ok(None)
-            }
-        } else {
-            // We're an intermediate node, relay to next hop
-            message.content = remaining_content.to_vec();
-            message.recipient = target_node;
-            self.relay_message(message).await?;
-            Ok(None)
-        }
-    }
-
-    /// Relay message to next hop
-    async fn relay_message(&self, message: ReticulumMessage) -> Result<()> {
-        // In a real implementation, this would send to the next hop
-        // For now, we'll just queue it
-        let mut queue = self.message_queue.write().await;
-        queue.push(message);
-
-        info!("Relayed message to next hop");
         Ok(())
     }
 
-    /// Send message with optional onion routing
-    pub async fn send_message(&mut self, message: &Message) -> Result<()> {
-        let content = format!("{}: {}", message.sender, message.content);
-        let encrypted_content = self.encrypt_message(content.as_bytes())?;
-
-        if message.encrypted && self.onion_routing_enabled {
-            // Find onion route to recipient
-            let route = self.find_onion_route(&message.recipient).await?;
-            let message = self.create_onion_message(&encrypted_content, &route)?;
-            self.relay_message(message).await?;
-        } else {
-            // Direct message
-            let message = ReticulumMessage {
-                id: Uuid::new_v4().to_string(),
-                sender: message.sender.clone(),
-                recipient: message.recipient.clone(),
-                content: encrypted_content,
-                onion_layers: Vec::new(),
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                ttl: 300,
-                hop_count: 0,
-                max_hops: 1,
-            };
-            self.relay_message(message).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Find onion route to recipient
-    async fn find_onion_route(&self, recipient: &str) -> Result<Vec<String>> {
-        let topology = self.topology.read().await;
-
-        // Simple route finding - in production, use proper routing algorithm
-        if let Some(route) = topology.onion_routes.get(recipient) {
-            Ok(route.clone())
-        } else {
-            // Create a simple route through available nodes
-            let available_nodes: Vec<String> = topology
-                .nodes
-                .values()
-                .filter(|node| node.is_online && node.onion_routing_capable)
-                .map(|node| node.id.clone())
-                .collect();
-
-            if available_nodes.is_empty() {
-                return Err(anyhow::anyhow!("No onion routing nodes available"));
-            }
-
-            // Simple 2-hop route for now
-            let mut route = Vec::new();
-            route.push(available_nodes[0].clone());
-            route.push(recipient.to_string());
-
-            Ok(route)
-        }
-    }
-
-    /// Get network statistics
-    pub async fn get_stats(&self) -> ReticulumStats {
-        let mut stats = self.stats.read().await.clone();
-        let topology = self.topology.read().await;
-
-        stats.total_nodes = topology.nodes.len();
-        stats.online_nodes = topology.nodes.values().filter(|n| n.is_online).count();
-        stats.routes_count = topology.routes.len();
-        stats.onion_routes_count = topology.onion_routes.len();
-
-        stats
-    }
-
-    /// Add node to topology
-    pub async fn add_node(&mut self, node: ReticulumNode) -> Result<()> {
-        let mut topology = self.topology.write().await;
-        topology.nodes.insert(node.id.clone(), node);
-
-        info!("Added node to Reticulum topology");
-        Ok(())
-    }
-
-    /// Update node status
-    pub async fn update_node_status(
-        &mut self,
-        node_id: &str,
-        is_online: bool,
-        quality: f32,
-    ) -> Result<()> {
-        let mut topology = self.topology.write().await;
-        if let Some(node) = topology.nodes.get_mut(node_id) {
-            node.is_online = is_online;
-            node.connection_quality = quality.max(0.0).min(1.0);
-            node.last_seen = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-        }
-
-        Ok(())
+    /// Read one bridge event for the forthcoming shared ingress pipeline. It is
+    /// crate-private so external callers cannot treat an RNS event as already
+    /// authenticated application delivery.
+    pub(crate) fn try_next_event(&self) -> Option<Value> {
+        self.events.lock().ok()?.try_recv().ok()
     }
 
     pub async fn stop(&self) -> Result<()> {
-        info!("Stopping ReticulumManager...");
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| anyhow!("RETICULUM_BRIDGE_LOCK_POISONED"))?;
+
+        if handles.child.try_wait().context("could not inspect RNS bridge process")?.is_some() {
+            return Ok(());
+        }
+
+        let shutdown = b"{\"op\":\"shutdown\"}\n";
+        let _ = handles.stdin.write_all(shutdown);
+        let _ = handles.stdin.flush();
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if handles.child.try_wait()?.is_some() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        warn!("Reticulum bridge did not stop gracefully; terminating child process");
+        handles.child.kill().context("could not terminate RNS bridge")?;
+        let _ = handles.child.wait();
         Ok(())
+    }
+}
+
+fn bridge_path() -> Result<PathBuf> {
+    let path = env::var_os("GHOSTWIRE_RNS_BRIDGE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/reticulum_bridge.py"));
+    if !path.is_file() {
+        return Err(anyhow!(RETICULUM_BRIDGE_UNAVAILABLE));
+    }
+    Ok(path)
+}
+
+fn bridge_paths() -> Result<(PathBuf, PathBuf)> {
+    let base = env::var_os("GHOSTWIRE_RNS_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::config_dir().map(|directory| directory.join("ghostwire").join("reticulum")))
+        .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+    Ok((base.clone(), base.join("bridge.identity")))
+}
+
+fn spawn_bridge_reader(stdout: impl std::io::Read + Send + 'static, event_tx: SyncSender<Value>) {
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let Ok(event) = serde_json::from_str::<Value>(&line) else {
+                warn!("Reticulum bridge violated JSON-lines protocol; dropping record");
+                continue;
+            };
+            match event_tx.try_send(event) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    // The local manager is deliberately bounded. Application
+                    // ingress is not yet enabled, so dropping an unconsumed
+                    // event is safer than allowing an external carrier to grow
+                    // unbounded memory.
+                    warn!("Reticulum bridge event queue full; dropping event");
+                }
+                Err(TrySendError::Disconnected(_)) => break,
+            }
+        }
+    });
+}
+
+fn parse_ready_event(event: &Value) -> Result<(String, String)> {
+    if event.get("event").and_then(Value::as_str) != Some("ready") {
+        return Err(anyhow!(RETICULUM_BRIDGE_UNAVAILABLE));
+    }
+    let destination = event
+        .get("destination")
+        .and_then(Value::as_str)
+        .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+    let rns_version = event
+        .get("rns_version")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 32)
+        .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
+
+    Ok((destination.to_owned(), rns_version.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ready_event_requires_a_bounded_rns_destination() {
+        let valid = json!({
+            "event": "ready",
+            "destination": "0123456789abcdef0123456789abcdef",
+            "rns_version": "1.4.2",
+        });
+        assert_eq!(
+            parse_ready_event(&valid).unwrap(),
+            ("0123456789abcdef0123456789abcdef".to_string(), "1.4.2".to_string())
+        );
+
+        let invalid = json!({"event": "ready", "destination": "not-a-destination", "rns_version": "1.4.2"});
+        assert!(parse_ready_event(&invalid).is_err());
+    }
+
+    #[test]
+    fn topology_is_explicitly_empty_until_rns_exposes_observable_data() {
+        let topology = ReticulumTopology::default();
+        assert!(topology.nodes.is_empty());
+        assert!(topology.routes.is_empty());
     }
 }

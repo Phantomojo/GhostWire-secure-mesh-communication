@@ -30,6 +30,8 @@ The reference implementation is written in **Rust** and includes a working mesh 
 
 **Built for:** Disaster responders, rural communities, privacy advocates, researchers, and anyone who needs communication that works regardless of the odds.
 
+> **Implementation status matters.** GhostWire is active development, not a claim that every module or feature flag is production-ready. libp2p mesh is the current runtime foundation. The RNS bridge is an experimental bounded external-runtime adapter; BLE, Wi-Fi Direct, LoRa/RNode, private bulk transfer, and most external protocol bridges remain planned or policy/design foundations. See the authoritative [transport and bridge support status](docs/TRANSPORT_SUPPORT_STATUS.md) before deploying or depending on a path.
+
 ---
 
 ## Protocol Stack
@@ -46,7 +48,7 @@ The reference implementation is written in **Rust** and includes a working mesh 
 ├─────────────────────────────────────────────────────────┤
 │  CRYPTO:       XChaCha20-Poly1305 │ X25519 │ ML-KEM-768  │
 ├─────────────────────────────────────────────────────────┤
-│  TRANSPORTS:   StealthTCP │ WebRTC │ BLE │ LoRa │ obfs4  │
+│  CARRIERS:     libp2p mesh │ experimental RNS bridge │ planned BLE/Wi-Fi/radio │
 ├─────────────────────────────────────────────────────────┤
 │  MESH:         libp2p GossipSub │ Kademlia DHT │ DTN     │
 └─────────────────────────────────────────────────────────┘
@@ -66,12 +68,12 @@ The reference implementation is written in **Rust** and includes a working mesh 
 | **📡 Delay-Tolerant** | PRoPHET epidemic routing — messages survive network partitions via store-carry-forward |
 | **🔒 Post-Quantum** | ML-KEM-768 (Kyber-768) hybrid key exchange — defends against harvest-now-decrypt-later |
 | **🎭 Anonymous Routing** | Sphinx onion routing (same protocol as Nym and Lightning Network) with SURBs |
-| **📶 Multi-Transport** | TCP, WebRTC, Bluetooth LE, LoRa, Reticulum — auto-failover based on conditions |
+| **📶 Multi-Carrier Foundation** | Tested carrier policy, identity separation, and protected-envelope handoff planning; automatic switching is not yet wired across concrete adapters |
 | **🛡️ Censorship Resistance** | 4 pluggable transport modes (WebSocket, Shadowsocks, TLS, obfs4) with traffic armor |
 | **🚨 Coercion Resistance** | Duress PIN, panic wipe, dead man's switch — protection against physical coercion |
 | **🧠 Web of Trust** | TOFU key pinning with signed attestations and computed trust scores |
-| **📚 Knowledge Ark** | Decentralized knowledge commons — share code, docs, datasets across the mesh |
-| **🔗 Protocol Bridges** | Interoperability with Matrix, Meshtastic, Briar, Reticulum networks |
+| **📚 Knowledge Ark** | Local knowledge and content-addressed foundations; public swarm/provider behavior is not a supported privacy claim |
+| **🔗 Protocol Bridges** | Experimental bounded RNS interoperability; Matrix, Meshtastic, and Briar bridges remain individually unaudited/planned |
 
 ---
 
@@ -226,6 +228,7 @@ graph TD;
 | **[🤖 AI Integration](ghostwire/GEMMA4_INTEGRATION.md)** | Gemma 4 and AI routing setup |
 | **[🔧 Build Instructions](ghostwire/BUILD_INSTRUCTIONS.md)** | Compilation and development guide |
 | **[🏗️ Build on GhostWire](docs/build/OVERVIEW.md)** | How to build applications on the protocol |
+| **[📡 Transport Support Status](docs/TRANSPORT_SUPPORT_STATUS.md)** | Verified, experimental, planned, and unsupported carrier/bridge boundaries |
 | **[📜 Governance](docs/GOVERNANCE.md)** | Protocol evolution process (GIPs) |
 | **[📋 Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
 
@@ -362,8 +365,9 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### 📋 Planned
 - [ ] Voice over mesh (VoIP)
-- [ ] LoRa/Reticulum bridge (production)
-- [ ] Protocol adapters (Matrix, Meshtastic, Briar)
+- [ ] RNS Link/Resource, shared ingress, and supervised lifecycle before any production Reticulum support claim
+- [ ] Wi-Fi Direct, BLE, and RNode/LoRa adapters behind the tested carrier contract
+- [ ] Protocol adapters (Matrix, Meshtastic, Briar), each with an independent privacy/interoperability audit
 - [ ] Knowledge Ark — offline content serving
 - [ ] Zero-knowledge proofs
 - [ ] Third-party security audit

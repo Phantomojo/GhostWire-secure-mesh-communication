@@ -12,6 +12,7 @@ use shamir_secret_sharing::ShamirSecretSharing;
 
 // Re-using/Adapting from encryption.rs for share encryption
 // Each share will be encrypted with the recovery password before storing in DHT.
+const XCHACHA_NONCE_LEN: usize = 24;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EncryptedRecoveryShare {
@@ -86,7 +87,7 @@ impl RecoveryManager {
             // Derive key from recovery_password + salt
             let key_bytes =
                 crate::core::identity::encryption::derive_key(recovery_password, &salt[..])?;
-            let cipher = XChaCha20Poly1305::new(&key_bytes.into());
+            let cipher = XChaCha20Poly1305::new((&*key_bytes).into());
 
             // Generate random nonce (24 bytes) — SECURITY FIX: use getrandom
             let mut nonce_bytes = [0u8; 24];
@@ -142,9 +143,21 @@ impl RecoveryManager {
         let mut share_bigints = Vec::new();
         // Decrypt each share
         for share in &encrypted_shares {
+            // `XNonce::from_slice` panics on invalid input length. Recovery
+            // shares are network/storage input, so reject malformed values
+            // before constructing the nonce.
+            if share.nonce.len() != XCHACHA_NONCE_LEN {
+                return Err(anyhow!(
+                    "Invalid recovery-share nonce length for share {}: expected {}, got {}",
+                    share.index,
+                    XCHACHA_NONCE_LEN,
+                    share.nonce.len()
+                ));
+            }
+
             let key_bytes =
                 crate::core::identity::encryption::derive_key(recovery_password, &share.salt)?;
-            let cipher = XChaCha20Poly1305::new(&key_bytes.into());
+            let cipher = XChaCha20Poly1305::new((&*key_bytes).into());
             let nonce = XNonce::from_slice(&share.nonce);
 
             let decrypted_bytes = cipher
@@ -175,5 +188,27 @@ impl RecoveryManager {
         // Use to_bytes_be for consistent encoding
         let (_, secret_bytes) = recovered_bigint.to_bytes_be();
         Ok(secret_bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_recovery_nonce_is_rejected_without_panic() {
+        let share = EncryptedRecoveryShare {
+            index: 1,
+            index_hash: "test".to_string(),
+            encrypted_data: vec![],
+            nonce: vec![0u8; XCHACHA_NONCE_LEN - 1],
+            salt: vec![],
+        };
+
+        let error = RecoveryManager::recover_identity_secret(vec![share], "password", 1)
+            .expect_err("malformed nonce must not reach XNonce::from_slice");
+        assert!(error
+            .to_string()
+            .contains("Invalid recovery-share nonce length"));
     }
 }

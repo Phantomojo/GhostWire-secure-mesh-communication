@@ -26,10 +26,10 @@ impl HealthController {
         let core = state.core.read().await;
 
         #[cfg(feature = "mesh")]
-        let (mesh_enabled, mesh_status) = match &core.mesh_manager {
+        let (mesh_enabled, mesh_status) = match &*core.network_stack.mesh_manager.load() {
             Some(_) => (true, "initialized".to_string()),
             None => {
-                let identity_locked = core.identity.read().await.is_locked();
+                let identity_locked = core.identity_stack.identity.read().await.is_locked();
                 if identity_locked {
                     (
                         false,

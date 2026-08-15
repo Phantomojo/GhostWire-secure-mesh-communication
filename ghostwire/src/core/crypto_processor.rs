@@ -26,11 +26,7 @@ impl CryptoProcessor {
 
         // Attempt to load existing machine state
         let machine = Self::load_state(&storage_path).unwrap_or_else(|_| {
-            GhostCryptoMachine::new(
-                identity.id.clone(),
-                identity
-                    .public_key_bytes(),
-            )
+            GhostCryptoMachine::new(identity.id.clone(), identity.public_key_bytes())
         });
 
         (
@@ -76,7 +72,7 @@ impl CryptoProcessor {
                 } => {
                     use crypto_box::{ChaChaBox, PublicKey, SecretKey};
 
-                    let my_sk = SecretKey::from(self.identity.x25519_secret);
+                    let my_sk = SecretKey::from(self.identity_stack.identity.x25519_secret);
                     let ephem_pk = PublicKey::from(ephemeral_pub);
                     let b = ChaChaBox::new(&ephem_pk, &my_sk);
 

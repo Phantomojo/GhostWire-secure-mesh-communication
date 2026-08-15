@@ -1,12 +1,16 @@
 pub mod core_identity;
 pub mod encryption;
 pub mod recovery;
+pub mod transport_derivation;
 #[cfg(test)]
 mod tests;
 
 pub use core_identity::*;
 pub use encryption::{decrypt_identity, encrypt_identity, EncryptedIdentity};
 pub use recovery::*;
+pub use transport_derivation::{
+    derive_transport_keypair, InterfaceInstanceId, TransportKeyDomain, TransportKeyScope,
+};
 
 pub mod anonymous_intro;
 pub mod coercion;

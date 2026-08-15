@@ -33,6 +33,7 @@ pub async fn get_profile_v2(State(state): State<Arc<AppState>>) -> impl IntoResp
         .core
         .read()
         .await
+        .security_stack
         .security_manager
         .clone()
         .calculate_security_score()
@@ -143,6 +144,69 @@ pub async fn toggle_pqc_armor_v2(
     })))
 }
 
+/// GET /api/v2/mesh/transports - List active transports
+pub async fn list_transports_v2(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let stats = state.core.read().await.get_mesh_stats().await;
+    if let Some(s) = stats {
+        Json(ApiV2Response::success(s.connection_stats)).into_response()
+    } else {
+        Json(ApiV2Response::<()>::error(
+            "MESH_NOT_AVAILABLE",
+            "Mesh network is not active",
+        ))
+        .into_response()
+    }
+}
+
+/// PUT /api/v2/mesh/transports/mdns - Toggle mDNS
+pub async fn toggle_mdns_v2(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let enabled = req
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Update security manager config
+    let mut config = state
+        .core
+        .read()
+        .await
+        .security_stack
+        .security_manager
+        .get_config()
+        .await;
+    config.enable_mdns = enabled;
+    state
+        .core
+        .read()
+        .await
+        .security_stack
+        .security_manager
+        .update_config(config)
+        .await;
+
+    Json(ApiV2Response::success(serde_json::json!({
+        "mdns_enabled": enabled,
+        "privacy_status": if enabled { "LOW_PRIVACY_LOCAL_LEAK" } else { "HIGH_PRIVACY_STEALTH" }
+    })))
+}
+
+/// GET /api/v2/mesh/postbox - Get postbox status
+pub async fn get_postbox_status_v2(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let _core = state.core.read().await;
+    let quota = 50; // Default quota
+    let message_count = 0; // Placeholder for actual count from postbox.rs
+
+    Json(ApiV2Response::success(serde_json::json!({
+        "active": true,
+        "quota_used": message_count,
+        "quota_total": quota,
+        "expiry_days": 7
+    })))
+}
+
 /// PUT /api/v2/mesh/sharding - Update DHT sharding region
 pub async fn update_sharding_v2(
     State(state): State<Arc<AppState>>,
@@ -227,6 +291,7 @@ pub async fn get_security_dashboard_v2(State(state): State<Arc<AppState>>) -> im
         .core
         .read()
         .await
+        .security_stack
         .security_manager
         .clone()
         .calculate_security_score()
@@ -277,7 +342,7 @@ pub async fn get_peers_v2(
     let mut all_peers = vec![];
 
     #[cfg(feature = "mesh")]
-    if let Some(mesh_manager) = &state.core.read().await.mesh_manager.clone() {
+    if let Some(mesh_manager) = &*state.core.read().await.network_stack.mesh_manager.load() {
         let topology = mesh_manager.read().await.get_topology().await;
         for (id, node) in topology.nodes {
             all_peers.push(PeerResponse {
@@ -332,6 +397,7 @@ pub async fn get_messages_v2(
         .core
         .read()
         .await
+        .storage_stack
         .message_store
         .clone()
         .get_history(&peer_id, limit);

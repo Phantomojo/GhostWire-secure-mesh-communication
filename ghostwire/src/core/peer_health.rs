@@ -233,8 +233,6 @@ fn now_ms_u32() -> u32 {
         .as_millis() as u32
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

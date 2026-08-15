@@ -13,7 +13,24 @@ use quinn::rustls::client::danger::{
 use quinn::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use quinn::rustls::{DigitallySignedStruct, SignatureScheme};
 
+use crate::core::constants::MAX_MESSAGE_SIZE;
 use crate::core::message::Message;
+
+/// QUIC framing includes serialized metadata in addition to message content.
+/// The ceiling remains finite to reject peer-controlled allocation requests.
+const MAX_QUIC_FRAME_SIZE: usize = MAX_MESSAGE_SIZE * 2;
+
+fn checked_frame_len(length: u32) -> Result<usize> {
+    let length = length as usize;
+    if length > MAX_QUIC_FRAME_SIZE {
+        anyhow::bail!(
+            "QUIC frame exceeds maximum size: {} bytes (limit {})",
+            length,
+            MAX_QUIC_FRAME_SIZE
+        );
+    }
+    Ok(length)
+}
 
 type PrivateKeyDer = quinn::rustls::pki_types::PrivateKeyDer<'static>;
 
@@ -63,8 +80,7 @@ impl ServerCertVerifier for TofuVerifier {
                 self.peer_id,
                 hex::encode(&fingerprint[..8])
             );
-            self.trusted
-                .insert(self.peer_id.clone(), fingerprint);
+            self.trusted.insert(self.peer_id.clone(), fingerprint);
         }
 
         Ok(ServerCertVerified::assertion())
@@ -165,13 +181,19 @@ impl QuicTransportProvider {
     fn load_fingerprints(store: &DashMap<String, Vec<u8>>) {
         let path = Self::tofu_path();
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&data) {
+            if let Ok(map) =
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            {
                 for (k, v) in map {
                     if let Ok(bytes) = hex::decode(&v) {
                         store.insert(k, bytes);
                     }
                 }
-                tracing::info!("TOFU: loaded {} fingerprints from {}", store.len(), path.display());
+                tracing::info!(
+                    "TOFU: loaded {} fingerprints from {}",
+                    store.len(),
+                    path.display()
+                );
             }
         }
     }
@@ -237,6 +259,13 @@ impl QuicTransportProvider {
 
         let (mut send, _recv) = conn.open_bi().await?;
         let payload = bincode::serialize(message)?;
+        if payload.len() > MAX_QUIC_FRAME_SIZE {
+            anyhow::bail!(
+                "serialized message exceeds QUIC frame limit: {} bytes (limit {})",
+                payload.len(),
+                MAX_QUIC_FRAME_SIZE
+            );
+        }
 
         let mut frame = Vec::with_capacity(4 + payload.len());
         frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
@@ -276,16 +305,24 @@ impl QuicTransportProvider {
                                             break;
                                         }
                                         let payload_len =
-                                            u32::from_be_bytes(len_buf) as usize;
+                                            match checked_frame_len(u32::from_be_bytes(len_buf)) {
+                                                Ok(length) => length,
+                                                Err(error) => {
+                                                    tracing::warn!(
+                                                        remote = %remote,
+                                                        error = %error,
+                                                        "Rejected oversized QUIC frame"
+                                                    );
+                                                    break;
+                                                }
+                                            };
 
                                         let mut payload = vec![0u8; payload_len];
                                         if recv.read_exact(&mut payload).await.is_err() {
                                             break;
                                         }
 
-                                        if let Ok(msg) =
-                                            bincode::deserialize::<Message>(&payload)
-                                        {
+                                        if let Ok(msg) = bincode::deserialize::<Message>(&payload) {
                                             let _ = tx.send(msg).await;
                                         }
                                     }
@@ -307,6 +344,16 @@ impl QuicTransportProvider {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_length_limit_rejects_oversized_input() {
+        assert_eq!(
+            checked_frame_len(MAX_QUIC_FRAME_SIZE as u32).unwrap(),
+            MAX_QUIC_FRAME_SIZE
+        );
+        assert!(checked_frame_len((MAX_QUIC_FRAME_SIZE + 1) as u32).is_err());
+    }
 
     #[test]
     fn debug_format() {

@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/ghostwire/target/
 *.rs.bk
 
 # Vendored dependencies (downloaded by cargo, not committed)
@@ -184,6 +185,7 @@ config.toml
 litellm-config.yaml
 build_errors.txt
 *.sh
+!playground/start.sh
 *.rs.bak
 probe_sss.rs
 test_dalek.rs

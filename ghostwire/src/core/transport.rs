@@ -52,12 +52,8 @@ impl TransportKind {
                 tracing::trace!("Dummy transport sending message to {}", message.recipient);
                 Ok(())
             }
-            TransportKind::StealthTCP(provider) => {
-                provider.send_message(message).await
-            }
-            TransportKind::Quic(provider) => {
-                provider.send_message(message).await
-            }
+            TransportKind::StealthTCP(provider) => provider.send_message(message).await,
+            TransportKind::Quic(provider) => provider.send_message(message).await,
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
                 let transport = transport.read().await;

@@ -33,8 +33,7 @@ jobs:
   test:
     name: 🧪 Test Suite
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -47,8 +46,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libudev-dev
       - name: Prepare workspace
         run: mkdir -p webui/dist
-      - name: Run tests
-        run: cargo test --lib --tests
+      - name: Run deterministic library tests
+        run: cargo test --lib
+        working-directory: ghostwire
+      - name: Compile all integration targets
+        # The live node-to-node harness is tracked separately because it still
+        # needs deterministic readiness/shutdown work. Compilation remains a
+        # required compatibility gate.
+        run: cargo test --tests --no-run
+        working-directory: ghostwire
+      - name: Run non-live integration tests
+        run: >-
+          cargo test --test ai_routing_tests --test api_integration
+          --test crypto_tests --test postbox_tests --test protocol_integration
         working-directory: ghostwire
 
   lint:
@@ -90,8 +100,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
       - name: Prepare workspace
         run: mkdir -p webui/dist
-      - name: Check default features
-        run: cargo check
+      - name: Check all default targets
+        run: cargo check --all-targets
+        working-directory: ghostwire
+      - name: Check Reticulum feature boundary
+        # This is a compile gate only. The Reticulum bridge intentionally fails
+        # closed at runtime until a reviewed interoperable adapter exists.
+        run: cargo check --features reticulum
         working-directory: ghostwire
 
   coverage:

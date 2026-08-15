@@ -26,7 +26,7 @@ use tracing::{debug, info};
 /// - ✅ Replay protection via message deduplication
 pub struct SecureMessageStore {
     persistence: Arc<PersistenceManager>,
-    encryption: Arc<EncryptionManager>,
+    _encryption: Arc<EncryptionManager>,
 }
 
 impl SecureMessageStore {
@@ -34,7 +34,7 @@ impl SecureMessageStore {
     pub fn new(persistence: Arc<PersistenceManager>, encryption: Arc<EncryptionManager>) -> Self {
         Self {
             persistence,
-            encryption,
+            _encryption: encryption,
         }
     }
 
@@ -44,8 +44,7 @@ impl SecureMessageStore {
     /// with master key). No peer-key ECDH — that's for in-transit only.
     pub fn save_message(&self, message: &Message) -> Result<()> {
         let key = format!("msg_{}_{}", message.timestamp, message.id);
-        self.persistence
-            .store_secure("messages", &key, message)?;
+        self.persistence.store_secure("messages", &key, message)?;
 
         info!(
             message_id = %message.id,
@@ -55,26 +54,37 @@ impl SecureMessageStore {
         Ok(())
     }
 
-    /// Store a message without encryption (for broadcasts/local-only messages)
-    pub fn save_message_plain(&self, message: &Message) -> Result<()> {
-        // Store as JSON without encryption
+    /// Store a semantically public message in the legacy public-message tree.
+    ///
+    /// The tree name is retained for backwards-compatible reads, but the value
+    /// still goes through `PersistenceManager::store_secure`; broadcasts are
+    /// public at the protocol layer, not left unencrypted at rest.
+    pub fn save_public_message(&self, message: &Message) -> Result<()> {
         let key = format!("msg_{}_{}", message.timestamp, message.id);
         self.persistence
             .store_secure("messages_plain", &key, message)?;
 
         info!(
             message_id = %message.id,
-            "Message stored (plaintext)"
+            "Public message stored with vault encryption"
         );
 
         Ok(())
     }
 
+    /// Backwards-compatible alias for the previous misleading method name.
+    ///
+    /// All writes still use the encrypted persistence manager; callers should
+    /// migrate to [`Self::save_public_message`].
+    #[deprecated(note = "use save_public_message; local persistence remains encrypted")]
+    pub fn save_message_plain(&self, message: &Message) -> Result<()> {
+        self.save_public_message(message)
+    }
+
     /// Load all messages from the encrypted store
     pub fn load(&self) -> Result<Vec<Message>> {
-        let mut all_messages: Vec<Message> = self
-            .persistence
-            .load_all_secure::<Message>("messages")?;
+        let mut all_messages: Vec<Message> =
+            self.persistence.load_all_secure::<Message>("messages")?;
 
         let plain_messages: Vec<Message> = self
             .persistence
@@ -137,7 +147,8 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
-        let persistence = Arc::new(PersistenceManager::new(None).unwrap());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(PersistenceManager::open_at(temp_dir.path(), None).unwrap());
         let encryption = Arc::new(EncryptionManager::new().unwrap());
         let store = SecureMessageStore::new(persistence, encryption);
 
@@ -154,5 +165,23 @@ mod tests {
         assert_eq!(loaded[0].content, "Secret meeting at noon");
         assert_eq!(loaded[0].sender, "Alice");
         assert_eq!(loaded[0].recipient, "Bob");
+    }
+
+    #[test]
+    fn test_public_message_roundtrip_uses_vault_persistence() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(PersistenceManager::open_at(temp_dir.path(), None).unwrap());
+        let encryption = Arc::new(EncryptionManager::new().unwrap());
+        let store = SecureMessageStore::new(persistence, encryption);
+
+        let message = Message::new(
+            "Alice".to_string(),
+            "broadcast".to_string(),
+            "Public status update".to_string(),
+        );
+        let id = message.id;
+        store.save_public_message(&message).unwrap();
+
+        assert!(store.load().unwrap().iter().any(|stored| stored.id == id));
     }
 }

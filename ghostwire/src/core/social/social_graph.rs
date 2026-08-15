@@ -506,12 +506,18 @@ mod tests {
 
         graph.receive_request(request).await.unwrap();
 
-        // Should emit ConnectionRequestReceived
-        let event = rx.try_recv().unwrap();
-        assert!(matches!(
-            event,
-            SocialEvent::ConnectionRequestReceived { .. }
-        ));
+        // Registering an unknown peer may emit `PeerDiscovered` before the
+        // inbound-request notification. Verify the required event without
+        // coupling this test to incidental broadcast ordering.
+        let mut saw_request = false;
+        for _ in 0..2 {
+            let event = rx.recv().await.unwrap();
+            if matches!(event, SocialEvent::ConnectionRequestReceived { .. }) {
+                saw_request = true;
+                break;
+            }
+        }
+        assert!(saw_request, "missing inbound connection request event");
 
         // Alice accepts
         let _response = graph

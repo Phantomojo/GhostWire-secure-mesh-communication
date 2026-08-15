@@ -2,7 +2,7 @@
 //! Next: integrate with peer discovery, store, and reputation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -43,8 +43,9 @@ pub struct SecurityConfig {
     pub max_messages_per_minute: usize,
     pub blacklist_enabled: bool,
     pub threat_detection_enabled: bool,
-    pub allowed_ips: Vec<String>,
-    pub blocked_ips: Vec<String>,
+    pub allowed_ips: HashSet<String>,
+    pub blocked_ips: HashSet<String>,
+    pub enable_mdns: bool,
 }
 
 impl Default for SecurityConfig {
@@ -54,8 +55,9 @@ impl Default for SecurityConfig {
             max_messages_per_minute: 100,
             blacklist_enabled: true,
             threat_detection_enabled: true,
-            allowed_ips: vec![],
-            blocked_ips: vec![],
+            allowed_ips: HashSet::new(),
+            blocked_ips: HashSet::new(),
+            enable_mdns: false, // Privacy: disabled by default to prevent IP leakage
         }
     }
 }
@@ -127,6 +129,10 @@ impl SecurityManager {
     }
 
     /// Check if an IP is allowed
+    pub async fn is_mdns_enabled(&self) -> bool {
+        self.config.read().await.enable_mdns
+    }
+
     pub async fn is_ip_allowed(&self, ip: &IpAddr) -> bool {
         let ip_str = ip.to_string();
 
@@ -787,8 +793,8 @@ mod tests {
     #[tokio::test]
     async fn test_security_manager_ip_filtering() {
         let mut config = SecurityConfig::default();
-        config.blocked_ips.push("1.2.3.4".to_string());
-        config.allowed_ips.push("127.0.0.1".to_string());
+        config.blocked_ips.insert("1.2.3.4".to_string());
+        config.allowed_ips.insert("127.0.0.1".to_string());
 
         let manager = SecurityManager::new(config);
 

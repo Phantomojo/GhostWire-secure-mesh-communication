@@ -17,6 +17,7 @@ use axum::{
 };
 // use chrono;
 use jsonwebtoken;
+#[cfg(feature = "embedded-webui")]
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -37,10 +38,12 @@ use std::fs;
 // use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
+#[cfg(feature = "embedded-webui")]
 #[derive(RustEmbed)]
 #[folder = "../webui/dist/"]
 struct Assets;
 
+#[cfg(feature = "embedded-webui")]
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let mut path = uri.path().trim_start_matches('/').to_string();
     if path.is_empty() {
@@ -69,6 +72,17 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
             }
         }
     }
+}
+
+#[cfg(not(feature = "embedded-webui"))]
+async fn static_handler(_uri: Uri) -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(Body::from(
+            "GhostWire's legacy embedded WebUI is not built into this binary. The authenticated API remains available under /api.",
+        ))
+        .unwrap()
 }
 
 lazy_static! {
@@ -165,6 +179,22 @@ pub struct LoginResponse {
     pub token: String,
 }
 
+/// Return true only for unauthenticated bootstrap and liveness endpoints.
+///
+/// This deliberately uses exact path and method matching. Prefix matching turns
+/// every future sub-route under a public prefix into an accidental auth bypass.
+fn is_public_control_plane_route(path: &str, method: &Method) -> bool {
+    if method == Method::POST && path == "/api/auth/login" {
+        return true;
+    }
+
+    method == Method::GET
+        && matches!(
+            path,
+            "/api/v2/health" | "/api/v2/ready" | "/api/v2/live"
+        )
+}
+
 pub async fn auth_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request<axum::body::Body>,
@@ -173,23 +203,16 @@ pub async fn auth_middleware(
     let path = req.uri().path();
     let client_ip = get_client_ip(&req, addr);
 
-    if !path.starts_with("/api") {
+    // Static assets are public, while API and WebSocket upgrades are daemon
+    // control-plane entry points and must authenticate before any event stream
+    // or command handling is available.
+    if !path.starts_with("/api") && path != "/ws" {
         return Ok(next.run(req).await);
     }
 
     tracing::debug!("Checking auth path: {}", path);
 
-    // Public endpoints (no auth required)
-    if path == "/api/dev/token"
-        || path == "/api/auth/login"
-        || path.starts_with("/api/v2/health")
-        || path.starts_with("/api/v2/ready")
-        || path.starts_with("/api/v2/live")
-        || path.starts_with("/api/profile")
-        || path.starts_with("/api/identity")
-        || path.starts_with("/api/ble")
-    // BLE transport endpoints
-    {
+    if is_public_control_plane_route(path, req.method()) {
         return Ok(next.run(req).await);
     }
 
@@ -227,6 +250,50 @@ pub async fn auth_middleware(
     } else {
         tracing::warn!(target: "web", "⛔ Unauthorized API access attempt to {} from {}", path, client_ip);
         Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+#[cfg(test)]
+mod auth_route_tests {
+    use super::*;
+
+    #[test]
+    fn allows_only_exact_public_bootstrap_and_liveness_routes() {
+        assert!(is_public_control_plane_route(
+            "/api/auth/login",
+            &Method::POST
+        ));
+        assert!(is_public_control_plane_route(
+            "/api/v2/health",
+            &Method::GET
+        ));
+        assert!(is_public_control_plane_route(
+            "/api/v2/ready",
+            &Method::GET
+        ));
+        assert!(is_public_control_plane_route(
+            "/api/v2/live",
+            &Method::GET
+        ));
+    }
+
+    #[test]
+    fn rejects_prefix_matches_and_sensitive_route_families() {
+        for (path, method) in [
+            ("/api/auth/login/extra", Method::POST),
+            ("/api/v2/health/details", Method::GET),
+            ("/api/v2/health", Method::POST),
+            ("/api/profile/list", Method::GET),
+            ("/api/identity/status", Method::GET),
+            ("/api/ble/status", Method::GET),
+            ("/api/dev/token", Method::GET),
+            ("/ws", Method::GET),
+        ] {
+            assert!(
+                !is_public_control_plane_route(path, &method),
+                "{method} {path} must require authentication"
+            );
+        }
     }
 }
 

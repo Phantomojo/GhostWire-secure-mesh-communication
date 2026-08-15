@@ -748,13 +748,8 @@ mod tests {
         let (_s2, pk2, id2) = make_hop();
         let rng = SystemRandom::new();
 
-        let mut packet = create_sphinx_packet(
-            &[pk1, pk2],
-            &[id1.clone(), id2],
-            b"test payload",
-            &rng,
-        )
-        .unwrap();
+        let mut packet =
+            create_sphinx_packet(&[pk1, pk2], &[id1.clone(), id2], b"test payload", &rng).unwrap();
 
         // Forge a new gamma using the public domain constant (old broken approach).
         // An attacker can compute this from wire-visible data, but the relay now
@@ -777,13 +772,8 @@ mod tests {
         let (_s2, pk2, id2) = make_hop();
         let rng = SystemRandom::new();
 
-        let mut packet = create_sphinx_packet(
-            &[pk1, pk2],
-            &[id1.clone(), id2.clone()],
-            b"test",
-            &rng,
-        )
-        .unwrap();
+        let mut packet =
+            create_sphinx_packet(&[pk1, pk2], &[id1.clone(), id2.clone()], b"test", &rng).unwrap();
 
         // Inject zero-point (order 1)
         packet.alpha = [0u8; 32];
@@ -793,14 +783,12 @@ mod tests {
         }
 
         // Re-create and inject identity point (order 2)
-        let mut packet2 = create_sphinx_packet(
-            &[pk1, pk2],
-            &[id1.clone(), id2],
-            b"test",
-            &rng,
-        )
-        .unwrap();
-        packet2.alpha = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut packet2 =
+            create_sphinx_packet(&[pk1, pk2], &[id1.clone(), id2], b"test", &rng).unwrap();
+        packet2.alpha = [
+            1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+        ];
         match process_sphinx_packet(&packet2, &s1, &id1) {
             SphinxProcessResult::Invalid => {}
             _ => panic!("Identity-point alpha should be rejected"),

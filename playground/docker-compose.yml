@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  bootstrap:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: gw-bootstrap
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+      - GHOSTWIRE_PORT=9000
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--mesh-host", "0.0.0.0", "--mesh-port", "4001", "--port", "9000"]
+    ports:
+      - "9000:9000"
+      - "4001:4001"
+    volumes:
+      - ./configs/bootstrap:/home/ghostwire/.ghostwire
+    networks:
+      gw-mesh:
+        ipv4_address: 172.20.0.2
+
+  node1:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: gw-node1
+    depends_on:
+      - bootstrap
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+      - GHOSTWIRE_PORT=9001
+      - GHOSTWIRE_BOOTSTRAP_NODES=/ip4/172.20.0.2/tcp/4001/p2p/${BOOTSTRAP_PEER_ID:-unavailable}
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--mesh-host", "0.0.0.0", "--mesh-port", "4002", "--port", "9001"]
+    ports:
+      - "9001:9001"
+      - "4002:4002"
+    volumes:
+      - ./configs/node1:/home/ghostwire/.ghostwire
+    networks:
+      gw-mesh:
+        ipv4_address: 172.20.0.3
+
+  node2:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: gw-node2
+    depends_on:
+      - bootstrap
+    environment:
+      - RUST_LOG=ghostwire=debug,libp2p=info
+      - GHOSTWIRE_PORT=9002
+      - GHOSTWIRE_BOOTSTRAP_NODES=/ip4/172.20.0.2/tcp/4001/p2p/${BOOTSTRAP_PEER_ID:-unavailable}
+    command: ["ghostwire", "--web", "--api-host", "0.0.0.0", "--mesh-host", "0.0.0.0", "--mesh-port", "4003", "--port", "9002"]
+    ports:
+      - "9002:9002"
+      - "4003:4003"
+    volumes:
+      - ./configs/node2:/home/ghostwire/.ghostwire
+    networks:
+      gw-mesh:
+        ipv4_address: 172.20.0.4
+
+networks:
+  gw-mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

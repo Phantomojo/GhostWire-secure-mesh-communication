@@ -4,6 +4,7 @@ use crate::core::wire_protocol::{Frame, FrameKind, FrameParser, WireMessage};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     io,
     net::SocketAddr,
     sync::Arc,
@@ -31,7 +32,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 #[derive(Debug, Clone)]
 pub struct StealthTCPProvider {
     rate_limiter: Arc<DashMap<SocketAddr, (usize, Instant)>>,
-    allowlist: Option<Vec<std::net::IpAddr>>,
+    allowlist: Option<HashSet<std::net::IpAddr>>,
     security_manager: Arc<SecurityManager>,
     handshake_secret: Arc<HandshakeSecret>,
     enable_stealth_mode: bool,
@@ -56,7 +57,7 @@ pub struct ConnectionInfo {
 
 impl StealthTCPProvider {
     pub fn new(
-        allowlist: Option<Vec<std::net::IpAddr>>,
+        allowlist: Option<HashSet<std::net::IpAddr>>,
         security_manager: Arc<SecurityManager>,
         handshake_secret: Option<Vec<u8>>,
         enable_stealth_mode: bool,
@@ -526,8 +527,7 @@ impl StealthTCPProvider {
                                     Ok(n) => match parser.feed(&buf[..n]) {
                                         Ok(frames) => {
                                             for frame in frames {
-                                                if let Ok(wire_msg) =
-                                                    frame.decode::<WireMessage>()
+                                                if let Ok(wire_msg) = frame.decode::<WireMessage>()
                                                 {
                                                     let msg = Message::new(
                                                         String::from_utf8_lossy(&wire_msg.from)
@@ -546,10 +546,7 @@ impl StealthTCPProvider {
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::warn!(
-                                                "StealthTCP: Frame parse error: {}",
-                                                e
-                                            );
+                                            tracing::warn!("StealthTCP: Frame parse error: {}", e);
                                         }
                                     },
                                     Err(_) => break,

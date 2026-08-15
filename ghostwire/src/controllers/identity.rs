@@ -39,6 +39,7 @@ impl IdentityController {
             .core
             .read()
             .await
+            .security_stack
             .security_manager
             .clone()
             .calculate_security_score()
@@ -251,7 +252,7 @@ impl IdentityController {
                     timestamp: now,
                     description: "Profile locked successfully".to_string(),
                 };
-                core.audit_logger.log_event(&record);
+                core.security_stack.audit_logger.log_event(&record);
 
                 tracing::info!(target: "profile_lock", "✅ Profile locked for user: {}", core.get_identity_id().await);
 
@@ -271,7 +272,7 @@ impl IdentityController {
                     timestamp: now,
                     description: format!("Profile lock failed: {}", e),
                 };
-                core.audit_logger.log_event(&record);
+                core.security_stack.audit_logger.log_event(&record);
 
                 tracing::error!(target: "profile_lock", "❌ Profile lock failed: {}", e);
 
@@ -302,6 +303,7 @@ impl IdentityController {
 
         // Check rate limiting - is this key locked out?
         if core
+            .security_stack
             .failed_attempt_tracker
             .is_locked_out(&identity_id)
             .await
@@ -315,7 +317,7 @@ impl IdentityController {
                 timestamp: now,
                 description: "Account locked due to too many failed attempts".to_string(),
             };
-            core.audit_logger.log_event(&record);
+            core.security_stack.audit_logger.log_event(&record);
 
             tracing::warn!(target: "profile_unlock", "⚠️ Account locked out due to failed attempts: {}", identity_id);
 
@@ -333,7 +335,10 @@ impl IdentityController {
         match core.unlock(&req.password).await {
             Ok(_) => {
                 // Reset failed attempts on successful unlock
-                core.failed_attempt_tracker.reset(&identity_id).await;
+                core.security_stack
+                    .failed_attempt_tracker
+                    .reset(&identity_id)
+                    .await;
 
                 // Audit log the successful unlock
                 let record = crate::core::security_v2::SecurityAuditRecord {
@@ -344,7 +349,7 @@ impl IdentityController {
                     timestamp: now,
                     description: "Profile unlocked successfully".to_string(),
                 };
-                core.audit_logger.log_event(&record);
+                core.security_stack.audit_logger.log_event(&record);
 
                 tracing::info!(target: "profile_unlock", "✅ Profile unlocked for user: {}", identity_id);
 
@@ -356,7 +361,8 @@ impl IdentityController {
             }
             Err(e) => {
                 // Record failed attempt
-                core.failed_attempt_tracker
+                core.security_stack
+                    .failed_attempt_tracker
                     .record_failure(&identity_id)
                     .await;
 
@@ -369,7 +375,7 @@ impl IdentityController {
                     timestamp: now,
                     description: format!("Profile unlock failed: {}", e),
                 };
-                core.audit_logger.log_event(&record);
+                core.security_stack.audit_logger.log_event(&record);
 
                 tracing::warn!(target: "profile_unlock", "❌ Profile unlock failed for {}: {}", identity_id, e);
 

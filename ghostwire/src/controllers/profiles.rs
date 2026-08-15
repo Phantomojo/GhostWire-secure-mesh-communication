@@ -69,6 +69,7 @@ impl ProfilesController {
             .core
             .read()
             .await
+            .identity_stack
             .identity
             .clone()
             .read()
@@ -313,7 +314,7 @@ impl ProfilesController {
         // Cannot delete active profile ("default" when profile is None)
         let current = {
             let core = state.core.read().await;
-            let identity = core.identity.read().await;
+            let identity = core.identity_stack.identity.read().await;
             identity.profile.clone()
         };
         let is_active = (name == "default" && current.is_none()) || current.as_ref() == Some(&name);
