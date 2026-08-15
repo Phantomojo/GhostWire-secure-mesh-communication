@@ -1,75 +1,79 @@
-import requests
-import time
-import json
+"""Verify GhostWire v2 APIs against explicitly configured local test nodes.
 
-def test_v2_connectivity():
-    NODES = {
+This utility intentionally never stores node credentials in source control. Set
+`GHOSTWIRE_NODE_ALPHA_TOKEN` and `GHOSTWIRE_NODE_BETA_TOKEN` in the invoking
+environment before running it.
+"""
+
+import os
+import time
+
+import requests
+
+REQUEST_TIMEOUT_SECONDS = 10
+
+
+def required_env(name: str) -> str:
+    """Return a required environment value without printing its contents."""
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} must be set before running this connectivity check")
+    return value
+
+
+def configured_nodes() -> dict[str, dict[str, str]]:
+    """Build local-node configuration from non-persisted environment inputs."""
+    return {
         "node_alpha": {
             "name": "Alpha",
-            "url": "http://localhost:3001",
-            "token": "VqJTPFA8Q3qGVp1OGSxsXRHCL07q9f6G"
+            "url": os.environ.get("GHOSTWIRE_NODE_ALPHA_URL", "http://localhost:3001"),
+            "token": required_env("GHOSTWIRE_NODE_ALPHA_TOKEN"),
         },
         "node_beta": {
             "name": "Beta",
-            "url": "http://localhost:3002",
-            "token": "cYE0xoEpcM7KbFyjRjnkeesI5OV0ww7B"
-        }
+            "url": os.environ.get("GHOSTWIRE_NODE_BETA_URL", "http://localhost:3002"),
+            "token": required_env("GHOSTWIRE_NODE_BETA_TOKEN"),
+        },
     }
-    
-    # Wait for nodes to be ready
-    print("⏳ Waiting for nodes to initialize...")
+
+
+def get_json(url: str, headers: dict[str, str]) -> requests.Response:
+    """Issue a bounded GET request so a local node outage cannot hang the script."""
+    return requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+
+
+def test_v2_connectivity() -> None:
+    """Exercise the v2 profile, security-dashboard, and peer-discovery routes."""
+    nodes = configured_nodes()
+    print("Waiting for nodes to initialize...")
     time.sleep(2)
-    
-    for node_id, node in NODES.items():
+
+    for node in nodes.values():
         print(f"\n--- Testing Node {node['name']} ({node['url']}) ---")
-        headers = {"X-Ghost-Token": node['token']}
-        
-        # 1. Profile V2
-        try:
-            profile_url = f"{node['url']}/api/v2/profile"
-            print(f"📡 Requesting: {profile_url}")
-            profile_res = requests.get(profile_url, headers=headers)
-            if profile_res.status_code != 200:
-                print(f"❌ Profile V2 failed with status {profile_res.status_code}")
-                print(f"   Response: {profile_res.text}")
-            else:
-                profile = profile_res.json()
-                print(f"✅ Profile V2: {profile['data']['username']} (Score: {profile['data']['security_score']})")
-                if "links" in profile:
-                    print(f"🔗 HATEOAS: {profile['links']['self']}")
-        except Exception as e:
-            print(f"❌ Profile V2 failed: {e}")
+        headers = {"X-Ghost-Token": node["token"]}
 
-        # 2. Security Dashboard V2
-        try:
-            security_url = f"{node['url']}/api/v2/security/dashboard"
-            print(f"📡 Requesting: {security_url}")
-            security_res = requests.get(security_url, headers=headers)
-            if security_res.status_code != 200:
-                print(f"❌ Security Dashboard V2 failed with status {security_res.status_code}")
-                print(f"   Response: {security_res.text}")
-            else:
-                security = security_res.json()
-                print(f"✅ Security Dashboard V2: Score={security['data']['score']}")
-        except Exception as e:
-            print(f"❌ Security Dashboard V2 failed: {e}")
+        checks = (
+            ("Profile V2", "/api/v2/profile"),
+            ("Security Dashboard V2", "/api/v2/security/dashboard"),
+            ("Peers V2", "/api/v2/peers"),
+        )
+        for label, route in checks:
+            url = f"{node['url']}{route}"
+            print(f"Requesting {label}: {url}")
+            try:
+                response = get_json(url, headers)
+                if response.status_code != 200:
+                    print(f"{label} failed with status {response.status_code}")
+                    continue
+                payload = response.json()
+                print(f"{label} succeeded")
+                if label == "Profile V2" and "links" in payload:
+                    print(f"HATEOAS: {payload['links']['self']}")
+                if label == "Peers V2":
+                    print(f"Found {len(payload['data'])} peers")
+            except requests.RequestException as error:
+                print(f"{label} request failed: {error}")
 
-        # 3. Peers V2 (Multi-node discovery)
-        try:
-            peers_url = f"{node['url']}/api/v2/peers"
-            print(f"📡 Requesting: {peers_url}")
-            peers_res = requests.get(peers_url, headers=headers)
-            if peers_res.status_code != 200:
-                print(f"❌ Peers V2 failed with status {peers_res.status_code}")
-                print(f"   Response: {peers_res.text}")
-            else:
-                peers = peers_res.json()
-                peer_list = peers['data']
-                print(f"✅ Peers V2: Found {len(peer_list)} peers")
-                for p in peer_list:
-                    print(f"  - Node: {p['username']} ({p['status']}) Trust: {p['trust_score']}")
-        except Exception as e:
-            print(f"❌ Peers V2 failed: {e}")
 
 if __name__ == "__main__":
     test_v2_connectivity()
