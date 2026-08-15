@@ -154,8 +154,14 @@ impl CarrierSemantics {
         matches!(
             (self.family, self.native_identity),
             (CarrierFamily::Libp2p, NativeIdentityNamespace::Libp2pPeerId)
-                | (CarrierFamily::Reticulum, NativeIdentityNamespace::ReticulumDestination)
-                | (CarrierFamily::WifiDirect, NativeIdentityNamespace::WifiDirectDeviceOrGroup)
+                | (
+                    CarrierFamily::Reticulum,
+                    NativeIdentityNamespace::ReticulumDestination
+                )
+                | (
+                    CarrierFamily::WifiDirect,
+                    NativeIdentityNamespace::WifiDirectDeviceOrGroup
+                )
                 | (
                     CarrierFamily::BluetoothLowEnergy,
                     NativeIdentityNamespace::BluetoothAddressAndGattRole
@@ -168,7 +174,10 @@ impl CarrierSemantics {
                     CarrierFamily::StoreAndForward,
                     NativeIdentityNamespace::OpaqueMailboxHandle
                 )
-                | (CarrierFamily::Custom, NativeIdentityNamespace::CustomExternalIdentity)
+                | (
+                    CarrierFamily::Custom,
+                    NativeIdentityNamespace::CustomExternalIdentity
+                )
         )
     }
 }

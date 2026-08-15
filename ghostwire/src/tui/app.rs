@@ -788,7 +788,10 @@ impl TuiApp {
 
                 let details = Line::from(vec![
                     Span::raw("    Link Quality: "),
-                    Span::styled(format!("{:.0}%", c.trust_score * 100.0), theme::text_style()),
+                    Span::styled(
+                        format!("{:.0}%", c.trust_score * 100.0),
+                        theme::text_style(),
+                    ),
                     Span::raw(" | Last Seen: "),
                     Span::styled(format_duration(c.last_seen_secs), theme::text_style()),
                 ]);
@@ -797,7 +800,8 @@ impl TuiApp {
             })
             .collect();
 
-        let explorer = List::new(explorer_items).block(theme::themed_block("Network Explorer (Nomadnet Style)"));
+        let explorer = List::new(explorer_items)
+            .block(theme::themed_block("Network Explorer (Nomadnet Style)"));
         f.render_widget(explorer, main[1]);
 
         let help = theme::help_bar(&[

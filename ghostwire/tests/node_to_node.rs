@@ -44,8 +44,8 @@ async fn build_test_mesh_manager(
             .lock()
             .map_err(|_| anyhow::anyhow!("Identity home guard was poisoned"))?;
         std::env::set_var("GHOSTWIRE_HOME", &temp_dir);
-        let created = Identity::new(profile)
-            .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e));
+        let created =
+            Identity::new(profile).map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e));
         std::env::remove_var("GHOSTWIRE_HOME");
         Arc::new(created?)
     };
@@ -79,7 +79,7 @@ async fn build_test_mesh_manager(
         message_store,
         vec![], // no bootstrap nodes -- we'll dial directly
         username_discovery,
-        None, // no event bus
+        None,                        // no event bus
         Arc::new(RwLock::new(None)), // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
     )

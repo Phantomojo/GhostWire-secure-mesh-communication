@@ -283,7 +283,12 @@ impl ReticulumManager {
             .lock()
             .map_err(|_| anyhow!("RETICULUM_BRIDGE_LOCK_POISONED"))?;
 
-        if handles.child.try_wait().context("could not inspect RNS bridge process")?.is_some() {
+        if handles
+            .child
+            .try_wait()
+            .context("could not inspect RNS bridge process")?
+            .is_some()
+        {
             return Ok(());
         }
 
@@ -300,7 +305,10 @@ impl ReticulumManager {
         }
 
         warn!("Reticulum bridge did not stop gracefully; terminating child process");
-        handles.child.kill().context("could not terminate RNS bridge")?;
+        handles
+            .child
+            .kill()
+            .context("could not terminate RNS bridge")?;
         let _ = handles.child.wait();
         Ok(())
     }
@@ -309,7 +317,9 @@ impl ReticulumManager {
 fn bridge_path() -> Result<PathBuf> {
     let path = env::var_os("GHOSTWIRE_RNS_BRIDGE_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/reticulum_bridge.py"));
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/reticulum_bridge.py")
+        });
     if !path.is_file() {
         return Err(anyhow!(RETICULUM_BRIDGE_UNAVAILABLE));
     }
@@ -319,7 +329,9 @@ fn bridge_path() -> Result<PathBuf> {
 fn bridge_paths() -> Result<(PathBuf, PathBuf)> {
     let base = env::var_os("GHOSTWIRE_RNS_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|directory| directory.join("ghostwire").join("reticulum")))
+        .or_else(|| {
+            dirs::config_dir().map(|directory| directory.join("ghostwire").join("reticulum"))
+        })
         .ok_or_else(|| anyhow!(RETICULUM_BRIDGE_UNAVAILABLE))?;
     Ok((base.clone(), base.join("bridge.identity")))
 }
@@ -379,10 +391,14 @@ mod tests {
         });
         assert_eq!(
             parse_ready_event(&valid).unwrap(),
-            ("0123456789abcdef0123456789abcdef".to_string(), "1.4.2".to_string())
+            (
+                "0123456789abcdef0123456789abcdef".to_string(),
+                "1.4.2".to_string()
+            )
         );
 
-        let invalid = json!({"event": "ready", "destination": "not-a-destination", "rns_version": "1.4.2"});
+        let invalid =
+            json!({"event": "ready", "destination": "not-a-destination", "rns_version": "1.4.2"});
         assert!(parse_ready_event(&invalid).is_err());
     }
 

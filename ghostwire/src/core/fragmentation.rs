@@ -26,9 +26,7 @@ pub const MAX_PRIVATE_BULK_OBJECT_BYTES: usize = 64 * 1024 * 1024;
 pub enum CarrierFragmentation {
     /// A reliable stream with explicit backpressure. The carrier owns framing;
     /// GhostWire sends bounded logical frames and never adds message fragments.
-    Stream {
-        max_logical_frame_bytes: usize,
-    },
+    Stream { max_logical_frame_bytes: usize },
     /// A packet carrier whose official runtime provides a specific large-object
     /// facility. `max_packet_payload_bytes` is *not* an invitation to split
     /// bytes ourselves; objects beyond it must use the named native facility.
@@ -39,9 +37,7 @@ pub enum CarrierFragmentation {
     /// A strict single-packet carrier. Oversize input must fail. This is the
     /// current official-RNS bridge packet mode and the safe baseline for most
     /// low-rate/radio adapters before their native resource protocol is wired.
-    SinglePacket {
-        max_payload_bytes: usize,
-    },
+    SinglePacket { max_payload_bytes: usize },
     /// An intentionally negotiated private bulk-transfer session. Immutable
     /// encrypted blocks must be verified individually and requests must travel
     /// only through the already-private session/path selected by policy.

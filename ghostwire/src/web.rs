@@ -188,11 +188,7 @@ fn is_public_control_plane_route(path: &str, method: &Method) -> bool {
         return true;
     }
 
-    method == Method::GET
-        && matches!(
-            path,
-            "/api/v2/health" | "/api/v2/ready" | "/api/v2/live"
-        )
+    method == Method::GET && matches!(path, "/api/v2/health" | "/api/v2/ready" | "/api/v2/live")
 }
 
 pub async fn auth_middleware(
@@ -267,14 +263,8 @@ mod auth_route_tests {
             "/api/v2/health",
             &Method::GET
         ));
-        assert!(is_public_control_plane_route(
-            "/api/v2/ready",
-            &Method::GET
-        ));
-        assert!(is_public_control_plane_route(
-            "/api/v2/live",
-            &Method::GET
-        ));
+        assert!(is_public_control_plane_route("/api/v2/ready", &Method::GET));
+        assert!(is_public_control_plane_route("/api/v2/live", &Method::GET));
     }
 
     #[test]

@@ -6,10 +6,10 @@
 //! a local carrier-submission event; it is never an end-to-end GhostWire
 //! receipt. Direct/private message dispatch is intentionally not rerouted here.
 
-use crate::core::fragmentation::{plan as plan_fragmentation, FragmentationError, FragmentationPlan};
-use crate::core::operating_profile::{
-    DeviceRuntimeState, OperatingProfile, OperatingProfileError,
+use crate::core::fragmentation::{
+    plan as plan_fragmentation, FragmentationError, FragmentationPlan,
 };
+use crate::core::operating_profile::{DeviceRuntimeState, OperatingProfile, OperatingProfileError};
 use crate::core::transport_handoff::ProtectedEnvelopeId;
 use crate::core::transport_policy::{
     CarrierFamily, CarrierSemantics, DeliveryRequirement, DiscoveryMode, InterfaceEligibility,
@@ -126,11 +126,9 @@ pub fn plan_rns_packet_submission(
         .admit_operation(runtime_state, requirement, protected_payload.len())
         .map_err(RnsHybridError::OperatingProfile)?;
 
-    let fragmentation = plan_fragmentation(
-        capability.semantics.fragmentation,
-        protected_payload.len(),
-    )
-    .map_err(RnsHybridError::Fragmentation)?;
+    let fragmentation =
+        plan_fragmentation(capability.semantics.fragmentation, protected_payload.len())
+            .map_err(RnsHybridError::Fragmentation)?;
     debug_assert_eq!(fragmentation, FragmentationPlan::Direct);
 
     Ok(RnsPacketSubmissionPlan {

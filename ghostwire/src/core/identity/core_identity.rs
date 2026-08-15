@@ -780,9 +780,7 @@ mod tests {
 
     #[test]
     fn derived_transport_key_requires_an_unlocked_identity() {
-        use crate::core::identity::{
-            InterfaceInstanceId, TransportKeyDomain, TransportKeyScope,
-        };
+        use crate::core::identity::{InterfaceInstanceId, TransportKeyDomain, TransportKeyScope};
 
         let identity = Identity::create_new(None).unwrap();
         let scope = TransportKeyScope::new(

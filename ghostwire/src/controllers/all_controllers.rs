@@ -817,7 +817,9 @@ impl RecoveryController {
                 let _core = state.core.read().await;
 
                 // Create new identity from recovered key
-                match crate::core::identity::core_identity::Identity::from_recovery_seed(&recovered_key.0) {
+                match crate::core::identity::core_identity::Identity::from_recovery_seed(
+                    &recovered_key.0,
+                ) {
                     Ok(new_identity) => match new_identity.save_to_disk(new_password) {
                         Ok(_) => Json(ApiV2Response::success(serde_json::json!({
                             "status": "key_reconstructed_and_identity_restored",
