@@ -387,10 +387,11 @@ impl EncryptionManager {
         private_key.extend_from_slice(&x25519_private_bytes);
         private_key.extend_from_slice(pq_sk.as_bytes());
 
+        let key_id = Self::generate_key_id(&public_key);
         let key_pair = GhostKeyPair {
             public_key,
             private_key,
-            key_id: Self::generate_key_id(),
+            key_id,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -409,13 +410,14 @@ impl EncryptionManager {
         Ok(key_pair)
     }
 
-    fn generate_key_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        format!("key_{:x}", timestamp)
+    /// Return a stable, collision-resistant identifier for public key material.
+    ///
+    /// Identifiers are intentionally derived from the public portion only, so
+    /// independently generated keys do not share a wall-clock-only identifier.
+    /// BLAKE3 makes accidental or adversarial collisions computationally
+    /// impractical; the value remains safe to persist or advertise.
+    fn generate_key_id(public_key: &[u8]) -> String {
+        format!("key_{}", blake3::hash(public_key).to_hex())
     }
 
     pub fn get_public_key(&self) -> &[u8] {
@@ -427,12 +429,13 @@ impl EncryptionManager {
     }
 
     pub fn add_peer_key(&self, peer_id: String, public_key: Vec<u8>, key_type: KeyType) {
+        let key_id = Self::generate_key_id(&public_key);
         let mut peer_keys = self.peer_keys.lock().unwrap();
         peer_keys.insert(
             peer_id,
             PeerKey {
                 public_key,
-                key_id: Self::generate_key_id(),
+                key_id,
                 last_updated: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()

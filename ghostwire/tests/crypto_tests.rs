@@ -25,22 +25,22 @@ fn test_encryption_manager_initialization() {
     assert!(!mgr.get_key_id().is_empty(), "Key ID should not be empty");
 }
 
-/// Test that two different managers generate different key pairs
+/// Test that managers reuse the persistent local identity.
 #[test]
-fn test_unique_key_generation() {
+fn test_persistent_key_identity_is_reused() {
     let mgr1 = EncryptionManager::new().unwrap();
     let mgr2 = EncryptionManager::new().unwrap();
 
-    assert_ne!(
+    assert_eq!(
         mgr1.get_public_key(),
         mgr2.get_public_key(),
-        "Different managers should have different public keys"
+        "Managers loading the same GhostWire home should reuse its persistent public key"
     );
 
-    assert_ne!(
+    assert_eq!(
         mgr1.get_key_id(),
         mgr2.get_key_id(),
-        "Different managers should have different key IDs"
+        "Managers loading the same GhostWire home should reuse its persistent key ID"
     );
 }
 
@@ -50,8 +50,12 @@ fn test_hybrid_key_format() {
     let mgr = EncryptionManager::new().unwrap();
     let pub_key = mgr.get_public_key();
 
-    // Hybrid public key should be 64 bytes: 32 for Ed25519 + 32 for X25519
-    assert_eq!(pub_key.len(), 64, "Hybrid public key should be 64 bytes");
+    // Ultimate hybrid public key: 32 Ed25519 + 32 X25519 + 1184 ML-KEM-768.
+    assert_eq!(
+        pub_key.len(),
+        1248,
+        "Hybrid public key should include Ed25519, X25519, and ML-KEM-768"
+    );
 }
 
 /// Test message signing and verification
@@ -183,5 +187,9 @@ fn test_public_key_export() {
     let exported = mgr.export_public_key();
 
     assert_eq!(exported, mgr.get_public_key(), "Exported key should match");
-    assert_eq!(exported.len(), 64, "Exported key should be 64 bytes");
+    assert_eq!(
+        exported.len(),
+        1248,
+        "Exported key should include Ed25519, X25519, and ML-KEM-768"
+    );
 }
