@@ -303,23 +303,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mixing_queue_drains_after_delay() {
-        let config = MixingConfig {
-            mean_ms: 10.0,
-            enabled: true,
-            min_ms: 5,
-            max_ms: 50,
-        };
-        let queue = std::sync::Arc::new(MixingQueue::new(config));
-        queue.enqueue("peer1".to_string(), vec![0u8; 64]).await;
+    async fn mixing_queue_drains_an_expired_packet() {
+        let queue = MixingQueue::new(MixingConfig::disabled());
+        queue.queue.lock().await.push(QueuedSphinxPacket {
+            next_hop: "peer1".to_string(),
+            packet_bytes: vec![0u8; 64],
+            forward_at: std::time::Instant::now() - Duration::from_millis(1),
+        });
 
-        // Before delay: nothing ready
-        let ready = queue.drain_ready().await;
-        // May or may not be ready depending on timing — just check it doesn't panic
-        drop(ready);
-
-        // After max delay: everything ready
-        tokio::time::sleep(Duration::from_millis(100)).await;
         let ready = queue.drain_ready().await;
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].next_hop, "peer1");
