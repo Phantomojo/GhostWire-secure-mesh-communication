@@ -51,9 +51,9 @@ help with:
 
 ## Links
 
-- GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 - Website: https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-- Docs: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs
+- Docs: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs
 
 The repo has `good first issue` labels on beginner-friendly tasks and a detailed
 CONTRIBUTING.md. Happy to answer any Rust questions!

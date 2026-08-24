@@ -8,7 +8,7 @@ Add GhostWire — decentralized mesh communication platform
 ### PR Body
 ```markdown
 ## GhostWire
-[![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/stargazers)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 Decentralized, censorship-resistant mesh communication platform. P2P encrypted
@@ -32,7 +32,7 @@ Add GhostWire — serverless encrypted mesh communication
 ### PR Body
 ```markdown
 ## GhostWire
-[GitHub](https://github.com/Phantomojo/GhostWire-secure-mesh-communication) |
+[GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication) |
 [Website](https://phantomojo.github.io/GhostWire-secure-mesh-communication/)
 
 Peer-to-peer encrypted mesh communication with no central servers. AES-256-GCM
@@ -55,9 +55,9 @@ Add GhostWire — self-hosted mesh communication
 ### PR Body
 ```markdown
 ## GhostWire
-[GitHub](https://github.com/Phantomojo/GhostWire-secure-mesh-communication) |
+[GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication) |
 [Website](https://phantomojo.github.io/GhostWire-secure-mesh-communication/) |
-[AGPL-3.0](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/LICENSE)
+[AGPL-3.0](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/LICENSE)
 
 Decentralized mesh communication platform. No central server required. Devices
 connect directly via libp2p with 7 transport layers. End-to-end encrypted.

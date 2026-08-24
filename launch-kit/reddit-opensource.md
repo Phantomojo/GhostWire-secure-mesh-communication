@@ -39,8 +39,8 @@ We need help with:
 Good first issues are labeled on GitHub.
 
 ## Links
-- GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 - Website: https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-- Docs: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs
+- Docs: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs
 
 Happy to answer any questions!

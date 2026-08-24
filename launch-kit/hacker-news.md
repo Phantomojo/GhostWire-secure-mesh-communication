@@ -1,7 +1,7 @@
 # Hacker News — Show HN Post
 
 ## URL to submit
-https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 ## Title (choose one)
 Show HN: GhostWire – Decentralized mesh communication in Rust
@@ -34,8 +34,8 @@ We're actively looking for contributors, especially in:
 • Frontend (React/TypeScript)
 
 Live site: https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
-Docs: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs
+GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+Docs: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs
 
 Happy to answer any questions about the architecture, crypto, or mesh networking!
 

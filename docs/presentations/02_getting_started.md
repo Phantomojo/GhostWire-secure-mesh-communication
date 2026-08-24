@@ -55,7 +55,7 @@ GhostWire is for everyone—community organizers, first responders, privacy advo
 ### Step-by-Step
 1. **Clone the repo:**
    ```sh
-   git clone https://github.com/phantomojo/GhostWire-secure-mesh-communication.git
+   git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
    cd GhostWire-secure-mesh-communication/ghostwire
    ```
 2. **Build the backend:**
@@ -164,7 +164,7 @@ GhostWire is for everyone—community organizers, first responders, privacy advo
 ---
 
 ## 10. Further Reading & Resources
-- [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
+- [GhostWire GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 - [Mesh Networking 101](https://en.wikipedia.org/wiki/Mesh_networking)
 - [LoRa Setup Guide](https://lora-alliance.org/about-lorawan/)
 - [CLI Reference](12_developer_guide.pdf)

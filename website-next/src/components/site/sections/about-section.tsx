@@ -218,7 +218,7 @@ export function AboutSection() {
                 </p>
                 {idx === 0 && (
                   <code className="font-mono-gw text-[11px] text-[var(--gw-green)] block mt-3 bg-[var(--gw-bg)] p-3 rounded border border-[var(--gw-border)]">
-                    ghostwire = {"{ git = \"https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git\" }"}
+                    ghostwire = {"{ git = \"https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git\" }"}
                   </code>
                 )}
                 {idx === 1 && (

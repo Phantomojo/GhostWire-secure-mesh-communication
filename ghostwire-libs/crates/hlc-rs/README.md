@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/hlc-rs.svg)](https://crates.io/crates/hlc-rs)
 [![Documentation](https://docs.rs/hlc-rs/badge.svg)](https://docs.rs/hlc-rs)
-[![License](https://img.shields.io/crates/l/hlc-rs)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication)
+[![License](https://img.shields.io/crates/l/hlc-rs)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 
 Hybrid Logical Clocks (HLC) for causally correct distributed event ordering.
 

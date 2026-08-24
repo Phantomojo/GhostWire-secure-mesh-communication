@@ -38,7 +38,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ghostwire = { git = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication" }
+ghostwire = { git = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tracing = "0.1"

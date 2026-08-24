@@ -45,7 +45,7 @@ We need help with:
 Built in Nairobi, Kenya 🇰🇪 as part of GCD4F 2026.
 
 Website: https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 RTs appreciated! 🙏
 
@@ -63,7 +63,7 @@ layers with auto-fallback. AI-powered routing trained on real mesh data.
 AGPL-3.0. Looking for contributors.
 
 🌐 https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-🐙 https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+🐙 https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 #RustLang #OpenSource #Privacy #MeshNetwork #SelfHosted #Decentralized
 
@@ -92,7 +92,7 @@ submission representing the Open University of Kenya.
 We're actively looking for contributors. If you work with Rust, networking,
 AI/ML, or security — I'd love to connect.
 
-GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 #OpenSource #Rust #Cybersecurity #MeshNetwork #Africa #Innovation
 
@@ -106,14 +106,14 @@ Rust. It's P2P encrypted messaging that works without internet using 7
 transport layers (WiFi, Bluetooth, LoRa, etc.) with AI-powered routing.
 
 AGPL-3.0, looking for contributors.
-GitHub: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+GitHub: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 ### libp2p Discord
 Hey! Using libp2p for a mesh communication project called GhostWire. We're
 running S/Kademlia DHT + Gossipsub with 7 transport layers. Built in Rust
 with Tokio. Looking to improve peer discovery and relay traversal.
 
-Repo: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+Repo: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 ---
 

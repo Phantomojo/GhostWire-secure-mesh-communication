@@ -41,4 +41,4 @@ GhostWire is built with security and privacy as core principles. This page detai
 - Always use the latest release.
 - Rotate keys regularly.
 - Enable all security modules.
-- Report vulnerabilities via [GitHub Security](https://github.com/phantomojo/GhostWire-secure-mesh-communication/security/advisories). 
+- Report vulnerabilities via [Codeberg Security](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories).

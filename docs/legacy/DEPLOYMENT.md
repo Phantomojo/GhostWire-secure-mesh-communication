@@ -21,7 +21,7 @@ This guide provides step-by-step instructions for deploying GhostWire in a small
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+   git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
    cd GhostWire-secure-mesh-communication
    ```
 

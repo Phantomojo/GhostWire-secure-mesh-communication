@@ -14,7 +14,7 @@
 ![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge)
 ![Tech Stack](https://img.shields.io/badge/Tech-Rust%20%7C%20libp2p%20%7C%20ONNX%20%7C%20React-orange?style=for-the-badge)
 [![First Ping](https://img.shields.io/badge/First%20Ping-2026--04--05T22%3A50%3A37.125669222Z-brightgreen?style=for-the-badge)](docs/FIRST_PING.md)
-[![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
+[![Source: Codeberg](https://img.shields.io/badge/source-Codeberg-2185d0)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 
 **GCD4F 2026 Submission** | [Learn More →](#-competition)
 
@@ -82,7 +82,7 @@ The reference implementation is written in **Rust** and includes a working mesh 
 ### Build & Run
 
 ```bash
-git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication/ghostwire
 cargo run --release
 ```
@@ -115,7 +115,7 @@ GhostWire is a **protocol**, not just an application. You can build on it in thr
 
 ```toml
 [dependencies]
-ghostwire = { git = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git" }
+ghostwire = { git = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git" }
 ```
 
 ### 2. Use the REST API
@@ -234,7 +234,7 @@ graph TD;
 | **[🔧 Build Instructions](ghostwire/BUILD_INSTRUCTIONS.md)** | Compilation and development guide |
 | **[🏗️ Build on GhostWire](docs/build/OVERVIEW.md)** | How to build applications on the protocol |
 | **[📜 Governance](docs/GOVERNANCE.md)** | Protocol evolution process (GIPs) |
-| **[📋 Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
+| **[📋 Wiki](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
 
 ---
 
@@ -283,7 +283,7 @@ We welcome contributors across all layers of the protocol:
 
 If referencing GhostWire in academic work:
 
-> Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient Peer-to-Peer Communication. Open University of Kenya. https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+> Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient Peer-to-Peer Communication. Open University of Kenya. https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 Milestone reference: First verified cross-machine mesh communication — April 5, 2026 (v0.2.0).
 
@@ -331,8 +331,8 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### Get Help
 - 📖 **Documentation:** [docs/](docs/)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
-- 🐛 **Bug Reports:** [GitHub Issues](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
+- 💬 **Discussions:** [Codeberg discussions](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
+- 🐛 **Bug Reports:** [Codeberg issues](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues)
 - 📧 **Contact:** contact@ghostwire.cc
 
 ### Stay Updated
@@ -341,7 +341,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### Security
 - 🔒 **Security Policy:** [docs/SECURITY.md](docs/SECURITY.md)
-- 🚨 **Report Vulnerability:** [GitHub Security Advisories](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
+- 🚨 **Report Vulnerability:** [Security reports](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
 
 ---
 

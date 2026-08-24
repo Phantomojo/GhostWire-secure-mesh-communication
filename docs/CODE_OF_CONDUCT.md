@@ -98,7 +98,7 @@ If you experience or witness unacceptable behavior, please report it immediately
 
 #### **🔍 How to Report**
 - **Email**: conduct@ghostwire.com (if available)
-- **GitHub Issues**: Create a private issue with the "conduct" label
+- **Codeberg issues**: Create a private issue with the "conduct" label
 - **Direct Contact**: Reach out to maintainers directly
 - **Anonymous Reporting**: Use GitHub's anonymous reporting feature
 
@@ -277,10 +277,10 @@ If you experience or witness unacceptable behavior, please report it immediately
 ### **🤝 Getting Help**
 
 #### **📧 Contact Information**
-- **General Questions**: [GitHub Discussions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
+- **General Questions**: [Codeberg discussions](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
 - **Code of Conduct Issues**: conduct@ghostwire.com (if available)
 - **Security Issues**: [Security Policy](SECURITY.md)
-- **Technical Support**: [GitHub Issues](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
+- **Technical Support**: [Codeberg issues](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues)
 
 #### **👥 Community Leaders**
 - **Project Lead**: @Phantomojo
@@ -385,7 +385,7 @@ If you experience or witness unacceptable behavior, please report it immediately
 
 **🌟 Ready to join our amazing community? Start by running `./launch-ghostwire-working.sh` and testing all the working buttons!**
 
-[![Community](https://img.shields.io/badge/Community-Welcome%20🌟-blue?style=for-the-badge)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
+[![Community](https://img.shields.io/badge/Community-Welcome%20🌟-blue?style=for-the-badge)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
 [![Contributing](https://img.shields.io/badge/Contributing-Open%20🤝-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 **🤝 Together, we're building the future of secure communication!**

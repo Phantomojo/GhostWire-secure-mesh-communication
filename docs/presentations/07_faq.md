@@ -23,7 +23,7 @@ A: A modular, privacy-focused mesh networking and messaging platform supporting 
 A: Anyone! It’s designed for activists, disaster responders, rural communities, privacy enthusiasts, and developers.
 
 **Q: Is GhostWire free and open-source?**
-A: Yes! The code is on [GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication).
+A: Yes! The code is on [GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication).
 
 **Q: What platforms are supported?**
 A: Linux, Windows, macOS, and (soon) mobile platforms.
@@ -109,7 +109,7 @@ graph TD;
 ---
 
 ## 8. Further Reading & Resources
-- [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
+- [GhostWire GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 - [Mesh Networking 101](https://en.wikipedia.org/wiki/Mesh_networking)
 - [Security & Privacy](05_security.pdf)
 - [Developer Guide](12_developer_guide.pdf)

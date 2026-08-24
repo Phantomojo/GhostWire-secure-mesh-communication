@@ -378,7 +378,7 @@ Agent: main (Z.ai Code)
 Task: Fix the white-background bug, simplify the surface view, remove Open University/GCD4F, switch to the canonical ghostwire.dev domain + emails, and align all technical claims with the actual repo (v0.2.0).
 
 Work Log:
-- Cloned the GhostWire repo (https://github.com/Phantomojo/GhostWire-secure-mesh-communication) for accurate in-depth details.
+- Cloned the GhostWire repo (https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication) for accurate in-depth details.
 - Identified the canonical NEW domain by counting occurrences across all repo files: ghostwire.dev (28) is the primary, with official emails security@/security-emergency@/security-announce@/support@/conduct@/announce@ghostwire.dev. Old ghostwire.cc is legacy; ghostwire.com is commercial/legal.
 - ROOT-CAUSE of white background: the original globals.css used `@theme inline` + a bare `:root` block, but Tailwind v4 dropped my custom `--gw-*` variables from the compiled output (confirmed: compiled CSS had `--background: #fff` and zero `--gw-bg:` definitions). So `var(--gw-bg)` resolved to empty → body fell back to white.
 - FIX: rewrote globals.css using `@theme` (non-inline, which guarantees `:root` emission) for all color mappings + brand tokens, AND added a redundant `:root` block with raw `--gw-*` aliases, AND hardcoded `html/body { background-color: #070a0e }` in `@layer base` as a belt-and-suspenders guarantee.
@@ -490,10 +490,10 @@ Read prior worklog (Tasks 6, 7, 8a) before editing. Confirmed design system: `gw
 #### File 3 — `src/components/site/sections/community-section.tsx`
 - Kept existing `CommunityCard` interface, the original 4 cards, the `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4` grid (works correctly with 8 cards = 2 rows of 4 on desktop), and the named export `CommunitySection` untouched.
 - Added 4 new cards to the `CARDS` array after the Security card:
-  5. **Protocol Spec** → `https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs/spec` (external), file-text SVG (3 paths: file outline, folded corner, three text lines), link label `docs/spec/ →`
+  5. **Protocol Spec** → `https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs/spec` (external), file-text SVG (3 paths: file outline, folded corner, three text lines), link label `docs/spec/ →`
   6. **Published Crates** → `https://crates.io/crates/sphinx-rs` (external), package SVG (4 paths: 3D box, front face, vertical spine, top diagonals), link label `crates.io/sphinx-rs →`
-  7. **Documentation** → `https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs` (external), book-open SVG (2 paths: spine line + book outline), link label `docs/ →`
-  8. **Changelog** → `https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/ghostwire/CHANGELOG.md` (external), git-commit SVG (circle + two horizontal lines), link label `CHANGELOG.md →`
+  7. **Documentation** → `https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs` (external), book-open SVG (2 paths: spine line + book outline), link label `docs/ →`
+  8. **Changelog** → `https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/ghostwire/CHANGELOG.md` (external), git-commit SVG (circle + two horizontal lines), link label `CHANGELOG.md →`
 - All 4 new icons are 28×28 viewBox 0 0 24 24, `fill="none" stroke="currentColor" strokeWidth="1.5"` (outline style, consistent with existing Contact/Contributor/Security cards). Each new card has `external: true` so the render map spreads `target="_blank" rel="noopener noreferrer"`.
 
 ### Verification
@@ -878,9 +878,9 @@ Build two new section components for the GhostWire Next.js single-page site:
 - **Loaded state** — Part A: 4-card stat grid (`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4`): stars, commits (sub uses `timeAgo(stats.pushedAt)`), contributors, `v0.2.0` current version. Each card uses the prescribed `StatCard` markup (mono green value, display label, dim sub, `gw-card-hover`). Display-only — not clickable.
 - **Loaded state** — Part B: `grid grid-cols-1 lg:grid-cols-3 gap-6 mt-10` two-column layout.
   - Left (col-span-2): "Latest activity" h3 + scrollable commit list (`max-h-[400px] overflow-y-auto no-scrollbar`, `space-y-2`). Renders up to 8 `latestCommits` as anchor rows (`<a target="_blank" rel="noopener noreferrer">`) with avatar, sha (mono green), `timeAgo(date)`, message (truncates, green on hover), author. Uses plain `<img>` (the `@next/next/no-img-element` rule is disabled project-wide per lint config).
-  - Right: "Repository" card with a `<dl>` of 6 rows (License / Default branch / Created / Forks / Open issues / Watchers), a divider, a "Topics" section rendering `stats.topics` as mono pill spans, and a full-width `gw-btn-outline` "View on GitHub →" link.
+  - Right: "Repository" card with a `<dl>` of 6 rows (License / Default branch / Created / Forks / Open issues / Watchers), a divider, a "Topics" section rendering `stats.topics` as mono pill spans, and a full-width `gw-btn-outline` "View on Codeberg →" link.
 - Footer line: `font-mono-gw text-[11px] text-[var(--gw-white-faint)]` showing `Last updated: {timeAgo(stats.fetchedAt)}`.
-- Const `REPO_URL = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"` used in 3 places.
+- Const `REPO_URL = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"` used in 3 places.
 
 **2. `src/components/site/sections/glossary-section.tsx`** (`'use client'`, named export `GlossarySection`)
 - `Term` interface with `term`, `category`, `short`, `definition`.
@@ -913,7 +913,7 @@ Build TWO new section components for the GhostWire Next.js site:
 ### `docs-hub-section.tsx` — implementation notes
 - **No `'use client'`** — pure static links, no interactivity needed. Server component by default.
 - Interfaces `DocLink { title; desc; href }` and `DocGroup { label; docs }` defined exactly per spec.
-- Single `REPO_BASE` constant `"https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/"` used to build every `href` via template literal. All 24 doc links use the full GitHub URL prefix as required.
+- Single `REPO_BASE` constant `"https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/"` used to build every `href` via template literal. All 24 doc links use the full GitHub URL prefix as required.
 - Single `DOC_GROUPS: DocGroup[]` array with 4 groups:
   - **Getting Started** (4 docs): QUICK_START, INSTALL, HOW_TO_START_GHOSTWIRE, API_QUICK_REFERENCE.
   - **Architecture & Security** (4 docs): ARCHITECTURE, SECURITY, SECURITY_AUDIT, COMPREHENSIVE_CODE_REVIEW.
@@ -947,7 +947,7 @@ Build TWO new section components for the GhostWire Next.js site:
 - Tailwind + `var(--gw-*)` tokens throughout (`--gw-bg-2`, `--gw-border`, `--gw-green`, `--gw-white`, `--gw-white-dim`, `--gw-white-faint`). No indigo, no blue accent colors (the blue shields.io badges are external images, not theme colors).
 - `{"// section-label"}` braces pattern preserved on both sections.
 - NO emojis except ✓ where specified.
-- All 24 doc links use full GitHub URLs prefixed with `https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/`.
+- All 24 doc links use full GitHub URLs prefixed with `https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/`.
 - `gw-card-hover`, `gw-section-label`, `gw-btn-outline`, `gw-code`, `font-display`, `font-mono-gw` CSS helpers used as directed.
 
 ### Verification
@@ -967,7 +967,7 @@ Work Log:
 - WEB RESEARCH (2 more searches): OSS project website best features (changelog feed, GitHub stats, badges); technical SEO glossary for long-tail keywords.
 - Built GitHub stats API route (/api/github-stats): fetches repo + contributors + commits in parallel, 15-min in-memory cache, returns stars/forks/contributors/commits/latestCommits/topics/license/fetchedAt. Verified: 13 stars, 197 commits, 4 contributors, latest commit "fix: canonical URLs and sitemap match SPA routes (#189)".
 - Task 11a subagent built 2 sections:
-  * StatsSection — fetches /api/github-stats on mount, shows 4 stat cards (stars/commits/contributors/v0.2.0) + scrollable latest-commits feed (8 commits with avatars) + repository metadata card (license, branch, created, forks, issues, watchers, topics) + "View on GitHub" CTA. Loading skeletons + error fallback. timeAgo helper.
+  * StatsSection — fetches /api/github-stats on mount, shows 4 stat cards (stars/commits/contributors/v0.2.0) + scrollable latest-commits feed (8 commits with avatars) + repository metadata card (license, branch, created, forks, issues, watchers, topics) + "View on Codeberg" CTA. Loading skeletons + error fallback. timeAgo helper.
   * GlossarySection — 16 terms across 4 categories (Mesh/Crypto/Routing/Identity), category pill filter, each card clickable → FeatureModal with deep definition. SEO long-tail goldmine (P2P, Mesh, GossipSub, Kademlia DHT, XChaCha20-Poly1305, X25519, ML-KEM-768, Sphinx, DTN, PRoPHET, LightGBM, GNN, TOFU, SURB, Shamir's Secret Sharing, Proof-of-Work).
 - Task 11b subagent built 2 sections:
   * DocsHubSection — 4 groups (Getting Started / Architecture & Security / Protocol Spec / Community), 24 doc link cards pointing to all repo docs + all 8 spec docs (PROTOCOL, CRYPTO, TRANSPORT, SPHINX, DTN, ROUTING, IDENTITY, DISCOVERY) on GitHub.

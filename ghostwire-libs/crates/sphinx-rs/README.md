@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/sphinx-rs.svg)](https://crates.io/crates/sphinx-rs)
 [![Documentation](https://docs.rs/sphinx-rs/badge.svg)](https://docs.rs/sphinx-rs)
-[![License](https://img.shields.io/crates/l/sphinx-rs)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication)
+[![License](https://img.shields.io/crates/l/sphinx-rs)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 [![Rust](https://img.shields.io/badge/rust-1.75+-blue.svg)](https://www.rust-lang.org)
 
 A production-grade implementation of the [Sphinx](https://www.freehaven.net/anonbib/cache/sphinx.pdf) onion routing protocol with Single-Use Reply Blocks (SURBs).

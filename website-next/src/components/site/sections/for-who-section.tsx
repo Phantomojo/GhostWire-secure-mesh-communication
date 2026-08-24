@@ -277,7 +277,7 @@ export function ForWhoSection() {
         title={active?.title ?? ""}
         ctaPrimary={{ href: "#quickstart", label: "Get GhostWire" }}
         ctaSecondary={{
-          href: "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+          href: "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
           label: "View Source",
         }}
       >

@@ -37,7 +37,7 @@ Security layer: Isolation Forest anomaly detection → Gemma 4 threat analysis.
 ## Project Links
 
 - **Website:** https://www.ghostwire.cc/
-- **GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- **GitHub:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 - **Security Policy:** https://www.ghostwire.cc/security
 - **Documentation:** https://www.ghostwire.cc/docs
 - **Download:** https://www.ghostwire.cc/download
@@ -81,5 +81,5 @@ https://www.ghostwire.cc/
 ## Contact
 
 - **Email:** admin@ghostwire.cc
-- **GitHub Issues:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues
+- **Codeberg Issues:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues
 - **Location:** Nairobi, Kenya

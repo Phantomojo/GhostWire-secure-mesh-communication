@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-const REPO = "Phantomojo/GhostWire-secure-mesh-communication";
+const REPO = "PHANTOMOJO/GhostWire-secure-mesh-communication";
+const API_BASE = "https://codeberg.org/api/v1";
 const CACHE_TTL = 60 * 15; // 15 minutes
 
 let cache: { data: unknown; ts: number } | null = null;
@@ -34,8 +35,7 @@ interface GithubStats {
 
 async function fetchJson(url: string, token?: string): Promise<unknown> {
   const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
+    Accept: "application/json",
     "User-Agent": "ghostwire-website",
   };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -52,12 +52,10 @@ export async function GET() {
   }
 
   try {
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-
-    const [repoData, contributorsData, commitsData] = await Promise.all([
-      fetchJson(`https://api.github.com/repos/${REPO}`, token) as Promise<Record<string, unknown>>,
-      fetchJson(`https://api.github.com/repos/${REPO}/contributors?per_page=100`, token) as Promise<unknown[]>,
-      fetchJson(`https://api.github.com/repos/${REPO}/commits?per_page=8`, token) as Promise<Record<string, unknown>[]>,
+      const [repoData, contributorsData, commitsData] = await Promise.all([
+      fetchJson(`${API_BASE}/repos/${REPO}`) as Promise<Record<string, unknown>>,
+      fetchJson(`${API_BASE}/repos/${REPO}/contributors?limit=100`) as Promise<unknown[]>,
+      fetchJson(`${API_BASE}/repos/${REPO}/commits?limit=8`) as Promise<Record<string, unknown>[]>,
     ]);
 
     const latestCommits: Commit[] = commitsData.map((c) => ({
@@ -70,13 +68,13 @@ export async function GET() {
     }));
 
     const stats: GithubStats = {
-      stars: Number(repoData.stargazers_count) || 0,
+      stars: Number(repoData.stars_count) || 0,
       forks: Number(repoData.forks_count) || 0,
       openIssues: Number(repoData.open_issues_count) || 0,
       subscribers: Number(repoData.subscribers_count) || 0,
       watchers: Number(repoData.watchers_count) || 0,
       contributors: contributorsData.length,
-      commits: contributorsData.reduce((sum, c) => sum + Number((c as Record<string, unknown>).contributions || 0), 0),
+      commits: contributorsData.reduce<number>((sum, c) => sum + Number((c as Record<string, unknown>).contributions || 0), 0),
       defaultBranch: String(repoData.default_branch || "main"),
       createdAt: String(repoData.created_at),
       pushedAt: String(repoData.pushed_at),
@@ -93,9 +91,9 @@ export async function GET() {
       headers: { "Cache-Control": `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=60` },
     });
   } catch (err) {
-    console.error("GitHub stats error:", err);
+    console.error("Codeberg stats error:", err);
     return NextResponse.json(
-      { error: "Failed to fetch GitHub stats", fetchedAt: new Date().toISOString() },
+      { error: "Failed to fetch Codeberg stats", fetchedAt: new Date().toISOString() },
       { status: 502 }
     );
   }

@@ -19,6 +19,7 @@ import { StatsSection } from "@/components/site/sections/stats-section";
 import { GlossarySection } from "@/components/site/sections/glossary-section";
 import { DocsHubSection } from "@/components/site/sections/docs-hub-section";
 import { PressSection } from "@/components/site/sections/press-section";
+import { ReleaseStatusSection } from "@/components/site/sections/release-status-section";
 import { BlogSection } from "@/components/site/sections/blog-section";
 
 const jsonLd = {
@@ -28,10 +29,10 @@ const jsonLd = {
   applicationCategory: "CommunicationApplication",
   operatingSystem: "Linux, macOS, Windows, Android",
   description:
-    "GhostWire is an open protocol for resilient peer-to-peer mesh communication. A decentralized networking stack built in Rust — encrypted, delay-tolerant, post-quantum ready, and AI-routed. It provides the cryptographic, routing, and transport layers that developers build communication tools on top of.",
+    "GhostWire is an actively developed open protocol and Rust reference implementation for resilient peer-to-peer communication. Current evidence covers a bounded two-node path; broader transports, discovery, routing, and anonymity features remain under validation.",
   url: "https://ghostwire.cc/",
   downloadUrl:
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/src/branch/main-promotion-20260824",
   softwareVersion: "0.2.0",
   license: "https://www.gnu.org/licenses/agpl-3.0.html",
   programmingLanguage: "Rust",
@@ -41,15 +42,10 @@ const jsonLd = {
     priceCurrency: "USD",
   },
   featureList: [
-    "XChaCha20-Poly1305 E2E encryption with X25519 key exchange and forward secrecy ratchet",
-    "Post-quantum ML-KEM-768 hybrid key exchange",
-    "Sphinx onion routing with SURBs (anonymous routing)",
-    "4-layer AI routing: LightGBM → Gemma 4 → GNN → PRoPHET",
-    "Delay-tolerant networking (PRoPHET epidemic routing)",
-    "Multi-transport: Stealth TCP, WebRTC, Bluetooth LE, LoRa, obfs4, Reticulum",
-    "Coercion resistance: duress PIN, panic wipe, dead man's switch",
-    "Web of Trust with TOFU key pinning",
-    "Protocol bridges to Matrix, Meshtastic, Briar, Reticulum",
+    "Rust reference implementation under active development",
+    "libp2p-based peer-to-peer messaging path under validation",
+    "Multiple transport and discovery adapters under validation",
+    "Documented threat model and reproducible-release plans",
   ],
   author: {
     "@type": "Organization",
@@ -106,7 +102,7 @@ const orgJsonLd = {
   description:
     "An open protocol for resilient peer-to-peer mesh communication. Decentralized networking stack built in Rust.",
   sameAs: [
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
   ],
   contactPoint: [
     {
@@ -142,7 +138,7 @@ const softwareSourceCodeJsonLd = {
     "P2P mesh communication protocol with post-quantum encryption, built in Rust",
   programmingLanguage: "Rust",
   codeRepository:
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
   license: "https://www.gnu.org/licenses/agpl-3.0.html",
   runtimePlatform: "Linux, macOS, Windows, Android",
   softwareVersion: "0.2.0",
@@ -176,6 +172,7 @@ export default function Home() {
       <SiteNav />
       <main className="flex-1">
         <HeroSection />
+        <ReleaseStatusSection />
         <ProblemSection />
         <ForWhoSection />
         <HowItWorksSection />

@@ -47,7 +47,7 @@ Add the `ghostwire` crate to your project and embed the full protocol stack dire
 
 ```toml
 [dependencies]
-ghostwire = { git = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication" }
+ghostwire = { git = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

@@ -30,7 +30,7 @@ interface Stats {
 }
 
 const REPO_URL =
-  "https://github.com/Phantomojo/GhostWire-secure-mesh-communication";
+  "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication";
 
 /**
  * Returns a short "Xh ago" / "Xd ago" / "Xw ago" style relative string.
@@ -160,7 +160,7 @@ export function StatsSection() {
               rel="noopener noreferrer"
               className="gw-btn-outline"
             >
-              View on GitHub →
+              View on Codeberg →
             </a>
           </div>
         )}
@@ -306,7 +306,7 @@ export function StatsSection() {
                   rel="noopener noreferrer"
                   className="gw-btn-outline mt-5 w-full justify-center"
                 >
-                  View on GitHub →
+                  View on Codeberg →
                 </a>
               </div>
             </div>
