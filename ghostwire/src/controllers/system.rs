@@ -54,7 +54,17 @@ impl SystemController {
             sybil_defense: SybilStatus,
             rate_limiting: RateLimitStatus,
             blacklist: BlacklistStatus,
+            stats: SecurityStatsSummary,
+            threat_level: String,
             last_scan: String,
+        }
+
+        #[derive(Serialize)]
+        struct SecurityStatsSummary {
+            messages_encrypted: u64,
+            peers_verified: u32,
+            rate_limit_violations: u32,
+            blocked_peers: u32,
         }
 
         #[derive(Serialize)]
@@ -62,6 +72,7 @@ impl SystemController {
             method: String,
             active: bool,
             messages_encrypted: u64,
+            pqc_armor: bool,
         }
 
         #[derive(Serialize)]
@@ -96,9 +107,10 @@ impl SystemController {
         let dashboard = SecurityDashboard {
             score,
             encryption: EncryptionStatus {
-                method: "AES-256-GCM".to_string(),
+                method: "XChaCha20-Poly1305 + ML-KEM-768 hybrid".to_string(),
                 active: true,
                 messages_encrypted: stats.messages_processed,
+                pqc_armor: true,
             },
             sybil_defense: SybilStatus {
                 method: "Proof-of-Work".to_string(),
@@ -113,6 +125,13 @@ impl SystemController {
                 entries: stats.blacklisted_peers,
                 recent_additions: 0,
             },
+            stats: SecurityStatsSummary {
+                messages_encrypted: stats.messages_processed,
+                peers_verified: stats.peers_verified,
+                rate_limit_violations: stats.rate_limit_violations,
+                blocked_peers: stats.blacklisted_peers,
+            },
+            threat_level: format!("{:?}", stats.threat_level).to_lowercase(),
             last_scan: chrono::Utc::now().to_rfc3339(),
         };
 
@@ -137,13 +156,23 @@ impl SystemController {
     }
 
     pub async fn rotate_keys(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        Json(ApiV2Response::success("Keys rotated successfully"))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Key rotation is not yet implemented",
+            )),
+        )
     }
 
     pub async fn upgrade_encryption(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        Json(ApiV2Response::success("Encryption upgraded to AES-256"))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Encryption upgrade is not yet implemented",
+            )),
+        )
     }
 
     pub async fn configure_firewall(
@@ -244,24 +273,33 @@ impl SystemController {
     }
 
     pub async fn security_audit(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(
-            "Security audit completed - No issues found".to_string(),
-        ))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Security audit is not yet implemented",
+            )),
+        )
     }
 
     pub async fn security_scan(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "COMPLETED",
-            "threats_found": 0,
-            "vulnerabilities_found": 0
-        })))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Security scan is not yet implemented",
+            )),
+        )
     }
 
     pub async fn threat_hunt(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "COMPLETED",
-            "threats_found": 0
-        })))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Threat hunt is not yet implemented",
+            )),
+        )
     }
 
     pub async fn backup_security(State(state): State<Arc<AppState>>) -> impl IntoResponse {

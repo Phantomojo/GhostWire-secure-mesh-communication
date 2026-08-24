@@ -42,7 +42,8 @@ pub const EMBEDDING_REFRESH_SECS: u64 = 300;
 /// Expected BLAKE2b-256 hash of the scoring model ONNX file.
 /// Set this after model export: `sha256sum models/gnn_routing/gnn_routing.onnx`
 /// or: `python3 -c "import hashlib; print(hashlib.new('blake2b', open('models/gnn_routing/gnn_routing.onnx','rb').read(), digest_size=32).hexdigest())"`
-pub const EXPECTED_SCORING_HASH: &str = "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
+pub const EXPECTED_SCORING_HASH: &str =
+    "4508c5f5bd0f5ffaaab769d8405373e2ca5d160187dbc4a500b8e9b2d28dfc20";
 
 // ── Embedding freshness ──────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ impl NodeIdMapper {
         }
         let idx = self.next_index;
         self.next_index += 1;
-        self.peer_to_index.insert(peer.clone(), idx);
+        self.peer_to_index.insert(peer, idx);
         self.index_to_peer.insert(idx, peer);
         idx
     }
@@ -152,6 +153,9 @@ impl NodeIdMapper {
 
     pub fn len(&self) -> usize {
         self.peer_to_index.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.peer_to_index.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -401,7 +405,7 @@ impl GnnRouter {
                 let mut scored: Vec<(PeerId, f32)> = candidate_peers
                     .iter()
                     .zip(scores.iter())
-                    .map(|(peer, &score)| (peer.clone(), score))
+                    .map(|(peer, &score)| (*peer, score))
                     .collect();
 
                 scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -431,19 +435,18 @@ impl GnnRouter {
 
         let mut candidates_with_features = Vec::new();
         for &cand_idx in candidates {
-            let features =
-                peer_features
-                    .get(&cand_idx)
-                    .cloned()
-                    .unwrap_or_else(|| RoutingFeatures {
-                        rssi: -70,
-                        latency_ms: 100,
-                        packet_loss: 0.1,
-                        trust_score: 0.5,
-                        hop_count: 1,
-                        battery_level: 1.0,
-                        time_of_day: 12,
-                    });
+            let features = peer_features
+                .get(&cand_idx)
+                .cloned()
+                .unwrap_or(RoutingFeatures {
+                    rssi: -70,
+                    latency_ms: 100,
+                    packet_loss: 0.1,
+                    trust_score: 0.5,
+                    hop_count: 1,
+                    battery_level: 1.0,
+                    time_of_day: 12,
+                });
             let mapper = self.mapper.read().await;
             if let Some(peer) = mapper.get_peer(cand_idx) {
                 candidates_with_features.push((peer, features));
@@ -458,7 +461,7 @@ impl GnnRouter {
                 features.packet_loss,
                 features.trust_score,
             ) as f32;
-            scored.push((peer.clone(), score));
+            scored.push((*peer, score));
         }
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -467,7 +470,7 @@ impl GnnRouter {
             (
                 candidates_with_features
                     .first()
-                    .map(|(p, _)| p.clone())
+                    .map(|(p, _)| *p)
                     .unwrap_or_else(PeerId::random),
                 0.0,
             )
@@ -601,12 +604,12 @@ pub fn build_topology_from_mesh(
     link_metrics: &HashMap<(PeerId, PeerId), f32>,
 ) -> MeshTopology {
     let num_nodes = peers.len();
-    let peer_list: Vec<PeerId> = peers.keys().cloned().collect();
-    let peer_to_idx: HashMap<PeerId, usize> = peer_list
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.clone(), i))
-        .collect();
+    let mut peer_list: Vec<PeerId> = peers.keys().cloned().collect();
+    // HashMap iteration is intentionally non-deterministic; stable indices are
+    // required for reproducible topology tensors and route decisions.
+    peer_list.sort_by_key(|peer| peer.to_bytes());
+    let peer_to_idx: HashMap<PeerId, usize> =
+        peer_list.iter().enumerate().map(|(i, p)| (*p, i)).collect();
 
     let mut node_features = vec![GnnNodeFeatures::default(); num_nodes];
     let mut adjacency: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -826,7 +829,10 @@ mod tests {
 
         assert_eq!(topology.num_nodes, 3);
         assert_eq!(topology.node_features.len(), 3);
-        let peer1_idx = 0;
-        assert!(topology.adjacency.contains_key(&peer1_idx));
+        // Peer indices are deterministic but not tied to HashMap insertion order.
+        // This fixture has one routing-table source and two advertised neighbors.
+        assert_eq!(topology.adjacency.len(), 1);
+        // Both routes use peer2 as next hop, so the neighbor set is deduplicated.
+        assert_eq!(topology.adjacency.values().next().unwrap().len(), 1);
     }
 }

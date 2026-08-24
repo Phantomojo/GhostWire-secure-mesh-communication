@@ -16,8 +16,11 @@
 //! Auto-escalation: this tier activates automatically when stealth TCP
 //! is blocked (detected by the AutoTransportSwitcher in transport_manager.rs)
 
+use ring::hmac;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 /// WebRTC transport configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,78 +203,242 @@ fn build_stun_binding_request() -> Vec<u8> {
     req
 }
 
-/// Frame fragmenter for WebRTC data channel
-/// WebRTC data channels have a practical message size limit (~16KB).
-/// Large Ghostwire frames (Sphinx packets can be ~2KB) need fragmentation.
+/// Frame fragmenter for WebRTC data channels.
+///
+/// Every fragment is authenticated with a session-specific HMAC-SHA256 key.
+/// The MAC covers the stream, sequence, logical length, whole-message digest,
+/// and fragment payload. This prevents fragment substitution and reordering
+/// from being accepted as a valid logical message. The outer session still
+/// needs its normal AEAD; this MAC is not a replacement for E2EE.
 pub struct WebRtcFragmenter {
     max_chunk: usize,
+    auth_key: Option<[u8; 32]>,
+}
+
+const FRAGMENT_MAGIC: &[u8; 4] = b"GWF1";
+const FRAGMENT_VERSION: u8 = 1;
+const FRAGMENT_HEADER_LEN: usize = 4 + 1 + 4 + 2 + 2 + 1 + 4 + 32;
+const FRAGMENT_TAG_LEN: usize = 32;
+const MAX_FRAGMENT_COUNT: usize = 1024;
+const MAX_REASSEMBLY_BYTES: usize = 16 * 1024 * 1024;
+const REASSEMBLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FragmentError {
+    InvalidConfiguration(&'static str),
+    AuthenticationRequired,
+    Malformed(&'static str),
+    BoundsExceeded(&'static str),
+    AuthenticationFailed,
+    ConflictingDuplicate,
+}
+
+impl std::fmt::Display for FragmentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidConfiguration(message)
+            | Self::Malformed(message)
+            | Self::BoundsExceeded(message) => f.write_str(message),
+            Self::AuthenticationRequired => f.write_str("fragment authentication key required"),
+            Self::AuthenticationFailed => f.write_str("fragment authentication failed"),
+            Self::ConflictingDuplicate => f.write_str("conflicting duplicate fragment"),
+        }
+    }
+}
+
+impl std::error::Error for FragmentError {}
+
+#[derive(Debug)]
+pub struct ReassemblyState {
+    total: usize,
+    logical_len: usize,
+    digest: [u8; 32],
+    fragments: Vec<Option<Vec<u8>>>,
+    created_at: Instant,
 }
 
 impl WebRtcFragmenter {
     pub fn new(max_chunk: usize) -> Self {
-        Self { max_chunk }
+        Self {
+            max_chunk,
+            auth_key: None,
+        }
     }
 
-    /// Split a large frame into chunks with a sequence header
-    pub fn fragment(&self, frame: &[u8], stream_id: u32) -> Vec<Vec<u8>> {
-        if frame.len() <= self.max_chunk - 9 {
-            // Single chunk: [stream_id(4)][total_chunks(2)][chunk_idx(2)][data]
-            let mut chunk = Vec::with_capacity(9 + frame.len());
-            chunk.extend_from_slice(&stream_id.to_be_bytes());
-            chunk.extend_from_slice(&1u16.to_be_bytes()); // total: 1
-            chunk.extend_from_slice(&0u16.to_be_bytes()); // index: 0
-            chunk.push(1u8); // final chunk flag
-            chunk.extend_from_slice(frame);
-            return vec![chunk];
+    pub fn new_authenticated(max_chunk: usize, auth_key: [u8; 32]) -> Result<Self, FragmentError> {
+        if max_chunk <= FRAGMENT_HEADER_LEN + FRAGMENT_TAG_LEN {
+            return Err(FragmentError::InvalidConfiguration(
+                "fragment chunk size leaves no payload capacity",
+            ));
+        }
+        Ok(Self {
+            max_chunk,
+            auth_key: Some(auth_key),
+        })
+    }
+
+    pub fn fragment(&self, frame: &[u8], stream_id: u32) -> Result<Vec<Vec<u8>>, FragmentError> {
+        let auth_key = self
+            .auth_key
+            .as_ref()
+            .ok_or(FragmentError::AuthenticationRequired)?;
+        let data_per_chunk = self
+            .max_chunk
+            .checked_sub(FRAGMENT_HEADER_LEN + FRAGMENT_TAG_LEN)
+            .ok_or(FragmentError::InvalidConfiguration("invalid fragment size"))?;
+        if frame.is_empty() {
+            return Err(FragmentError::Malformed("empty logical frame"));
+        }
+        if frame.len() > MAX_REASSEMBLY_BYTES {
+            return Err(FragmentError::BoundsExceeded("logical frame exceeds limit"));
+        }
+        let total_chunks = frame.len().div_ceil(data_per_chunk);
+        if total_chunks == 0
+            || total_chunks > MAX_FRAGMENT_COUNT
+            || total_chunks > u16::MAX as usize
+        {
+            return Err(FragmentError::BoundsExceeded(
+                "fragment count exceeds limit",
+            ));
         }
 
-        let data_per_chunk = self.max_chunk - 9;
-        let total_chunks = (frame.len() + data_per_chunk - 1) / data_per_chunk;
+        let digest: [u8; 32] = Sha256::digest(frame).into();
         let mut chunks = Vec::with_capacity(total_chunks);
-
         for (idx, chunk_data) in frame.chunks(data_per_chunk).enumerate() {
-            let is_final = idx == total_chunks - 1;
-            let mut chunk = Vec::with_capacity(9 + chunk_data.len());
+            let final_flag = u8::from(idx + 1 == total_chunks);
+            let mut chunk = Vec::with_capacity(self.max_chunk);
+            chunk.extend_from_slice(FRAGMENT_MAGIC);
+            chunk.push(FRAGMENT_VERSION);
             chunk.extend_from_slice(&stream_id.to_be_bytes());
             chunk.extend_from_slice(&(total_chunks as u16).to_be_bytes());
             chunk.extend_from_slice(&(idx as u16).to_be_bytes());
-            chunk.push(if is_final { 1u8 } else { 0u8 });
+            chunk.push(final_flag);
+            chunk.extend_from_slice(&(frame.len() as u32).to_be_bytes());
+            chunk.extend_from_slice(&digest);
             chunk.extend_from_slice(chunk_data);
+            let tag = self.mac(auth_key, &chunk);
+            chunk.extend_from_slice(&tag);
             chunks.push(chunk);
         }
-        chunks
+        Ok(chunks)
     }
 
-    /// Reassemble chunks. Returns Some(frame) when all chunks received.
     pub fn reassemble(
         &self,
-        chunks: &mut std::collections::HashMap<u32, Vec<Option<Vec<u8>>>>,
+        chunks: &mut HashMap<u32, ReassemblyState>,
         chunk: &[u8],
-    ) -> Option<Vec<u8>> {
-        if chunk.len() < 9 {
-            return None;
+    ) -> Result<Option<Vec<u8>>, FragmentError> {
+        let auth_key = self
+            .auth_key
+            .as_ref()
+            .ok_or(FragmentError::AuthenticationRequired)?;
+        if chunk.len() > self.max_chunk || chunk.len() < FRAGMENT_HEADER_LEN + FRAGMENT_TAG_LEN {
+            return Err(FragmentError::Malformed("fragment length is invalid"));
         }
-        let stream_id = u32::from_be_bytes(chunk[0..4].try_into().ok()?);
-        let total = u16::from_be_bytes(chunk[4..6].try_into().ok()?) as usize;
-        let idx = u16::from_be_bytes(chunk[6..8].try_into().ok()?) as usize;
-        let data = chunk[9..].to_vec();
+        if &chunk[..4] != FRAGMENT_MAGIC || chunk[4] != FRAGMENT_VERSION {
+            return Err(FragmentError::Malformed(
+                "fragment magic or version is invalid",
+            ));
+        }
+        let stream_id = u32::from_be_bytes(chunk[5..9].try_into().unwrap());
+        let total = u16::from_be_bytes(chunk[9..11].try_into().unwrap()) as usize;
+        let idx = u16::from_be_bytes(chunk[11..13].try_into().unwrap()) as usize;
+        let final_flag = chunk[13];
+        let logical_len = u32::from_be_bytes(chunk[14..18].try_into().unwrap()) as usize;
+        let digest: [u8; 32] = chunk[18..50].try_into().unwrap();
+        let payload_end = chunk.len() - FRAGMENT_TAG_LEN;
+        let payload = &chunk[50..payload_end];
+        let tag = &chunk[payload_end..];
 
-        let entry = chunks.entry(stream_id).or_insert_with(|| vec![None; total]);
-        if idx < entry.len() {
-            entry[idx] = Some(data);
+        if total == 0 || total > MAX_FRAGMENT_COUNT || idx >= total {
+            return Err(FragmentError::BoundsExceeded(
+                "fragment sequence is invalid",
+            ));
+        }
+        if logical_len == 0 || logical_len > MAX_REASSEMBLY_BYTES {
+            return Err(FragmentError::BoundsExceeded(
+                "logical frame length is invalid",
+            ));
+        }
+        let data_per_chunk = self.max_chunk - FRAGMENT_HEADER_LEN - FRAGMENT_TAG_LEN;
+        let expected_total = logical_len.div_ceil(data_per_chunk);
+        if total != expected_total {
+            return Err(FragmentError::Malformed(
+                "fragment count does not match logical length",
+            ));
+        }
+        if final_flag != u8::from(idx + 1 == total) {
+            return Err(FragmentError::Malformed("invalid final-fragment flag"));
+        }
+        if idx + 1 < total && payload.len() != data_per_chunk {
+            return Err(FragmentError::Malformed(
+                "non-final fragment has invalid length",
+            ));
+        }
+        if idx + 1 == total && (payload.is_empty() || payload.len() > data_per_chunk) {
+            return Err(FragmentError::Malformed(
+                "final fragment has invalid length",
+            ));
+        }
+        if !hmac::verify(
+            &hmac::Key::new(hmac::HMAC_SHA256, auth_key),
+            &chunk[..payload_end],
+            tag,
+        )
+        .is_ok()
+        {
+            return Err(FragmentError::AuthenticationFailed);
         }
 
-        if entry.iter().all(|c| c.is_some()) {
-            let frame: Vec<u8> = entry
-                .iter()
-                .filter_map(|c| c.as_ref())
-                .flat_map(|c| c.iter().cloned())
-                .collect();
+        chunks.retain(|_, state| state.created_at.elapsed() <= REASSEMBLY_TIMEOUT);
+        let state = chunks.entry(stream_id).or_insert_with(|| ReassemblyState {
+            total,
+            logical_len,
+            digest,
+            fragments: vec![None; total],
+            created_at: Instant::now(),
+        });
+        if state.total != total || state.logical_len != logical_len || state.digest != digest {
             chunks.remove(&stream_id);
-            Some(frame)
-        } else {
-            None
+            return Err(FragmentError::ConflictingDuplicate);
         }
+        if let Some(existing) = &state.fragments[idx] {
+            if existing.as_slice() != payload {
+                chunks.remove(&stream_id);
+                return Err(FragmentError::ConflictingDuplicate);
+            }
+            return Ok(None);
+        }
+        state.fragments[idx] = Some(payload.to_vec());
+
+        if state.fragments.iter().all(Option::is_some) {
+            let frame: Vec<u8> = state
+                .fragments
+                .iter()
+                .flat_map(|fragment| fragment.as_deref().unwrap_or_default())
+                .copied()
+                .collect();
+            if frame.len() != state.logical_len
+                || Sha256::digest(&frame).as_slice() != state.digest.as_slice()
+            {
+                chunks.remove(&stream_id);
+                return Err(FragmentError::Malformed("logical frame digest mismatch"));
+            }
+            chunks.remove(&stream_id);
+            Ok(Some(frame))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn mac(&self, auth_key: &[u8; 32], authenticated_header_and_payload: &[u8]) -> [u8; 32] {
+        let tag = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA256, auth_key),
+            authenticated_header_and_payload,
+        );
+        tag.as_ref()
+            .try_into()
+            .expect("HMAC-SHA256 tag is 32 bytes")
     }
 }
 
@@ -281,17 +448,17 @@ mod tests {
 
     #[test]
     fn fragment_reassemble_roundtrip() {
-        let fragmenter = WebRtcFragmenter::new(32); // tiny chunks for testing
-        let original = vec![0xABu8; 100]; // larger than one chunk
+        let fragmenter = WebRtcFragmenter::new_authenticated(128, [7u8; 32]).unwrap();
+        let original = vec![0xABu8; 100];
         let stream_id = 42u32;
 
-        let chunks = fragmenter.fragment(&original, stream_id);
+        let chunks = fragmenter.fragment(&original, stream_id).unwrap();
         assert!(chunks.len() > 1, "Should fragment into multiple chunks");
 
-        let mut reassembly_state = std::collections::HashMap::new();
+        let mut reassembly_state = HashMap::new();
         let mut result = None;
         for chunk in &chunks {
-            result = fragmenter.reassemble(&mut reassembly_state, chunk);
+            result = fragmenter.reassemble(&mut reassembly_state, chunk).unwrap();
         }
 
         assert_eq!(result, Some(original));
@@ -299,10 +466,53 @@ mod tests {
 
     #[test]
     fn small_frame_single_chunk() {
-        let fragmenter = WebRtcFragmenter::new(1024);
-        let frame = vec![1u8; 100];
-        let chunks = fragmenter.fragment(&frame, 1);
+        let fragmenter = WebRtcFragmenter::new_authenticated(128, [7u8; 32]).unwrap();
+        let frame = vec![1u8; 10];
+        let chunks = fragmenter.fragment(&frame, 1).unwrap();
         assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn tampering_and_wrong_key_are_rejected() {
+        let fragmenter = WebRtcFragmenter::new_authenticated(128, [7u8; 32]).unwrap();
+        let wrong_key = WebRtcFragmenter::new_authenticated(128, [8u8; 32]).unwrap();
+        let original = vec![3u8; 20];
+        let mut chunk = fragmenter.fragment(&original, 9).unwrap().remove(0);
+        let last = chunk.len() - 1;
+        chunk[last] ^= 1;
+
+        let mut state = HashMap::new();
+        assert_eq!(
+            fragmenter.reassemble(&mut state, &chunk),
+            Err(FragmentError::AuthenticationFailed)
+        );
+        let valid = fragmenter.fragment(&original, 9).unwrap().remove(0);
+        assert_eq!(
+            wrong_key.reassemble(&mut state, &valid),
+            Err(FragmentError::AuthenticationFailed)
+        );
+    }
+
+    #[test]
+    fn conflicting_duplicate_is_rejected() {
+        let fragmenter = WebRtcFragmenter::new_authenticated(128, [7u8; 32]).unwrap();
+        let original = vec![4u8; 100];
+        let chunks = fragmenter.fragment(&original, 10).unwrap();
+        let mut state = HashMap::new();
+        assert_eq!(fragmenter.reassemble(&mut state, &chunks[0]).unwrap(), None);
+        let mut conflicting = chunks[0].clone();
+        let payload_index = FRAGMENT_HEADER_LEN;
+        conflicting[payload_index] ^= 1;
+        let tag = fragmenter.mac(
+            &[7u8; 32],
+            &conflicting[..conflicting.len() - FRAGMENT_TAG_LEN],
+        );
+        let tag_start = conflicting.len() - FRAGMENT_TAG_LEN;
+        conflicting[tag_start..].copy_from_slice(&tag);
+        assert_eq!(
+            fragmenter.reassemble(&mut state, &conflicting),
+            Err(FragmentError::ConflictingDuplicate)
+        );
     }
 
     #[test]

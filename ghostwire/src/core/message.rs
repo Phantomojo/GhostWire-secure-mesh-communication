@@ -69,7 +69,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const TIMESTAMP_JITTER_RANGE: u64 = 60; // ±30 seconds
+pub const MAX_INLINE_BYTES: usize = 64 * 1024;
 
 /// Type of message being sent
 ///
@@ -78,8 +78,10 @@ const TIMESTAMP_JITTER_RANGE: u64 = 60; // ±30 seconds
 /// at a higher layer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum MessageType {
     /// Standard text message (default)
+    #[default]
     Text,
     /// Binary data (file, image, etc.)
     Binary,
@@ -93,20 +95,16 @@ pub enum MessageType {
     Encrypted,
 }
 
-impl Default for MessageType {
-    fn default() -> Self {
-        Self::Text
-    }
-}
-
 /// Encryption status of the message
 ///
 /// **Security Note:** This is a **local state** indicator, not a security guarantee.
 /// Always verify encryption at the transport/storage layer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum EncryptionStatus {
     /// Message is not encrypted (plaintext in memory)
+    #[default]
     None,
     /// Message is being encrypted (in transit)
     InProgress,
@@ -116,10 +114,25 @@ pub enum EncryptionStatus {
     Failed,
 }
 
-impl Default for EncryptionStatus {
-    fn default() -> Self {
-        Self::None
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MediaMetadata {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_secs: Option<f64>,
+    pub codec: Option<String>,
+    pub bitrate: Option<u32>,
+    pub thumbnail_cid: Option<String>,
+    pub file_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MessageMetadata {
+    pub media: Option<MediaMetadata>,
+    pub reply_to: Option<Uuid>,
+    pub edit_of: Option<Uuid>,
+    pub thread_id: Option<Uuid>,
+    pub priority: u8,
+    pub expires_at: Option<u64>,
 }
 
 /// # Message - Core Communication Structure
@@ -146,7 +159,7 @@ impl Default for EncryptionStatus {
 ///
 /// ## Example Usage
 ///
-/// ```rust
+/// ```ignore
 /// // Create a new message
 /// let message = Message::new(
 ///     "Alice".to_string(),
@@ -170,71 +183,23 @@ impl Default for EncryptionStatus {
 /// - Comparison: Use `id` field for equality checks
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
-    /// Unique message identifier (UUID v4)
-    ///
-    /// **Purpose:** Deduplication, tracking, reference
-    /// **Security:** Random (unpredictable), prevents enumeration
     pub id: Uuid,
-
-    /// Sender's node ID (public key hash)
-    ///
-    /// **Purpose:** Routing, display, verification
-    /// **Security:** Plaintext in memory, encrypted in transit
     pub sender: String,
-
-    /// Recipient's node ID (public key hash)
-    ///
-    /// **Purpose:** Routing, access control
-    /// **Security:** Plaintext in memory, encrypted in transit
-    /// **Special Values:** "broadcast" for broadcast messages
     pub recipient: String,
-
-    /// Message content (the actual message)
-    ///
-    /// **Purpose:** User data
-    /// **Security:** ENCRYPT before storage/network transmission
-    /// **Size Limit:** 10KB recommended (enforced at API layer)
     pub content: String,
-
-    /// Unix timestamp (seconds since 1970-01-01 UTC)
-    ///
-    /// **Purpose:** Ordering, display, expiry
-    /// **Security:** Add jitter (±5 seconds) before sending to prevent traffic analysis
-    /// **Precision:** Seconds (sufficient for messaging)
+    pub content_type: String,
+    pub content_bytes: Option<Vec<u8>>,
+    pub content_cid: Option<String>,
+    pub metadata: Option<MessageMetadata>,
     pub timestamp: u64,
-
-    /// Legacy encryption flag (deprecated)
-    ///
-    /// **Status:** DEPRECATED - use `encryption_status` instead
-    /// **Backwards Compatibility:** Kept for old code
-    /// **Value:** `false` for plaintext, `true` for encrypted
     pub encrypted: bool,
-
-    /// Type of message
-    ///
-    /// **Purpose:** Routing, handling, display
-    /// **Security:** Visible in plaintext for routing
     pub message_type: String,
-
-    /// Current encryption status
-    ///
-    /// **Purpose:** Track encryption state
-    /// **Security:** Local state indicator, not a security guarantee
     pub encryption_status: String,
-
-    /// Hop count for multi-hop relay
-    ///
-    /// **Purpose:** Track how many hops this message has traversed
-    /// **Security:** Prevents infinite loops (max 8 hops via reliability::MAX_HOPS)
-    /// **Default:** 0 (originating node)
     pub hops: u8,
-
-    /// Time-to-live in seconds
-    ///
-    /// Messages are dropped when TTL reaches 0. Decremented on each relay hop.
     pub ttl: u64,
-
     pub vector_clock: crate::core::vector_clock::VectorClock,
+    pub compressed: bool,
+    pub compression_algo: Option<String>,
 }
 
 impl Message {
@@ -264,7 +229,7 @@ impl Message {
     ///
     /// ## Example
     ///
-    /// ```rust
+    /// ```ignore
     /// let message = Message::new(
     ///     "Alice".to_string(),
     ///     "Bob".to_string(),
@@ -280,20 +245,25 @@ impl Message {
             sender,
             recipient,
             content,
-            timestamp: {
-                let base = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let jitter = rand::random::<u64>() % TIMESTAMP_JITTER_RANGE;
-                base + jitter - (TIMESTAMP_JITTER_RANGE / 2)
-            },
+            content_type: "text/plain".to_string(),
+            content_bytes: None,
+            content_cid: None,
+            metadata: None,
+            // Keep local lifecycle semantics exact. Privacy-preserving timestamp
+            // jitter belongs at the outbound transport boundary, not in `age()`
+            // and TTL calculations.
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             encrypted: false,
             message_type: "text".to_string(),
             encryption_status: "none".to_string(),
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
+            compressed: false,
+            compression_algo: None,
         }
     }
 
@@ -312,7 +282,7 @@ impl Message {
     ///
     /// ## Example
     ///
-    /// ```rust
+    /// ```ignore
     /// let control_msg = Message::with_type(
     ///     "System".to_string(),
     ///     "All".to_string(),
@@ -331,20 +301,25 @@ impl Message {
             sender,
             recipient,
             content,
-            timestamp: {
-                let base = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let jitter = rand::random::<u64>() % TIMESTAMP_JITTER_RANGE;
-                base + jitter - (TIMESTAMP_JITTER_RANGE / 2)
-            },
+            content_type: "text/plain".to_string(),
+            content_bytes: None,
+            content_cid: None,
+            metadata: None,
+            // Keep local lifecycle semantics exact. Privacy-preserving timestamp
+            // jitter belongs at the outbound transport boundary, not in `age()`
+            // and TTL calculations.
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             encrypted: false,
             message_type: format!("{:?}", message_type),
             encryption_status: "none".to_string(),
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
+            compressed: false,
+            compression_algo: None,
         }
     }
 
@@ -386,6 +361,85 @@ impl Message {
     /// **Usage:** Auto-delete old messages
     pub fn is_expired(&self, ttl: u64) -> bool {
         self.age() >= ttl
+    }
+
+    pub fn with_binary(
+        sender: String,
+        recipient: String,
+        content_bytes: Vec<u8>,
+        content_type: String,
+    ) -> Self {
+        let mut msg = Self::new(sender, recipient, String::new());
+        msg.content_type = content_type;
+        msg.content_bytes = Some(content_bytes);
+        msg.message_type = "binary".to_string();
+        msg
+    }
+
+    pub fn with_cid(sender: String, recipient: String, cid: String, content_type: String) -> Self {
+        let mut msg = Self::new(sender, recipient, String::new());
+        msg.content_type = content_type;
+        msg.content_cid = Some(cid);
+        msg.message_type = "binary".to_string();
+        msg
+    }
+
+    pub fn inline_bytes(&self) -> Option<&[u8]> {
+        self.content_bytes.as_deref()
+    }
+
+    pub fn has_cid(&self) -> bool {
+        self.content_cid.is_some()
+    }
+
+    pub fn compress(
+        &mut self,
+        codec: crate::core::compression::Codec,
+    ) -> Result<(), anyhow::Error> {
+        if self.compressed {
+            return Ok(());
+        }
+        if let Some(ref bytes) = self.content_bytes {
+            let compressed = crate::core::compression::compress(bytes, codec)?;
+            self.content_bytes = Some(compressed);
+            self.compressed = true;
+            self.compression_algo = Some(format!("{:?}", codec));
+            return Ok(());
+        }
+        if !self.content.is_empty() {
+            let compressed = crate::core::compression::compress(self.content.as_bytes(), codec)?;
+            self.content_bytes = Some(compressed);
+            self.compressed = true;
+            self.compression_algo = Some(format!("{:?}", codec));
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    pub fn decompress(&mut self) -> Result<(), anyhow::Error> {
+        if !self.compressed {
+            return Ok(());
+        }
+        let codec = self
+            .compression_algo
+            .as_deref()
+            .map(|s| match s {
+                "Zstd" => crate::core::compression::Codec::Zstd,
+                "Lz4" => crate::core::compression::Codec::Lz4,
+                _ => crate::core::compression::Codec::None,
+            })
+            .unwrap_or(crate::core::compression::Codec::None);
+
+        if let Some(ref bytes) = self.content_bytes {
+            let decompressed = crate::core::compression::decompress(bytes, codec)?;
+            if self.message_type == "text" || self.content.is_empty() {
+                self.content = String::from_utf8_lossy(&decompressed).to_string();
+            }
+            self.content_bytes = Some(decompressed);
+            self.compressed = false;
+            self.compression_algo = None;
+        }
+        Ok(())
     }
 }
 
@@ -557,5 +611,37 @@ mod tests {
         set.insert(message3);
 
         assert_eq!(set.len(), 2); // Only 2 unique messages
+    }
+
+    #[test]
+    fn test_compress_roundtrip() {
+        use crate::core::compression::Codec;
+
+        let mut msg = Message::new("Alice".to_string(), "Bob".to_string(), "x".repeat(1024));
+        msg.compress(Codec::Zstd).unwrap();
+        assert!(msg.compressed);
+        assert!(msg.content_bytes.is_some());
+
+        msg.decompress().unwrap();
+        assert!(!msg.compressed);
+        assert_eq!(msg.content, "x".repeat(1024));
+    }
+
+    #[test]
+    fn test_compress_binary() {
+        use crate::core::compression::Codec;
+
+        let data = vec![0xAB; 2048];
+        let mut msg = Message::with_binary(
+            "Alice".to_string(),
+            "Bob".to_string(),
+            data.clone(),
+            "application/octet-stream".to_string(),
+        );
+        msg.compress(Codec::Lz4).unwrap();
+        assert!(msg.compressed);
+
+        msg.decompress().unwrap();
+        assert_eq!(msg.content_bytes, Some(data));
     }
 }

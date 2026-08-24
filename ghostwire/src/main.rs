@@ -3,9 +3,11 @@
 
 use anyhow::Result;
 #[cfg(feature = "cli")]
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
+use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tracing::{error, info};
 
@@ -35,10 +37,12 @@ fn install_panic_hook() {
 
 // Use modules from the library crate
 use ghostwire::config::Config;
-use ghostwire::core::updater;
+use ghostwire::controllers::ProfilesController;
+use ghostwire::core::updater_fixed;
 use ghostwire::core::Core;
 use ghostwire::daemon;
 
+/// Initialize logging with structured JSON output for production
 fn init_logging(filter: &str) {
     #[cfg(not(debug_assertions))]
     {
@@ -63,28 +67,6 @@ fn init_logging(filter: &str) {
     }
 }
 
-async fn check_first_run(port: u16) -> bool {
-    let url = format!("http://127.0.0.1:{}/api/v2/identity", port);
-    match reqwest::get(&url).await {
-        Ok(resp) => {
-            if !resp.status().is_success() {
-                return true;
-            }
-            match resp.json::<serde_json::Value>().await {
-                Ok(val) => {
-                    let data = val.get("data").unwrap_or(&val);
-                    data.get("id")
-                        .and_then(|v| v.as_str())
-                        .map(|id| id.is_empty() || id == "unknown")
-                        .unwrap_or(true)
-                }
-                Err(_) => true,
-            }
-        }
-        Err(_) => true,
-    }
-}
-
 #[cfg(feature = "cli")]
 #[derive(Parser)]
 #[command(name = "ghostwire")]
@@ -106,6 +88,9 @@ struct Args {
 
     #[arg(long, default_value_t = daemon::DEFAULT_DAEMON_PORT)]
     port: u16,
+    /// QUIC transport port (0 = ephemeral; default 8081)
+    #[arg(long, default_value_t = 8081)]
+    quic_port: u16,
 
     #[arg(long)]
     bootstrap: Vec<String>,
@@ -147,10 +132,6 @@ struct Args {
     /// Quiet output (warn level logging only)
     #[arg(long, short, global = true)]
     quiet: bool,
-
-    /// Skip first-run wizard
-    #[arg(long)]
-    quick: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -160,6 +141,7 @@ struct Args {
     mesh_host: String,
     mesh_port: u16,
     port: u16,
+    quic_port: u16,
     bootstrap: Vec<String>,
     web: bool,
     cli: bool,
@@ -168,17 +150,32 @@ struct Args {
     daemon: bool,
     tailscale_bootstrap: Vec<String>,
     mesh_size: String,
-    quick: bool,
 }
 
 #[cfg(feature = "cli")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Interface {
+    Web,
+    Tui,
+    None,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start the GhostWire daemon in the background
     Start {
+        /// Interface to launch after the daemon is ready.
+        #[arg(long, value_enum, default_value_t = Interface::Web)]
+        interface: Interface,
+        /// Host for the local HTTP API and embedded web UI.
+        #[arg(long, default_value = "127.0.0.1")]
+        api_host: String,
         /// Mesh network port (0 = random)
         #[arg(long, default_value_t = 0)]
         mesh_port: u16,
+        /// QUIC transport port (0 = ephemeral)
+        #[arg(long, default_value_t = 8081)]
+        quic_port: u16,
         /// Tailscale bootstrap node (format: <tailscale-ip>/<peer-id>)
         #[arg(long)]
         tailscale_bootstrap: Vec<String>,
@@ -206,6 +203,9 @@ enum Commands {
         mesh_host: String,
         #[arg(long, default_value_t = 8080)]
         port: u16,
+        /// QUIC transport port (0 = ephemeral)
+        #[arg(long, default_value_t = 8081)]
+        quic_port: u16,
         #[arg(long)]
         bootstrap: Vec<String>,
     },
@@ -236,6 +236,7 @@ async fn main() -> Result<()> {
         mesh_host: "0.0.0.0".to_string(),
         mesh_port: 0,
         port: daemon::DEFAULT_DAEMON_PORT,
+        quic_port: 8081,
         bootstrap: Vec::new(),
         web: false,
         cli: false,
@@ -246,17 +247,18 @@ async fn main() -> Result<()> {
         mesh_size: "small".to_string(),
         verbose: false,
         quiet: false,
-        quick: false,
     };
 
-    let log_filter = if args.quiet {
-        "ghostwire=warn"
+    let log_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        rust_log
+    } else if args.quiet {
+        "ghostwire=warn".to_string()
     } else if args.verbose {
-        "ghostwire=debug,libp2p_gossipsub=debug"
+        "ghostwire=debug,libp2p_gossipsub=debug".to_string()
     } else {
-        "ghostwire=info"
+        "ghostwire=info".to_string()
     };
-    init_logging(log_filter);
+    init_logging(&log_filter);
     install_panic_hook();
 
     // Anti-debug: abort if being traced (must run before any key material loads)
@@ -269,15 +271,40 @@ async fn main() -> Result<()> {
     {
         match &args.command {
             Some(Commands::Start {
+                interface,
+                api_host,
                 mesh_port,
+                quic_port,
                 tailscale_bootstrap,
                 bootstrap,
                 mesh_size,
             }) => {
+                // `ghostwire --quic-port X start` and
+                // `ghostwire start --quic-port X` must converge. The
+                // subcommand value wins when explicitly non-default; otherwise
+                // inherit the global option parsed before the subcommand.
+                let effective_api_host = if api_host == "127.0.0.1" && args.api_host != "127.0.0.1"
+                {
+                    args.api_host.clone()
+                } else {
+                    api_host.clone()
+                };
+                let effective_mesh_port = if *mesh_port == 0 {
+                    args.mesh_port
+                } else {
+                    *mesh_port
+                };
+                let effective_quic_port = if *quic_port == 8081 {
+                    args.quic_port
+                } else {
+                    *quic_port
+                };
                 let extra = daemon::DaemonArgs {
+                    api_host: effective_api_host.clone(),
                     tailscale_bootstrap: tailscale_bootstrap.clone(),
                     bootstrap: bootstrap.clone(),
-                    mesh_port: *mesh_port,
+                    mesh_port: effective_mesh_port,
+                    quic_port: effective_quic_port,
                 };
                 match daemon::start_daemon(Some(args.port), Some(extra)) {
                     Ok(pid) => {
@@ -288,14 +315,41 @@ async fn main() -> Result<()> {
                         if !tailscale_bootstrap.is_empty() {
                             println!("   Tailscale bootstrap: {}", tailscale_bootstrap.join(", "));
                         }
-                        if *mesh_port > 0 {
-                            println!("   Mesh port: {}", mesh_port);
+                        if effective_mesh_port > 0 {
+                            println!("   Mesh port: {}", effective_mesh_port);
                         }
+                        println!("   QUIC port: {}", effective_quic_port);
                         if mesh_size != "small" {
                             println!("   Mesh size: {}", mesh_size);
                         }
                         println!();
-                        println!("Run 'ghostwire tui' to open the terminal interface.");
+                        daemon::wait_for_ready(args.port, Duration::from_secs(20))?;
+                        println!(
+                            "✅ GhostWire is ready on http://{}:{}",
+                            effective_api_host, args.port
+                        );
+                        match interface {
+                            Interface::Web => {
+                                let browser_host = if api_host == "0.0.0.0" {
+                                    "127.0.0.1"
+                                } else {
+                                    api_host
+                                };
+                                let url = format!("http://{}:{}", browser_host, args.port);
+                                println!("🌐 Web UI: {}", url);
+                                if std::env::var_os("DISPLAY").is_some()
+                                    || std::env::var_os("WAYLAND_DISPLAY").is_some()
+                                {
+                                    let _ = Command::new("xdg-open").arg(&url).spawn();
+                                }
+                            }
+                            Interface::Tui => {
+                                ghostwire::tui::run_tui(args.port)
+                                    .await
+                                    .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
+                            }
+                            Interface::None => {}
+                        }
                     }
                     Err(e) => {
                         eprintln!("❌ {}", e);
@@ -324,13 +378,15 @@ async fn main() -> Result<()> {
                 let port = args.port;
                 if !daemon::is_daemon_running() {
                     let extra = daemon::load_saved_args().unwrap_or_else(|| daemon::DaemonArgs {
+                        api_host: "127.0.0.1".to_string(),
                         mesh_port: 4001,
+                        quic_port: 8081,
                         ..Default::default()
                     });
                     match daemon::start_daemon(Some(port), Some(extra)) {
                         Ok(pid) => {
                             eprintln!("✅ Daemon started (PID {})", pid);
-                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            daemon::wait_for_ready(port, Duration::from_secs(20))?;
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to auto-start daemon: {}", e);
@@ -338,10 +394,9 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                daemon::wait_for_ready(port, Duration::from_secs(20))?;
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
-
-                let is_first_run = !args.quick && check_first_run(port).await;
-                ghostwire::tui::run_tui(port, is_first_run)
+                ghostwire::tui::run_tui(port)
                     .await
                     .map_err(|e| anyhow::anyhow!("TUI error: {}", e))?;
                 return Ok(());
@@ -423,7 +478,7 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration (only needed for Core-based commands)
-    let config = if let Some(config_path) = &args.config {
+    let mut config = if let Some(config_path) = &args.config {
         match Config::load_from_path(config_path) {
             Ok(c) => c,
             Err(e) => {
@@ -435,11 +490,17 @@ async fn main() -> Result<()> {
         Config::load().unwrap_or_else(|_| Config::default())
     };
 
-    // Auto-update check (skip for daemon mode — it runs forever)
-    if !args.daemon && config.server.auto_update && updater::is_update_available() {
-        info!("✨ Applying automatic update...");
-        if let Err(e) = updater::apply_update() {
-            error!("❌ Automatic update failed: {}", e);
+    // Auto-update check (skip for daemon mode — it runs forever).
+    // Only the signed-manifest updater is allowed to inspect or install updates.
+    if !args.daemon && config.server.auto_update {
+        if let Some(manifest) = updater_fixed::check_for_update().await {
+            info!(
+                "✨ Applying verified GhostWire update {}...",
+                manifest.version
+            );
+            if let Err(e) = updater_fixed::apply_update(&manifest).await {
+                error!("❌ Verified automatic update failed: {}", e);
+            }
         }
     }
 
@@ -457,7 +518,12 @@ async fn main() -> Result<()> {
     for ts in &args.tailscale_bootstrap {
         if let Some((ip, peer_id)) = ts.split_once('/') {
             if let Ok(peer_id) = peer_id.parse::<libp2p::PeerId>() {
-                let addr_str = format!("/ip4/{}/tcp/4001", ip);
+                let mesh_port = if args.mesh_port > 0 {
+                    args.mesh_port
+                } else {
+                    ghostwire::core::constants::network::DEFAULT_MESH_PORT
+                };
+                let addr_str = format!("/ip4/{}/tcp/{}", ip, mesh_port);
                 if let Ok(ma) = addr_str.parse::<libp2p::Multiaddr>() {
                     let full_addr = ma.with(libp2p::multiaddr::Protocol::P2p(peer_id));
                     tracing::info!(
@@ -486,12 +552,21 @@ async fn main() -> Result<()> {
     // Set mesh size for gossipsub config (read by hardened_gossipsub_config)
     std::env::set_var("GHOSTWIRE_MESH_SIZE", &args.mesh_size);
 
+    // Apply the CLI transport override without changing the persisted identity.
+    config.server.quic_port = args.quic_port;
+
+    // Restore the last selected profile unless the CLI explicitly overrides it.
+    let selected_profile = args
+        .profile
+        .clone()
+        .or_else(ProfilesController::load_active_profile);
+
     // Initialize core components
     let core = Core::new(
         config.clone(),
         bootstrap_multiaddrs.clone(),
         args.sim_addr.clone(),
-        args.profile,
+        selected_profile,
     )
     .await?;
     let core_arc = Arc::new(core);
@@ -516,6 +591,7 @@ async fn main() -> Result<()> {
             api_host,
             mesh_host,
             port,
+            quic_port,
             bootstrap,
         }) => {
             info!("Starting web server via CLI on {}:{}", api_host, port);
@@ -568,11 +644,16 @@ async fn main() -> Result<()> {
                     .start_nervous_system(args.mesh_host.clone(), args.mesh_port)
                     .await;
 
-                // Start the web API server (this is how clients talk to the daemon)
-                info!("🌐 Daemon API listening on 127.0.0.1:{}", args.port);
+                // Start the web API server (this is how clients talk to the daemon).
+                // Honor the operator-selected bind; the CLI default remains loopback.
+                let daemon_api_host = args.api_host.clone();
+                info!(
+                    "🌐 Daemon API listening on {}:{}",
+                    daemon_api_host, args.port
+                );
                 ghostwire::web::start_web_server(
                     Some(core_arc),
-                    "127.0.0.1".to_string(),
+                    daemon_api_host,
                     args.port,
                     bootstrap_multiaddrs.clone(),
                     None,

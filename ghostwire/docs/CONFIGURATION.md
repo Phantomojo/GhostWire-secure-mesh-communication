@@ -214,7 +214,7 @@ The `web` subcommand uses slightly different defaults than the daemon:
 | `GHOSTWIRE_LOG` | `ghostwire=info` | Tracing filter (e.g. `ghostwire=debug,libp2p=warn`) |
 | `GHOSTWIRE_PROFILE` | none | Identity profile name to load |
 | `GHOSTWIRE_AUTO_UPDATE` | `true` | Enable automatic update checks |
-| `GHOSTWIRE_RELEASE_SIGNING_KEY` | none | Ed25519 pubkey hex for update verification |
+| `GHOSTWIRE_RELEASE_VERIFYING_KEY` | none | Ed25519 pubkey hex for update verification |
 
 ### Security
 

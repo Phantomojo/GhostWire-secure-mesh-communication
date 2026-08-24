@@ -88,7 +88,7 @@ impl PresenceConfig {
 /// Call this when the node first connects to the mesh.
 ///
 /// Usage in mesh.rs connect flow:
-/// ```rust
+/// ```ignore
 /// presence_obfuscation::apply_connect_jitter(&config).await;
 /// // Now publish username to DHT
 /// core.publish_username().await?;
@@ -177,7 +177,7 @@ pub fn generate_dummy_activity() -> DummyActivity {
 /// intervals (exponentially distributed inter-event times).
 ///
 /// Usage:
-/// ```rust
+/// ```ignore
 /// let (dummy_tx, mut dummy_rx) = tokio::sync::mpsc::channel(32);
 /// presence_obfuscation::start_dummy_activity_loop(config.clone(), dummy_tx);
 ///

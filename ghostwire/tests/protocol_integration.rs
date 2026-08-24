@@ -14,6 +14,16 @@ use std::sync::Arc;
 /// Test that SecureMessageStore initializes correctly
 #[test]
 fn test_message_store_initialization() {
+    // Integration tests must never share the production vault with a running
+    // daemon. This validates store construction while preserving production
+    // locking semantics.
+    let test_home = std::env::temp_dir().join(format!(
+        "ghostwire_protocol_store_{}_{}",
+        std::process::id(),
+        "init"
+    ));
+    std::fs::create_dir_all(&test_home).expect("create isolated test home");
+    std::env::set_var("GHOSTWIRE_HOME", &test_home);
     let persistence = PersistenceManager::new(None).expect("Persistence should init");
     let encryption = EncryptionManager::new().expect("Encryption should init");
     let _store = SecureMessageStore::new(Arc::new(persistence), Arc::new(encryption));

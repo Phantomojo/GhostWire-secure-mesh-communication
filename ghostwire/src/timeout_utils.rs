@@ -23,7 +23,7 @@ pub const DEFAULT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Execute an async operation with a timeout
 ///
 /// # Example
-/// ```rust
+/// ```ignore
 /// let result = with_timeout(
 ///     DEFAULT_CONNECTION_TIMEOUT,
 ///     || async { connect_to_peer(peer_addr).await },
@@ -136,7 +136,7 @@ where
 /// * `operation` - The async operation to retry
 ///
 /// # Example
-/// ```rust
+/// ```ignore
 /// let result = retry_with_backoff(
 ///     3,
 ///     Duration::from_millis(100),

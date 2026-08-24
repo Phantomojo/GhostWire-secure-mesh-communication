@@ -57,7 +57,7 @@ pub enum EntryKind {
     Answer { question_id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AccessLevel {
     /// Visible to all mesh nodes
     Public,
@@ -66,13 +66,8 @@ pub enum AccessLevel {
     /// Visible only to specified peers
     Shared { peer_ids: Vec<String> },
     /// Only visible locally — never leaves this device
+    #[default]
     Private,
-}
-
-impl Default for AccessLevel {
-    fn default() -> Self {
-        Self::Private
-    }
 }
 
 // ── Core entry ────────────────────────────────────────────────────────────────

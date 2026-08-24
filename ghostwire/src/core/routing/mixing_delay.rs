@@ -136,7 +136,7 @@ pub fn sample_delay(config: &MixingConfig) -> Duration {
 /// Call this at a relay node before forwarding a Sphinx packet.
 ///
 /// Usage:
-/// ```rust
+/// ```ignore
 /// use crate::core::routing::mixing_delay::{apply_mixing_delay, MixingConfig};
 ///
 /// let config = MixingConfig::default();

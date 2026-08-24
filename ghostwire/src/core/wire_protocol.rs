@@ -18,6 +18,10 @@ pub const FRAME_MAGIC: [u8; 4] = crate::genesis_constants::FRAME_MAGIC;
 /// 64 KB is generous for any legitimate Ghostwire message (Sphinx = 2 KB).
 pub const MAX_FRAME_SIZE: usize = 65_536;
 
+/// High bit in FrameKind u16 signals payload is zstd-compressed.
+/// Transparent to receivers that don't support it: they see unknown kind 0x8XXX.
+const COMPRESSED_BIT: u16 = 0x8000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, num_derive::FromPrimitive)]
 #[repr(u16)]
 pub enum FrameKind {
@@ -65,6 +69,45 @@ impl Frame {
             .map_err(|e| anyhow::anyhow!("Bincode decode failed: {}", e))
     }
 
+    pub fn is_compressed(&self) -> bool {
+        (self.kind as u16) & COMPRESSED_BIT != 0
+    }
+
+    pub fn raw_kind(&self) -> u16 {
+        (self.kind as u16) & !COMPRESSED_BIT
+    }
+
+    pub fn compress_payload(&mut self) -> Result<(), anyhow::Error> {
+        use crate::core::compression::{self, Codec};
+        if self.is_compressed() {
+            return Ok(());
+        }
+        if self.payload.len() < compression::MIN_COMPRESS_SIZE {
+            return Ok(());
+        }
+        let codec = Codec::Zstd;
+        let compressed = compression::compress(&self.payload, codec)?;
+        if compressed.len() < self.payload.len() {
+            self.payload = compressed;
+            self.kind = num_traits::FromPrimitive::from_u16((self.kind as u16) | COMPRESSED_BIT)
+                .ok_or_else(|| anyhow::anyhow!("Invalid frame kind for compression"))?;
+        }
+        Ok(())
+    }
+
+    pub fn decompress_payload(&mut self) -> Result<(), anyhow::Error> {
+        use crate::core::compression::{self, Codec};
+        if !self.is_compressed() {
+            return Ok(());
+        }
+        let codec = Codec::Zstd;
+        let decompressed = compression::decompress(&self.payload, codec)?;
+        self.payload = decompressed;
+        self.kind = num_traits::FromPrimitive::from_u16((self.kind as u16) & !COMPRESSED_BIT)
+            .ok_or_else(|| anyhow::anyhow!("Invalid frame kind after decompression"))?;
+        Ok(())
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let kind_bytes = (self.kind as u16).to_be_bytes();
         let len_bytes = (self.payload.len() as u32).to_be_bytes();
@@ -83,16 +126,16 @@ impl Frame {
         if buf.len() < HEADER_LEN {
             anyhow::bail!("Buffer too short for frame header: {} bytes", buf.len());
         }
-        if &buf[..4] != &FRAME_MAGIC {
+        if buf[..4] != FRAME_MAGIC {
             anyhow::bail!("Invalid frame magic: {:?}", &buf[..4]);
         }
         let kind_u16 = u16::from_be_bytes([buf[4], buf[5]]);
-        let kind = num_traits::FromPrimitive::from_u16(kind_u16)
+        let compressed = kind_u16 & COMPRESSED_BIT != 0;
+        let base_kind = num_traits::FromPrimitive::from_u16(kind_u16 & !COMPRESSED_BIT)
             .ok_or_else(|| anyhow::anyhow!("Unknown frame kind: 0x{:04X}", kind_u16))?;
 
         let payload_len = u32::from_be_bytes([buf[6], buf[7], buf[8], buf[9]]) as usize;
 
-        // FIXED: reject oversized frames before allocating anything
         if payload_len > MAX_FRAME_SIZE {
             anyhow::bail!(
                 "Frame payload {} bytes exceeds MAX_FRAME_SIZE {} — possible OOM attack",
@@ -102,14 +145,29 @@ impl Frame {
         }
         if buf.len() < HEADER_LEN + payload_len {
             anyhow::bail!(
-                "Buffer too short for payload: need {}, have {}",
+                "Frame buffer too short for payload: need {}, have {}",
                 HEADER_LEN + payload_len,
                 buf.len()
             );
         }
 
-        let payload = buf[HEADER_LEN..HEADER_LEN + payload_len].to_vec();
-        Ok((Frame { kind, payload }, HEADER_LEN + payload_len))
+        let mut payload = buf[HEADER_LEN..HEADER_LEN + payload_len].to_vec();
+
+        if compressed {
+            use crate::core::compression::{self, Codec};
+            payload = compression::decompress(&payload, Codec::Zstd).unwrap_or_else(|_| {
+                tracing::debug!("Frame decompression failed, falling back to raw");
+                payload
+            });
+        }
+
+        Ok((
+            Frame {
+                kind: base_kind,
+                payload,
+            },
+            HEADER_LEN + payload_len,
+        ))
     }
 
     /// Generate a cover traffic frame: looks like a real frame but carries
@@ -322,11 +380,13 @@ impl Default for FrameParser {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WirePing {
     pub ts: u32,
+    pub seq: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WirePong {
     pub ts: u32,
+    pub seq: u32,
 }
 
 #[cfg(test)]
@@ -379,7 +439,7 @@ mod tests {
 
     #[test]
     fn frame_parser_handles_partial_reads() {
-        let msg = WirePing { ts: 12345 };
+        let msg = WirePing { ts: 12345, seq: 0 };
         let frame = Frame::encode(FrameKind::Ping, &msg).unwrap();
         let bytes = frame.to_bytes();
         let mut parser = FrameParser::new();

@@ -171,6 +171,9 @@ impl PeerAddressCache {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
 }
 
 // ── 3. O(1) message deduplication ────────────────────────────────────────────
@@ -224,6 +227,9 @@ impl MessageDeduplicator {
 
     pub fn len(&self) -> usize {
         self.seen.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
     }
 }
 
@@ -297,7 +303,7 @@ impl<T: Clone + Send + 'static> RingBus<T> {
 /// latency spike of session init on first message.
 ///
 /// Call in mesh.rs when a new peer is fully identified:
-/// ```rust
+/// ```ignore
 /// session_warmer.prewarm(peer_id, peer_public_key).await;
 /// ```
 pub struct SessionWarmer {

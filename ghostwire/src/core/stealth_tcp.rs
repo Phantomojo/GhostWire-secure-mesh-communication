@@ -38,6 +38,8 @@ pub struct StealthTCPProvider {
     connection_history: Arc<DashMap<SocketAddr, ConnectionInfo>>,
     /// peer_id → SocketAddr mapping for send_message
     peer_map: Arc<DashMap<String, SocketAddr>>,
+    /// Received messages from the listener (wired by init_default_transport)
+    receiver: Arc<tokio::sync::Mutex<Option<mpsc::Receiver<(SocketAddr, Message)>>>>,
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
@@ -87,6 +89,7 @@ impl StealthTCPProvider {
             enable_stealth_mode,
             connection_history: Arc::new(DashMap::new()),
             peer_map: Arc::new(DashMap::new()),
+            receiver: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -188,15 +191,13 @@ impl StealthTCPProvider {
             return Ok(false);
         }
 
-        if &magic_buf[..] != &MAGIC_BYTES[..] {
+        if magic_buf[..] != MAGIC_BYTES[..] {
             return Ok(false);
         }
 
         // Layer 3: Challenge-response (if stealth mode enabled)
-        if self.enable_stealth_mode {
-            if !self.perform_challenge_response(stream).await? {
-                return Ok(false);
-            }
+        if self.enable_stealth_mode && !self.perform_challenge_response(stream).await? {
+            return Ok(false);
         }
 
         let handshake_time = start_time.elapsed();
@@ -212,7 +213,7 @@ impl StealthTCPProvider {
         let rng = SystemRandom::new();
         let mut challenge = [0u8; 16];
         rng.fill(&mut challenge[..])
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to generate challenge"))?;
+            .map_err(|_| io::Error::other("Failed to generate challenge"))?;
 
         // Send challenge
         stream.write_all(&challenge).await?;
@@ -386,10 +387,8 @@ impl StealthTCPProvider {
         stream.write_all(&MAGIC_BYTES[..]).await?;
 
         // Handle challenge-response if stealth mode enabled
-        if self.enable_stealth_mode {
-            if !self.handle_outbound_challenge_response(stream).await? {
-                return Ok(false);
-            }
+        if self.enable_stealth_mode && !self.handle_outbound_challenge_response(stream).await? {
+            return Ok(false);
         }
 
         Ok(true)
@@ -453,7 +452,7 @@ impl StealthTCPProvider {
                 kv.value()
                     .last_seen
                     .duration_since(Instant::now())
-                    .as_secs() as u64
+                    .as_secs()
             })
             .max()
             .unwrap_or(0);
@@ -474,12 +473,11 @@ impl StealthTCPProvider {
     }
 
     pub async fn send_message(&self, message: &Message) -> anyhow::Result<()> {
-        let addr = self
+        let addr = *self
             .peer_map
             .get(&message.recipient)
             .ok_or_else(|| anyhow::anyhow!("Peer {} not registered", message.recipient))?
-            .value()
-            .clone();
+            .value();
 
         let mut stream = self.connect(&addr).await?;
 
@@ -526,8 +524,7 @@ impl StealthTCPProvider {
                                     Ok(n) => match parser.feed(&buf[..n]) {
                                         Ok(frames) => {
                                             for frame in frames {
-                                                if let Ok(wire_msg) =
-                                                    frame.decode::<WireMessage>()
+                                                if let Ok(wire_msg) = frame.decode::<WireMessage>()
                                                 {
                                                     let msg = Message::new(
                                                         String::from_utf8_lossy(&wire_msg.from)
@@ -546,10 +543,7 @@ impl StealthTCPProvider {
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::warn!(
-                                                "StealthTCP: Frame parse error: {}",
-                                                e
-                                            );
+                                            tracing::warn!("StealthTCP: Frame parse error: {}", e);
                                         }
                                     },
                                     Err(_) => break,
@@ -565,6 +559,18 @@ impl StealthTCPProvider {
         });
 
         Ok(rx)
+    }
+
+    pub async fn start_listener_and_store(&self, listen_addr: SocketAddr) -> anyhow::Result<()> {
+        let rx = self.start_listener(listen_addr).await?;
+        let mut guard = self.receiver.lock().await;
+        *guard = Some(rx);
+        Ok(())
+    }
+
+    pub async fn poll_receive(&self) -> Option<(SocketAddr, Message)> {
+        let mut guard = self.receiver.lock().await;
+        guard.as_mut()?.recv().await
     }
 }
 

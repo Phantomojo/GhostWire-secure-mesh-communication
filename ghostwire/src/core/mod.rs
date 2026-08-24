@@ -6,12 +6,16 @@ use zeroize::Zeroize;
 pub mod armor;
 pub mod binary_hardening;
 pub mod blockstore;
+pub mod bootstrap;
 pub mod channels;
+pub mod compression;
 pub mod constants;
 pub mod crl;
+pub mod crypto_profile;
 pub mod db;
 pub mod dht_signatures;
 pub mod disaster;
+pub mod discovery_directory;
 pub mod double_ratchet;
 pub mod dtn;
 pub mod encrypted_store;
@@ -20,6 +24,7 @@ pub mod identity;
 pub mod identity_pairing;
 pub mod knowledge;
 pub mod mailbox;
+pub mod medium_adapter;
 pub mod mesh_health;
 pub mod message;
 pub mod micro_optimizations;
@@ -27,12 +32,14 @@ pub mod monitor;
 pub mod network;
 pub mod obfs4_transport;
 pub mod oem_battery_guide;
+pub mod passphrase_keyslot;
 pub mod peer_health;
 pub mod persistence_manager;
 pub mod recovery_shamir;
 pub mod reliability;
 pub mod reputation;
 pub mod routing;
+pub mod secure_wipe;
 pub mod security_v2;
 pub mod social;
 pub mod traffic_armor;
@@ -42,12 +49,13 @@ pub mod typed_crypto;
 pub mod updater_fixed;
 pub mod vector_clock;
 pub mod wire_protocol;
+pub mod world_discovery;
 pub use security_v2 as security;
 pub mod store;
 pub mod transport;
 pub mod transport_manager;
+pub mod transport_selector;
 pub mod tutorial;
-pub mod updater;
 pub mod username_discovery; // DHT-based username discovery // Background and startup updates
 
 // AI/ML Module
@@ -60,10 +68,10 @@ pub mod briar;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 pub mod qr;
+pub mod quic_transport;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
 pub mod sim_transport;
-pub mod quic_transport;
 pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
@@ -90,7 +98,7 @@ pub use stealth_tcp::{ConnectionStats, StealthTCPProvider};
 use anyhow::Result;
 use libp2p::Multiaddr;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
 // use std::time::Duration; // redundant
@@ -335,8 +343,12 @@ pub struct Core {
     pub encryption: Arc<Encryption>,
     #[cfg(feature = "mesh")]
     pub mesh_manager: Option<Arc<RwLock<MeshManager>>>,
+    /// Mesh initialized after a locked profile is unlocked. This slot avoids
+    /// rebuilding Core while its persistence handles still own the profile DB.
+    #[cfg(feature = "mesh")]
+    pub late_mesh_manager: Arc<RwLock<Option<Arc<RwLock<MeshManager>>>>>,
     #[cfg(feature = "reticulum")]
-    pub reticulum_manager: Option<Arc<RwLock<ReticulumManager>>>,
+    pub reticulum_manager: Arc<RwLock<Option<Arc<RwLock<ReticulumManager>>>>>,
     pub security_manager: Arc<SecurityManager>,
     pub transport_registry: Arc<RwLock<TransportRegistry>>,
     pub active_transport: Arc<RwLock<Option<crate::core::transport::TransportKind>>>,
@@ -350,12 +362,17 @@ pub struct Core {
     pub messages: Arc<RwLock<Vec<Message>>>,
     pub message_store: Arc<store::SecureMessageStore>,
     pub bootstrap_nodes: Vec<Multiaddr>,
+    /// GhostWire-One capability state; not authorized or ready by default.
+    pub bootstrap_worker: Arc<RwLock<bootstrap::BootstrapWorker>>,
     pub event_bus: broadcast::Sender<CoreEvent>,
     pub handshake_secret: Option<Vec<u8>>,
 
     /// Cached mesh peer count so sync get_peer_count() can return it without awaiting.
     /// Updated whenever get_mesh_stats() is called (async path); read by get_peer_count().
     pub mesh_peer_count_cache: Arc<AtomicUsize>,
+    /// Ensures the actor-backed mesh driver is started at most once per Core.
+    #[cfg(feature = "mesh")]
+    pub mesh_started: Arc<AtomicBool>,
 
     /// Security components for rate limiting and audit logging
     pub failed_attempt_tracker: Arc<crate::core::security_v2::FailedAttemptTracker>,
@@ -374,6 +391,8 @@ pub struct Core {
     pub message_dedup: Arc<crate::core::micro_optimizations::MessageDeduplicator>,
     // Wave 5: Social graph
     pub social_graph: Arc<crate::core::social::social_graph::SocialGraph>,
+    /// Canonical discovery evidence directory; discovery never implies trust.
+    pub discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
     // Wave 6: Ghost Channels
     pub ghost_channels: Arc<crate::core::channels::ghost_channels::GhostChannelRegistry>,
     // Security: panic mode and dead man's switch
@@ -392,6 +411,34 @@ pub struct Core {
     pub gnn_router: Option<Arc<ai::GnnRouter>>,
     pub feature_extractor: Arc<RwLock<ai::FeatureExtractor>>,
     // Trust/reputation uses the existing TrustStore (reputation.rs) — not a duplicate
+}
+
+fn local_resource_budget_ok() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let memory_ok = std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|contents| {
+                contents.lines().find_map(|line| {
+                    let mut fields = line.split_whitespace();
+                    (fields.next() == Some("MemAvailable:"))
+                        .then(|| fields.next()?.parse::<u64>().ok())
+                })
+            })
+            .flatten()
+            .map(|available_kib| available_kib >= 32 * 1024)
+            .unwrap_or(false);
+        let load_ok = std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|contents| contents.split_whitespace().next()?.parse::<f64>().ok())
+            .map(|one_minute_load| one_minute_load < 16.0)
+            .unwrap_or(false);
+        memory_ok && load_ok
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 impl Core {
@@ -427,15 +474,20 @@ impl Core {
         }
 
         {
-            let quic_port = config.server.port.wrapping_add(1).max(5001);
-            let quic_addr: std::net::SocketAddr = format!("0.0.0.0:{}", quic_port).parse()?;
-            let quic = match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
-                Ok(q) => Ok(q),
-                Err(_) => {
-                    let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
-                    crate::core::quic_transport::QuicTransportProvider::new(fallback).await
-                }
+            let quic_port = if config.server.quic_port == 0 {
+                config.server.port.wrapping_add(1).max(5001)
+            } else {
+                config.server.quic_port
             };
+            let quic_addr: std::net::SocketAddr = format!("0.0.0.0:{}", quic_port).parse()?;
+            let quic =
+                match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
+                    Ok(q) => Ok(q),
+                    Err(_) => {
+                        let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
+                        crate::core::quic_transport::QuicTransportProvider::new(fallback).await
+                    }
+                };
             match quic {
                 Ok(quic) => {
                     let quic_kind = crate::core::transport::TransportKind::Quic(Arc::new(quic));
@@ -455,24 +507,27 @@ impl Core {
         let active_transport = Arc::new(RwLock::new(active_transport_inner));
 
         // Initialize Persistence
-        let persistence = Arc::new(persistence_manager::PersistenceManager::new(
+        let persistence = Arc::new(persistence_manager::PersistenceManager::new_locked(
             profile.clone(),
         )?);
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
 
-        // Use default bootstraps if none provided
-        let mut bootstrap_nodes = bootstrap_nodes;
+        // GhostWire deliberately has no hard-coded external bootstrap identities.
+        // An empty list means standalone mode until explicit GhostWire-native,
+        // network-scoped bootstrap records are supplied by local configuration,
+        // cached discovery, or the future supervised bootstrap worker.
+        let bootstrap_nodes = bootstrap_nodes;
         if bootstrap_nodes.is_empty() {
             tracing::info!(
-                msg = "🌐 No bootstrap nodes provided. Using default public gateways for zero-config discovery."
+                "No GhostWire bootstrap providers configured; starting in standalone mode"
             );
-            for addr_str in crate::core::mesh::DEFAULT_BOOTSTRAPS {
-                if let Ok(addr) = addr_str.parse() {
-                    bootstrap_nodes.push(addr);
-                }
-            }
+        } else {
+            tracing::info!(
+                providers = bootstrap_nodes.len(),
+                "Using explicitly configured GhostWire bootstrap providers"
+            );
         }
 
         // Register Matrix adapter if enabled
@@ -530,6 +585,8 @@ impl Core {
             });
 
         let reliability = Arc::new(crate::core::reliability::ReliabilityLayer::with_defaults());
+        let discovery_directory =
+            Arc::new(crate::core::discovery_directory::DiscoveryDirectory::new());
 
         #[cfg(feature = "mesh")]
         let mesh_manager_inner = {
@@ -551,6 +608,7 @@ impl Core {
                         Some(event_bus.clone()),
                         handshake_secret.clone(),
                         reliability.clone(),
+                        discovery_directory.clone(),
                     )
                     .await?,
                 )))
@@ -563,6 +621,13 @@ impl Core {
         #[cfg(not(feature = "mesh"))]
         let mesh_manager_inner = None;
 
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = mesh_manager_inner.clone() {
+            let mesh_kind = crate::core::transport::TransportKind::Mesh(mesh_manager);
+            registry.write().await.register(mesh_kind);
+            tracing::info!("libp2p mesh transport registered");
+        }
+
         let monitor = Arc::new(monitor::NetworkMonitor::new(
             #[cfg(feature = "mesh")]
             mesh_manager_inner.clone(),
@@ -572,6 +637,12 @@ impl Core {
         // Clone identity Arc for use in multiple field initializations
         let identity_for_fields = identity.clone();
 
+        // Bootstrap capability is intentionally disabled and unauthorized until an
+        // explicit operator control path enables it. This prevents accidental
+        // promotion of ordinary nodes and keeps GhostWire-One policy fail-closed.
+        let bootstrap_worker = Arc::new(RwLock::new(bootstrap::BootstrapWorker::new(
+            bootstrap::BootstrapPolicy::default(),
+        )));
         let core = Self {
             config,
             identity: Arc::new(RwLock::new(identity)),
@@ -583,34 +654,41 @@ impl Core {
             active_adapter,
             monitor,
             switcher,
-            persistence,
+            persistence: persistence.clone(),
             #[cfg(feature = "mesh")]
             mesh_manager: mesh_manager_inner,
+            #[cfg(feature = "mesh")]
+            late_mesh_manager: Arc::new(RwLock::new(None)),
             #[cfg(feature = "reticulum")]
-            reticulum_manager: None,
+            reticulum_manager: Arc::new(RwLock::new(None)),
             messages,
             message_store,
             bootstrap_nodes,
+            bootstrap_worker,
             event_bus,
             handshake_secret,
             mesh_peer_count_cache: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "mesh")]
+            mesh_started: Arc::new(AtomicBool::new(false)),
             failed_attempt_tracker: Arc::new(FailedAttemptTracker::default()),
             audit_logger: Arc::new(AuditLogger::default()),
             // Wave 2-6 subsystems
             mailbox_store: {
-                let db_path = dirs::data_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("ghostwire")
+                let storage_root = if let Ok(home) = std::env::var("GHOSTWIRE_HOME") {
+                    std::path::PathBuf::from(home).join("mailbox")
+                } else {
+                    dirs::data_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                        .join("ghostwire")
+                };
+                let db_path = storage_root
                     .join(profile.as_deref().unwrap_or("default"))
                     .join("db");
+                let db = sled::open(&db_path)
+                    .unwrap_or_else(|e| panic!("sled open failed at {}: {}", db_path.display(), e));
                 Arc::new(
-                    crate::core::mailbox::MailboxStore::open(Arc::new(
-                        sled::open(&db_path).unwrap_or_else(|_| {
-                            sled::open(std::path::Path::new(".ghostwire_db"))
-                                .expect("sled open failed")
-                        }),
-                    ))
-                    .unwrap_or_else(|_| crate::core::mailbox::MailboxStore::default()),
+                    crate::core::mailbox::MailboxStore::open(Arc::new(db), persistence.clone())
+                        .unwrap_or_else(|_| crate::core::mailbox::MailboxStore::default()),
                 )
             },
             trust_store: Arc::new(crate::core::reputation::TrustStore::new()),
@@ -631,10 +709,12 @@ impl Core {
             social_graph: {
                 let node_id = identity_for_fields.id.clone();
                 let pub_key = identity_for_fields.get_public_key().to_vec();
-                let (sg, _rx) =
+                let (mut sg, _rx) =
                     crate::core::social::social_graph::SocialGraph::new(node_id, pub_key);
+                sg.attach_directory(discovery_directory.clone());
                 Arc::new(sg)
             },
+            discovery_directory,
             ghost_channels: Arc::new(
                 crate::core::channels::ghost_channels::GhostChannelRegistry::new(),
             ),
@@ -803,7 +883,9 @@ impl Core {
                                     // Get candidates (our neighbors in topology)
                                     if let Some(neighbors) = topology.adjacency.get(&src_idx) {
                                         if !neighbors.is_empty() {
-                                            let all_health = if let Some(mesh) = &self.mesh_manager {
+                                            let all_health = if let Some(mesh) =
+                                                self.effective_mesh_manager().await
+                                            {
                                                 let mesh = mesh.read().await;
                                                 Some(mesh.peer_health().get_all_health().await)
                                             } else {
@@ -817,12 +899,19 @@ impl Core {
                                                     .and_then(|hl| {
                                                         let peer_id = mapper.get_peer(cand)?;
                                                         let peer_str = peer_id.to_string();
-                                                        hl.iter().find(|h| h.peer_id == peer_str).map(|h| ai::RoutingFeatures {
-                                                            latency_ms: h.avg_rtt_ms as u64,
-                                                            packet_loss: h.packet_loss_ratio() as f32,
-                                                            trust_score: if h.is_alive { 1.0 } else { 0.0 },
-                                                            ..Default::default()
-                                                        })
+                                                        hl.iter()
+                                                            .find(|h| h.peer_id == peer_str)
+                                                            .map(|h| ai::RoutingFeatures {
+                                                                latency_ms: h.avg_rtt_ms as u64,
+                                                                packet_loss: h.packet_loss_ratio()
+                                                                    as f32,
+                                                                trust_score: if h.is_alive {
+                                                                    1.0
+                                                                } else {
+                                                                    0.0
+                                                                },
+                                                                ..Default::default()
+                                                            })
                                                     })
                                                     .unwrap_or_default();
                                                 peer_features.insert(cand, features);
@@ -912,19 +1001,18 @@ impl Core {
     async fn collect_mesh_peer_features(
         &self,
     ) -> std::collections::HashMap<libp2p::PeerId, ai::RoutingFeatures> {
-        let mesh = match &self.mesh_manager {
-            Some(m) => m.read().await,
+        let mesh_manager = match self.effective_mesh_manager().await {
+            Some(m) => m,
             None => return std::collections::HashMap::new(),
         };
+        let mesh = mesh_manager.read().await;
 
         let topology = mesh.get_topology().await;
         let all_health = mesh.peer_health().get_all_health().await;
 
         // peer_health tracks by string peer_id; mesh topology uses the same string keys
-        let health_map: std::collections::HashMap<&str, &peer_health::PeerHealth> = all_health
-            .iter()
-            .map(|h| (h.peer_id.as_str(), h))
-            .collect();
+        let health_map: std::collections::HashMap<&str, &peer_health::PeerHealth> =
+            all_health.iter().map(|h| (h.peer_id.as_str(), h)).collect();
 
         let trust_avg = self.trust_store.average_trust_score().await;
         let now_hour = {
@@ -1138,10 +1226,25 @@ impl Core {
             loop {
                 interval.tick().await;
                 let metrics = core.monitor.get_metrics().await;
+                let eligible: Vec<crate::core::disaster::TransportType> = {
+                    let registry = core.transport_registry.read().await;
+                    registry.eligible_selector_transports()
+                };
+
+                // An empty live registry is a real degraded state, not permission
+                // to select a compiled-but-unregistered fallback transport.
+                if eligible.is_empty() {
+                    tracing::warn!(
+                        "Autonomic transport selection paused: no eligible registered transport"
+                    );
+                    continue;
+                }
 
                 let mut switcher = core.switcher.write().await;
-                if let Some(new_transport) = switcher.update_and_evaluate(&metrics) {
-                    // Logic to actually swap the transport kind in the Core
+                let previous_transport = switcher.current_transport();
+                if let Some(new_transport) = switcher.update_and_evaluate(&metrics, &eligible) {
+                    // A selector decision is not a successful switch until the
+                    // registry can apply the corresponding live transport.
                     let registry = core.transport_registry.read().await;
                     if let Some(transport) = registry.get(new_transport.name()) {
                         let mut active = core.active_transport.write().await;
@@ -1149,6 +1252,13 @@ impl Core {
                         tracing::info!(
                             "Autonomic system switched transport to {:?}",
                             new_transport
+                        );
+                    } else {
+                        switcher.restore_transport(previous_transport);
+                        tracing::warn!(
+                            attempted = new_transport.name(),
+                            restored = previous_transport.name(),
+                            "Transport selection rejected: no registered transport is available"
                         );
                     }
                 }
@@ -1186,7 +1296,13 @@ impl Core {
                     let listeners = core_mesh.get_mesh_listeners().await;
                     if !listeners.is_empty() {
                         println!("\n--- GhostWire Mesh Node Started ---");
-                        if let Some(peer_id) = core_mesh.identity.read().await.public_key().map(|pk| pk.to_peer_id()) {
+                        if let Some(peer_id) = core_mesh
+                            .identity
+                            .read()
+                            .await
+                            .public_key()
+                            .map(|pk| pk.to_peer_id())
+                        {
                             println!("Peer ID: {}", peer_id);
                         } else {
                             println!("Peer ID: <Locked>");
@@ -1255,7 +1371,7 @@ impl Core {
         let _ = self.event_bus.send(CoreEvent::NewMessage(message.clone()));
 
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
             return mgr.send_message(message).await;
         }
@@ -1306,7 +1422,7 @@ impl Core {
         // But we might want to emit a "MessageSent" event for UI updates
 
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
             if let Ok(peer_id) = recipient.parse::<libp2p::PeerId>() {
                 return mgr.send_direct_message(peer_id, message.clone()).await;
@@ -1406,11 +1522,12 @@ impl Core {
     pub async fn save_profile(&self, display_name: &str) -> Result<()> {
         self.update_metadata(Some(display_name.to_string()), None, None, Some(true))
             .await;
-        // Persist to disk (empty password — identity is already unlocked)
-        if let Err(e) = self.identity.read().await.save_to_disk("") {
-            tracing::warn!("Profile metadata saved, but disk persistence failed: {}", e);
+        if !self.persistence.is_unlocked() {
+            tracing::warn!(
+                "Profile metadata changed in memory; unlock persistence before saving it to disk"
+            );
         }
-        tracing::info!("📝 Profile saved: {}", display_name);
+        tracing::info!("Profile saved: {}", display_name);
         Ok(())
     }
 
@@ -1448,6 +1565,10 @@ impl Core {
     }
 
     pub async fn lock(&self) -> Result<()> {
+        self.encryption
+            .lock_private_state()
+            .map_err(|error| anyhow::anyhow!("encryption lock failed: {}", error))?;
+        self.persistence.lock()?;
         self.identity
             .read()
             .await
@@ -1460,10 +1581,83 @@ impl Core {
             .read()
             .await
             .unlock(password)
-            .map_err(|e| anyhow::anyhow!("{}", e))
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let persistence_result = if self.persistence.is_user_mode()? {
+            self.persistence.unlock_with_passphrase(password)
+        } else {
+            self.persistence
+                .migrate_legacy_with_verified_passphrase(password)
+        };
+        if let Err(error) = persistence_result
+            .and_then(|_| self.mailbox_store.migrate_legacy_records())
+            .and_then(|_| {
+                self.encryption
+                    .migrate_to_user_keyed(&self.persistence)
+                    .map_err(|error| {
+                        anyhow::anyhow!("encryption user-key migration failed: {}", error)
+                    })
+            })
+        {
+            let _ = self.encryption.lock_private_state();
+            let _ = self.persistence.lock();
+            let _ = self.identity.read().await.lock();
+            return Err(anyhow::anyhow!(
+                "persistence, mailbox, or encryption migration failed; profile was re-locked: {}",
+                error
+            ));
+        }
+        Ok(())
+    }
+
+    /// Explicitly recover a legacy machine-sidecar identity and migrate its
+    /// matching persistence store. Normal startup never calls this method.
+    pub async fn recover_legacy_identity(&self) -> Result<()> {
+        let password = self
+            .identity
+            .read()
+            .await
+            .unlock_from_legacy_keyfile()
+            .map_err(|e| anyhow::anyhow!("legacy identity recovery failed: {}", e))?;
+        let persistence_result = if self.persistence.is_user_mode()? {
+            self.persistence.unlock_with_passphrase(password.as_str())
+        } else {
+            self.persistence
+                .migrate_legacy_with_verified_passphrase(password.as_str())
+        };
+        if let Err(error) = persistence_result
+            .and_then(|_| self.mailbox_store.migrate_legacy_records())
+            .and_then(|_| {
+                self.encryption
+                    .migrate_to_user_keyed(&self.persistence)
+                    .map_err(|error| {
+                        anyhow::anyhow!("encryption user-key migration failed: {}", error)
+                    })
+            })
+        {
+            let _ = self.encryption.lock_private_state();
+            let _ = self.persistence.lock();
+            let _ = self.identity.read().await.lock();
+            return Err(anyhow::anyhow!(
+                "legacy identity, mailbox, or encryption migration failed; profile was re-locked: {}",
+                error
+            ));
+        }
+        Ok(())
     }
 
     pub async fn save_to_disk(&self, password: &str) -> Result<()> {
+        if self.persistence.is_unlocked() {
+            self.persistence.change_passphrase(password)?;
+        } else if self.persistence.is_user_mode()? {
+            self.persistence.unlock_with_passphrase(password)?;
+        } else if !self.persistence.initialize_user_mode_if_empty(password)? {
+            self.persistence
+                .migrate_legacy_with_verified_passphrase(password)?;
+        }
+        self.mailbox_store.migrate_legacy_records()?;
+        self.encryption
+            .migrate_to_user_keyed(&self.persistence)
+            .map_err(|error| anyhow::anyhow!("encryption user-key migration failed: {}", error))?;
         self.identity
             .read()
             .await
@@ -1478,7 +1672,7 @@ impl Core {
         let threshold = 3;
 
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mgr = mesh_manager.read().await;
             for i in 0..5 {
                 let dht_key_preimage = format!("{}:recovery:{}", username, i);
@@ -1545,7 +1739,7 @@ impl Core {
     /// Set Regional Shard
     pub async fn set_dht_shard(&self, shard: &str) -> anyhow::Result<()> {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
             mgr.set_shard(shard).await?;
             tracing::info!("DHT Regional Shard updated to: {}", shard);
@@ -1557,7 +1751,7 @@ impl Core {
     /// Get network topology as JSON (nodes, routes, local_node_id from mesh when available).
     pub async fn get_network_topology(&self) -> Result<String> {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let topology = mesh_manager.read().await.get_topology().await;
             return serde_json::to_string_pretty(&topology)
                 .map_err(|e| anyhow::anyhow!("Topology serialization failed: {}", e));
@@ -1571,6 +1765,14 @@ impl Core {
             "message": "Mesh not enabled or not initialized"
         })
         .to_string())
+    }
+
+    #[cfg(feature = "mesh")]
+    pub async fn effective_mesh_manager(&self) -> Option<Arc<RwLock<MeshManager>>> {
+        if let Some(mesh_manager) = &self.mesh_manager {
+            return Some(mesh_manager.clone());
+        }
+        self.late_mesh_manager.read().await.clone()
     }
 
     /// Initialize mesh network
@@ -1601,6 +1803,7 @@ impl Core {
                     Some(self.event_bus.clone()),
                     self.handshake_secret.clone(),
                     self.reliability.clone(),
+                    self.discovery_directory.clone(),
                 )
                 .await?;
                 let mut mesh_manager = mesh_manager;
@@ -1618,10 +1821,212 @@ impl Core {
         Ok(())
     }
 
+    /// Initialize the mesh in-place after a profile unlock.
+    ///
+    /// A locked profile cannot create MeshManager during Core construction.
+    /// Rebuilding Core after unlock is unsafe because the old Core still owns
+    /// the profile database lock. Instead, create MeshManager once and attach
+    /// it through the interior-mutable late slot.
+    pub async fn initialize_mesh_after_unlock(&self) -> Result<()> {
+        #[cfg(feature = "mesh")]
+        {
+            if self.mesh_manager.is_some() {
+                return Ok(());
+            }
+            let mut slot = self.late_mesh_manager.write().await;
+            if slot.is_some() {
+                return Ok(());
+            }
+
+            let identity = self.identity.read().await.clone();
+            let peer_id = identity
+                .public_key()
+                .map(|pk| pk.to_peer_id())
+                .ok_or_else(|| anyhow::anyhow!("Cannot init mesh: Identity is locked"))?;
+            let username_discovery =
+                Arc::new(crate::core::username_discovery::UsernameDiscovery::new(
+                    peer_id,
+                    identity.get_metadata().nickname,
+                ));
+            let mut mesh_manager = MeshManager::new(
+                identity,
+                self.encryption.clone(),
+                self.messages.clone(),
+                self.message_store.clone(),
+                self.bootstrap_nodes.clone(),
+                username_discovery,
+                Some(self.event_bus.clone()),
+                self.handshake_secret.clone(),
+                self.reliability.clone(),
+                self.discovery_directory.clone(),
+            )
+            .await?;
+            mesh_manager.set_peer_count_cache(self.mesh_peer_count_cache.clone());
+            mesh_manager.set_dtn_store(self.dtn_store.clone());
+            mesh_manager.set_mailbox_store(self.mailbox_store.clone());
+
+            let handle = Arc::new(RwLock::new(mesh_manager));
+            self.transport_registry
+                .write()
+                .await
+                .register(crate::core::transport::TransportKind::Mesh(handle.clone()));
+            *slot = Some(handle);
+            tracing::info!("Mesh network initialized after profile unlock");
+        }
+        #[cfg(not(feature = "mesh"))]
+        {
+            tracing::warn!("Mesh feature not enabled");
+        }
+        Ok(())
+    }
+
+    /// Refresh and return the local GhostWire-One capability state.
+    ///
+    /// This method deliberately does not authorize or start the worker. It only
+    /// evaluates observable prerequisites and expires stale records.
+    pub async fn get_bootstrap_state(&self) -> bootstrap::BootstrapCapabilityState {
+        let stable_identity = !self.is_locked().await;
+        let mesh_listener_count = self.get_mesh_listeners().await.len();
+        let reticulum_listener_started = self
+            .get_reticulum_stats()
+            .await
+            .map(|stats| stats.initialized && stats.interfaces_configured > 0)
+            .unwrap_or(false);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut worker = self.bootstrap_worker.write().await;
+        let input = bootstrap::BootstrapEligibilityInput {
+            stable_identity,
+            listener_started: mesh_listener_count > 0 || reticulum_listener_started,
+            advertised_address_count: mesh_listener_count + usize::from(reticulum_listener_started),
+            clock_sane: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .is_ok(),
+            resource_budget_ok: local_resource_budget_ok(),
+            network_id_matches: worker.policy().network_id == "ghostwire-one",
+        };
+        worker.evaluate_eligibility(&input);
+        worker.expire(now);
+        worker.state()
+    }
+
+    /// Enable or disable GhostWire-One bootstrap capability. This never grants
+    /// authorization and never starts the worker.
+    pub async fn configure_bootstrap(&self, enabled: bool) {
+        if !enabled {
+            if let Some(mesh_manager) = self.effective_mesh_manager().await {
+                let _ = mesh_manager
+                    .read()
+                    .await
+                    .set_world_discovery_provider(false)
+                    .await;
+            }
+        }
+        self.bootstrap_worker.write().await.configure(enabled);
+    }
+
+    /// Explicit local control hook for an authenticated operator/API path.
+    /// Authorization is never inferred from eligibility.
+    pub async fn authorize_bootstrap(&self, authorized: bool) {
+        if !authorized {
+            if let Some(mesh_manager) = self.effective_mesh_manager().await {
+                let _ = mesh_manager
+                    .read()
+                    .await
+                    .set_world_discovery_provider(false)
+                    .await;
+            }
+        }
+        self.bootstrap_worker.write().await.authorize(authorized);
+    }
+
+    /// Start the GhostWire-One bootstrap capability after explicit authorization
+    /// and current eligibility have been established.
+    pub async fn start_bootstrap(&self) -> anyhow::Result<()> {
+        let _ = self.get_bootstrap_state().await;
+        self.bootstrap_worker
+            .write()
+            .await
+            .start()
+            .map_err(|e| anyhow::anyhow!("bootstrap start rejected: {:?}", e))?;
+
+        // Starting supervision is not itself proof that a concrete listener is
+        // available. Confirm the runtime listener now and expose that truth to
+        // the API/UI; the worker remains started-but-not-ready if no listener
+        // is bound yet, rather than claiming bootstrap capability prematurely.
+        let mesh_listener_ready = !self.get_mesh_listeners().await.is_empty();
+        let reticulum_listener_ready = self
+            .get_reticulum_stats()
+            .await
+            .map(|stats| stats.initialized && stats.interfaces_configured > 0)
+            .unwrap_or(false);
+        let runtime_ready = mesh_listener_ready || reticulum_listener_ready;
+        self.bootstrap_worker
+            .write()
+            .await
+            .mark_ready(runtime_ready)
+            .map_err(|e| anyhow::anyhow!("bootstrap readiness confirmation failed: {:?}", e))?;
+        if runtime_ready {
+            if let Some(mesh_manager) = self.effective_mesh_manager().await {
+                let manager = mesh_manager.read().await;
+                manager.set_world_discovery_provider(true).await?;
+                // Publication is best-effort until a real externally routable
+                // listener exists; health remains truthful if it is withheld.
+                let _ = manager.publish_world_discovery().await;
+            }
+        }
+        Ok(())
+    }
+    /// Stop local bootstrap service and clear its ephemeral admission state.
+    pub async fn stop_bootstrap(&self) {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            let _ = mesh_manager
+                .read()
+                .await
+                .set_world_discovery_provider(false)
+                .await;
+        }
+        self.bootstrap_worker.write().await.stop();
+    }
+    pub async fn world_discovery_health(
+        &self,
+    ) -> crate::core::world_discovery::WorldDiscoveryHealth {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            return mesh_manager.read().await.world_discovery_health().await;
+        }
+        crate::core::world_discovery::WorldDiscoveryHealth::new(
+            false,
+            crate::core::world_discovery::configured_network_id(),
+        )
+    }
+
+    pub async fn publish_world_discovery(&self) -> anyhow::Result<()> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            return mesh_manager.read().await.publish_world_discovery().await;
+        }
+        Err(anyhow::anyhow!("mesh discovery is unavailable"))
+    }
+
+    pub async fn refresh_world_discovery_providers(&self) -> anyhow::Result<()> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            return mesh_manager
+                .read()
+                .await
+                .refresh_world_discovery_providers()
+                .await;
+        }
+        Err(anyhow::anyhow!("mesh discovery is unavailable"))
+    }
+
     /// Add bootstrap nodes dynamically
     pub async fn add_bootstrap_nodes(&self, nodes: Vec<Multiaddr>) {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
             tracing::info!("Added {} bootstrap nodes dynamically", nodes.len());
             mgr.add_bootstrap_nodes(nodes);
@@ -1631,7 +2036,7 @@ impl Core {
     /// Enable DHT-based account recovery
     pub async fn enable_recovery(&self, recovery_password: &str) -> Result<Vec<String>> {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let shares = crate::core::identity::RecoveryManager::create_recovery_shares(
                 &(*self.identity.read().await),
                 recovery_password,
@@ -1663,15 +2068,45 @@ impl Core {
     }
 
     /// Initialize Reticulum network
-    pub async fn init_reticulum(&mut self) -> Result<()> {
+    pub async fn init_reticulum(&self) -> Result<()> {
         #[cfg(feature = "reticulum")]
         {
-            if self.reticulum_manager.is_none() {
+            let mut slot = self.reticulum_manager.write().await;
+            if slot.is_none() {
+                let identity = self.identity.read().await.clone();
+                let node_id = identity.id.clone();
+                let interfaces_ini = self.config.network.reticulum_interfaces.clone();
                 let reticulum_manager =
-                    ReticulumManager::new(self.identity.read().await.clone()).await?;
-                self.reticulum_manager = Some(Arc::new(RwLock::new(reticulum_manager)));
-                tracing::info!("Reticulum network initialized");
+                    ReticulumManager::new(identity, &interfaces_ini, &node_id).await?;
+                let reticulum_transport = reticulum_manager.transport_arc();
+                let reticulum_handle = Arc::new(RwLock::new(reticulum_manager));
+                self.transport_registry.write().await.register(
+                    crate::core::transport::TransportKind::Reticulum(reticulum_transport),
+                );
+                *slot = Some(reticulum_handle);
+                tracing::info!("Reticulum network initialized and registered");
             }
+        }
+        #[cfg(not(feature = "reticulum"))]
+        {
+            tracing::warn!("Reticulum feature not enabled");
+        }
+        Ok(())
+    }
+
+    /// Stop the Reticulum medium and remove its runtime registration.
+    pub async fn stop_reticulum(&self) -> Result<()> {
+        #[cfg(feature = "reticulum")]
+        {
+            if let Some(reticulum_manager) = self.reticulum_manager.write().await.take() {
+                let mut manager = reticulum_manager.write().await;
+                manager.stop().await?;
+            }
+            self.transport_registry
+                .write()
+                .await
+                .unregister("reticulum");
+            tracing::info!("Reticulum network stopped and unregistered");
         }
         #[cfg(not(feature = "reticulum"))]
         {
@@ -1685,7 +2120,7 @@ impl Core {
     pub async fn get_mesh_stats(&self) -> Option<MeshStats> {
         #[cfg(feature = "mesh")]
         {
-            if let Some(mesh_manager) = &self.mesh_manager {
+            if let Some(mesh_manager) = self.effective_mesh_manager().await {
                 let manager = mesh_manager.read().await;
                 let stats = manager.get_stats().await;
                 self.mesh_peer_count_cache
@@ -1705,17 +2140,10 @@ impl Core {
     pub async fn get_reticulum_stats(&self) -> Option<ReticulumStats> {
         #[cfg(feature = "reticulum")]
         {
-            if let Some(reticulum_manager) = &self.reticulum_manager {
-                let _manager = reticulum_manager.read().await;
-                Some(ReticulumStats {
-                    total_nodes: 0,
-                    online_nodes: 0,
-                    local_node_id: self.get_identity_id().await.to_string(),
-                    routes_count: 0,
-                    onion_routes_count: 0,
-                    messages_relayed: 0,
-                    encryption_errors: 0,
-                })
+            let slot = self.reticulum_manager.read().await;
+            if let Some(reticulum_manager) = slot.as_ref() {
+                let manager = reticulum_manager.read().await;
+                Some(manager.get_stats().await)
             } else {
                 None
             }
@@ -1740,27 +2168,31 @@ impl Core {
         Ok(())
     }
 
-    pub async fn connect_reticulum(
-        &self,
-        _address: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect_reticulum(&self, address: &str) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "reticulum")]
         {
-            if let Some(_reticulum_manager) = &self.reticulum_manager {
-                // Note: This method doesn't exist yet, so we'll skip it for now
-                // let manager = reticulum_manager.write().await;
-                // manager.connect(address).await?;
-            }
+            let slot = self.reticulum_manager.read().await;
+            let reticulum_manager = slot
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Reticulum is not initialized"))?;
+            let mut manager = reticulum_manager.write().await;
+            manager.connect(address).await?;
+            return Ok(());
         }
-        Ok(())
+        #[cfg(not(feature = "reticulum"))]
+        {
+            let _ = address;
+            Err(anyhow::anyhow!("Reticulum feature not enabled").into())
+        }
     }
 
     pub async fn get_reticulum_topology(&self) -> Result<Option<ReticulumTopology>> {
         #[cfg(feature = "reticulum")]
         {
-            if let Some(_reticulum_manager) = &self.reticulum_manager {
-                // Note: This method doesn't exist yet, so we'll return None for now
-                Ok(None)
+            let slot = self.reticulum_manager.read().await;
+            if let Some(reticulum_manager) = slot.as_ref() {
+                let manager = reticulum_manager.read().await;
+                Ok(Some(manager.get_topology().await))
             } else {
                 Ok(None)
             }
@@ -1773,12 +2205,17 @@ impl Core {
 
     pub async fn start_mesh(&self, address: &str) -> anyhow::Result<()> {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            if self.mesh_started.swap(true, Ordering::AcqRel) {
+                return Ok(());
+            }
             let addr = address.parse()?;
             let mesh_manager = mesh_manager.clone();
+            let mesh_started = self.mesh_started.clone();
             tokio::spawn(async move {
                 let mut mgr = mesh_manager.write().await;
                 if let Err(e) = mgr.start(addr).await {
+                    mesh_started.store(false, Ordering::Release);
                     tracing::error!("Mesh loop failed: {}", e);
                 }
             });
@@ -1786,14 +2223,17 @@ impl Core {
         }
         Err(anyhow::anyhow!("Mesh networking not available"))
     }
-    pub async fn get_mesh_topology(&self) -> anyhow::Result<()> {
-        // Stub implementation
-        Ok(())
+    pub async fn get_mesh_topology(&self) -> Option<MeshTopology> {
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
+            return Some(mesh_manager.read().await.get_topology().await);
+        }
+        None
     }
 
     pub async fn get_mesh_listeners(&self) -> Vec<Multiaddr> {
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = &self.mesh_manager {
+        if let Some(mesh_manager) = self.effective_mesh_manager().await {
             return mesh_manager.read().await.get_listeners().await;
         }
         Vec::new()
@@ -1803,7 +2243,13 @@ impl Core {
     /// The mesh cache is updated whenever get_mesh_stats() is called (e.g. by HUD or CLI).
     pub fn get_peer_count(&self) -> usize {
         #[cfg(feature = "mesh")]
-        if self.mesh_manager.is_some() {
+        if self.mesh_manager.is_some()
+            || self
+                .late_mesh_manager
+                .try_read()
+                .map(|slot| slot.is_some())
+                .unwrap_or(false)
+        {
             return self.mesh_peer_count_cache.load(Ordering::Relaxed);
         }
         self.encryption.get_peer_count()
@@ -1815,21 +2261,23 @@ impl Core {
         // 1. Stop Monitor
         self.monitor.stop();
 
-        // 2. Stop Mesh
+        // 2. Stop local BootstrapWorker
+        self.stop_bootstrap().await;
+        // 3. Stop Mesh
         #[cfg(feature = "mesh")]
         if let Some(mesh_mgr) = &self.mesh_manager {
             let mgr = mesh_mgr.read().await;
             mgr.stop().await?;
         }
 
-        // 3. Stop Reticulum
+        // 4. Stop Reticulum
         #[cfg(feature = "reticulum")]
-        if let Some(ret_mgr) = &self.reticulum_manager {
-            let mgr = ret_mgr.read().await;
+        if let Some(ret_mgr) = self.reticulum_manager.write().await.take() {
+            let mut mgr = ret_mgr.write().await;
             mgr.stop().await?;
         }
 
-        // 4. Flush Persistence
+        // 5. Flush Persistence
         self.persistence.flush()?;
 
         tracing::info!("Core shutdown complete.");

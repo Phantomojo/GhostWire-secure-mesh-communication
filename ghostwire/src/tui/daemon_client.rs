@@ -59,10 +59,12 @@ pub struct DaemonContact {
 /// Message from the daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonMessage {
+    pub id: Option<String>,
     pub sender: String,
     pub content: String,
     pub timestamp: u64,
     pub is_mine: bool,
+    pub delivery_state: String,
 }
 
 /// Identity info from the daemon
@@ -90,6 +92,54 @@ pub struct DaemonNetworkStatus {
     pub peer_count: usize,
     pub mode: String,
     pub encryption: String,
+    pub bootstrap_state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DaemonDiscoveryHealth {
+    pub enabled: bool,
+    pub network_id: String,
+    pub state: String,
+    pub published_total: u64,
+    pub accepted_total: u64,
+    pub rejected_total: u64,
+    pub candidate_count: usize,
+    pub provider_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DaemonTransportDescriptor {
+    pub name: String,
+    pub description: String,
+    pub registered: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DaemonSecurityEncryption {
+    pub method: String,
+    pub active: bool,
+    pub messages_encrypted: u64,
+    pub pqc_armor: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DaemonSecurityStats {
+    pub messages_encrypted: u64,
+    pub peers_verified: u32,
+    pub rate_limit_violations: u32,
+    pub blocked_peers: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DaemonSecurityDashboard {
+    pub score: u8,
+    pub encryption: DaemonSecurityEncryption,
+    pub sybil_defense: serde_json::Value,
+    pub rate_limiting: serde_json::Value,
+    pub blacklist: serde_json::Value,
+    pub stats: DaemonSecurityStats,
+    pub threat_level: String,
+    pub last_scan: String,
 }
 
 /// The daemon HTTP client
@@ -133,7 +183,7 @@ impl DaemonClient {
     /// Check if the daemon is reachable
     pub async fn health_check(&self) -> bool {
         self.http
-            .get(format!("{}/health", self.base_url))
+            .get(format!("{}/api/v2/ready", self.base_url))
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -292,6 +342,11 @@ impl DaemonClient {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("XChaCha20-Poly1305")
                                 .to_string(),
+                            bootstrap_state: data
+                                .get("bootstrap_state")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("disabled")
+                                .to_string(),
                         }
                     }
                     Err(e) => {
@@ -300,6 +355,7 @@ impl DaemonClient {
                             peer_count: 0,
                             mode: "Mesh P2P".to_string(),
                             encryption: "XChaCha20-Poly1305".to_string(),
+                            bootstrap_state: "unavailable".to_string(),
                         }
                     }
                 }
@@ -310,6 +366,7 @@ impl DaemonClient {
                     peer_count: 0,
                     mode: "Mesh P2P".to_string(),
                     encryption: "XChaCha20-Poly1305".to_string(),
+                    bootstrap_state: "unavailable".to_string(),
                 }
             }
             Err(e) => {
@@ -318,8 +375,126 @@ impl DaemonClient {
                     peer_count: 0,
                     mode: "Mesh P2P".to_string(),
                     encryption: "XChaCha20-Poly1305".to_string(),
+                    bootstrap_state: "unavailable".to_string(),
                 }
             }
+        }
+    }
+
+    pub async fn get_discovery_health(&self) -> DaemonDiscoveryHealth {
+        match self
+            .authenticated_get("/api/v2/system/discovery")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                let value = resp.json::<serde_json::Value>().await.unwrap_or_default();
+                let data = value.get("data").unwrap_or(&value);
+                serde_json::from_value(data.clone()).unwrap_or_default()
+            }
+            Ok(resp) => {
+                tracing::debug!(target: "tui", "Discovery endpoint returned {}", resp.status());
+                DaemonDiscoveryHealth::default()
+            }
+            Err(error) => {
+                tracing::debug!(target: "tui", "Discovery endpoint unavailable: {}", error);
+                DaemonDiscoveryHealth::default()
+            }
+        }
+    }
+
+    pub async fn get_security_dashboard(&self) -> DaemonSecurityDashboard {
+        let response = match self
+            .authenticated_get("/api/v2/security/dashboard")
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::debug!(target: "tui", "Security dashboard unavailable: {}", error);
+                return DaemonSecurityDashboard::default();
+            }
+        };
+        if !response.status().is_success() {
+            tracing::debug!(target: "tui", "Security dashboard returned {}", response.status());
+            return DaemonSecurityDashboard::default();
+        }
+        let body: serde_json::Value = match response.json().await {
+            Ok(body) => body,
+            Err(error) => {
+                tracing::debug!(target: "tui", "Security dashboard parse failed: {}", error);
+                return DaemonSecurityDashboard::default();
+            }
+        };
+        body.get("data")
+            .and_then(|data| serde_json::from_value(data.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    /// Read the transport registry projection used by the operator cockpit.
+    /// Registry membership is not readiness; lifecycle state comes from mesh health.
+    pub async fn get_transport_registry(&self) -> Vec<DaemonTransportDescriptor> {
+        let response = match self
+            .authenticated_get("/api/v2/system/transports")
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::debug!(target: "tui", "Transport registry unavailable: {}", error);
+                return Vec::new();
+            }
+        };
+        if !response.status().is_success() {
+            tracing::debug!(target: "tui", "Transport registry returned {}", response.status());
+            return Vec::new();
+        }
+        let body: serde_json::Value = match response.json().await {
+            Ok(body) => body,
+            Err(error) => {
+                tracing::debug!(target: "tui", "Transport registry parse failed: {}", error);
+                return Vec::new();
+            }
+        };
+        body.get("data")
+            .and_then(|data| data.get("registry"))
+            .and_then(|registry| serde_json::from_value(registry.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    pub async fn publish_discovery(&self) -> Result<(), String> {
+        match self
+            .authenticated_post("/api/v2/system/discovery/publish")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => Ok(()),
+            Ok(resp) => Err(format!("Discovery publish rejected: {}", resp.status())),
+            Err(error) => Err(format!("Discovery publish failed: {}", error)),
+        }
+    }
+
+    pub async fn refresh_discovery(&self) -> Result<(), String> {
+        match self
+            .authenticated_post("/api/v2/system/discovery/refresh")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => Ok(()),
+            Ok(resp) => Err(format!("Discovery refresh rejected: {}", resp.status())),
+            Err(error) => Err(format!("Discovery refresh failed: {}", error)),
+        }
+    }
+
+    pub async fn scan_discovery(&self) -> Result<(), String> {
+        match self
+            .authenticated_post("/api/v2/discovery/scan")
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => Ok(()),
+            Ok(response) => Err(format!("Discovery scan rejected: {}", response.status())),
+            Err(error) => Err(format!("Discovery scan failed: {}", error)),
         }
     }
 
@@ -372,6 +547,7 @@ impl DaemonClient {
                         let result: Vec<DaemonMessage> = msgs
                             .iter()
                             .filter_map(|m| {
+                                let id = m.get("id").and_then(|v| v.as_str()).map(str::to_string);
                                 let sender = m
                                     .get("sender")
                                     .or_else(|| m.get("sender_id"))
@@ -393,10 +569,12 @@ impl DaemonClient {
                                     .unwrap_or(0);
 
                                 Some(DaemonMessage {
+                                    id,
                                     sender,
                                     content,
                                     timestamp,
                                     is_mine: false,
+                                    delivery_state: "delivered".to_string(),
                                 })
                             })
                             .collect();

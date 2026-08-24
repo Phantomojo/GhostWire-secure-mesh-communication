@@ -37,12 +37,12 @@ cargo install --path .
 
 This puts `ghostwire` in `~/.cargo/bin/` which should be on your PATH.
 
-### Inject release signing key (optional)
+### Inject release public verification key (optional)
 
 Set the hex-encoded ed25519 public key (64 chars = 32 bytes) before building. This key verifies automatic updates at runtime.
 
 ```bash
-export GHOSTWIRE_RELEASE_SIGNING_KEY_HEX="<64-char-hex-pubkey>"
+export GHOSTWIRE_RELEASE_VERIFYING_KEY_HEX="<64-char-hex-pubkey>"
 cargo build --release
 ```
 

@@ -30,36 +30,69 @@ pub struct RespondRequestBody {
 
 impl PeerController {
     /// GET /api/v2/peers — All known peers with their connection states
+    ///
+    /// ponytail: merges social_graph + mesh topology. social_graph isn't populated
+    /// from libp2p events yet, so topology is the real source. When social_graph
+    /// gets wired to swarm events, this deduplicates naturally.
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        use crate::core::social::social_graph::PeerFilter;
+        use crate::core::social::social_graph::{ConnectionState, PeerFilter};
 
         let core = state.core.read().await;
         let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
-        let connected = core.social_graph.connected_peers().await;
         let pending_inbound = core.social_graph.pending_inbound().await;
-        let peer_count = core.get_peer_count();
 
-        let peers_json: Vec<serde_json::Value> = all_peers
+        let topo = core.get_mesh_topology().await;
+        let topo_nodes = topo.as_ref().map(|t| &t.nodes);
+
+        let mut seen = std::collections::HashSet::new();
+        let mut peers_json: Vec<serde_json::Value> = Vec::new();
+
+        for p in &all_peers {
+            seen.insert(p.node_id.clone());
+            peers_json.push(serde_json::json!({
+                "node_id": p.node_id,
+                "did": p.did,
+                "nickname": p.nickname,
+                "avatar_cid": p.avatar_cid,
+                "connection_state": format!("{:?}", p.connection_state),
+                "is_online": p.is_online,
+                "signal": p.signal,
+                "discovered_via": format!("{:?}", p.discovered_via),
+                "last_seen": p.last_seen,
+            }));
+        }
+
+        if let Some(nodes) = topo_nodes {
+            for (id, node) in nodes {
+                if seen.contains(id) {
+                    continue;
+                }
+                peers_json.push(serde_json::json!({
+                    "node_id": id,
+                    "nickname": node.username,
+                    "connection_state": if node.is_online { "Connected" } else { "Disconnected" },
+                    "is_online": node.is_online,
+                    "signal": node.connection_quality,
+                    "last_seen": node.last_seen,
+                    "threat_level": format!("{:?}", node.threat_level),
+                }));
+            }
+        }
+
+        let peer_count = peers_json.len();
+        let connected_count = peers_json
             .iter()
-            .map(|p| {
-                serde_json::json!({
-                    "node_id": p.node_id,
-                    "did": p.did,
-                    "nickname": p.nickname,
-                    "avatar_cid": p.avatar_cid,
-                    "connection_state": format!("{:?}", p.connection_state),
-                    "is_online": p.is_online,
-                    "signal": p.signal,
-                    "discovered_via": format!("{:?}", p.discovered_via),
-                    "last_seen": p.last_seen,
-                })
+            .filter(|p| {
+                p.get("is_online")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
             })
-            .collect();
+            .count();
 
         tracing::debug!(
             target: "peers",
             total = peer_count,
-            connected = connected.len(),
+            connected = connected_count,
             pending = pending_inbound.len(),
             "Peer list requested"
         );
@@ -68,7 +101,7 @@ impl PeerController {
             "count": peer_count,
             "peers": peers_json,
             "pending_requests": pending_inbound.len(),
-            "connected": connected.len(),
+            "connected": connected_count,
         })))
     }
 
@@ -115,15 +148,16 @@ impl PeerController {
                 .into_response();
         }
 
-        tracing::info!(target: "social", "Connection request sent to {}", &req.node_id[..8.min(req.node_id.len())]);
+        tracing::warn!(target: "social", "Connection request unavailable; social-graph send is not wired for {}", &req.node_id[..8.min(req.node_id.len())]);
 
-        // Wire: core.social_graph.send_request(&req.node_id, req.message, sign_fn).await
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "request_sent",
-            "to": req.node_id,
-            "note": "Wire social_graph.send_request() here"
-        })))
-        .into_response()
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_CONNECT_UNAVAILABLE",
+                "Peer connection requests are not wired to the authenticated social graph yet",
+            )),
+        )
+            .into_response()
     }
 
     /// GET /api/v2/peers/requests — Pending inbound connection requests
@@ -163,23 +197,15 @@ impl PeerController {
     ) -> impl IntoResponse {
         let _core = state.core.read().await;
 
-        if req.accept {
-            tracing::info!(target: "social", "Accepting connection request {}", req.request_id);
-            // Wire: core.social_graph.accept_request(&req.request_id, x25519_pub, sign_fn).await
-            Json(ApiV2Response::success(serde_json::json!({
-                "status": "accepted",
-                "request_id": req.request_id
-            })))
+        tracing::warn!(target: "social", "Connection request response unavailable; social-graph mutation is not wired for {}", req.request_id);
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_REQUEST_RESPONSE_UNAVAILABLE",
+                "Peer request responses are not wired to the authenticated social graph yet",
+            )),
+        )
             .into_response()
-        } else {
-            tracing::info!(target: "social", "Denying connection request {}", req.request_id);
-            // Wire: core.social_graph.deny_request(&req.request_id).await
-            Json(ApiV2Response::success(serde_json::json!({
-                "status": "denied",
-                "request_id": req.request_id
-            })))
-            .into_response()
-        }
     }
 
     /// DELETE /api/v2/peers/:node_id — Remove a connection
@@ -187,11 +213,14 @@ impl PeerController {
         State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
-        tracing::info!(target: "social", "Removing connection to {}", &node_id[..8.min(node_id.len())]);
-        // Wire: core.social_graph.remove(&node_id).await
-        Json(ApiV2Response::success(
-            serde_json::json!({ "status": "removed" }),
-        ))
+        tracing::warn!(target: "social", "Disconnect unavailable; social-graph removal is not wired for {}", &node_id[..8.min(node_id.len())]);
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_DISCONNECT_UNAVAILABLE",
+                "Peer disconnect is not wired to the authenticated social graph yet",
+            )),
+        )
     }
 
     /// POST /api/v2/peers/:node_id/block — Block a node
@@ -199,11 +228,14 @@ impl PeerController {
         State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
-        tracing::info!(target: "social", "Blocking node {}", &node_id[..8.min(node_id.len())]);
-        // Wire: core.social_graph.block(&node_id).await
-        Json(ApiV2Response::success(
-            serde_json::json!({ "status": "blocked" }),
-        ))
+        tracing::warn!(target: "social", "Block unavailable; social-graph mutation is not wired for {}", &node_id[..8.min(node_id.len())]);
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_BLOCK_UNAVAILABLE",
+                "Peer blocking is not wired to the authenticated social graph yet",
+            )),
+        )
     }
 
     /// GET /api/v2/peers/:node_id/profile — Get a peer's public profile
@@ -211,12 +243,14 @@ impl PeerController {
         State(_state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
-        // Wire: look up in social_graph.peers, then fetch avatar from BlockStore if cid present
-        Json(ApiV2Response::success(serde_json::json!({
-            "node_id": node_id,
-            "found": false,
-            "note": "Wire social_graph peer lookup here"
-        })))
+        tracing::warn!(target: "peers", "Peer profile lookup unavailable for {}", &node_id[..8.min(node_id.len())]);
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_PROFILE_UNAVAILABLE",
+                "Peer profile lookup is not wired to the canonical discovery directory yet",
+            )),
+        )
     }
 
     /// POST /api/v2/peers/ping — Ping a peer and get latency
@@ -225,12 +259,24 @@ impl PeerController {
         Json(req): Json<serde_json::Value>,
     ) -> impl IntoResponse {
         let node_id = req.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
-        // Wire: mesh_manager.ping_peer(node_id).await → actual RTT
-        Json(ApiV2Response::success(serde_json::json!({
-            "node_id": node_id,
-            "latency_ms": null,
-            "status": "not_implemented",
-            "note": "Wire mesh ping here"
-        })))
+        if node_id.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_NODE_ID",
+                    "node_id is required",
+                )),
+            )
+                .into_response();
+        }
+        tracing::warn!(target: "peers", "Peer ping unavailable for {}", &node_id[..8.min(node_id.len())]);
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "PEER_PING_UNAVAILABLE",
+                "Peer ping is not wired to the live mesh manager yet",
+            )),
+        )
+            .into_response()
     }
 }

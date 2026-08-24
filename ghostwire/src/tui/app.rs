@@ -4,9 +4,11 @@
 //! This means the daemon stays alive when the TUI closes, and multiple
 //! TUI instances can connect simultaneously.
 
-use super::daemon_client::{DaemonClient, DaemonContact, DaemonMessage};
+use super::daemon_client::{
+    DaemonClient, DaemonContact, DaemonDiscoveryHealth, DaemonMessage, DaemonSecurityDashboard,
+    DaemonTransportDescriptor,
+};
 use super::theme;
-use super::wizard::WizardState;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -21,6 +23,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::{io, time::Duration};
+use tokio::sync::mpsc;
 
 // ═══════════════════════════════════════════════════════════
 // Application State
@@ -29,10 +32,30 @@ use std::{io, time::Duration};
 /// Which screen/view is active
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
+    /// Main chat view (contacts sidebar + conversation + input)
     Chat,
+    /// Full contact list / address book
     Contacts,
+    /// Dashboard / node status
     Dashboard,
-    Wizard,
+    /// Network, discovery, and transport registry inspection
+    Network,
+    /// Security posture and cryptographic posture
+    Security,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DiscoveryAction {
+    Publish,
+    Refresh,
+    Scan,
+}
+
+#[derive(Debug)]
+struct DeliveryUpdate {
+    message_id: String,
+    state: String,
+    error: Option<String>,
 }
 
 /// TUI application state
@@ -69,21 +92,22 @@ pub struct TuiApp {
     network_mode: String,
     /// Encryption type
     encryption_type: String,
+    bootstrap_state: String,
     ai_status: String,
-    wizard: Option<WizardState>,
-    start_in_wizard: bool,
+    discovery: DaemonDiscoveryHealth,
+    transports: Vec<DaemonTransportDescriptor>,
+    security: DaemonSecurityDashboard,
+    pending_discovery_action: Option<DiscoveryAction>,
+    delivery_tx: mpsc::UnboundedSender<DeliveryUpdate>,
+    delivery_rx: mpsc::UnboundedReceiver<DeliveryUpdate>,
 }
 
 impl TuiApp {
-    pub fn new(client: DaemonClient, start_in_wizard: bool) -> Self {
-        let view = if start_in_wizard {
-            View::Wizard
-        } else {
-            View::Chat
-        };
+    pub fn new(client: DaemonClient) -> Self {
+        let (delivery_tx, delivery_rx) = mpsc::unbounded_channel();
         Self {
             client,
-            view,
+            view: View::Chat,
             selected_contact: None,
             contacts: Vec::new(),
             messages: Vec::new(),
@@ -98,31 +122,33 @@ impl TuiApp {
             total_unread: 0,
             network_mode: String::from("Mesh P2P"),
             encryption_type: String::from("XChaCha20-Poly1305"),
+            bootstrap_state: String::from("disabled"),
             ai_status: String::from("Checking..."),
-            wizard: if start_in_wizard {
-                Some(WizardState::new())
-            } else {
-                None
-            },
-            start_in_wizard,
+            discovery: DaemonDiscoveryHealth::default(),
+            transports: Vec::new(),
+            security: DaemonSecurityDashboard::default(),
+            pending_discovery_action: None,
+            delivery_tx,
+            delivery_rx,
         }
     }
 
     /// Run the TUI application
     pub async fn run(&mut self) -> io::Result<()> {
-        if !self.start_in_wizard {
-            if !self.client.health_check().await {
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionRefused,
-                    format!(
-                        "Cannot connect to GhostWire daemon on port {}.\n\
-                         Run 'ghostwire start' first, or check 'ghostwire status'.",
-                        self.client.port()
-                    ),
-                ));
-            }
-            self.refresh_data().await;
+        // Verify daemon is reachable
+        if !self.client.health_check().await {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!(
+                    "Cannot connect to GhostWire daemon on port {}.\n\
+                     Run 'ghostwire start' first, or check 'ghostwire status'.",
+                    self.client.port()
+                ),
+            ));
         }
+
+        // Initial data load
+        self.refresh_data().await;
 
         // Setup terminal
         enable_raw_mode()?;
@@ -157,26 +183,61 @@ impl TuiApp {
                 break;
             }
 
-            if self.view == View::Wizard {
-                if let Some(ref mut wizard) = self.wizard {
-                    wizard.tick();
-                }
-            } else {
-                refresh_tick += 1;
-                if refresh_tick >= 30 {
-                    refresh_tick = 0;
-                    self.refresh_data().await;
+            while let Ok(update) = self.delivery_rx.try_recv() {
+                if let Some(message) = self
+                    .messages
+                    .iter_mut()
+                    .find(|message| message.id.as_deref() == Some(update.message_id.as_str()))
+                {
+                    message.delivery_state = update.state.clone();
+                    if let Some(error) = update.error {
+                        self.error = Some(error);
+                    }
+                    self.status = Some(match message.delivery_state.as_str() {
+                        "accepted" => "Accepted by daemon; delivery receipt pending".to_string(),
+                        "failed" => "Message rejected by daemon".to_string(),
+                        _ => "Message state updated".to_string(),
+                    });
                 }
             }
 
+            // Refresh data every ~30 ticks (3 seconds at 100ms poll)
+            refresh_tick += 1;
+            if refresh_tick >= 30 {
+                refresh_tick = 0;
+                self.refresh_data().await;
+            }
+
+            // Draw UI
             terminal.draw(|f| self.ui(f))?;
 
+            // Poll for events
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
                     self.handle_key(key);
+                    if let Some(action) = self.pending_discovery_action.take() {
+                        let result = match action {
+                            DiscoveryAction::Publish => self.client.publish_discovery().await,
+                            DiscoveryAction::Refresh => self.client.refresh_discovery().await,
+                            DiscoveryAction::Scan => self.client.scan_discovery().await,
+                        };
+                        self.status = Some(match result {
+                            Ok(()) => match action {
+                                DiscoveryAction::Publish => {
+                                    "Signed discovery presence published".to_string()
+                                }
+                                DiscoveryAction::Refresh => {
+                                    "Discovery provider refresh requested".to_string()
+                                }
+                                DiscoveryAction::Scan => "Discovery scan completed".to_string(),
+                            },
+                            Err(error) => error,
+                        });
+                        self.refresh_data().await;
+                    }
                 }
             }
         }
@@ -193,9 +254,19 @@ impl TuiApp {
         let contacts_fut = self.client.get_contacts();
         let net_fut = self.client.get_network_status();
         let ai_fut = self.client.get_ai_status_summary();
+        let discovery_fut = self.client.get_discovery_health();
+        let transport_fut = self.client.get_transport_registry();
+        let security_fut = self.client.get_security_dashboard();
 
-        let (identity, contacts, net, ai_status) =
-            tokio::join!(identity_fut, contacts_fut, net_fut, ai_fut);
+        let (identity, contacts, net, ai_status, discovery, transports, security) = tokio::join!(
+            identity_fut,
+            contacts_fut,
+            net_fut,
+            ai_fut,
+            discovery_fut,
+            transport_fut,
+            security_fut
+        );
 
         if let Some(identity) = identity {
             self.my_name = if identity.nickname.is_empty() {
@@ -213,6 +284,9 @@ impl TuiApp {
         self.encryption_type = net.encryption;
 
         self.ai_status = ai_status;
+        self.discovery = discovery;
+        self.transports = transports;
+        self.security = security;
 
         if self.contacts.is_empty() {
             self.contacts.push(DaemonContact {
@@ -229,7 +303,19 @@ impl TuiApp {
             if idx < self.contacts.len() {
                 let peer_id = self.contacts[idx].peer_id.clone();
                 if !peer_id.is_empty() {
-                    self.messages = self.client.get_messages(&peer_id).await;
+                    let fetched = self.client.get_messages(&peer_id).await;
+                    let pending = self
+                        .messages
+                        .iter()
+                        .filter(|message| message.delivery_state == "pending")
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    self.messages = fetched;
+                    for message in pending {
+                        if !self.messages.iter().any(|current| current.id == message.id) {
+                            self.messages.push(message);
+                        }
+                    }
                 }
             }
         }
@@ -240,16 +326,6 @@ impl TuiApp {
     // ═══════════════════════════════════════════════════
 
     fn handle_key(&mut self, key: event::KeyEvent) {
-        if self.view == View::Wizard {
-            if let Some(ref mut wizard) = self.wizard {
-                wizard.handle_key(key);
-                if wizard.done {
-                    self.view = View::Chat;
-                    self.wizard = None;
-                }
-            }
-            return;
-        }
         if self.input_mode {
             self.handle_input_key(key);
         } else {
@@ -262,6 +338,15 @@ impl TuiApp {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.running = false;
             }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+                self.pending_discovery_action = Some(DiscoveryAction::Publish);
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.pending_discovery_action = Some(DiscoveryAction::Refresh);
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                self.pending_discovery_action = Some(DiscoveryAction::Scan);
+            }
             KeyCode::Char('i') | KeyCode::Char('I') => {
                 // Enter input mode
                 self.input_mode = true;
@@ -270,13 +355,16 @@ impl TuiApp {
             KeyCode::Char('1') => self.view = View::Chat,
             KeyCode::Char('2') => self.view = View::Contacts,
             KeyCode::Char('3') => self.view = View::Dashboard,
+            KeyCode::Char('4') => self.view = View::Network,
+            KeyCode::Char('5') => self.view = View::Security,
             KeyCode::Tab => {
                 // Cycle views
                 self.view = match self.view {
                     View::Chat => View::Contacts,
                     View::Contacts => View::Dashboard,
-                    View::Dashboard => View::Chat,
-                    View::Wizard => View::Chat,
+                    View::Dashboard => View::Network,
+                    View::Network => View::Security,
+                    View::Security => View::Chat,
                 };
             }
             KeyCode::Up => {
@@ -401,22 +489,39 @@ impl TuiApp {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let message_id = uuid::Uuid::new_v4().to_string();
         self.messages.push(DaemonMessage {
+            id: Some(message_id.clone()),
             sender: my_name.clone(),
             content: message.clone(),
             timestamp: now,
             is_mine: true,
+            delivery_state: "pending".to_string(),
         });
 
-        // Send via daemon API (async, fire-and-forget)
+        // Send via daemon API and reconcile the exact local row when the
+        // daemon accepts or rejects the request.
+        let delivery_tx = self.delivery_tx.clone();
         tokio::spawn(async move {
-            match client.send_message(&recipient, &message).await {
-                Ok(()) => tracing::info!("Message sent via daemon"),
-                Err(e) => tracing::error!("Failed to send message: {}", e),
-            }
+            let update = match client.send_message(&recipient, &message).await {
+                Ok(()) => DeliveryUpdate {
+                    message_id,
+                    state: "accepted".to_string(),
+                    error: None,
+                },
+                Err(error) => DeliveryUpdate {
+                    message_id,
+                    state: "failed".to_string(),
+                    error: Some(error),
+                },
+            };
+            let _ = delivery_tx.send(update);
         });
 
-        self.status = Some(format!("Sent to {}", contact.display_name));
+        self.status = Some(format!(
+            "Accepted by daemon for {}; delivery receipt pending",
+            contact.display_name
+        ));
         self.input.clear();
         self.cursor_pos = 0;
         self.input_mode = false;
@@ -431,11 +536,8 @@ impl TuiApp {
             View::Chat => self.render_chat_view(f),
             View::Contacts => self.render_contacts_view(f),
             View::Dashboard => self.render_dashboard_view(f),
-            View::Wizard => {
-                if let Some(ref wizard) = self.wizard {
-                    wizard.render(f);
-                }
-            }
+            View::Network => self.render_network_view(f),
+            View::Security => self.render_security_view(f),
         }
     }
 
@@ -481,9 +583,9 @@ impl TuiApp {
     fn render_status_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let status_text = Line::from(vec![
             Span::styled(theme::LOGO_SYMBOL, theme::primary_bold()),
-            Span::raw(" "),
+            Span::raw(" GHOSTWIRE  "),
             Span::styled(&self.my_name, theme::primary_bold()),
-            Span::raw("  "),
+            Span::styled("  ·  MESH P2P  ·  ", theme::muted_style()),
             theme::status_dot(self.peer_count > 0),
             Span::raw(" "),
             Span::raw(format!("{} peer", self.peer_count)),
@@ -597,6 +699,22 @@ impl TuiApp {
                             Span::raw("   "),
                             Span::styled(m.content.clone(), theme::text_style()),
                         ]),
+                        Line::from(vec![
+                            Span::raw("   "),
+                            Span::styled(
+                                match m.delivery_state.as_str() {
+                                    "pending" => "… accepted pending",
+                                    "accepted" => "✓ accepted · receipt pending",
+                                    "failed" => "✗ failed",
+                                    _ => "",
+                                },
+                                if m.delivery_state == "failed" {
+                                    theme::error_style()
+                                } else {
+                                    theme::muted_style()
+                                },
+                            ),
+                        ]),
                         Line::from(""), // spacing between messages
                     ]
                 })
@@ -650,11 +768,12 @@ impl TuiApp {
             theme::help_bar(&[("Enter", "Send"), ("Esc", "Cancel"), ("←→", "Move cursor")])
         } else {
             theme::help_bar(&[
-                ("↑↓", "Navigate"),
-                ("Enter", "Open chat"),
-                ("i", "Type message"),
-                ("Tab", "Switch view"),
-                ("1/2/3", "Chat/Contacts/Dashboard"),
+                ("↑↓", "Select"),
+                ("Enter", "Open"),
+                ("i", "Write"),
+                ("Tab", "Views"),
+                ("p", "Publish presence"),
+                ("r", "Refresh discovery"),
                 ("q", "Quit"),
             ])
         };
@@ -709,6 +828,238 @@ impl TuiApp {
         f.render_widget(help, main[2]);
     }
 
+    fn render_security_view(&self, f: &mut Frame) {
+        let area = f.area();
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(area);
+        self.render_status_bar(f, main[0]);
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+            .split(main[1]);
+        let score_style = if self.security.score >= 80 {
+            theme::online_style()
+        } else if self.security.score >= 50 {
+            theme::warning_style()
+        } else {
+            theme::error_style()
+        };
+        let posture = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("Score:       ", theme::muted_style()),
+                Span::styled(self.security.score.to_string(), score_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Threat:      ", theme::muted_style()),
+                Span::styled(&self.security.threat_level, theme::text_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("Encryption:  ", theme::muted_style()),
+                Span::styled(&self.security.encryption.method, theme::text_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("PQC armor:   ", theme::muted_style()),
+                Span::styled(
+                    if self.security.encryption.pqc_armor {
+                        "ACTIVE"
+                    } else {
+                        "NOT REPORTED"
+                    },
+                    if self.security.encryption.pqc_armor {
+                        theme::online_style()
+                    } else {
+                        theme::warning_style()
+                    },
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Last scan:   ", theme::muted_style()),
+                Span::styled(
+                    if self.security.last_scan.is_empty() {
+                        "unknown"
+                    } else {
+                        &self.security.last_scan
+                    },
+                    theme::text_style(),
+                ),
+            ]),
+        ])
+        .block(theme::themed_block("Security posture"));
+        f.render_widget(posture, body[0]);
+        let counters = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("Encrypted:   ", theme::muted_style()),
+                Span::styled(
+                    self.security.stats.messages_encrypted.to_string(),
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Verified:    ", theme::muted_style()),
+                Span::styled(
+                    self.security.stats.peers_verified.to_string(),
+                    theme::online_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Rate limits: ", theme::muted_style()),
+                Span::styled(
+                    self.security.stats.rate_limit_violations.to_string(),
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Blocked:     ", theme::muted_style()),
+                Span::styled(
+                    self.security.stats.blocked_peers.to_string(),
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(Span::styled(
+                "This is posture telemetry; it does not replace peer verification.",
+                theme::muted_style(),
+            )),
+        ])
+        .block(theme::themed_block("Security counters"));
+        f.render_widget(counters, body[1]);
+        let help = theme::help_bar(&[
+            ("Tab", "Cycle views"),
+            ("1-5", "Chat/Contacts/Dashboard/Network/Security"),
+            ("Esc", "Clear status"),
+            ("q", "Quit"),
+        ]);
+        f.render_widget(help, main[2]);
+    }
+
+    fn render_network_view(&self, f: &mut Frame) {
+        let area = f.area();
+        let main = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(area);
+        self.render_status_bar(f, main[0]);
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(main[1]);
+        let transport_items: Vec<ListItem> = if self.transports.is_empty() {
+            vec![ListItem::new(Line::from(Span::styled(
+                "No registry descriptors returned",
+                theme::muted_style(),
+            )))]
+        } else {
+            self.transports
+                .iter()
+                .map(|transport| {
+                    let style = if transport.registered {
+                        theme::online_style()
+                    } else {
+                        theme::muted_style()
+                    };
+                    ListItem::new(vec![
+                        Line::from(vec![
+                            Span::styled("● ", style),
+                            Span::styled(&transport.name, theme::text_style()),
+                            Span::styled(
+                                if transport.registered {
+                                    "  REGISTERED"
+                                } else {
+                                    "  UNAVAILABLE"
+                                },
+                                style,
+                            ),
+                        ]),
+                        Line::from(Span::styled(
+                            format!("  {}", transport.description),
+                            theme::muted_style(),
+                        )),
+                    ])
+                })
+                .collect()
+        };
+        f.render_widget(
+            List::new(transport_items).block(theme::themed_block("Transport registry")),
+            body[0],
+        );
+        let discovery_state = if self.discovery.state.is_empty() {
+            "unknown"
+        } else {
+            &self.discovery.state
+        };
+        let discovery_style = if discovery_state == "waiting_for_peers" {
+            theme::warning_style()
+        } else if discovery_state.contains("ready") {
+            theme::online_style()
+        } else {
+            theme::text_style()
+        };
+        let detail = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("Discovery: ", theme::muted_style()),
+                Span::styled(discovery_state, discovery_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Candidates: ", theme::muted_style()),
+                Span::styled(
+                    self.discovery.candidate_count.to_string(),
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Accepted: ", theme::muted_style()),
+                Span::styled(
+                    self.discovery.accepted_total.to_string(),
+                    theme::online_style(),
+                ),
+                Span::styled("  Rejected: ", theme::muted_style()),
+                Span::styled(
+                    self.discovery.rejected_total.to_string(),
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Provider: ", theme::muted_style()),
+                Span::styled(
+                    if self.discovery.provider_active {
+                        "ACTIVE"
+                    } else {
+                        "CLIENT ONLY"
+                    },
+                    if self.discovery.provider_active {
+                        theme::online_style()
+                    } else {
+                        theme::muted_style()
+                    },
+                ),
+            ]),
+            Line::from(Span::styled(
+                "Evidence is not trust; connection is not delivery.",
+                theme::muted_style(),
+            )),
+        ])
+        .block(theme::themed_block("Discovery evidence"));
+        f.render_widget(detail, body[1]);
+        let help = theme::help_bar(&[
+            ("Tab", "Cycle views"),
+            ("1-4", "Chat/Contacts/Dashboard/Network"),
+            ("d", "Scan"),
+            ("p", "Publish"),
+            ("r", "Refresh"),
+            ("q", "Quit"),
+        ]);
+        f.render_widget(help, main[2]);
+    }
+
     fn render_dashboard_view(&self, f: &mut Frame) {
         let area = f.area();
         let main = Layout::default()
@@ -729,6 +1080,7 @@ impl TuiApp {
             .constraints([
                 Constraint::Length(5), // Node info
                 Constraint::Length(5), // Network
+                Constraint::Length(7), // World discovery
                 Constraint::Min(1),    // Spacer
             ])
             .split(main[1]);
@@ -763,6 +1115,10 @@ impl TuiApp {
                 ),
             ]),
             Line::from(vec![
+                Span::styled("Bootstrap: ", theme::muted_style()),
+                Span::styled(&self.bootstrap_state, theme::text_style()),
+            ]),
+            Line::from(vec![
                 Span::styled("AI Layer:  ", theme::muted_style()),
                 Span::styled(&self.ai_status, theme::text_style()),
             ]),
@@ -770,9 +1126,70 @@ impl TuiApp {
         .block(theme::themed_block("Network"));
         f.render_widget(network, content[1]);
 
+        let discovery_style = if self.discovery.state.contains("ready") {
+            theme::online_style()
+        } else {
+            theme::text_style()
+        };
+        let discovery = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("State:     ", theme::muted_style()),
+                Span::styled(&self.discovery.state, discovery_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Scope:     ", theme::muted_style()),
+                Span::styled(
+                    if self.discovery.network_id.is_empty() {
+                        "unknown"
+                    } else {
+                        &self.discovery.network_id
+                    },
+                    theme::text_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Candidates:", theme::muted_style()),
+                Span::styled(
+                    format!(" {}", self.discovery.candidate_count),
+                    theme::text_style(),
+                ),
+                Span::styled("  Accepted: ", theme::muted_style()),
+                Span::styled(
+                    self.discovery.accepted_total.to_string(),
+                    theme::online_style(),
+                ),
+                Span::styled("  Rejected: ", theme::muted_style()),
+                Span::styled(
+                    self.discovery.rejected_total.to_string(),
+                    theme::muted_style(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Provider:   ", theme::muted_style()),
+                Span::styled(
+                    if self.discovery.provider_active {
+                        "AUTHORIZED / ACTIVE"
+                    } else {
+                        "CLIENT ONLY"
+                    },
+                    if self.discovery.provider_active {
+                        theme::online_style()
+                    } else {
+                        theme::muted_style()
+                    },
+                ),
+            ]),
+        ])
+        .block(theme::themed_block(
+            "World Discovery [p publish / r refresh]",
+        ));
+        f.render_widget(discovery, content[2]);
+
         let help = theme::help_bar(&[
             ("Tab", "Switch view"),
             ("1/2/3", "Chat/Contacts/Dashboard"),
+            ("p", "Publish presence"),
+            ("r", "Refresh discovery"),
             ("q", "Quit"),
         ]);
         f.render_widget(help, main[2]);
@@ -806,8 +1223,9 @@ fn format_duration(secs: u64) -> String {
 // Public Entry Point
 // ═══════════════════════════════════════════════════════════
 
-pub async fn run_tui(port: u16, start_in_wizard: bool) -> io::Result<()> {
+/// Run the TUI, connecting to the daemon on the given port
+pub async fn run_tui(port: u16) -> io::Result<()> {
     let client = DaemonClient::new(port);
-    let mut app = TuiApp::new(client, start_in_wizard);
+    let mut app = TuiApp::new(client);
     app.run().await
 }

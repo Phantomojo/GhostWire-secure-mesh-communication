@@ -1,10 +1,10 @@
 use crate::api_v2_types::*;
 use crate::core::Core;
-use crate::web::AppState;
+use crate::web::{revoke_sessions, AppState};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -33,6 +33,8 @@ pub struct ProfileListResponse {
 pub struct ProfilesController;
 
 impl ProfilesController {
+    const ACTIVE_PROFILE_FILE: &'static str = ".active_profile";
+
     fn ghostwire_dir() -> std::path::PathBuf {
         if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
             std::path::PathBuf::from(ghost_home)
@@ -41,6 +43,29 @@ impl ProfilesController {
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".ghostwire")
         }
+    }
+
+    pub fn load_active_profile() -> Option<String> {
+        let path = Self::ghostwire_dir().join(Self::ACTIVE_PROFILE_FILE);
+        let value = fs::read_to_string(path).ok()?;
+        let value = value.trim();
+        if value.is_empty() || value == "default" {
+            None
+        } else if value
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn persist_active_profile(profile_name: &str) -> std::io::Result<()> {
+        fs::write(
+            Self::ghostwire_dir().join(Self::ACTIVE_PROFILE_FILE),
+            format!("{profile_name}\n"),
+        )
     }
 
     /// V2 List Profiles
@@ -82,6 +107,60 @@ impl ProfilesController {
         }))
     }
 
+    /// Public first-run profile creation. This is intentionally separate from
+    /// the authenticated Settings endpoint and only works before setup is
+    /// complete, or while the active configured identity is locked.
+    pub async fn create_first(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<CreateProfileRequest>,
+    ) -> Response {
+        let (setup_complete, locked) = {
+            let core = state.core.read().await;
+            (
+                core.get_metadata().await.setup_complete,
+                core.is_locked().await,
+            )
+        };
+        if setup_complete && !locked {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::Unauthorized.as_str(),
+                    "Create a profile from Settings while the active cockpit is unlocked",
+                )),
+            )
+                .into_response();
+        }
+        Self::create(State(state), Json(req)).await.into_response()
+    }
+
+    /// Locked-screen profile selection. This endpoint is only available before
+    /// the active node has completed setup; authenticated profile switching
+    /// remains on the normal `/api/profile/select` route.
+    pub async fn select_locked(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<SelectProfileRequest>,
+    ) -> Response {
+        let (setup_complete, locked) = {
+            let core = state.core.read().await;
+            (
+                core.get_metadata().await.setup_complete,
+                core.is_locked().await,
+            )
+        };
+        if setup_complete && !locked {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::Unauthorized.as_str(),
+                    "Locked-screen profile selection requires a locked daemon",
+                )),
+            )
+                .into_response();
+        }
+        Self::select(State(state), Json(req)).await.into_response()
+    }
+
     /// V2 Create Profile - ENHANCED WITH DETAILED ERROR LOGGING
     pub async fn create(
         State(_state): State<Arc<AppState>>,
@@ -97,10 +176,12 @@ impl ProfilesController {
         );
 
         // === STEP 2: Validate name ===
-        if !req
-            .name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        if req.name.is_empty()
+            || req.name.len() > 48
+            || !req
+                .name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
         {
             tracing::warn!(
                 target: "profile_creation",
@@ -216,6 +297,18 @@ impl ProfilesController {
         };
 
         // === STEP 6: Create profile ===
+        if let Some(nickname) = &req.nickname {
+            if nickname.trim().is_empty() || nickname.len() > 96 {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::InvalidInput.as_str(),
+                        "Nickname must be between 1 and 96 characters",
+                    )),
+                )
+                    .into_response();
+            }
+        }
         tracing::info!(
             target: "profile_creation",
             msg = "🔧 Creating profile",
@@ -224,19 +317,19 @@ impl ProfilesController {
         );
 
         let result = if let (Some(nickname), Some(password)) = (&req.nickname, &req.password) {
-            // Validate password length
-            if password.len() < 8 {
+            // Validate password length in bytes, matching every interface.
+            if password.as_bytes().len() < 12 {
                 tracing::warn!(
                     target: "profile_creation",
                     msg = "❌ Password too short",
                     password_length = password.len(),
-                    minimum_length = 8
+                    minimum_length = 12
                 );
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(ApiV2Response::<()>::error(
                         StandardErrorCode::InvalidInput.as_str(),
-                        "Password must be at least 8 characters when provided",
+                        "Passphrase must be at least 12 bytes when provided",
                     )),
                 )
                     .into_response();
@@ -371,35 +464,44 @@ impl ProfilesController {
         .into_response()
     }
 
-    /// Emergency Wipe
-    pub async fn wipe_all(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        tracing::warn!(msg = "⚠️ EMERGENCY WIPE TRIGGERED - PURGING ALL DATA");
-
-        let ghost_dir = Self::ghostwire_dir();
-
-        if ghost_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&ghost_dir) {
+    /// Emergency wipe with staged detach, deletion, and post-delete verification.
+    pub async fn wipe_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        tracing::warn!(msg = "EMERGENCY WIPE REQUESTED");
+        revoke_sessions();
+        {
+            let core = state.core.read().await.clone();
+            if let Err(error) = core.shutdown().await {
                 return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::SERVICE_UNAVAILABLE,
                     Json(ApiV2Response::<()>::error(
                         StandardErrorCode::InternalError.as_str(),
-                        format!("Failed to purge data directory: {}", e),
+                        format!("Wipe aborted: active core shutdown failed: {}", error),
                     )),
                 )
                     .into_response();
             }
         }
 
-        // Shutdown after a short delay
-        tokio::spawn(async {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            std::process::exit(0);
-        });
-
-        Json(ApiV2Response::success(
-            "Emergency wipe completed. System is shutting down.".to_string(),
-        ))
-        .into_response()
+        let ghost_dir = Self::ghostwire_dir();
+        match crate::core::secure_wipe::wipe_data_dir(&ghost_dir) {
+            Ok(report) if report.verified => Json(ApiV2Response::success(report)).into_response(),
+            Ok(report) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InternalError.as_str(),
+                    format!("Wipe incomplete; residuals: {:?}", report.residuals),
+                )),
+            )
+                .into_response(),
+            Err(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InternalError.as_str(),
+                    format!("Wipe failed: {}", error),
+                )),
+            )
+                .into_response(),
+        }
     }
 
     /// V2 Select Profile
@@ -407,11 +509,74 @@ impl ProfilesController {
         State(state): State<Arc<AppState>>,
         Json(req): Json<SelectProfileRequest>,
     ) -> impl IntoResponse {
+        if req.profile_name.is_empty()
+            || !req
+                .profile_name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    "Invalid profile name. Use alphanumeric, _, - only",
+                )),
+            )
+                .into_response();
+        }
+        let identity_path = if req.profile_name == "default" {
+            Self::ghostwire_dir().join("identity.json")
+        } else {
+            Self::ghostwire_dir().join(format!("identity_{}.json", req.profile_name))
+        };
+        if !identity_path.is_file() {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::NotFound.as_str(),
+                    "Profile does not exist",
+                )),
+            )
+                .into_response();
+        }
         let profile_name = if req.profile_name == "default" {
             None
         } else {
             Some(req.profile_name.clone())
         };
+
+        // Selecting the already-active profile must be idempotent. Rebuilding
+        // Core here would reopen the same sled vault while the current Core
+        // still owns its file lock, producing a misleading WouldBlock error.
+        let (current_profile, active_locked) = {
+            let core = state.core.read().await;
+            let current_profile = core
+                .identity
+                .read()
+                .await
+                .profile
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
+            let active_locked = core.is_locked().await;
+            (current_profile, active_locked)
+        };
+        if current_profile == req.profile_name {
+            return Json(ApiV2Response::success(serde_json::json!({
+                "status": "profile_already_selected",
+                "profile": req.profile_name,
+            })))
+            .into_response();
+        }
+        if !active_locked {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::ProfileLoadFailed.as_str(),
+                    "Lock the active profile before selecting another profile",
+                )),
+            )
+                .into_response();
+        }
 
         tracing::info!("Switching to profile: {:?}", profile_name);
 
@@ -455,6 +620,18 @@ impl ProfilesController {
                         .await;
                 });
 
+                revoke_sessions();
+                if let Err(e) = Self::persist_active_profile(&req.profile_name) {
+                    tracing::error!(error = %e, "Failed to persist active profile");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiV2Response::<()>::error(
+                            StandardErrorCode::InternalError.as_str(),
+                            "Profile switched but active profile persistence failed",
+                        )),
+                    )
+                        .into_response();
+                }
                 Json(ApiV2Response::success(serde_json::json!({
                     "status": "profile_switched",
                     "profile": req.profile_name

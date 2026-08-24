@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
     pub security: SecurityConfig,
@@ -12,16 +13,19 @@ pub struct Config {
     pub features: FeatureFlags,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub quic_port: u16,
     pub web_enabled: bool,
     pub cli_enabled: bool,
     pub auto_update: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SecurityConfig {
     pub max_connections_per_ip: usize,
     pub max_messages_per_minute: usize,
@@ -32,10 +36,13 @@ pub struct SecurityConfig {
     pub key_rotation_interval_days: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NetworkConfig {
     pub mesh_enabled: bool,
     pub reticulum_enabled: bool,
+    #[serde(default = "default_reticulum_interfaces")]
+    pub reticulum_interfaces: String,
     pub briar_enabled: bool,
     pub stealth_tcp_enabled: bool,
     pub max_peers: usize,
@@ -46,6 +53,15 @@ pub struct NetworkConfig {
     pub obfs4_enabled: bool,
     /// Obfs4 secret key (hex-encoded, if not provided a random key is generated)
     pub obfs4_secret_key: Option<String>,
+    /// Hybrid mode: "hybrid", "libp2p-only", "reticulum-only"
+    #[serde(default = "default_hybrid_mode")]
+    pub hybrid_mode: String,
+    /// Discovery interval in seconds (gossipsub announce)
+    #[serde(default = "default_discovery_interval")]
+    pub discovery_interval: u64,
+    /// RNS announce interval in seconds
+    #[serde(default = "default_rns_announce_interval")]
+    pub rns_announce_interval: u64,
 }
 
 impl std::fmt::Debug for NetworkConfig {
@@ -53,6 +69,7 @@ impl std::fmt::Debug for NetworkConfig {
         f.debug_struct("NetworkConfig")
             .field("mesh_enabled", &self.mesh_enabled)
             .field("reticulum_enabled", &self.reticulum_enabled)
+            .field("reticulum_interfaces", &"[redacted]")
             .field("briar_enabled", &self.briar_enabled)
             .field("stealth_tcp_enabled", &self.stealth_tcp_enabled)
             .field("max_peers", &self.max_peers)
@@ -66,18 +83,23 @@ impl std::fmt::Debug for NetworkConfig {
                 "obfs4_secret_key",
                 &self.obfs4_secret_key.as_ref().map(|_| "********"),
             )
+            .field("hybrid_mode", &self.hybrid_mode)
+            .field("discovery_interval", &self.discovery_interval)
+            .field("rns_announce_interval", &self.rns_announce_interval)
             .finish()
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EncryptionConfig {
     pub algorithm: String,
     pub key_size: usize,
     pub session_timeout_hours: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FeatureFlags {
     pub matrix_bridge: bool,
     pub meshtastic_bridge: bool,
@@ -109,12 +131,30 @@ pub struct FeatureFlags {
     pub available_ram_mb: u64,    // Available RAM in MB (0 = auto-detect)
 }
 
+fn default_reticulum_interfaces() -> String {
+    // GhostWire-only default: enable local Reticulum discovery without
+    // contacting an external public RNS peer implicitly. WAN interfaces must
+    // be explicitly configured by the operator through an authenticated path.
+    "[interfaces]\ninterface 0 = AutoInterface".to_string()
+}
+
+fn default_hybrid_mode() -> String {
+    "hybrid".to_string()
+}
+fn default_discovery_interval() -> u64 {
+    60
+}
+fn default_rns_announce_interval() -> u64 {
+    300
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
+                quic_port: 8081,
                 web_enabled: true,
                 cli_enabled: true,
                 auto_update: true,
@@ -130,7 +170,8 @@ impl Default for Config {
             },
             network: NetworkConfig {
                 mesh_enabled: true,
-                reticulum_enabled: false,
+                reticulum_enabled: true,
+                reticulum_interfaces: default_reticulum_interfaces(),
                 briar_enabled: false,
                 stealth_tcp_enabled: false,
                 max_peers: 50,
@@ -138,6 +179,9 @@ impl Default for Config {
                 stealth_handshake_secret: None,
                 obfs4_enabled: true,    // Always-on obfuscation by default
                 obfs4_secret_key: None, // Generated randomly if not provided
+                hybrid_mode: default_hybrid_mode(),
+                discovery_interval: default_discovery_interval(),
+                rns_announce_interval: default_rns_announce_interval(),
             },
             encryption: EncryptionConfig {
                 algorithm: "AES-256-GCM".to_string(),

@@ -1,0 +1,32 @@
+# GhostWire Capability Truth Ledger
+
+> Status: generated from the newest Omen checkout audit. This ledger is intended to become the source of truth for repository documentation and the public website. It must be reviewed before publication.
+
+## Capability status
+
+| Capability | Current evidence | Status | Required wording |
+|---|---|---|---|
+| Rust/libp2p mesh core | Compiles with the default feature set and contains active transport, routing, and security modules | Implemented but not release-ready | “Implemented prototype/core; interoperability and release verification remain in progress.” |
+| End-to-end session encryption | vodozemac-backed account/session path is present; sealed mailbox fallback is separate | Partially implemented | Distinguish authenticated ratcheted sessions from offline sealed envelopes. |
+| Transport switching | Selector and manager code exist; transport switching has tests and integration boundaries | Implemented in core, incomplete in operational proof | Do not claim every transport is production interoperable. |
+| Sphinx/onion routing | Sphinx module and tests exist | Prototype/limited integration | Say “Sphinx routing prototype” until multi-hop deployment evidence exists. |
+| Reticulum/RNS | Optional adapter and transport feature exist | Optional integration | Do not claim universal RNS compatibility without tested peers. |
+| Post-quantum cryptography | Type/policy references exist, but current production handshake is not a verified hybrid ML-KEM exchange | Not implemented as a production guarantee | Remove “post-quantum secure” unless explicitly qualified as roadmap/research. |
+| AI/ML intelligence | Intelligence workspace and heuristic/placeholder modules exist; no measured production ML pipeline | Research/protocol MVP | Describe as “privacy-preserving intelligence architecture under development.” |
+| Binary integrity | Runtime hash hooks and updater verification code exist, but build hash/key configuration is unset in current builds | Disabled unless configured | Never state binary integrity is active by default. |
+| Signed updates | Updater verification code exists, but current key configuration is ambiguous and default key is a zero placeholder | Not release-ready | Block release until public verification key and manifest tests are configured. |
+| “No logs/no traces” | The system contains local state, metrics, errors, telemetry, and persistence paths | False as an absolute claim | Use a precise data-retention and operator-observability statement. |
+| Censorship/coercion resistance | Architectural goals and traffic/transport features exist; no adversarial deployment evidence | Unverified claim | State threat-model goals, not achieved guarantees. |
+| Nine live transports | Multiple transport modules/types exist, but “live” interoperability is not established for all | Overstated | Publish a transport matrix with tested status per adapter. |
+
+## Release blockers
+
+The aggregate test suite currently has a failing node-to-node integration path and failing doctests. Clippy with `-D warnings` fails at project scale. Release signing and binary hash configuration are absent from the current environment. These are release blockers, not cosmetic issues.
+
+## Website correction policy
+
+Every public capability claim must link to one of: a passing integration test, a reproducible deployment report, a protocol specification, or a clearly labelled roadmap item. Marketing language must not convert a module name, feature flag, or research stub into a verified operational guarantee.
+
+## Required evidence fields
+
+Each capability record should include the commit or build identifier, feature flags, test command, test result, environment, known limitations, and security classification. If any field is missing, the capability remains provisional.

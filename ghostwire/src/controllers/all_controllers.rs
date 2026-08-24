@@ -88,7 +88,7 @@ impl ArkController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("ARK_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("ARK_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -121,7 +121,7 @@ impl ArkController {
             .into_response(),
             Err(e) => (
                 StatusCode::NOT_FOUND,
-                Json(ApiV2Response::<()>::error("DELETE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("DELETE_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -189,7 +189,7 @@ impl ChannelController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("CHANNEL_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -205,7 +205,7 @@ impl ChannelController {
             Ok(ch) => Json(ApiV2Response::success(ch)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("INVALID_INVITE", &e.to_string())),
+                Json(ApiV2Response::<()>::error("INVALID_INVITE", e.to_string())),
             )
                 .into_response(),
         }
@@ -270,7 +270,7 @@ impl ChannelController {
                 // CRITICAL FIX: Actually publish via mesh gossipsub
                 #[cfg(feature = "mesh")]
                 {
-                    if let Some(mesh_manager) = &core.mesh_manager {
+                    if let Some(mesh_manager) = core.effective_mesh_manager().await {
                         let mgr = mesh_manager.read().await;
                         let topic = format!("ghostwire-channel-{}", hex::encode(topic_id));
                         let content = serde_json::to_string(&msg).unwrap_or_default();
@@ -295,7 +295,7 @@ impl ChannelController {
             }
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PUBLISH_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -359,7 +359,7 @@ impl TrustController {
                         "public_key must be hex",
                     )),
                 )
-                    .into_response()
+                    .into_response();
             }
         };
         let core = state.core.read().await;
@@ -370,7 +370,7 @@ impl TrustController {
             .into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("VERIFY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("VERIFY_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -400,6 +400,21 @@ impl TrustController {
 
 pub struct NetworkController;
 
+#[derive(Debug, Deserialize)]
+pub struct BootstrapAuthorizationRequest {
+    pub authorized: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BootstrapConfigureRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransportActionRequest {
+    pub action: String,
+}
+
 impl NetworkController {
     pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
@@ -419,7 +434,7 @@ impl NetworkController {
             // Derive from mesh_manager status
             #[cfg(feature = "mesh")]
             {
-                if core.mesh_manager.is_some() {
+                if core.effective_mesh_manager().await.is_some() {
                     "full_mesh".to_string()
                 } else {
                     "disconnected".to_string()
@@ -447,6 +462,300 @@ impl NetworkController {
         let core = state.core.read().await;
         let snapshot = crate::core::mesh_health::build_snapshot(&core, 0).await;
         Json(ApiV2Response::success(snapshot))
+    }
+
+    /// Current GhostWire-One capability state.
+    pub async fn bootstrap_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        Json(ApiV2Response::success(core.get_bootstrap_state().await))
+    }
+    /// Configure capability availability without granting authorization.
+    pub async fn bootstrap_configure(
+        State(state): State<Arc<AppState>>,
+        Json(request): Json<BootstrapConfigureRequest>,
+    ) -> impl IntoResponse {
+        let core = state.core.read().await;
+        core.configure_bootstrap(request.enabled).await;
+        Json(ApiV2Response::success(core.get_bootstrap_state().await))
+    }
+    /// Grant or revoke explicit local operator authorization.
+    pub async fn bootstrap_authorize(
+        State(state): State<Arc<AppState>>,
+        Json(request): Json<BootstrapAuthorizationRequest>,
+    ) -> impl IntoResponse {
+        let core = state.core.read().await;
+        core.authorize_bootstrap(request.authorized).await;
+        Json(ApiV2Response::success(core.get_bootstrap_state().await))
+    }
+    /// Start only after capability configuration, eligibility, and authorization.
+    pub async fn bootstrap_start(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.start_bootstrap().await {
+            Ok(()) => (
+                StatusCode::OK,
+                Json(ApiV2Response::success(core.get_bootstrap_state().await)),
+            )
+                .into_response(),
+            Err(error) => (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<serde_json::Value>::error(
+                    "bootstrap_start_rejected",
+                    error.to_string(),
+                )),
+            )
+                .into_response(),
+        }
+    }
+    /// Stop bootstrap service and clear volatile admissions.
+    pub async fn bootstrap_stop(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        core.stop_bootstrap().await;
+        Json(ApiV2Response::success(core.get_bootstrap_state().await))
+    }
+    /// World-scale discovery status. Discovery evidence never implies trust.
+    pub async fn discovery_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        Json(ApiV2Response::success(core.world_discovery_health().await))
+    }
+    /// Publish this node's signed discovery advertisement immediately.
+    pub async fn discovery_publish(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.publish_world_discovery().await {
+            Ok(()) => {
+                Json(ApiV2Response::success(core.world_discovery_health().await)).into_response()
+            }
+            Err(error) => (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<serde_json::Value>::error(
+                    "discovery_publish_rejected",
+                    error.to_string(),
+                )),
+            )
+                .into_response(),
+        }
+    }
+    /// Ask the Kademlia layer to refresh GhostWire discovery providers.
+    pub async fn discovery_refresh(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.refresh_world_discovery_providers().await {
+            Ok(()) => {
+                Json(ApiV2Response::success(core.world_discovery_health().await)).into_response()
+            }
+            Err(error) => (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<serde_json::Value>::error(
+                    "discovery_refresh_rejected",
+                    error.to_string(),
+                )),
+            )
+                .into_response(),
+        }
+    }
+    /// Unified discovery read model for the cockpit.
+    ///
+    /// This deliberately separates cached nearby evidence, world-discovery health,
+    /// and live topology. A candidate is not a trusted peer and a listener is not
+    /// proof of discovery.
+    pub async fn discovery_snapshot(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        use crate::core::social::social_graph::PeerFilter;
+
+        let core = state.core.read().await;
+        let world = core.world_discovery_health().await;
+        let nearby = core.social_graph.list_peers(PeerFilter::Nearby).await;
+        let known = core.social_graph.list_peers(PeerFilter::All).await;
+        let topology = core.get_mesh_topology().await;
+
+        let nearby_json: Vec<serde_json::Value> = nearby
+            .iter()
+            .map(|peer| {
+                serde_json::json!({
+                    "node_id": peer.node_id,
+                    "nickname": peer.nickname,
+                    "is_online": peer.is_online,
+                    "last_seen": peer.last_seen,
+                    "discovered_via": format!("{:?}", peer.discovered_via),
+                    "source": "nearby_cache",
+                })
+            })
+            .collect();
+        let known_json: Vec<serde_json::Value> = known
+            .iter()
+            .map(|peer| {
+                serde_json::json!({
+                    "node_id": peer.node_id,
+                    "nickname": peer.nickname,
+                    "is_online": peer.is_online,
+                    "last_seen": peer.last_seen,
+                    "discovered_via": format!("{:?}", peer.discovered_via),
+                    "connection_state": format!("{:?}", peer.connection_state),
+                    "source": "social_graph",
+                })
+            })
+            .collect();
+        let connected_json: Vec<serde_json::Value> = topology
+            .as_ref()
+            .map(|mesh| {
+                mesh.nodes
+                    .iter()
+                    .filter(|(_, node)| node.is_online)
+                    .map(|(node_id, node)| {
+                        serde_json::json!({
+                            "node_id": node_id,
+                            "nickname": node.username,
+                            "is_online": node.is_online,
+                            "last_seen": node.last_seen,
+                            "signal": node.connection_quality,
+                            "source": "live_topology",
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Json(ApiV2Response::success(serde_json::json!({
+            "generated_at_unix": crate::core::world_discovery::now_secs(),
+            "local": {
+                "peer_id": core.get_identity_id().await.to_string(),
+                "listener_state": if topology.is_some() { "available" } else { "unknown" },
+            },
+            "methods": {
+                "nearby": {
+                    "state": "cached_results",
+                    "active_scan": false,
+                    "count": nearby_json.len(),
+                    "note": "Results are cached social-graph evidence; no radio sweep is implied.",
+                },
+                "world_gossip": {
+                    "state": world.state,
+                    "enabled": world.enabled,
+                    "published": world.published_total,
+                    "accepted": world.accepted_total,
+                    "rejected": world.rejected_total,
+                    "candidates": world.candidate_count,
+                    "last_error": world.last_error,
+                },
+                "kademlia": {
+                    "state": if world.provider_active { "provider_active" } else { "not_provider" },
+                    "provider_active": world.provider_active,
+                },
+            },
+            "candidates": nearby_json,
+            "known_peers": known_json,
+            "connected_peers": connected_json,
+            "counts": {
+                "nearby": nearby.len(),
+                "known": known.len(),
+                "connected": connected_json.len(),
+                "world_candidates": world.candidate_count,
+            },
+        })))
+    }
+
+    /// Run the safe discovery refresh cycle and return its evidence.
+    ///
+    /// This endpoint does not pretend that a cached nearby query is a radio
+    /// scan. It triggers the currently supported signed publication and DHT
+    /// provider refresh operations, then returns the unified snapshot.
+    pub async fn discovery_scan(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        let publish_result = core.publish_world_discovery().await;
+        let providers = core
+            .refresh_world_discovery_providers()
+            .await
+            .map(|_| "completed")
+            .unwrap_or_else(|_| "rejected");
+        let world = core.world_discovery_health().await;
+        let publish = if publish_result.is_err() {
+            "rejected"
+        } else {
+            match world.state.as_str() {
+                "waiting_for_peers" | "waiting_for_listener" => world.state.as_str(),
+                _ => "completed",
+            }
+        };
+
+        (
+            StatusCode::OK,
+            Json(ApiV2Response::success(serde_json::json!({
+                "scan_id": uuid::Uuid::new_v4().to_string(),
+                "methods": {
+                    "nearby": { "state": "cached_results", "active_scan": false },
+                    "world_gossip": { "state": publish, "enabled": world.enabled },
+                    "kademlia": { "state": providers, "provider_active": world.provider_active },
+                },
+                "world_discovery": world,
+                "note": "Nearby results are queried from the local social graph; active radio scanning remains transport-specific.",
+            }))),
+        )
+            .into_response()
+    }
+
+    /// Runtime release and identity inspection for the authenticated cockpit.
+    pub async fn version(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        let identity_id = core.get_identity_id().await.to_string();
+        Json(ApiV2Response::success(serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "protocol_version": crate::core::constants::protocol::PROTOCOL_VERSION,
+            "build_hash": option_env!("GHOSTWIRE_BINARY_HASH"),
+            "git_revision": option_env!("GHOSTWIRE_GIT_HEAD"),
+            "asset_manifest_hash": option_env!("GHOSTWIRE_ASSET_MANIFEST_HASH"),
+            "identity_id": identity_id,
+        })))
+    }
+
+    /// Truthful transport and route projection for the authenticated cockpit.
+    pub async fn transport_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        let snapshot = crate::core::mesh_health::build_snapshot(&core, 0).await;
+        let registry = core.transport_registry.read().await.descriptors();
+        Json(ApiV2Response::success(serde_json::json!({
+            "snapshot": snapshot,
+            "registry": registry,
+        })))
+    }
+
+    /// Apply a lifecycle action to a concrete transport. Unsupported actions
+    /// fail closed instead of changing a frontend-only flag.
+    pub async fn transport_action(
+        State(state): State<Arc<AppState>>,
+        axum::extract::Path(transport): axum::extract::Path<String>,
+        Json(request): Json<TransportActionRequest>,
+    ) -> impl IntoResponse {
+        let core = state.core.read().await;
+        let result = match (transport.as_str(), request.action.as_str()) {
+            ("reticulum", "start") if core.config.network.reticulum_enabled => {
+                core.init_reticulum().await
+            }
+            ("reticulum", "start") => Err(anyhow::anyhow!(
+                "Reticulum is disabled in node configuration"
+            )),
+            ("reticulum", "stop") => core.stop_reticulum().await,
+            (unknown, _) => Err(anyhow::anyhow!(format!(
+                "No lifecycle action is implemented for transport {unknown}"
+            ))),
+        };
+        match result {
+            Ok(()) => {
+                let snapshot = crate::core::mesh_health::build_snapshot(&core, 0).await;
+                let registry = core.transport_registry.read().await.descriptors();
+                (
+                    StatusCode::OK,
+                    Json(ApiV2Response::success(
+                        serde_json::json!({ "snapshot": snapshot, "registry": registry }),
+                    )),
+                )
+                    .into_response()
+            }
+            Err(error) => (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<serde_json::Value>::error(
+                    "transport_action_rejected",
+                    error.to_string(),
+                )),
+            )
+                .into_response(),
+        }
     }
 
     pub async fn generate_contact_qr(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -487,9 +796,7 @@ impl NetworkController {
         // CRITICAL FIX: Sign the contact card with identity keypair
         let card_bytes = serde_json::to_vec(&card).unwrap_or_default();
         let identity = core.identity.read().await;
-        let signature = identity
-            .sign(&card_bytes)
-            .unwrap_or_default();
+        let signature = identity.sign(&card_bytes).unwrap_or_default();
         card.signature = signature;
 
         match card.to_qr_string() {
@@ -501,7 +808,7 @@ impl NetworkController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("QR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -517,7 +824,7 @@ impl NetworkController {
             Ok(card) => Json(ApiV2Response::success(card)).into_response(),
             Err(e) => (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("QR_PARSE_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -543,7 +850,7 @@ impl PairingController {
             .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("PAIR_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("PAIR_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -614,10 +921,10 @@ impl RecoveryController {
                         StatusCode::BAD_REQUEST,
                         Json(ApiV2Response::<()>::error(
                             "INVALID_KEY",
-                            &format!("Invalid X25519 key for guardian {}", g.name),
+                            format!("Invalid X25519 key for guardian {}", g.name),
                         )),
                     )
-                        .into_response()
+                        .into_response();
                 }
             };
             guardians.push((g.peer_id.clone(), g.name.clone(), pub_bytes));
@@ -699,7 +1006,7 @@ impl RecoveryController {
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", &e.to_string())),
+                Json(ApiV2Response::<()>::error("RECOVERY_ERROR", e.to_string())),
             )
                 .into_response(),
         }
@@ -759,7 +1066,7 @@ impl RecoveryController {
                 StatusCode::BAD_REQUEST,
                 Json(ApiV2Response::<()>::error(
                     "INSUFFICIENT_SHARES",
-                    &format!("Need {} shares, got {}", threshold, raw_shares.len()),
+                    format!("Need {} shares, got {}", threshold, raw_shares.len()),
                 )),
             )
                 .into_response();
@@ -780,7 +1087,7 @@ impl RecoveryController {
                                 "new_password is required and must not be empty",
                             )),
                         )
-                            .into_response()
+                            .into_response();
                     }
                 };
 
@@ -797,13 +1104,13 @@ impl RecoveryController {
                         .into_response(),
                         Err(e) => (
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ApiV2Response::<()>::error("SAVE_ERROR", &e.to_string())),
+                            Json(ApiV2Response::<()>::error("SAVE_ERROR", e.to_string())),
                         )
                             .into_response(),
                     },
                     Err(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", &e.to_string())),
+                        Json(ApiV2Response::<()>::error("IDENTITY_ERROR", e.to_string())),
                     )
                         .into_response(),
                 }
@@ -812,7 +1119,7 @@ impl RecoveryController {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiV2Response::<()>::error(
                     "RECONSTRUCTION_ERROR",
-                    &e.to_string(),
+                    e.to_string(),
                 )),
             )
                 .into_response(),

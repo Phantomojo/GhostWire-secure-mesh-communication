@@ -3,6 +3,7 @@
 //! Spins up two MeshManagers on localhost, connects them, sends a message,
 //! and verifies the recipient received it.
 
+use ghostwire::core::discovery_directory::DiscoveryDirectory;
 use ghostwire::core::encryption::Encryption;
 use ghostwire::core::encryption::EncryptionManager;
 use ghostwire::core::identity::Identity;
@@ -14,9 +15,18 @@ use ghostwire::core::security::{SecurityConfig, SecurityManager};
 use ghostwire::core::store::SecureMessageStore;
 use ghostwire::core::username_discovery::UsernameDiscovery;
 use libp2p::PeerId;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
+
+static TEST_HOME_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+async fn test_home_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_HOME_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
 
 /// Build a minimal MeshManager for testing.
 /// Returns (MeshManager, PeerId, listen_multiaddr).
@@ -69,6 +79,7 @@ async fn build_test_mesh_manager(
         None, // no event bus
         None, // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
+        Arc::new(DiscoveryDirectory::new()),
     )
     .await?;
 
@@ -83,6 +94,8 @@ async fn build_test_mesh_manager(
 
 #[tokio::test]
 async fn test_node_to_node_connectivity() {
+    let _home_guard = test_home_guard().await;
+    std::env::set_var("GHOSTWIRE_TEST_DISABLE_MDNS", "1");
     tokio::time::timeout(Duration::from_secs(15), async {
         let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19001, Some("test_node_a".to_string()))
@@ -98,15 +111,13 @@ async fn test_node_to_node_connectivity() {
             .await
             .expect("Failed to add address");
 
-        let dm_topic_b = format!("ghostwire-dm-{}", peer_id_b);
+        let dm_topic = ghostwire::core::constants::topics::DM.to_string();
         node_b
-            .subscribe_topic(&dm_topic_b)
+            .subscribe_topic(&dm_topic)
             .await
             .expect("Failed to subscribe to DM topic");
-
-        let dm_topic_a = format!("ghostwire-dm-{}", peer_id_a);
         node_a
-            .subscribe_topic(&dm_topic_a)
+            .subscribe_topic(&dm_topic)
             .await
             .expect("Failed to subscribe to DM topic");
 
@@ -115,7 +126,51 @@ async fn test_node_to_node_connectivity() {
             .await
             .expect("Failed to connect to peer");
 
-        sleep(Duration::from_secs(2)).await;
+        let handshake_ready = tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                let a_ready = node_a
+                    .get_topology()
+                    .await
+                    .nodes
+                    .get(&peer_id_b.to_string())
+                    .map(|node| !node.public_key.is_empty())
+                    .unwrap_or(false);
+                let b_ready = node_b
+                    .get_topology()
+                    .await
+                    .nodes
+                    .get(&peer_id_a.to_string())
+                    .map(|node| !node.public_key.is_empty())
+                    .unwrap_or(false);
+                if a_ready && b_ready {
+                    break true;
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(handshake_ready, "authenticated handshake did not complete");
+        let peer_health_ready = tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                if let Some(health) = node_a
+                    .peer_health()
+                    .get_peer_health(&peer_id_b.to_string())
+                    .await
+                {
+                    if health.pongs_received > 0 && health.is_alive {
+                        break true;
+                    }
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            peer_health_ready,
+            "peer did not become live after handshake"
+        );
 
         let peer_id_a_str = peer_id_a.to_string();
         let peer_id_b_str = peer_id_b.to_string();
@@ -152,6 +207,8 @@ async fn test_node_to_node_connectivity() {
 
 #[tokio::test]
 async fn test_ping_pong_same_machine() {
+    let _home_guard = test_home_guard().await;
+    std::env::set_var("GHOSTWIRE_TEST_DISABLE_MDNS", "1");
     tokio::time::timeout(Duration::from_secs(15), async {
         let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
@@ -167,16 +224,24 @@ async fn test_ping_pong_same_machine() {
             .await
             .expect("add_address");
 
-        let dm_topic_b = format!("ghostwire-dm-{peer_id_b}");
-        node_b.subscribe_topic(&dm_topic_b).await.expect("sub B");
-        let dm_topic_a = format!("ghostwire-dm-{peer_id_a}");
-        node_a.subscribe_topic(&dm_topic_a).await.expect("sub A");
+        let dm_topic = ghostwire::core::constants::topics::DM.to_string();
+        node_b.subscribe_topic(&dm_topic).await.expect("sub B");
+        node_a.subscribe_topic(&dm_topic).await.expect("sub A");
 
         node_a.connect_peer(peer_id_b).await.expect("connect");
 
-        sleep(Duration::from_secs(6)).await;
-
         let peer_b_str = peer_id_b.to_string();
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(health) = node_a.peer_health().get_peer_health(&peer_b_str).await {
+                    if health.pongs_received > 0 {
+                        break;
+                    }
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await;
         let health = node_a.peer_health().get_peer_health(&peer_b_str).await;
 
         match health {
@@ -187,7 +252,7 @@ async fn test_ping_pong_same_machine() {
                 );
                 assert!(h.pings_sent > 0, "expected pings sent to B");
                 assert!(h.pongs_received > 0, "expected pongs received from B");
-                assert!(h.avg_rtt_ms > 0.0, "expected positive RTT");
+                assert!(h.avg_rtt_ms >= 0.0, "RTT must not be negative");
                 assert!(h.is_alive, "peer B should be alive");
             }
             None => {

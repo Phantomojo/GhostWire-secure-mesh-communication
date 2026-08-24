@@ -5,6 +5,7 @@ use obfstr::obfstr;
 use parking_lot::RwLock;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 pub struct EphemeralIdentity {
     pub identity_id: String,
@@ -89,6 +90,12 @@ impl Identity {
         Self::load_or_create(profile)
     }
 
+    fn legacy_auto_unlock_enabled() -> bool {
+        std::env::var("GHOSTWIRE_AUTO_UNLOCK")
+            .map(|value| value == "1")
+            .unwrap_or(false)
+    }
+
     pub fn load_or_create(profile: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
         let storage_path = Self::get_storage_path(profile.clone())?;
 
@@ -98,23 +105,41 @@ impl Identity {
                     identity.profile = profile;
 
                     if identity.is_locked() {
-                        if let Ok(password) = Self::load_keyfile_password(&storage_path) {
-                            match identity.unlock(&password) {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        "Identity {} loaded (auto-unlocked via keyfile)",
-                                        &identity.id[..8]
-                                    );
+                        if Self::legacy_auto_unlock_enabled() {
+                            tracing::warn!(
+                                target: "identity",
+                                "GHOSTWIRE_AUTO_UNLOCK=1 enabled: using legacy machine-recoverable identity sidecar; migrate it explicitly and remove this compatibility flag"
+                            );
+                            if let Ok(password) = Self::load_keyfile_password(&storage_path) {
+                                match identity.unlock(password.as_str()) {
+                                    Ok(()) => {
+                                        tracing::warn!(
+                                            target: "identity",
+                                            "Identity {} loaded with legacy sidecar auto-unlock",
+                                            &identity.id[..8]
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            target: "identity",
+                                            "Legacy sidecar auto-unlock failed: {}. Identity remains locked.",
+                                            e
+                                        );
+                                    }
                                 }
-                                Err(e) => {
-                                    tracing::debug!(
-                                        "Keyfile auto-unlock failed: {}. Identity remains locked.",
-                                        e
-                                    );
-                                }
+                            } else {
+                                tracing::warn!(
+                                    target: "identity",
+                                    "Legacy sidecar auto-unlock requested but no usable sidecar was found; identity remains locked"
+                                );
                             }
+                        } else if storage_path.with_file_name(".identity.key").exists() {
+                            tracing::warn!(
+                                target: "identity",
+                                "Identity loaded locked; legacy .identity.key sidecar was ignored. Use the explicit legacy recovery endpoint or GHOSTWIRE_AUTO_UNLOCK=1 only for migration."
+                            );
                         } else {
-                            tracing::debug!("No keyfile found. Identity remains locked.");
+                            tracing::debug!("No legacy sidecar found. Identity remains locked.");
                         }
                     } else {
                         tracing::info!("Identity {} loaded (unlocked)", &identity.id[..8]);
@@ -128,31 +153,11 @@ impl Identity {
             }
         }
 
-        tracing::info!("Creating new identity...");
-        let identity = Self::create_new(profile)?;
-        let initial_password = Self::generate_initial_password()?;
-        identity.save_to_disk(&initial_password)?;
-
-        let keyfile_path = Self::get_storage_path(None)?.with_file_name(".initial-password");
-        std::fs::write(&keyfile_path, &initial_password)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&keyfile_path)?.permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&keyfile_path, perms)?;
-        }
-        tracing::info!(
-            "New identity created. See ~/.ghostwire/.initial-password for your password."
+        tracing::warn!(
+            target: "identity",
+            "Creating a new in-memory identity; it will remain ephemeral until the operator completes explicit password setup"
         );
-
-        if let Err(e) = Self::save_keyfile_password(&storage_path, &initial_password) {
-            tracing::warn!(
-                "Failed to save keyfile (auto-unlock won't work on restart): {}",
-                e
-            );
-        }
-
+        let identity = Self::create_new(profile)?;
         Ok(identity)
     }
 
@@ -189,8 +194,9 @@ impl Identity {
         })
     }
 
-    /// Generate a cryptographically random initial password for new identities.
-    /// Returns a 32-character hex string (128 bits of entropy).
+    /// Legacy helper retained only for source compatibility with old integrations.
+    /// New identities must receive an operator-supplied password through explicit setup.
+    #[allow(dead_code)]
     fn generate_initial_password() -> Result<String, Box<dyn std::error::Error>> {
         use ring::rand::{SecureRandom, SystemRandom};
         let rng = SystemRandom::new();
@@ -276,7 +282,7 @@ impl Identity {
     /// SECURITY FIX: Decrypts the password instead of reading plaintext.
     fn load_keyfile_password(
         identity_path: &std::path::Path,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
         use chacha20poly1305::aead::Aead;
         use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
 
@@ -326,7 +332,7 @@ impl Identity {
 
             let password =
                 String::from_utf8(plaintext).map_err(|_| "Keyfile contains invalid UTF-8")?;
-            Ok(password)
+            Ok(Zeroizing::new(password))
         } else if data.len() >= 24 {
             let seed = format!(
                 "ghostwire-keyfile-v2-{}-{}",
@@ -355,7 +361,7 @@ impl Identity {
                 target: "identity",
                 "🔑 Migrated keyfile from SHA256 to Argon2id"
             );
-            Ok(password)
+            Ok(Zeroizing::new(password))
         } else {
             let password = String::from_utf8(data).map_err(|_| "Keyfile contains invalid UTF-8")?;
             let password = password.trim().to_string();
@@ -364,7 +370,7 @@ impl Identity {
                 target: "identity",
                 "🔑 Migrated keyfile from plaintext to Argon2id"
             );
-            Ok(password)
+            Ok(Zeroizing::new(password))
         }
     }
 
@@ -402,6 +408,21 @@ impl Identity {
         let keypair = Keypair::ed25519_from_bytes(seed.to_vec())
             .map_err(|e| anyhow::anyhow!("Failed to create keypair from seed: {}", e))?;
         Ok(Self::from_keypair(keypair))
+    }
+
+    /// Derive a deterministic 32-byte transport-specific key from this identity.
+    /// Same identity + transport name → same key. Different identities → different keys.
+    /// Used by transports (e.g. Reticulum) that need a persistent seed.
+    pub fn derive_transport_key(&self, transport_name: &str) -> [u8; 32] {
+        use ring::digest;
+        let pk = self.get_public_key();
+        let mut input = Vec::with_capacity(pk.len() + transport_name.len());
+        input.extend_from_slice(&pk);
+        input.extend_from_slice(transport_name.as_bytes());
+        let hash = digest::digest(&digest::SHA256, &input);
+        let mut key = [0u8; 32];
+        key.copy_from_slice(hash.as_ref());
+        key
     }
 
     /// Create a new identity with nickname and password in one step (for profile creation with setup).
@@ -531,16 +552,6 @@ impl Identity {
             .open(&path)?;
         std::io::Write::write_all(&mut f, json.as_bytes())?;
 
-        // CRITICAL FIX: Update the keyfile with the current password.
-        // This ensures auto-unlock works even after the user changes their password.
-        if let Err(e) = Self::save_keyfile_password(&path, password) {
-            tracing::debug!(
-                target: "identity",
-                "⚠️ Keyfile not updated (auto-unlock may use stale password): {}",
-                e
-            );
-        }
-
         tracing::info!(
             target: "identity",
             msg = "✅ Identity saved successfully",
@@ -589,7 +600,8 @@ impl Identity {
             let pub_key_bytes = kp.public().encode_protobuf();
             let encrypted = encrypted.clone();
 
-            let old = std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
+            let old =
+                std::mem::replace(&mut *state, IdentityState::Locked(encrypted, pub_key_bytes));
             if let IdentityState::Unlocked(kp, _) = old {
                 // try_into_ed25519() consumes kp; inner ed25519_dalek::SigningKey
                 // implements ZeroizeOnDrop, so dropping zeroizes the secret key.
@@ -606,6 +618,23 @@ impl Identity {
                 "Cannot lock identity: No encrypted copy available (save with password first)"
             ))
         }
+    }
+
+    /// Explicitly recover a legacy identity from the machine-bound sidecar.
+    /// This is never called during normal startup. The returned password is
+    /// zeroizing so the caller can authenticate the matching persistence store
+    /// and then drop the recovered secret.
+    pub fn unlock_from_legacy_keyfile(&self) -> Result<Zeroizing<String>> {
+        let path = Self::get_storage_path(self.profile.clone())
+            .map_err(|error| anyhow::anyhow!("identity storage path failed: {}", error))?;
+        let password = Self::load_keyfile_password(&path)
+            .map_err(|error| anyhow::anyhow!("legacy keyfile load failed: {}", error))?;
+        self.unlock(password.as_str())?;
+        tracing::warn!(
+            target: "identity",
+            "Identity unlocked through explicit legacy sidecar recovery; migrate to a user-selected passphrase and remove the sidecar"
+        );
+        Ok(password)
     }
 
     pub fn get_metadata(&self) -> IdentityMetadata {
@@ -769,16 +798,18 @@ mod tests {
 
         identity.save_to_disk("secret").unwrap();
 
+        // Hardened startup does not create or consume a machine-bound sidecar
+        // by default, so persisted identities must remain locked on reload.
+        let storage_path = Identity::get_storage_path(Some("test_profile".to_string())).unwrap();
+        assert!(!storage_path.with_file_name(".identity.key").exists());
+
         // Load it back
         let loaded = Identity::load_or_create(profile).unwrap();
         assert_eq!(loaded.id, original_id);
         assert!(loaded.is_locked());
 
         loaded.unlock("secret").unwrap();
-        assert_eq!(
-            loaded.public_key().unwrap(),
-            identity.public_key().unwrap()
-        );
+        assert_eq!(loaded.public_key().unwrap(), identity.public_key().unwrap());
     }
 
     #[test]
@@ -818,5 +849,34 @@ mod tests {
 
         let sig = identity.sign(b"after unlock");
         assert!(sig.is_some());
+    }
+
+    #[test]
+    fn default_load_does_not_auto_unlock_from_legacy_sidecar() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+        let profile = Some("identity_gate_red".to_string());
+        let password = "identity-gate-password";
+
+        let identity = Identity::create_new(profile.clone()).unwrap();
+        identity.save_to_disk(password).unwrap();
+        identity.lock().unwrap();
+
+        let storage_path = Identity::get_storage_path(profile.clone()).unwrap();
+        Identity::save_keyfile_password(&storage_path, password).unwrap();
+        assert!(
+            storage_path.with_file_name(".identity.key").exists(),
+            "the reproducer requires a legacy machine-recoverable sidecar"
+        );
+
+        let loaded = Identity::load_or_create(profile).unwrap();
+        assert!(
+            loaded.is_locked(),
+            "default load must not auto-unlock from a machine-derived legacy sidecar"
+        );
+
+        std::env::remove_var("GHOSTWIRE_HOME");
     }
 }

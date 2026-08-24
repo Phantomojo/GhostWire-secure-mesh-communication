@@ -15,31 +15,31 @@ use ratatui::{
 // ═══════════════════════════════════════════════════════════
 
 /// Primary brand color — used for logo, headers, active elements
-pub const PRIMARY: Color = Color::Cyan;
+pub const PRIMARY: Color = Color::Rgb(124, 228, 220);
 
 /// Online / connected / success
-pub const ONLINE: Color = Color::Green;
+pub const ONLINE: Color = Color::Rgb(124, 228, 220);
 
 /// Warning / degraded / pending
-pub const WARNING: Color = Color::Yellow;
+pub const WARNING: Color = Color::Rgb(245, 200, 117);
 
 /// Offline / disconnected / inactive
-pub const OFFLINE: Color = Color::DarkGray;
+pub const OFFLINE: Color = Color::Rgb(71, 97, 106);
 
 /// Error / failure / security alert
-pub const ERROR: Color = Color::Red;
+pub const ERROR: Color = Color::Rgb(238, 128, 123);
 
 /// Primary text content
-pub const TEXT: Color = Color::White;
+pub const TEXT: Color = Color::Rgb(216, 232, 235);
 
 /// Muted text — timestamps, help, secondary info
-pub const MUTED: Color = Color::Gray;
+pub const MUTED: Color = Color::Rgb(120, 147, 156);
 
 /// Your (sent) messages — distinct from received
-pub const SENT: Color = Color::Magenta;
+pub const SENT: Color = Color::Rgb(211, 154, 230);
 
 /// Background for selected/highlighted items
-pub const HIGHLIGHT_BG: Color = Color::DarkGray;
+pub const HIGHLIGHT_BG: Color = Color::Rgb(19, 38, 48);
 
 // ═══════════════════════════════════════════════════════════
 // Style Constructors
@@ -69,7 +69,7 @@ pub fn offline_style() -> Style {
     Style::default().fg(OFFLINE)
 }
 
-#[allow(dead_code)] // ponytail: UI component, not yet wired
+#[allow(dead_code)] // ponytail: UI component, used in first_run.rs which is not yet wired
 pub fn error_style() -> Style {
     Style::default().fg(ERROR).add_modifier(Modifier::BOLD)
 }
@@ -133,6 +133,7 @@ pub fn logo_header() -> Line<'static> {
 ///
 ///   Infrastructure for Human Dignity
 /// ```
+#[allow(dead_code)] // ponytail: UI component for splash/welcome screen
 pub fn splash_logo_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(vec![

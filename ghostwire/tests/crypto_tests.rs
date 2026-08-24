@@ -28,7 +28,14 @@ fn test_encryption_manager_initialization() {
 /// Test that two different managers generate different key pairs
 #[test]
 fn test_unique_key_generation() {
+    // `new()` intentionally reloads persisted identity state. Use two isolated
+    // persistence homes to test fresh generation without exposing private
+    // production constructors to integration tests.
+    let root = std::env::temp_dir().join(format!("ghostwire_crypto_unique_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&root);
+    std::env::set_var("GHOSTWIRE_HOME", root.join("one"));
     let mgr1 = EncryptionManager::new().unwrap();
+    std::env::set_var("GHOSTWIRE_HOME", root.join("two"));
     let mgr2 = EncryptionManager::new().unwrap();
 
     assert_ne!(
@@ -51,7 +58,11 @@ fn test_hybrid_key_format() {
     let pub_key = mgr.get_public_key();
 
     // Hybrid public key should be 64 bytes: 32 for Ed25519 + 32 for X25519
-    assert_eq!(pub_key.len(), 64, "Hybrid public key should be 64 bytes");
+    assert_eq!(
+        pub_key.len(),
+        1248,
+        "Hybrid public key should be 1248 bytes"
+    );
 }
 
 /// Test message signing and verification
@@ -183,5 +194,5 @@ fn test_public_key_export() {
     let exported = mgr.export_public_key();
 
     assert_eq!(exported, mgr.get_public_key(), "Exported key should match");
-    assert_eq!(exported.len(), 64, "Exported key should be 64 bytes");
+    assert_eq!(exported.len(), 1248, "Exported key should be 1248 bytes");
 }

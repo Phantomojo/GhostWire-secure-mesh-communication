@@ -13,6 +13,9 @@ use quinn::rustls::client::danger::{
 use quinn::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use quinn::rustls::{DigitallySignedStruct, SignatureScheme};
 
+use crate::core::crypto_profile::{
+    negotiate, CryptoCapabilities, CryptoProfile, CryptoProfileId, NegotiatedProfile,
+};
 use crate::core::message::Message;
 
 type PrivateKeyDer = quinn::rustls::pki_types::PrivateKeyDer<'static>;
@@ -63,8 +66,7 @@ impl ServerCertVerifier for TofuVerifier {
                 self.peer_id,
                 hex::encode(&fingerprint[..8])
             );
-            self.trusted
-                .insert(self.peer_id.clone(), fingerprint);
+            self.trusted.insert(self.peer_id.clone(), fingerprint);
         }
 
         Ok(ServerCertVerified::assertion())
@@ -101,12 +103,20 @@ impl ServerCertVerifier for TofuVerifier {
     }
 }
 
+const CAPABILITY_MAGIC: &[u8; 4] = b"GWCH";
+const DATA_MAGIC: &[u8; 4] = b"GWDT";
+const WIRE_VERSION: u8 = 1;
+const MAX_CAPABILITY_BYTES: usize = 4096;
+const PROFILE_TRANSCRIPT_DOMAIN: &[u8] = b"GhostWire-QUIC-profile-transcript-v1";
+
 #[derive(Clone)]
 pub struct QuicTransportProvider {
     endpoint: Endpoint,
     trusted_fingerprints: Arc<DashMap<String, Vec<u8>>>,
     connections: Arc<DashMap<String, Connection>>,
+    negotiated_profiles: Arc<DashMap<String, NegotiatedProfile>>,
     peer_map: Arc<DashMap<String, SocketAddr>>,
+    local_capabilities: CryptoCapabilities,
     local_fingerprint: Vec<u8>,
 }
 
@@ -139,6 +149,12 @@ impl QuicTransportProvider {
 
         let trusted = Arc::new(DashMap::new());
         Self::load_fingerprints(&trusted);
+        let local_capabilities = CryptoCapabilities::new(
+            vec![CryptoProfileId::Gw0Session],
+            CryptoProfile::GW0_SESSION.max_plaintext_fragment,
+            false,
+        )
+        .map_err(|e| anyhow::anyhow!("invalid local QUIC crypto capabilities: {}", e))?;
 
         tracing::info!(
             "QUIC transport started on {} (fingerprint: {})",
@@ -150,7 +166,9 @@ impl QuicTransportProvider {
             endpoint,
             trusted_fingerprints: trusted,
             connections: Arc::new(DashMap::new()),
+            negotiated_profiles: Arc::new(DashMap::new()),
             peer_map: Arc::new(DashMap::new()),
+            local_capabilities,
             local_fingerprint: fingerprint,
         })
     }
@@ -165,13 +183,19 @@ impl QuicTransportProvider {
     fn load_fingerprints(store: &DashMap<String, Vec<u8>>) {
         let path = Self::tofu_path();
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&data) {
+            if let Ok(map) =
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            {
                 for (k, v) in map {
                     if let Ok(bytes) = hex::decode(&v) {
                         store.insert(k, bytes);
                     }
                 }
-                tracing::info!("TOFU: loaded {} fingerprints from {}", store.len(), path.display());
+                tracing::info!(
+                    "TOFU: loaded {} fingerprints from {}",
+                    store.len(),
+                    path.display()
+                );
             }
         }
     }
@@ -209,11 +233,19 @@ impl QuicTransportProvider {
             .connect_with(client_config, addr, "ghostwire.local")?
             .await?;
 
+        let negotiated = self.client_profile_handshake(&conn).await?;
         self.connections.insert(peer_id.to_string(), conn);
+        self.negotiated_profiles
+            .insert(peer_id.to_string(), negotiated);
         self.peer_map.insert(peer_id.to_string(), addr);
         self.save_fingerprints();
 
-        tracing::info!("QUIC connected to {} at {}", peer_id, addr);
+        tracing::info!(
+            "QUIC connected to {} at {} with profile {:?}",
+            peer_id,
+            addr,
+            negotiated.profile.id
+        );
         Ok(())
     }
 
@@ -230,17 +262,18 @@ impl QuicTransportProvider {
             }
         }
 
+        let negotiated = self
+            .negotiated_profiles
+            .get(peer_id)
+            .map(|entry| *entry.value())
+            .ok_or_else(|| anyhow::anyhow!("QUIC profile not negotiated for {}", peer_id))?;
         let conn = self
             .connections
             .get(peer_id)
             .ok_or_else(|| anyhow::anyhow!("Not connected to {}", peer_id))?;
 
         let (mut send, _recv) = conn.open_bi().await?;
-        let payload = bincode::serialize(message)?;
-
-        let mut frame = Vec::with_capacity(4 + payload.len());
-        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        frame.extend_from_slice(&payload);
+        let frame = Self::encode_message_frame(message, negotiated)?;
 
         send.write_all(&frame).await?;
         send.finish()?;
@@ -258,6 +291,7 @@ impl QuicTransportProvider {
         let (tx, rx) = mpsc::channel(256);
         let endpoint = self.endpoint.clone();
 
+        let local_capabilities = self.local_capabilities.clone();
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let tx = tx.clone();
@@ -267,26 +301,48 @@ impl QuicTransportProvider {
                         let remote = conn.remote_address();
                         tracing::info!("QUIC incoming connection from {}", remote);
 
+                        let connection_capabilities = local_capabilities.clone();
                         tokio::spawn(async move {
+                            let negotiated = match conn.accept_bi().await {
+                                Ok((mut send, mut recv)) => {
+                                    match Self::server_profile_handshake(
+                                        &mut send,
+                                        &mut recv,
+                                        &connection_capabilities,
+                                    )
+                                    .await
+                                    {
+                                        Ok(profile) => profile,
+                                        Err(error) => {
+                                            tracing::warn!(
+                                                remote = %remote,
+                                                error = %error,
+                                                "QUIC crypto-profile negotiation rejected"
+                                            );
+                                            conn.close(0u32.into(), b"crypto profile rejected");
+                                            return;
+                                        }
+                                    }
+                                }
+                                Err(_) => return,
+                            };
+
                             loop {
                                 match conn.accept_bi().await {
                                     Ok((_send, mut recv)) => {
-                                        let mut len_buf = [0u8; 4];
-                                        if recv.read_exact(&mut len_buf).await.is_err() {
-                                            break;
-                                        }
-                                        let payload_len =
-                                            u32::from_be_bytes(len_buf) as usize;
-
-                                        let mut payload = vec![0u8; payload_len];
-                                        if recv.read_exact(&mut payload).await.is_err() {
-                                            break;
-                                        }
-
-                                        if let Ok(msg) =
-                                            bincode::deserialize::<Message>(&payload)
+                                        match Self::decode_message_frame(&mut recv, negotiated)
+                                            .await
                                         {
-                                            let _ = tx.send(msg).await;
+                                            Ok(msg) => {
+                                                let _ = tx.send(msg).await;
+                                            }
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    remote = %remote,
+                                                    error = %error,
+                                                    "QUIC message frame rejected"
+                                                );
+                                            }
                                         }
                                     }
                                     Err(_) => break,
@@ -303,13 +359,231 @@ impl QuicTransportProvider {
 
         rx
     }
+
+    fn local_profile_binding(
+        client_capabilities: &[u8],
+        server_capabilities: &[u8],
+        negotiated: NegotiatedProfile,
+    ) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update(PROFILE_TRANSCRIPT_DOMAIN);
+        hasher.update((client_capabilities.len() as u32).to_be_bytes());
+        hasher.update(client_capabilities);
+        hasher.update((server_capabilities.len() as u32).to_be_bytes());
+        hasher.update(server_capabilities);
+        hasher.update(negotiated.profile.id.wire_id().to_be_bytes());
+        hasher.update(negotiated.max_frame_size.to_be_bytes());
+        hasher.update([u8::from(negotiated.fragmentation_required)]);
+        hasher.finalize().to_vec()
+    }
+
+    async fn client_profile_handshake(&self, conn: &Connection) -> Result<NegotiatedProfile> {
+        let (mut send, mut recv) = conn.open_bi().await?;
+        let local_bytes = self.local_capabilities.canonical_bytes();
+        if local_bytes.len() > MAX_CAPABILITY_BYTES {
+            return Err(anyhow::anyhow!("local QUIC capabilities exceed limit"));
+        }
+        send.write_all(CAPABILITY_MAGIC).await?;
+        send.write_all(&[WIRE_VERSION]).await?;
+        send.write_all(&(local_bytes.len() as u32).to_be_bytes())
+            .await?;
+        send.write_all(&local_bytes).await?;
+        send.finish()?;
+
+        let mut magic = [0u8; 4];
+        recv.read_exact(&mut magic).await?;
+        if &magic != b"GWPR" {
+            return Err(anyhow::anyhow!("invalid QUIC profile response magic"));
+        }
+        let mut version = [0u8; 1];
+        recv.read_exact(&mut version).await?;
+        if version[0] != WIRE_VERSION {
+            return Err(anyhow::anyhow!("unsupported QUIC profile response version"));
+        }
+        let server_bytes = Self::read_bounded_bytes(&mut recv, MAX_CAPABILITY_BYTES).await?;
+        let server_capabilities = CryptoCapabilities::from_canonical_bytes(&server_bytes)
+            .map_err(|e| anyhow::anyhow!("invalid server capabilities: {}", e))?;
+        let negotiated = negotiate(&self.local_capabilities, &server_capabilities, 1)
+            .map_err(|e| anyhow::anyhow!("QUIC profile negotiation failed: {}", e))?;
+        Self::reject_unimplemented_fragmentation(negotiated)?;
+
+        let selected_id = Self::read_u16(&mut recv).await?;
+        let selected_frame_size = Self::read_u32(&mut recv).await?;
+        let mut fragmentation = [0u8; 1];
+        recv.read_exact(&mut fragmentation).await?;
+        let mut binding = vec![0u8; 32];
+        recv.read_exact(&mut binding).await?;
+
+        if selected_id != negotiated.profile.id.wire_id()
+            || selected_frame_size != negotiated.max_frame_size
+            || fragmentation[0] != u8::from(negotiated.fragmentation_required)
+            || binding != Self::local_profile_binding(&local_bytes, &server_bytes, negotiated)
+        {
+            return Err(anyhow::anyhow!("QUIC profile transcript binding mismatch"));
+        }
+        Ok(negotiated)
+    }
+
+    async fn server_profile_handshake(
+        send: &mut quinn::SendStream,
+        recv: &mut quinn::RecvStream,
+        local_capabilities: &CryptoCapabilities,
+    ) -> Result<NegotiatedProfile> {
+        let mut magic = [0u8; 4];
+        recv.read_exact(&mut magic).await?;
+        if &magic != CAPABILITY_MAGIC {
+            return Err(anyhow::anyhow!("invalid QUIC capability magic"));
+        }
+        let mut version = [0u8; 1];
+        recv.read_exact(&mut version).await?;
+        if version[0] != WIRE_VERSION {
+            return Err(anyhow::anyhow!("unsupported QUIC capability version"));
+        }
+        let client_bytes = Self::read_bounded_bytes(recv, MAX_CAPABILITY_BYTES).await?;
+        let client_capabilities = CryptoCapabilities::from_canonical_bytes(&client_bytes)
+            .map_err(|e| anyhow::anyhow!("invalid client capabilities: {}", e))?;
+        let negotiated = negotiate(&client_capabilities, local_capabilities, 1)
+            .map_err(|e| anyhow::anyhow!("QUIC profile negotiation failed: {}", e))?;
+        Self::reject_unimplemented_fragmentation(negotiated)?;
+        let server_bytes = local_capabilities.canonical_bytes();
+
+        send.write_all(b"GWPR").await?;
+        send.write_all(&[WIRE_VERSION]).await?;
+        send.write_all(&(server_bytes.len() as u32).to_be_bytes())
+            .await?;
+        send.write_all(&server_bytes).await?;
+        send.write_all(&negotiated.profile.id.wire_id().to_be_bytes())
+            .await?;
+        send.write_all(&negotiated.max_frame_size.to_be_bytes())
+            .await?;
+        send.write_all(&[u8::from(negotiated.fragmentation_required)])
+            .await?;
+        send.write_all(&Self::local_profile_binding(
+            &client_bytes,
+            &server_bytes,
+            negotiated,
+        ))
+        .await?;
+        send.finish()?;
+        Ok(negotiated)
+    }
+
+    async fn read_bounded_bytes(recv: &mut quinn::RecvStream, max: usize) -> Result<Vec<u8>> {
+        let length = Self::read_u32(recv).await? as usize;
+        if length == 0 || length > max {
+            return Err(anyhow::anyhow!("QUIC capability length out of bounds"));
+        }
+        let mut bytes = vec![0u8; length];
+        recv.read_exact(&mut bytes).await?;
+        Ok(bytes)
+    }
+
+    async fn read_u16(recv: &mut quinn::RecvStream) -> Result<u16> {
+        let mut bytes = [0u8; 2];
+        recv.read_exact(&mut bytes).await?;
+        Ok(u16::from_be_bytes(bytes))
+    }
+
+    async fn read_u32(recv: &mut quinn::RecvStream) -> Result<u32> {
+        let mut bytes = [0u8; 4];
+        recv.read_exact(&mut bytes).await?;
+        Ok(u32::from_be_bytes(bytes))
+    }
+
+    fn reject_unimplemented_fragmentation(negotiated: NegotiatedProfile) -> Result<()> {
+        if negotiated.fragmentation_required {
+            return Err(anyhow::anyhow!(
+                "QUIC profile requires fragmentation, but QUIC fragmentation is not integrated"
+            ));
+        }
+        Ok(())
+    }
+
+    fn encode_message_frame(message: &Message, negotiated: NegotiatedProfile) -> Result<Vec<u8>> {
+        let payload = bincode::serialize(message)?;
+        if payload.len() > negotiated.max_frame_size as usize {
+            return Err(anyhow::anyhow!(
+                "QUIC message exceeds negotiated frame size"
+            ));
+        }
+        let mut frame = Vec::with_capacity(4 + 1 + 2 + 4 + payload.len());
+        frame.extend_from_slice(DATA_MAGIC);
+        frame.push(WIRE_VERSION);
+        frame.extend_from_slice(&negotiated.profile.id.wire_id().to_be_bytes());
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&payload);
+        Ok(frame)
+    }
+
+    async fn decode_message_frame(
+        recv: &mut quinn::RecvStream,
+        negotiated: NegotiatedProfile,
+    ) -> Result<Message> {
+        let mut magic = [0u8; 4];
+        recv.read_exact(&mut magic).await?;
+        if &magic != DATA_MAGIC {
+            return Err(anyhow::anyhow!("invalid QUIC data frame magic"));
+        }
+        let mut version = [0u8; 1];
+        recv.read_exact(&mut version).await?;
+        if version[0] != WIRE_VERSION {
+            return Err(anyhow::anyhow!("unsupported QUIC data frame version"));
+        }
+        let profile_id = Self::read_u16(recv).await?;
+        if profile_id != negotiated.profile.id.wire_id() {
+            return Err(anyhow::anyhow!("QUIC data frame profile mismatch"));
+        }
+        let payload_len = Self::read_u32(recv).await? as usize;
+        if payload_len > negotiated.max_frame_size as usize {
+            return Err(anyhow::anyhow!(
+                "QUIC payload exceeds negotiated frame size"
+            ));
+        }
+        let mut payload = vec![0u8; payload_len];
+        recv.read_exact(&mut payload).await?;
+        Ok(bincode::deserialize::<Message>(&payload)?)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        negotiate, CryptoCapabilities, CryptoProfile, CryptoProfileId, QuicTransportProvider,
+    };
 
     #[test]
     fn debug_format() {
         let _ = std::format!("{:?}", "quic_transport debug test");
+    }
+
+    #[test]
+    fn profile_binding_changes_when_capabilities_change() {
+        let local = CryptoCapabilities::new(
+            vec![CryptoProfileId::Gw0Session],
+            CryptoProfile::GW0_SESSION.max_plaintext_fragment,
+            false,
+        )
+        .unwrap();
+        let remote = local.clone();
+        let negotiated = negotiate(&local, &remote, 1).unwrap();
+        let first = QuicTransportProvider::local_profile_binding(
+            &local.canonical_bytes(),
+            &remote.canonical_bytes(),
+            negotiated,
+        );
+
+        let changed_remote = CryptoCapabilities::new(
+            vec![CryptoProfileId::Gw0Session],
+            CryptoProfile::GW0_SESSION.max_plaintext_fragment + 1,
+            false,
+        )
+        .unwrap();
+        let changed_negotiated = negotiate(&local, &changed_remote, 1).unwrap();
+        let second = QuicTransportProvider::local_profile_binding(
+            &local.canonical_bytes(),
+            &changed_remote.canonical_bytes(),
+            changed_negotiated,
+        );
+        assert_ne!(first, second);
     }
 }

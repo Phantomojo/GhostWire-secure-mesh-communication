@@ -49,11 +49,10 @@ impl MessagingController {
         if req.message.len() > MAX_MESSAGE_SIZE {
             return Json(ApiV2Response::error(
                 StandardErrorCode::InvalidInput.as_str(),
-                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+                format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
 
-        let message_id = uuid::Uuid::new_v4();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -82,13 +81,19 @@ impl MessagingController {
             recipients: usize,
             timestamp: u64,
             status: String,
+            delivery: String,
         }
 
         let result = BroadcastResult {
-            message_id: message_id.to_string(),
+            message_id: message.id.to_string(),
             recipients: peer_count,
             timestamp,
             status: status.to_string(),
+            delivery: if send_result.is_ok() {
+                "receipt_pending".to_string()
+            } else {
+                "queued".to_string()
+            },
         };
 
         tracing::info!("Broadcast message sent to {} peers", peer_count);
@@ -102,15 +107,15 @@ impl MessagingController {
     ) -> impl IntoResponse {
         // ✅ SECURITY: Validate message size
         if payload.content.len() > MAX_MESSAGE_SIZE {
-            return Json(ApiV2Response::error(
+            return Json(ApiV2Response::<serde_json::Value>::error(
                 StandardErrorCode::InvalidInput.as_str(),
-                &format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
+                format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
             ));
         }
 
         // ✅ SECURITY: Validate content is not empty
         if payload.content.trim().is_empty() {
-            return Json(ApiV2Response::error(
+            return Json(ApiV2Response::<serde_json::Value>::error(
                 StandardErrorCode::InvalidInput.as_str(),
                 "Message content cannot be empty",
             ));
@@ -118,7 +123,7 @@ impl MessagingController {
 
         // ✅ SECURITY: Validate recipient format
         if payload.recipient.len() > 256 {
-            return Json(ApiV2Response::error(
+            return Json(ApiV2Response::<serde_json::Value>::error(
                 StandardErrorCode::InvalidInput.as_str(),
                 "Recipient ID too long",
             ));
@@ -141,10 +146,17 @@ impl MessagingController {
         // If recipient is "broadcast" or empty, use broadcast flavor
         if payload.recipient == "broadcast" || payload.recipient.is_empty() {
             match state.core.read().await.send_message(&message).await {
-                Ok(_) => Json(ApiV2Response::success("Broadcast sent successfully")),
-                Err(e) => Json(ApiV2Response::error(
+                Ok(_) => Json(ApiV2Response::<serde_json::Value>::success(
+                    serde_json::json!({
+                        "status": "accepted",
+                        "delivery": "receipt_pending",
+                        "message_id": message.id.to_string(),
+                        "recipient": recipient,
+                    }),
+                )),
+                Err(e) => Json(ApiV2Response::<serde_json::Value>::error(
                     StandardErrorCode::InternalError.as_str(),
-                    &format!("Broadcast failed: {}", e),
+                    format!("Broadcast failed: {}", e),
                 )),
             }
         } else {
@@ -155,10 +167,17 @@ impl MessagingController {
                 .send_direct_message(payload.recipient, &message)
                 .await
             {
-                Ok(_) => Json(ApiV2Response::success("Direct message sent successfully")),
-                Err(e) => Json(ApiV2Response::error(
+                Ok(_) => Json(ApiV2Response::<serde_json::Value>::success(
+                    serde_json::json!({
+                        "status": "accepted",
+                        "delivery": "receipt_pending",
+                        "message_id": message.id.to_string(),
+                        "recipient": recipient,
+                    }),
+                )),
+                Err(e) => Json(ApiV2Response::<serde_json::Value>::error(
                     StandardErrorCode::InternalError.as_str(),
-                    &format!("Transmission failed: {}", e),
+                    format!("Transmission failed: {}", e),
                 )),
             }
         }

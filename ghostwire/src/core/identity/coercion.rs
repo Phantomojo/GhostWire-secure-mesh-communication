@@ -147,9 +147,9 @@ impl CoercionConfig {
         };
 
         let real_matches = real_verifier == self.real_verifier_hex;
-        let duress_matches = duress_key.as_ref().map_or(false, |dk| {
-            Self::compute_verifier(dk) == self.duress_verifier_hex
-        });
+        let duress_matches = duress_key
+            .as_ref()
+            .is_some_and(|dk| Self::compute_verifier(dk) == self.duress_verifier_hex);
 
         // Check real first (legitimate unlock takes priority)
         if real_matches {

@@ -19,38 +19,76 @@ use crate::web::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, Instant};
+
+const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
+const MAX_WS_CONTENT_BYTES: usize = 16 * 1024;
+const MAX_WS_SUBSCRIPTIONS: usize = 64;
+const MAX_WS_EVENT_NAME_BYTES: usize = 128;
+const MAX_WS_COMMANDS_PER_MINUTE: u32 = 120;
+const MAX_WS_IDLE_SECS: u64 = 300;
+const ALLOWED_WS_EVENTS: &[&str] = &["core_event", "connection_request"];
+
+#[derive(Debug)]
+struct WsQuota {
+    window_started: Instant,
+    commands: u32,
+}
+impl WsQuota {
+    fn new() -> Self {
+        Self {
+            window_started: Instant::now(),
+            commands: 0,
+        }
+    }
+    fn allow_command(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.window_started) >= Duration::from_secs(60) {
+            self.window_started = now;
+            self.commands = 0;
+        }
+        if self.commands >= MAX_WS_COMMANDS_PER_MINUTE {
+            return false;
+        }
+        self.commands = self.commands.saturating_add(1);
+        true
+    }
+}
 
 /// Encrypted WebSocket message format
-/// Format: {"enc": {"nonce": "<base64>", "ct": "<base64>"}}
+/// Format: {"nonce": "<base64>", "ct": "<base64>"}
+///
+/// The browser decrypts this with WebCrypto AES-256-GCM. The session key is
+/// derived from the authenticated profile identity ID and the random salt sent
+/// once in the `session_salt` handshake frame.
 #[derive(Debug, Serialize, Deserialize)]
 struct EncryptedWsMessage {
     nonce: String,
     ct: String,
 }
 
-/// Encrypt data using XChaCha20-Poly1305
+/// Encrypt data using AES-256-GCM for browser-native authenticated decryption
 fn encrypt_ws_message(
     plaintext: &[u8],
     session_key: &[u8; 32],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
     use base64::Engine;
-    use chacha20poly1305::aead::Aead;
-    use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, XNonce};
     use rand_core::{OsRng, RngCore};
 
-    // Generate random 24-byte nonce
-    let mut nonce_bytes = [0u8; 24];
+    // AES-GCM uses a 96-bit nonce, which is natively supported by WebCrypto.
+    let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = XNonce::from(nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let key = Key::from_slice(session_key);
-    let cipher = XChaCha20Poly1305::new(key);
-
+    let cipher = Aes256Gcm::new_from_slice(session_key)
+        .map_err(|e| format!("WS key setup failed: {}", e))?;
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
+        .encrypt(nonce, plaintext)
         .map_err(|e| format!("WS encryption failed: {}", e))?;
 
     // Encode as JSON
@@ -91,8 +129,17 @@ pub enum WsEvent {
     Pong { timestamp: u64 },
     /// Connection established confirmation
     Connected { node_id: String, version: String },
+    /// Per-connection salt for browser-side event decryption.
+    SessionSalt { salt: String },
     /// Error response
     Error { code: String, message: String },
+    /// The daemon accepted a message for transport; remote delivery is not
+    /// implied until a receipt is reconciled through the message layer.
+    Accepted {
+        code: String,
+        message_id: String,
+        delivery: String,
+    },
     /// Connection request received (social follow mechanic)
     ConnectionRequest {
         from_node_id: String,
@@ -105,7 +152,7 @@ pub enum WsEvent {
 
 /// REPLACE in web.rs:
 ///
-/// ```rust
+/// ```ignore
 /// async fn ws_handler(
 ///     ws: WebSocketUpgrade,
 ///     State(state): State<Arc<AppState>>,
@@ -122,7 +169,7 @@ pub async fn ws_handler(
 
 /// Generate a per-session WebSocket encryption key derived from the node identity.
 /// This ensures each WS connection uses a unique key, preventing cross-session decryption.
-async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
+async fn generate_ws_session_key(state: &Arc<AppState>) -> ([u8; 32], [u8; 16]) {
     use ring::hkdf::{Salt, HKDF_SHA256};
     use ring::rand::SecureRandom;
 
@@ -145,21 +192,29 @@ async fn generate_ws_session_key(state: &Arc<AppState>) -> [u8; 32] {
         .unwrap();
     let mut okm_bytes = [0u8; 32];
     okm.fill(&mut okm_bytes).unwrap();
-    okm_bytes
+    (okm_bytes, salt_bytes)
 }
 
 pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
-    // Generate per-session encryption key from identity + random nonce
-    // SECURITY FIX: replaced hardcoded key with per-session derived key
-    let session_key = generate_ws_session_key(&state).await;
+    // Generate per-session encryption key from the profile identity and a
+    // random salt. The salt is public; the identity ID is already bound to the
+    // authenticated profile and is available to the browser after unlock.
+    let (session_key, session_salt) = generate_ws_session_key(&state).await;
 
     // Subscribe to the core event bus
     let mut event_rx = state.core.read().await.event_bus.subscribe();
 
+    // Send the salt before any encrypted event so the browser can derive the
+    // same AES-GCM session key. The salt itself contains no secret material.
+    let salt_msg = serde_json::to_string(&WsEvent::SessionSalt {
+        salt: base64::engine::general_purpose::STANDARD.encode(session_salt),
+    })
+    .unwrap_or_default();
+    let _ = socket.send(Message::Text(salt_msg.into())).await;
+
     // Send connected confirmation
-    let node_id = state.core.read().await.get_identity_id().await;
     let connected_msg = serde_json::to_string(&WsEvent::Connected {
-        node_id: node_id.clone(),
+        node_id: "redacted".into(),
         version: "2.0.0".into(),
     })
     .unwrap_or_default();
@@ -167,6 +222,8 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
 
     // Keepalive ping every 30s
     let mut ping_interval = interval(Duration::from_secs(30));
+    let mut idle_timeout = Box::pin(tokio::time::sleep(Duration::from_secs(MAX_WS_IDLE_SECS)));
+    let mut quota = WsQuota::new();
 
     loop {
         tokio::select! {
@@ -190,11 +247,8 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("WS encryption failed: {}", e);
-                        // Send unencrypted error as fallback
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
+                        tracing::warn!("WS encryption failed, dropping message: {}", e);
+                        break;
                     }
                 }
             }
@@ -203,6 +257,23 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        if !quota.allow_command() {
+                            let err = serde_json::to_string(&WsEvent::Error {
+                                code: "RATE_LIMITED".into(),
+                                message: "WebSocket command quota exceeded; reconnect later".into(),
+                            }).unwrap_or_default();
+                            let _ = socket.send(Message::Text(err.into())).await;
+                            break;
+                        }
+                        idle_timeout.as_mut().reset(Instant::now() + Duration::from_secs(MAX_WS_IDLE_SECS));
+                        if text.len() > MAX_WS_FRAME_BYTES {
+                            let err = serde_json::to_string(&WsEvent::Error {
+                                code: "FRAME_TOO_LARGE".into(),
+                                message: "WebSocket command exceeds the 64 KiB limit".into(),
+                            }).unwrap_or_default();
+                            let _ = socket.send(Message::Text(err.into())).await;
+                            break;
+                        }
                         handle_ws_command(&mut socket, &state, &text, &session_key).await;
                     }
                     Some(Ok(Message::Ping(data))) => {
@@ -220,6 +291,14 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                 }
             }
 
+            _ = &mut idle_timeout => {
+                let err = serde_json::to_string(&WsEvent::Error {
+                    code: "WS_IDLE_TIMEOUT".into(),
+                    message: "WebSocket session expired after inactivity".into(),
+                }).unwrap_or_default();
+                let _ = socket.send(Message::Text(err.into())).await;
+                break;
+            }
             // Keepalive ping
             _ = ping_interval.tick() => {
                 let pong = serde_json::to_string(&WsEvent::Pong {
@@ -232,10 +311,7 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    tracing::debug!(
-        "WebSocket session ended for node {}",
-        &node_id[..8.min(node_id.len())]
-    );
+    tracing::debug!("WebSocket session ended");
 }
 
 async fn handle_ws_command(
@@ -267,25 +343,85 @@ async fn handle_ws_command(
         }
 
         WsCommand::GetPeers => {
-            let count = state.core.read().await.get_peer_count();
-            let resp = serde_json::to_string(&WsEvent::PeerList {
-                peers: vec![],
-                count,
-            })
-            .unwrap_or_default();
+            let core = state.core.read().await;
+            let snapshot = crate::core::mesh_health::build_snapshot(
+                &**core,
+                state.ws_count.load(std::sync::atomic::Ordering::Relaxed),
+            )
+            .await;
+            let peers = snapshot
+                .peers
+                .into_iter()
+                .filter_map(|peer| serde_json::to_value(peer).ok())
+                .collect::<Vec<_>>();
+            let count = peers.len();
+            let resp =
+                serde_json::to_string(&WsEvent::PeerList { peers, count }).unwrap_or_default();
             let _ = socket.send(Message::Text(resp.into())).await;
         }
 
         WsCommand::SendMessage { recipient, content } => {
-            // Delegate to messaging layer
+            if recipient.is_empty()
+                || recipient.len() > 256
+                || content.trim().is_empty()
+                || content.len() > MAX_WS_CONTENT_BYTES
+            {
+                let err = serde_json::to_string(&WsEvent::Error {
+                    code: "MESSAGE_LIMIT".into(),
+                    message: "Recipient or message content exceeds limits".into(),
+                })
+                .unwrap_or_default();
+                let _ = socket.send(Message::Text(err.into())).await;
+                return;
+            }
             let core = state.core.read().await;
+            if core.is_locked().await {
+                let err = serde_json::to_string(&WsEvent::Error {
+                    code: "IDENTITY_LOCKED".into(),
+                    message: "Unlock the active identity before sending messages".into(),
+                })
+                .unwrap_or_default();
+                let _ = socket.send(Message::Text(err.into())).await;
+                return;
+            }
             let sender = core.get_identity_id().await;
-            let msg = crate::core::message::Message::new(sender, recipient, content);
-            // core.send_message(msg) — wire when send_message is implemented
-            let _ = msg;
+            let msg = crate::core::message::Message::new(sender, recipient.clone(), content);
+            match core.send_direct_message(recipient, &msg).await {
+                Ok(_) => {
+                    let ack = serde_json::to_string(&WsEvent::Accepted {
+                        code: "ACCEPTED".into(),
+                        message_id: msg.id.to_string(),
+                        delivery: "receipt_pending".into(),
+                    })
+                    .unwrap_or_default();
+                    let _ = socket.send(Message::Text(ack.into())).await;
+                }
+                Err(e) => {
+                    let err = serde_json::to_string(&WsEvent::Error {
+                        code: "SEND_FAILED".into(),
+                        message: format!("Delivery failed: {}", e),
+                    })
+                    .unwrap_or_default();
+                    let _ = socket.send(Message::Text(err.into())).await;
+                }
+            }
         }
 
         WsCommand::Subscribe { events } => {
+            if events.len() > MAX_WS_SUBSCRIPTIONS
+                || events.iter().any(|event| {
+                    event.len() > MAX_WS_EVENT_NAME_BYTES
+                        || !ALLOWED_WS_EVENTS.iter().any(|allowed| allowed == event)
+                })
+            {
+                let err = serde_json::to_string(&WsEvent::Error {
+                    code: "SUBSCRIPTION_LIMIT".into(),
+                    message: "Subscription request exceeds limits".into(),
+                })
+                .unwrap_or_default();
+                let _ = socket.send(Message::Text(err.into())).await;
+                return;
+            }
             tracing::debug!("WS client subscribed to: {:?}", events);
         }
     }
@@ -296,4 +432,25 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ws_quota_rejects_commands_after_session_limit() {
+        let mut quota = WsQuota::new();
+        for _ in 0..MAX_WS_COMMANDS_PER_MINUTE {
+            assert!(quota.allow_command());
+        }
+        assert!(!quota.allow_command());
+    }
+
+    #[test]
+    fn ws_event_subscription_is_allowlisted() {
+        assert!(ALLOWED_WS_EVENTS.contains(&"core_event"));
+        assert!(ALLOWED_WS_EVENTS.contains(&"connection_request"));
+        assert!(!ALLOWED_WS_EVENTS.contains(&"arbitrary_private_event"));
+    }
 }

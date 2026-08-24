@@ -1,12 +1,17 @@
 use crate::core::encryption::{EncryptionManager, MessageType as EncMessageType};
-use crate::core::traffic_armor;
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
 use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
+use crate::core::traffic_armor;
 use anyhow::Result;
 // use async_trait::async_trait;
 use crate::core::username_discovery::UsernameDiscovery;
+use crate::core::world_discovery::{
+    advertisement_record_key, bounded_addresses, configured_network_id, discovery_topic,
+    private_endpoints_allowed, provider_record_key, SharedWorldDiscoveryHealth,
+    WorldDiscoveryAdvertisement, WorldDiscoveryHealth, MAX_TTL_SECS,
+};
 use base64::Engine;
 use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
@@ -21,14 +26,14 @@ use libp2p::{
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig},
     request_response::{self, Config as RequestResponseConfig, ProtocolSupport},
-    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
+    swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
     Multiaddr, PeerId,
 };
 use libp2p_webrtc as webrtc;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicUsize;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
@@ -41,6 +46,21 @@ const MAX_HOPS: u8 = 5;
 /// Maximum number of message IDs to track for deduplication
 const SEEN_MSGS_MAX: usize = 10_000;
 const IN_MEMORY_MSGS_MAX: usize = 5_000;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeshMdnsHealth {
+    pub enabled: bool,
+    pub discovered_total: usize,
+    pub expired_total: usize,
+    pub last_event_unix: u64,
+}
 
 pub enum MeshCommand {
     PutRecord {
@@ -74,6 +94,16 @@ pub enum MeshCommand {
     PublishToTopic {
         topic: String,
         data: Vec<u8>,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    PublishWorldDiscovery {
+        reply: oneshot::Sender<Result<()>>,
+    },
+    SetWorldDiscoveryProvider {
+        enabled: bool,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    RefreshWorldDiscoveryProviders {
         reply: oneshot::Sender<Result<()>>,
     },
     SendMessage {
@@ -114,23 +144,6 @@ pub struct MeshNode {
     pub threat_level: ThreatLevel,
 }
 
-/// Default bootstrap nodes for peer discovery. All are official, well-known libp2p/IPFS
-/// bootstrap nodes (bootstrap.libp2p.io pool and IPFS team–run node). Safe for production.
-/// See docs/LIBP2P_NETWORK_CONNECTIVITY.md for privacy notes.
-pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
-    // Original bootstrap.libp2p.io pool
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooP36J7RSRM8uXCc8p6Y74G56EPV45UFSy9Pr7T79F",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCUuY6vS7705XT5ZqUhc4G3n9PqEqH5D3S8Y8xYFSy9Pr",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMo6pXhvG2SFTkS5rTfyS28y2XbY3R7wF1pG4z5W",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWbeUUn9BR3pNDfB3zM9F136G9c6y6y2j9X6v4",
-    // Official IPFS/Kubo default bootstrap nodes (IPFS dev team)
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-];
-
 /// Mesh network topology
 #[derive(Debug, Clone, Serialize)]
 pub struct MeshTopology {
@@ -144,7 +157,7 @@ pub struct MeshBehaviour {
     pub gossipsub: Gossipsub,
     pub kad: Kad<MemoryStore>,
     pub identify: Identify,
-    pub mdns: Mdns,
+    pub mdns: Toggle<Mdns>,
     pub autonat: libp2p::autonat::Behaviour,
     pub relay: libp2p::relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
@@ -161,7 +174,9 @@ impl StealthTransport {
     pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
         Self {
             _provider: provider,
-            _inner: libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true)),
+            _inner: libp2p::tcp::tokio::Transport::new(
+                libp2p::tcp::Config::default().nodelay(true),
+            ),
         }
     }
 }
@@ -189,6 +204,14 @@ pub struct MeshTransport {
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
     _pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
+    mdns_discovered: Arc<AtomicUsize>,
+    mdns_expired: Arc<AtomicUsize>,
+    mdns_last_event: Arc<AtomicU64>,
+    mdns_enabled: bool,
+    discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    world_discovery_network_id: String,
+    world_discovery_enabled: bool,
+    world_discovery_health: SharedWorldDiscoveryHealth,
 }
 
 impl MeshTransport {
@@ -203,11 +226,19 @@ impl MeshTransport {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         _handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+        discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
     ) -> Result<Self> {
         let local_key = identity.keypair().ok_or_else(|| {
             anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
         })?;
         let local_peer_id = PeerId::from(local_key.public());
+        let world_discovery_network_id = configured_network_id();
+        crate::core::world_discovery::validate_network_id(&world_discovery_network_id)?;
+        let world_discovery_enabled = std::env::var_os("GHOSTWIRE_DISABLE_DISCOVERY").is_none();
+        let world_discovery_health = Arc::new(RwLock::new(WorldDiscoveryHealth::new(
+            world_discovery_enabled,
+            world_discovery_network_id.clone(),
+        )));
         // Use PeerId string as node_id (stable, unique, matches network identity)
         let node_id = local_peer_id.to_string();
 
@@ -275,7 +306,13 @@ impl MeshTransport {
         // Harden Kademlia: Increase replication and periodic refresh
         kad.set_mode(Some(libp2p::kad::Mode::Server));
 
-        let mdns = Mdns::new(MdnsConfig::default(), local_peer_id)?;
+        let mdns_enabled = std::env::var_os("GHOSTWIRE_TEST_DISABLE_MDNS").is_none();
+        let mdns = if mdns_enabled {
+            Some(Mdns::new(MdnsConfig::default(), local_peer_id)?)
+        } else {
+            tracing::info!("mDNS disabled by explicit test isolation policy");
+            None
+        };
 
         let autonat =
             libp2p::autonat::Behaviour::new(local_peer_id, libp2p::autonat::Config::default());
@@ -295,7 +332,7 @@ impl MeshTransport {
             gossipsub,
             identify,
             kad,
-            mdns,
+            mdns: mdns.into(),
             autonat,
             relay: relay_client,
             dcutr,
@@ -341,10 +378,18 @@ impl MeshTransport {
             mailbox_store: None,
             reliability,
             peer_health: Arc::new(crate::core::peer_health::PeerHealthTracker::new(
-                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(15),
                 std::time::Duration::from_secs(30),
             )),
             _pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
+            mdns_discovered: Arc::new(AtomicUsize::new(0)),
+            mdns_expired: Arc::new(AtomicUsize::new(0)),
+            mdns_last_event: Arc::new(AtomicU64::new(0)),
+            mdns_enabled,
+            discovery_directory,
+            world_discovery_network_id,
+            world_discovery_enabled,
+            world_discovery_health,
         })
     }
 
@@ -382,6 +427,24 @@ impl MeshTransport {
         // Listen on the specified address
         swarm.listen_on(listen_addr.clone())?;
 
+        // Explicit, opt-in test dial. This is deliberately environment-gated;
+        // production startup never dials an arbitrary address from the environment.
+        if let Ok(raw) = std::env::var("GHOSTWIRE_TEST_DIAL") {
+            for raw_addr in raw.split(',').map(str::trim).filter(|v| !v.is_empty()) {
+                match raw_addr.parse::<Multiaddr>() {
+                    Ok(addr) => {
+                        tracing::info!(address = %addr, "Dialing explicit test peer");
+                        if let Err(error) = swarm.dial(addr.clone()) {
+                            tracing::warn!(address = %addr, %error, "Explicit test peer dial failed");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(address = raw_addr, %error, "Invalid explicit test peer multiaddress")
+                    }
+                }
+            }
+        }
+
         // Subscribe to broadcast topic
         let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
@@ -391,13 +454,23 @@ impl MeshTransport {
 
         // Subscribe to shared DM topic (all DMs go here, content encrypted end-to-end)
         // Using a single topic avoids leaking recipient PeerId in gossipsub metadata
-        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+        let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
         swarm.behaviour_mut().gossipsub.subscribe(&dm_topic)?;
         tracing::info!("Subscribed to shared DM topic");
 
         let dtn_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
         swarm.behaviour_mut().gossipsub.subscribe(&dtn_topic)?;
         tracing::info!("Subscribed to DTN sync topic");
+
+        if self.world_discovery_enabled {
+            let discovery_topic =
+                IdentTopic::new(discovery_topic(&self.world_discovery_network_id));
+            swarm
+                .behaviour_mut()
+                .gossipsub
+                .subscribe(&discovery_topic)?;
+            tracing::info!(network_id = %self.world_discovery_network_id, topic = %discovery_topic, "Subscribed to GhostWire world-discovery topic");
+        }
 
         // Connect to bootstrap nodes
         for addr in &self.bootstrap_nodes {
@@ -413,6 +486,11 @@ impl MeshTransport {
                     .behaviour_mut()
                     .kad
                     .add_address(&peer_id, addr.clone());
+                if let Err(error) = swarm.dial(addr.clone()) {
+                    tracing::warn!(peer_id = %peer_id, address = %addr, %error, "Configured bootstrap dial failed");
+                } else {
+                    tracing::info!(peer_id = %peer_id, address = %addr, "Dialing configured GhostWire bootstrap");
+                }
             } else {
                 tracing::warn!("Bootstrap address missing PeerId: {}", addr);
             }
@@ -443,15 +521,26 @@ impl MeshTransport {
             dtn_store: self.dtn_store.clone(),
             mailbox_store: self.mailbox_store.clone(),
             completed_handshakes: std::collections::HashSet::new(),
+            pending_dials: std::collections::HashSet::new(),
             reliability: self.reliability.clone(),
             vector_clock: crate::core::vector_clock::VectorClock::new(),
             pending_messages: HashMap::new(),
             peer_health: self.peer_health.clone(),
             pending_pings: tokio::sync::Mutex::new(crate::core::peer_health::PendingPings::new()),
+            mdns_discovered: self.mdns_discovered.clone(),
+            mdns_expired: self.mdns_expired.clone(),
+            mdns_last_event: self.mdns_last_event.clone(),
+            discovery_directory: self.discovery_directory.clone(),
+            world_discovery_network_id: self.world_discovery_network_id.clone(),
+            world_discovery_enabled: self.world_discovery_enabled,
+            world_discovery_health: self.world_discovery_health.clone(),
+            world_discovery_sequence: 0,
             mixing_queue: Arc::new(crate::core::routing::mixing_delay::MixingQueue::new(
                 crate::core::routing::mixing_delay::MixingConfig::default(),
             )),
-            sphinx_secret: self.encryption_manager.x25519_secret()
+            sphinx_secret: self
+                .encryption_manager
+                .x25519_secret()
                 .ok_or_else(|| anyhow::anyhow!("X25519 secret not available for Sphinx"))?,
             mixing_tx: None,
             cover_rx,
@@ -514,6 +603,34 @@ impl MeshTransport {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
         rx.await?
+    }
+
+    pub async fn publish_world_discovery(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::PublishWorldDiscovery { reply: tx })
+            .await?;
+        rx.await?
+    }
+
+    pub async fn set_world_discovery_provider(&self, enabled: bool) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::SetWorldDiscoveryProvider { enabled, reply: tx })
+            .await?;
+        rx.await?
+    }
+
+    pub async fn refresh_world_discovery_providers(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::RefreshWorldDiscoveryProviders { reply: tx })
+            .await?;
+        rx.await?
+    }
+
+    pub async fn world_discovery_health(&self) -> WorldDiscoveryHealth {
+        self.world_discovery_health.read().await.clone()
     }
 
     /// Publish raw bytes to a Gossipsub topic.
@@ -665,12 +782,22 @@ struct MeshDriver {
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
     mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
     completed_handshakes: std::collections::HashSet<PeerId>,
+    /// PeerIDs with a dial currently in flight; owned by the mesh event loop.
+    pending_dials: std::collections::HashSet<PeerId>,
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     vector_clock: crate::core::vector_clock::VectorClock,
     /// Messages pending ACK — keyed by message ID, used for retry retransmission
     pending_messages: HashMap<Uuid, Message>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
     pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
+    mdns_discovered: Arc<AtomicUsize>,
+    mdns_expired: Arc<AtomicUsize>,
+    mdns_last_event: Arc<AtomicU64>,
+    discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    world_discovery_network_id: String,
+    world_discovery_enabled: bool,
+    world_discovery_health: SharedWorldDiscoveryHealth,
+    world_discovery_sequence: u64,
     /// Delay queue for Sphinx relay forwarding (timing-attack resistance)
     mixing_queue: Arc<crate::core::routing::mixing_delay::MixingQueue>,
     /// X25519 secret key for Sphinx packet processing
@@ -684,13 +811,22 @@ struct MeshDriver {
 impl MeshDriver {
     async fn run(mut self) {
         let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
-        if let Err(e) = self.swarm.behaviour_mut().gossipsub.subscribe(&sphinx_topic) {
+        if let Err(e) = self
+            .swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&sphinx_topic)
+        {
             tracing::warn!("Failed to subscribe to Sphinx topic: {}", e);
         } else {
-            tracing::info!("Subscribed to Sphinx topic: {}", crate::core::constants::SPHINX_TOPIC);
+            tracing::info!(
+                "Subscribed to Sphinx topic: {}",
+                crate::core::constants::SPHINX_TOPIC
+            );
         }
 
-        let (mixing_tx, mut mixing_rx) = mpsc::channel::<crate::core::routing::mixing_delay::QueuedSphinxPacket>(64);
+        let (mixing_tx, mut mixing_rx) =
+            mpsc::channel::<crate::core::routing::mixing_delay::QueuedSphinxPacket>(64);
         let drain_queue = self.mixing_queue.clone();
         {
             let tx_slot = self.mixing_tx.insert(mixing_tx);
@@ -699,13 +835,22 @@ impl MeshDriver {
 
         let mut retry_interval = tokio::time::interval(std::time::Duration::from_secs(5));
         retry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // ponytail: DTN housekeeping — purge expired bundles every 60s
         let mut dtn_purge_interval = tokio::time::interval(std::time::Duration::from_secs(60));
         dtn_purge_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut key_rotation_interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         key_rotation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut world_discovery_interval =
+            tokio::time::interval(std::time::Duration::from_secs(60));
+        world_discovery_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        if self.world_discovery_enabled {
+            let provider_key =
+                libp2p::kad::RecordKey::new(&provider_record_key(&self.world_discovery_network_id));
+            self.swarm.behaviour_mut().kad.get_providers(provider_key);
+            let _ = self.publish_world_discovery().await;
+        }
         loop {
             tokio::select! {
                 event = self.swarm.next() => {
@@ -756,6 +901,9 @@ impl MeshDriver {
                         }
                     }
                 }
+                _ = world_discovery_interval.tick() => {
+                    let _ = self.publish_world_discovery().await;
+                }
                 _ = key_rotation_interval.tick() => {
                     if let Some(enc) = Arc::get_mut(&mut self.encryption_manager) {
                         if let Err(e) = enc.rotate_keys_if_needed() {
@@ -767,7 +915,7 @@ impl MeshDriver {
                     self.forward_sphinx_packet(&ready_pkt.next_hop, &ready_pkt.packet_bytes).await;
                 }
                 Some(cover_frame) = self.cover_rx.recv() => {
-                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                     let cover = crate::core::wire_protocol::Frame::new(
                         crate::core::wire_protocol::FrameKind::CoverTraffic,
                         cover_frame.data,
@@ -859,7 +1007,10 @@ impl MeshDriver {
                 self.pending_get_queries.insert(query_id, reply);
             }
             MeshCommand::BroadcastMessage { mut message, reply } => {
-                self.vector_clock.increment(&crate::core::vector_clock::redact_node_id(&self.local_peer_id.to_string()));
+                self.vector_clock
+                    .increment(&crate::core::vector_clock::redact_node_id(
+                        &self.local_peer_id.to_string(),
+                    ));
                 message.vector_clock = self.vector_clock.clone();
 
                 let topic = IdentTopic::new(crate::core::constants::BROADCAST_TOPIC);
@@ -905,6 +1056,46 @@ impl MeshDriver {
                     .map_err(|e| anyhow::anyhow!("Publish error: {}", e));
                 let _ = reply.send(res);
             }
+            MeshCommand::PublishWorldDiscovery { reply } => {
+                let result = self.publish_world_discovery().await;
+                let _ = reply.send(result);
+            }
+            MeshCommand::SetWorldDiscoveryProvider { enabled, reply } => {
+                let key = libp2p::kad::RecordKey::new(&provider_record_key(
+                    &self.world_discovery_network_id,
+                ));
+                let result = if enabled {
+                    self.swarm
+                        .behaviour_mut()
+                        .kad
+                        .start_providing(key)
+                        .map(|_| ())
+                        .map_err(|e| anyhow::anyhow!("world discovery provider failed: {e:?}"))
+                } else {
+                    self.swarm.behaviour_mut().kad.stop_providing(&key);
+                    Ok(())
+                };
+                if result.is_ok() {
+                    let mut health = self.world_discovery_health.write().await;
+                    health.provider_active = enabled;
+                    health.state = if enabled {
+                        "provider_ready"
+                    } else if health.enabled {
+                        "ready"
+                    } else {
+                        "disabled"
+                    }
+                    .into();
+                }
+                let _ = reply.send(result);
+            }
+            MeshCommand::RefreshWorldDiscoveryProviders { reply } => {
+                let key = libp2p::kad::RecordKey::new(&provider_record_key(
+                    &self.world_discovery_network_id,
+                ));
+                self.swarm.behaviour_mut().kad.get_providers(key);
+                let _ = reply.send(Ok(()));
+            }
             MeshCommand::PublishUsername { reply } => {
                 let res = (|| -> Result<()> {
                     let identity = self._identity.clone();
@@ -949,8 +1140,33 @@ impl MeshDriver {
                 mut message,
                 reply,
             } => {
-                self.vector_clock.increment(&crate::core::vector_clock::redact_node_id(&self.local_peer_id.to_string()));
+                self.vector_clock
+                    .increment(&crate::core::vector_clock::redact_node_id(
+                        &self.local_peer_id.to_string(),
+                    ));
                 message.vector_clock = self.vector_clock.clone();
+
+                // Handshake installation is asynchronous. Do not attempt DM
+                // encryption during the short window between peer discovery
+                // and receipt of the peer's verified public key. Waiting is
+                // bounded and remains fail-closed if the key never arrives.
+                let key_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+                while !self.encryption_manager.has_peer_key(&recipient.to_string())
+                    && tokio::time::Instant::now() < key_deadline
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                if !self.encryption_manager.has_peer_key(&recipient.to_string()) {
+                    tracing::warn!(
+                        recipient = %recipient,
+                        "Direct-message encryption key not ready after bounded wait"
+                    );
+                    let _ = reply.send(Err(anyhow::anyhow!(
+                        "Recipient encryption key not ready for {}",
+                        recipient
+                    )));
+                    return;
+                }
 
                 let mut encrypted_msg = message.clone();
                 let use_ratchet = self
@@ -979,6 +1195,9 @@ impl MeshDriver {
                         .encrypt_message(&padded_content, &message.recipient, EncMessageType::Text)
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 };
+                if let Err(encryption_error) = enc_result.as_ref() {
+                    tracing::warn!(recipient = %recipient, error = %encryption_error, "Direct-message encryption failed before transport");
+                }
 
                 if let Ok(encrypted_content) = enc_result {
                     encrypted_msg.content = base64::engine::general_purpose::STANDARD
@@ -1004,10 +1223,7 @@ impl MeshDriver {
                         format!("encrypted:{}{}:{}", version_prefix, nonce_b64, sig_b64)
                     };
                 } else {
-                    tracing::warn!(
-                        "Failed to encrypt DM to {}, dropping message",
-                        recipient
-                    );
+                    tracing::warn!("Failed to encrypt DM to {}, dropping message", recipient);
                     let _ = reply.send(Err(anyhow::anyhow!(
                         "Encryption failed for DM to {}",
                         recipient
@@ -1052,8 +1268,14 @@ impl MeshDriver {
                         Ok(packet) => {
                             match bincode::serialize(&packet) {
                                 Ok(pkt_bytes) => {
-                                    let sphinx_topic = IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
-                                    match self.swarm.behaviour_mut().gossipsub.publish(sphinx_topic, pkt_bytes) {
+                                    let sphinx_topic =
+                                        IdentTopic::new(crate::core::constants::SPHINX_TOPIC);
+                                    match self
+                                        .swarm
+                                        .behaviour_mut()
+                                        .gossipsub
+                                        .publish(sphinx_topic, pkt_bytes)
+                                    {
                                         Ok(_) => {
                                             tracing::trace!(
                                                 "Sent DM via Sphinx ({} hops) to {}",
@@ -1084,7 +1306,7 @@ impl MeshDriver {
                 };
 
                 if !sent_via_sphinx {
-                    let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let topic = IdentTopic::new(crate::core::constants::topics::DM);
                     if let Err(e) = self
                         .swarm
                         .behaviour_mut()
@@ -1100,7 +1322,8 @@ impl MeshDriver {
                         if let Some(ref dtn_store) = self.dtn_store {
                             let destination =
                                 *blake3::hash(recipient.to_string().as_bytes()).as_bytes();
-                            let bundle = crate::core::dtn::bundle::DtnBundle::new(data, destination);
+                            let bundle =
+                                crate::core::dtn::bundle::DtnBundle::new(data, destination);
                             if dtn_store.store(bundle).await {
                                 tracing::trace!(
                                     "DTN fallback: message queued for epidemic delivery to {}",
@@ -1142,6 +1365,10 @@ impl MeshDriver {
                 address,
                 reply,
             } => {
+                // Keep the dial address book and the DHT routing table in sync.
+                // Kademlia knowledge alone does not guarantee that `swarm.dial(peer_id)`
+                // can resolve a usable address for the peer.
+                self.swarm.add_peer_address(peer_id, address.clone());
                 self.swarm
                     .behaviour_mut()
                     .kad
@@ -1154,21 +1381,66 @@ impl MeshDriver {
         }
     }
 
+    fn dial_peer_if_needed(
+        &mut self,
+        peer_id: PeerId,
+        address: Option<Multiaddr>,
+        source: &'static str,
+    ) {
+        if peer_id == self.local_peer_id {
+            tracing::debug!(%peer_id, source, "Dial suppressed for local peer");
+            return;
+        }
+        if self.swarm.is_connected(&peer_id) {
+            tracing::debug!(%peer_id, source, "Dial suppressed for already-connected peer");
+            return;
+        }
+        if !self.pending_dials.insert(peer_id) {
+            tracing::debug!(%peer_id, source, "Dial suppressed for in-flight peer");
+            return;
+        }
+        let result = match address {
+            Some(address) => self.swarm.dial(address),
+            None => self.swarm.dial(peer_id),
+        };
+        if let Err(error) = result {
+            self.pending_dials.remove(&peer_id);
+            tracing::debug!(%peer_id, source, %error, "Deduplicated dial start failed");
+        } else {
+            tracing::debug!(%peer_id, source, "Deduplicated dial started");
+        }
+    }
+
     async fn handle_swarm_event(&mut self, event: SwarmEvent<MeshBehaviourEvent>) {
         // Handle mDNS discovery — auto-connect to discovered peers
         if let SwarmEvent::Behaviour(MeshBehaviourEvent::Mdns(libp2p::mdns::Event::Discovered(
             peers,
         ))) = &event
         {
+            if std::env::var_os("GHOSTWIRE_TEST_DISABLE_MDNS").is_some() {
+                return;
+            }
+            self.mdns_discovered
+                .fetch_add(peers.len(), Ordering::Relaxed);
+            self.mdns_last_event.store(now_secs(), Ordering::Relaxed);
             for (peer_id, addr) in peers {
-                tracing::info!("mDNS discovered peer {} at {}", peer_id, addr);
+                tracing::info!(peer_id = %peer_id, address = %addr, "mDNS discovered peer");
+                self.discovery_directory
+                    .observe(
+                        peer_id.to_string(),
+                        None,
+                        [addr.to_string()],
+                        crate::core::discovery_directory::DiscoverySource::Mdns,
+                        now_secs(),
+                    )
+                    .await;
                 // Add to Kademlia routing table
                 self.swarm
                     .behaviour_mut()
                     .kad
                     .add_address(peer_id, addr.clone());
-                // Attempt to connect
-                let _ = self.swarm.dial(addr.clone());
+                // Attempt to connect, but never create duplicate physical connections.
+                self.dial_peer_if_needed(*peer_id, Some(addr.clone()), "mdns");
             }
             return;
         }
@@ -1177,24 +1449,50 @@ impl MeshDriver {
             peers,
         ))) = &event
         {
+            if std::env::var_os("GHOSTWIRE_TEST_DISABLE_MDNS").is_some() {
+                return;
+            }
+            self.mdns_expired.fetch_add(peers.len(), Ordering::Relaxed);
+            self.mdns_last_event.store(now_secs(), Ordering::Relaxed);
             for (peer_id, _addr) in peers {
-                tracing::info!("mDNS peer expired: {}", peer_id);
+                tracing::info!(peer_id = %peer_id, "mDNS peer expired");
+                let _ = self
+                    .discovery_directory
+                    .mark_reachability(
+                        &peer_id.to_string(),
+                        crate::core::discovery_directory::ReachabilityState::Unreachable,
+                    )
+                    .await;
             }
             return;
         }
 
         // Log connection events for debugging
+        if let SwarmEvent::NewListenAddr { address, .. } = &event {
+            if self.world_discovery_enabled {
+                tracing::info!(address = %address, "World discovery listener available; publishing signed presence");
+                let _ = self.publish_world_discovery().await;
+            }
+        }
         if let SwarmEvent::ConnectionEstablished {
             peer_id,
             num_established,
             ..
         } = &event
         {
+            self.pending_dials.remove(peer_id);
             tracing::info!(
                 "Connection established with {} ({} total)",
                 peer_id,
                 num_established
             );
+            let _ = self
+                .discovery_directory
+                .mark_reachability(
+                    &peer_id.to_string(),
+                    crate::core::discovery_directory::ReachabilityState::Reachable,
+                )
+                .await;
             let my_id = self._identity.id.clone();
             let my_pubkey = base64::engine::general_purpose::STANDARD
                 .encode(self.encryption_manager.get_public_key());
@@ -1260,7 +1558,7 @@ impl MeshDriver {
                 drop(bundles);
 
                 if !to_deliver.is_empty() {
-                    let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                    let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                     for bundle in &to_deliver {
                         let _ = self
                             .swarm
@@ -1279,10 +1577,15 @@ impl MeshDriver {
                 }
 
                 // Trigger epidemic sync handshake (bloom-filter exchange)
-                let handshake = crate::core::dtn::epidemic::DtnSyncHandshake::build(dtn_store).await;
+                let handshake =
+                    crate::core::dtn::epidemic::DtnSyncHandshake::build(dtn_store).await;
                 if let Ok(hs_bytes) = bincode::serialize(&handshake) {
                     let sync_topic = IdentTopic::new(crate::core::constants::DTN_SYNC_TOPIC);
-                    let _ = self.swarm.behaviour_mut().gossipsub.publish(sync_topic, hs_bytes);
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(sync_topic, hs_bytes);
                     tracing::debug!("DTN: published sync handshake to new peer {}", peer_id);
                 }
             }
@@ -1290,7 +1593,7 @@ impl MeshDriver {
             if let Some(ref mailbox) = self.mailbox_store {
                 if let Ok(deliveries) = mailbox.get_pending_deliveries(&peer_id.to_string()) {
                     if !deliveries.is_empty() {
-                        let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                        let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                         let mut delivered_ids = Vec::new();
                         for (msg_id, frame_bytes) in &deliveries {
                             if self
@@ -1316,6 +1619,17 @@ impl MeshDriver {
             }
         }
 
+        if let SwarmEvent::OutgoingConnectionError {
+            peer_id: Some(peer_id),
+            error,
+            ..
+        } = &event
+        {
+            if self.pending_dials.remove(peer_id) {
+                tracing::debug!(peer_id = %peer_id, %error, "Deduplicated dial failed");
+            }
+        }
+
         if let SwarmEvent::ConnectionClosed {
             peer_id,
             cause: Some(ref e),
@@ -1332,6 +1646,13 @@ impl MeshDriver {
             }
 
             self.peer_health.remove_peer(&peer_id.to_string()).await;
+            let _ = self
+                .discovery_directory
+                .mark_reachability(
+                    &peer_id.to_string(),
+                    crate::core::discovery_directory::ReachabilityState::Unreachable,
+                )
+                .await;
 
             if let Some(cache) = &self.peer_count_cache {
                 let count = self
@@ -1359,6 +1680,15 @@ impl MeshDriver {
                 info.agent_version,
                 info.protocols
             );
+            self.discovery_directory
+                .observe(
+                    peer_id.to_string(),
+                    None,
+                    info.listen_addrs.iter().map(|addr| addr.to_string()),
+                    crate::core::discovery_directory::DiscoverySource::Transport,
+                    now_secs(),
+                )
+                .await;
 
             let mut topo = self.topology.write().await;
             let entry = topo.entry(peer_id.to_string()).or_insert_with(|| MeshNode {
@@ -1388,6 +1718,23 @@ impl MeshDriver {
         )) = event
         {
             match result {
+                libp2p::kad::QueryResult::GetProviders(Ok(
+                    libp2p::kad::GetProvidersOk::FoundProviders { providers, .. },
+                )) => {
+                    for peer_id in providers {
+                        self.dial_peer_if_needed(peer_id, None, "kad_provider");
+                    }
+                }
+                libp2p::kad::QueryResult::GetProviders(Ok(
+                    libp2p::kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers },
+                )) => {
+                    for peer_id in closest_peers {
+                        self.dial_peer_if_needed(peer_id, None, "kad_closest");
+                    }
+                }
+                libp2p::kad::QueryResult::GetProviders(Err(error)) => {
+                    tracing::debug!(?error, "world discovery provider lookup failed");
+                }
                 libp2p::kad::QueryResult::GetRecord(Ok(libp2p::kad::GetRecordOk::FoundRecord(
                     record,
                 ))) => {
@@ -1406,6 +1753,15 @@ impl MeshDriver {
                                     username_record.username,
                                     username_record.peer_id
                                 );
+                                self.discovery_directory
+                                    .observe(
+                                        username_record.peer_id.to_string(),
+                                        None,
+                                        std::iter::empty::<String>(),
+                                        crate::core::discovery_directory::DiscoverySource::Dht,
+                                        now_secs(),
+                                    )
+                                    .await;
                             }
                         }
                     }
@@ -1437,9 +1793,15 @@ impl MeshDriver {
             },
         )) = event
         {
-            let _ = self
-                .handle_gossipsub_message(propagation_source, message_id, message)
-                .await;
+            if message.topic.as_str() == discovery_topic(&self.world_discovery_network_id) {
+                let _ = self
+                    .handle_world_discovery_message(propagation_source, message)
+                    .await;
+            } else {
+                let _ = self
+                    .handle_gossipsub_message(propagation_source, message_id, message)
+                    .await;
+            }
             return;
         }
 
@@ -1470,6 +1832,202 @@ impl MeshDriver {
         }
     }
 
+    async fn publish_world_discovery(&mut self) -> Result<()> {
+        if !self.world_discovery_enabled {
+            return Ok(());
+        }
+        let listeners: Vec<Multiaddr> = self.swarm.listeners().cloned().collect();
+        let allow_private = private_endpoints_allowed();
+        let mut addresses = bounded_addresses(listeners.clone(), allow_private);
+        // A wildcard listener is not a dialable advertisement. Project the
+        // actual interface addresses into the listener's TCP port so nodes
+        // can discover one another without manually exchanging addresses.
+        // Private LAN endpoints remain opt-in; Tailscale/global endpoints are
+        // admitted through the same bounded validator as explicit addresses.
+        if std::env::var("GHOSTWIRE_AUTO_EXTERNAL_ADDRESSES")
+            .map(|value| value != "0")
+            .unwrap_or(true)
+        {
+            let tcp_port = listeners.iter().find_map(|address| {
+                address.iter().find_map(|protocol| match protocol {
+                    libp2p::multiaddr::Protocol::Tcp(port) => Some(port),
+                    _ => None,
+                })
+            });
+            if let Some(tcp_port) = tcp_port {
+                if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+                    for (interface, ip) in interfaces {
+                        if interface == "lo" || ip.is_loopback() || ip.is_unspecified() {
+                            continue;
+                        }
+                        if ip.is_ipv4() {
+                            let raw = format!("/ip4/{}/tcp/{}", ip, tcp_port);
+                            if let Ok(address) = raw.parse::<Multiaddr>() {
+                                addresses.extend(bounded_addresses([address], allow_private));
+                            }
+                        } else {
+                            let raw = format!("/ip6/{}/tcp/{}", ip, tcp_port);
+                            if let Ok(address) = raw.parse::<Multiaddr>() {
+                                addresses.extend(bounded_addresses([address], allow_private));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(extra) = std::env::var("GHOSTWIRE_EXTERNAL_ADDRESS") {
+            for raw in extra
+                .split(',')
+                .map(str::trim)
+                .filter(|raw| !raw.is_empty())
+            {
+                if let Ok(address) = raw.parse::<Multiaddr>() {
+                    addresses.extend(bounded_addresses([address], private_endpoints_allowed()));
+                }
+            }
+        }
+        // The address bound applies to the aggregate advertisement, not each
+        // individual source. Preserve listener/interface preference, remove
+        // duplicates, and enforce the wire-level limit before signing.
+        let mut seen_addresses = HashSet::new();
+        addresses.retain(|address| seen_addresses.insert(address.clone()));
+        addresses.truncate(crate::core::world_discovery::MAX_ADDRESSES);
+        if addresses.is_empty() {
+            let mut health = self.world_discovery_health.write().await;
+            health.state = "waiting_for_listener".into();
+            return Ok(());
+        }
+        let public_key = self
+            ._identity
+            .public_key()
+            .ok_or_else(|| anyhow::anyhow!("identity locked; discovery advertisement withheld"))?;
+        self.world_discovery_sequence = self.world_discovery_sequence.saturating_add(1);
+        let issued_at = crate::core::world_discovery::now_secs();
+        let ad = WorldDiscoveryAdvertisement::unsigned(
+            self.world_discovery_network_id.clone(),
+            self.local_peer_id,
+            self._identity.did.clone(),
+            public_key.encode_protobuf(),
+            addresses,
+            self.world_discovery_sequence,
+            issued_at,
+            issued_at.saturating_add(MAX_TTL_SECS),
+            crate::core::world_discovery::default_capabilities(
+                self.world_discovery_health.read().await.provider_active,
+            ),
+        )
+        .sign_with(|bytes| self._identity.sign(bytes))?;
+        let bytes = ad.to_bytes()?;
+        let gossipsub_published = match self.swarm.behaviour_mut().gossipsub.publish(
+            IdentTopic::new(discovery_topic(&self.world_discovery_network_id)),
+            bytes.clone(),
+        ) {
+            Ok(_) => true,
+            Err(libp2p::gossipsub::PublishError::NoPeersSubscribedToTopic) => {
+                let mut health = self.world_discovery_health.write().await;
+                health.state = "waiting_for_peers".into();
+                health.last_error = None;
+                tracing::debug!(
+                    "World discovery advertisement signed but no GossipSub peers are available yet"
+                );
+                false
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "world discovery GossipSub publish failed: {error}"
+                ));
+            }
+        };
+        let record = libp2p::kad::Record {
+            key: libp2p::kad::RecordKey::new(&advertisement_record_key(
+                &self.world_discovery_network_id,
+                &self.local_peer_id.to_string(),
+            )),
+            value: bytes,
+            publisher: None,
+            expires: Some(std::time::Instant::now() + std::time::Duration::from_secs(MAX_TTL_SECS)),
+        };
+        let dht_published = self
+            .swarm
+            .behaviour_mut()
+            .kad
+            .put_record(record, libp2p::kad::Quorum::One)
+            .is_ok();
+        if !dht_published {
+            tracing::debug!(
+                "World discovery DHT store rejected the advertisement; it will be re-attempted"
+            );
+        }
+        let mut health = self.world_discovery_health.write().await;
+        if gossipsub_published && dht_published {
+            health.published_total = health.published_total.saturating_add(1);
+            health.last_published_unix = issued_at;
+        }
+        health.state = if !gossipsub_published || !dht_published {
+            "waiting_for_peers"
+        } else if health.provider_active {
+            "provider_ready"
+        } else {
+            "ready"
+        }
+        .into();
+        health.last_error = None;
+        Ok(())
+    }
+
+    async fn handle_world_discovery_message(
+        &mut self,
+        propagation_source: PeerId,
+        message: GossipsubMessage,
+    ) -> Result<()> {
+        let result = (|| -> Result<(WorldDiscoveryAdvertisement, PeerId)> {
+            let advertisement = WorldDiscoveryAdvertisement::from_bytes(&message.data)?;
+            let peer_id = advertisement.verify(
+                &self.world_discovery_network_id,
+                crate::core::world_discovery::now_secs(),
+                private_endpoints_allowed(),
+            )?;
+            Ok((advertisement, peer_id))
+        })();
+        let (advertisement, peer_id) = match result {
+            Ok(value) => value,
+            Err(error) => {
+                let mut health = self.world_discovery_health.write().await;
+                health.rejected_total = health.rejected_total.saturating_add(1);
+                health.last_error = Some(error.to_string());
+                tracing::debug!(%propagation_source, %error, "Rejected GhostWire world-discovery advertisement");
+                return Ok(());
+            }
+        };
+        let now = crate::core::world_discovery::now_secs();
+        self.discovery_directory
+            .observe(
+                peer_id.to_string(),
+                Some(advertisement.did.clone()),
+                advertisement.addresses.clone(),
+                crate::core::discovery_directory::DiscoverySource::GossipSub,
+                now,
+            )
+            .await;
+        for raw in &advertisement.addresses {
+            let Ok(mut address) = raw.parse::<Multiaddr>() else {
+                continue;
+            };
+            address.push(libp2p::multiaddr::Protocol::P2p(peer_id));
+            self.swarm
+                .behaviour_mut()
+                .kad
+                .add_address(&peer_id, address.clone());
+            self.dial_peer_if_needed(peer_id, Some(address), "world_discovery");
+        }
+        let mut health = self.world_discovery_health.write().await;
+        health.accepted_total = health.accepted_total.saturating_add(1);
+        health.last_received_unix = now;
+        health.candidate_count = self.discovery_directory.snapshot().await.len();
+        health.last_error = None;
+        Ok(())
+    }
+
     async fn handle_gossipsub_message(
         &mut self,
         peer_id: PeerId,
@@ -1486,7 +2044,7 @@ impl MeshDriver {
             return self.handle_dtn_sync(message).await;
         }
 
-        let is_dm_for_us = topic_str == crate::core::constants::DM_TOPIC;
+        let is_dm_for_us = topic_str == crate::core::constants::topics::DM;
         let is_dm_topic = is_dm_for_us;
 
         if !is_dm_for_us && !is_dm_topic && topic_str != crate::core::constants::BROADCAST_TOPIC {
@@ -1522,9 +2080,12 @@ impl MeshDriver {
                 if let Ok(ping) = frame.decode::<crate::core::wire_protocol::WirePing>() {
                     self.peer_health.record_activity(&peer_id.to_string()).await;
                     use crate::core::wire_protocol::{Frame, FrameKind, WirePong};
-                    let pong = WirePong { ts: ping.ts };
+                    let pong = WirePong {
+                        ts: ping.ts,
+                        seq: ping.seq,
+                    };
                     if let Ok(pong_frame) = Frame::encode(FrameKind::Pong, &pong) {
-                        let pong_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                        let pong_topic = IdentTopic::new(crate::core::constants::topics::DM);
                         let _ = self
                             .swarm
                             .behaviour_mut()
@@ -1598,7 +2159,7 @@ impl MeshDriver {
                 MAX_HOPS,
                 forwarded.recipient
             );
-            let relay_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+            let relay_topic = IdentTopic::new(crate::core::constants::topics::DM);
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &forwarded) {
                 let _ = self
@@ -1627,7 +2188,11 @@ impl MeshDriver {
             if payload_parts.len() >= 2 {
                 let nonce_b64 = payload_parts[0];
                 let sig_b64 = payload_parts[1];
-                let header_b64 = if is_ratchet && payload_parts.len() == 3 {
+                // Both v3 hybrid messages and v4 ratchet messages may carry
+                // an ML-KEM ciphertext/header. The sender includes it as the
+                // third payload segment; dropping it for v3 makes the receiver
+                // derive a different AEAD key and report a false decrypt failure.
+                let header_b64 = if payload_parts.len() == 3 {
                     Some(payload_parts[2].to_string())
                 } else {
                     None
@@ -1711,7 +2276,7 @@ impl MeshDriver {
 
             use crate::core::wire_protocol::{Frame, FrameKind};
             if let Ok(frame) = Frame::encode(FrameKind::Message, &ack_msg) {
-                let ack_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let ack_topic = IdentTopic::new(crate::core::constants::topics::DM);
                 let _ = self
                     .swarm
                     .behaviour_mut()
@@ -1729,10 +2294,11 @@ impl MeshDriver {
         peer_id: PeerId,
         message: GossipsubMessage,
     ) -> Result<()> {
-        let packet: crate::core::routing::sphinx::SphinxPacket = match bincode::deserialize(&message.data) {
-            Ok(p) => p,
-            Err(_) => return Ok(()),
-        };
+        let packet: crate::core::routing::sphinx::SphinxPacket =
+            match bincode::deserialize(&message.data) {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            };
 
         match crate::core::routing::sphinx::process_sphinx_packet(
             &packet,
@@ -1795,7 +2361,7 @@ impl MeshDriver {
 
             // Send bundles we have that they need
             if !bundles_to_send.is_empty() {
-                let dm_topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let dm_topic = IdentTopic::new(crate::core::constants::topics::DM);
                 for bundle in &bundles_to_send {
                     let _ = self
                         .swarm
@@ -1854,8 +2420,17 @@ impl MeshDriver {
                 pub_key_bytes.clone(),
                 key_type.clone(),
             );
-            self.encryption_manager
-                .add_peer_key(msg.sender.clone(), pub_key_bytes, key_type);
+            self.encryption_manager.add_peer_key(
+                msg.sender.clone(),
+                pub_key_bytes.clone(),
+                key_type,
+            );
+            // Make authenticated key readiness observable in the topology projection.
+            // Discovery/reachability alone must not imply trust, but a completed
+            // handshake should be reflected as verified peer metadata.
+            if let Some(node) = self.topology.write().await.get_mut(&peer_id.to_string()) {
+                node.public_key = pub_key_bytes.clone();
+            }
             tracing::info!(
                 "✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})",
                 peer_id,
@@ -1923,7 +2498,7 @@ impl MeshDriver {
         for msg_id in timed_out {
             if let Some(original) = self.pending_messages.get(&msg_id) {
                 let recipient = original.recipient.clone();
-                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let topic = IdentTopic::new(crate::core::constants::topics::DM);
 
                 let mut retransmit = original.clone();
                 retransmit.hops = 0;
@@ -1965,9 +2540,9 @@ impl MeshDriver {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u32;
-            let ping = WirePing { ts };
+            let ping = WirePing { ts, seq: 0 };
             if let Ok(frame) = Frame::encode(FrameKind::Ping, &ping) {
-                let topic = IdentTopic::new(crate::core::constants::DM_TOPIC);
+                let topic = IdentTopic::new(crate::core::constants::topics::DM);
                 if let Err(e) = self
                     .swarm
                     .behaviour_mut()
@@ -2006,6 +2581,7 @@ impl MeshManager {
         event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
         handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+        discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
     ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
@@ -2021,6 +2597,7 @@ impl MeshManager {
             event_bus,
             handshake_secret,
             reliability.clone(),
+            discovery_directory,
         )
         .await?;
 
@@ -2077,6 +2654,15 @@ impl MeshManager {
         self.transport.get_listeners().await
     }
 
+    pub fn mdns_health(&self) -> MeshMdnsHealth {
+        MeshMdnsHealth {
+            enabled: self.transport.mdns_enabled,
+            discovered_total: self.transport.mdns_discovered.load(Ordering::Relaxed),
+            expired_total: self.transport.mdns_expired.load(Ordering::Relaxed),
+            last_event_unix: self.transport.mdns_last_event.load(Ordering::Relaxed),
+        }
+    }
+
     pub async fn add_address(&self, peer_id: PeerId, address: Multiaddr) -> Result<()> {
         self.transport.add_address(peer_id, address).await
     }
@@ -2102,6 +2688,22 @@ impl MeshManager {
     }
 
     /// Publish username to DHT
+    pub async fn publish_world_discovery(&self) -> Result<()> {
+        self.transport.publish_world_discovery().await
+    }
+
+    pub async fn set_world_discovery_provider(&self, enabled: bool) -> Result<()> {
+        self.transport.set_world_discovery_provider(enabled).await
+    }
+
+    pub async fn refresh_world_discovery_providers(&self) -> Result<()> {
+        self.transport.refresh_world_discovery_providers().await
+    }
+
+    pub async fn world_discovery_health(&self) -> WorldDiscoveryHealth {
+        self.transport.world_discovery_health().await
+    }
+
     pub async fn publish_username(&mut self) -> Result<()> {
         self.transport.publish_username().await
     }

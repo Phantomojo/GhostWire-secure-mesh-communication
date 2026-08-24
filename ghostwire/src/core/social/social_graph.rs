@@ -149,6 +149,7 @@ pub struct SocialGraph {
     our_ed25519_pub: Vec<u8>,
     /// Channel to notify the UI of new requests
     notify_tx: tokio::sync::broadcast::Sender<SocialEvent>,
+    directory: Option<Arc<crate::core::discovery_directory::DiscoveryDirectory>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,8 +177,16 @@ impl SocialGraph {
             our_node_id,
             our_ed25519_pub,
             notify_tx: tx,
+            directory: None,
         };
         (graph, rx)
+    }
+
+    pub fn attach_directory(
+        &mut self,
+        directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    ) {
+        self.directory = Some(directory);
     }
 
     // ── Discovery ─────────────────────────────────────────────────────────────
@@ -189,6 +198,30 @@ impl SocialGraph {
 
         self.peers.write().await.insert(node_id, peer.clone());
 
+        if let Some(directory) = &self.directory {
+            let source = match &peer.discovered_via {
+                DiscoveryMethod::Mdns => crate::core::discovery_directory::DiscoverySource::Mdns,
+                DiscoveryMethod::DhtGossip => {
+                    crate::core::discovery_directory::DiscoverySource::Dht
+                }
+                DiscoveryMethod::ManualCode | DiscoveryMethod::QrScan => {
+                    crate::core::discovery_directory::DiscoverySource::Manual
+                }
+                DiscoveryMethod::Introduced { .. } => {
+                    crate::core::discovery_directory::DiscoverySource::Social
+                }
+            };
+            directory
+                .observe(
+                    peer.node_id.clone(),
+                    (!peer.did.is_empty()).then(|| peer.did.clone()),
+                    peer.multiaddrs.clone(),
+                    source,
+                    peer.last_seen,
+                )
+                .await;
+        }
+
         if is_new {
             let _ = self.notify_tx.send(SocialEvent::PeerDiscovered { peer });
         }
@@ -196,9 +229,22 @@ impl SocialGraph {
 
     /// Update a peer's online status
     pub async fn set_online(&self, node_id: &str, online: bool) {
+        let now = now_secs();
         if let Some(peer) = self.peers.write().await.get_mut(node_id) {
             peer.is_online = online;
-            peer.last_seen = now_secs();
+            peer.last_seen = now;
+        }
+        if let Some(directory) = &self.directory {
+            let _ = directory
+                .mark_reachability(
+                    node_id,
+                    if online {
+                        crate::core::discovery_directory::ReachabilityState::Seen
+                    } else {
+                        crate::core::discovery_directory::ReachabilityState::Unreachable
+                    },
+                )
+                .await;
         }
         let event = if online {
             SocialEvent::PeerOnline {
@@ -340,10 +386,8 @@ impl SocialGraph {
                 is_online: true,
             })
             .await;
-        } else {
-            if let Some(peer) = self.peers.write().await.get_mut(&request.from_node_id) {
-                peer.connection_state = ConnectionState::PendingInbound;
-            }
+        } else if let Some(peer) = self.peers.write().await.get_mut(&request.from_node_id) {
+            peer.connection_state = ConnectionState::PendingInbound;
         }
 
         let event = SocialEvent::ConnectionRequestReceived {
@@ -506,7 +550,10 @@ mod tests {
 
         graph.receive_request(request).await.unwrap();
 
-        // Should emit ConnectionRequestReceived
+        // Registering an unknown peer emits PeerDiscovered before the request
+        // event. Drain discovery and assert the terminal request notification.
+        let first_event = rx.try_recv().unwrap();
+        assert!(matches!(first_event, SocialEvent::PeerDiscovered { .. }));
         let event = rx.try_recv().unwrap();
         assert!(matches!(
             event,

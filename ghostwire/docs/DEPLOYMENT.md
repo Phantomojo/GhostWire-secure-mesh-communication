@@ -319,7 +319,7 @@ The mesh transport itself uses libp2p Noise encryption (end-to-end, authenticate
 - Ed25519 keypairs for peer authentication.
 - X25519 for key exchange.
 - PQCrypto ML-KEM (post-quantum) is available for key encapsulation.
-- Release signing: set `GHOSTWIRE_RELEASE_SIGNING_KEY_HEX` at build time.
+- Release verification: set `GHOSTWIRE_RELEASE_VERIFYING_KEY_HEX` at build time.
 
 ### Additional hardening
 

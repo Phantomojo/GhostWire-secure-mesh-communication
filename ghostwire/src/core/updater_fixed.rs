@@ -20,15 +20,20 @@ use anyhow::Result;
 use serde::Deserialize;
 use tracing::{info, warn};
 
-/// The public key used to sign Ghostwire release manifests.
-/// This is baked into the binary at compile time — no TOFU, no trust-on-update.
-/// REPLACE WITH YOUR ACTUAL RELEASE SIGNING KEY.
-const RELEASE_SIGNING_KEY: &[u8; 32] = &[
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PLACEHOLDER
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Replace before release
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-];
+/// Public Ed25519 key used to verify release manifests.
+///
+/// build.rs validates GHOSTWIRE_RELEASE_VERIFYING_KEY_HEX and injects only
+/// the public bytes under GHOSTWIRE_RELEASE_VERIFYING_KEY_BYTES. The private
+/// release-signing key must remain in the isolated release signer and must
+/// never be embedded in GhostWire or passed to rustc.
+const RELEASE_VERIFYING_KEY_HEX: Option<&str> =
+    option_env!("GHOSTWIRE_RELEASE_VERIFYING_KEY_BYTES");
 
+fn release_verifying_key() -> Option<[u8; 32]> {
+    let raw = RELEASE_VERIFYING_KEY_HEX?;
+    let decoded = hex::decode(raw).ok()?;
+    decoded.try_into().ok()
+}
 /// Update manifest published at MANIFEST_URL
 #[derive(Debug, Deserialize)]
 pub struct UpdateManifest {
@@ -83,9 +88,16 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
     // Download to temp file
     let temp_path = std::env::temp_dir().join("ghostwire-update.tmp");
 
-    let response = reqwest::get(&manifest.download_url)
+    let url = reqwest::Url::parse(&manifest.download_url)
+        .map_err(|e| anyhow::anyhow!("Invalid update URL: {}", e))?;
+    if url.scheme() != "https" {
+        anyhow::bail!("Refusing non-HTTPS update URL");
+    }
+    let response = reqwest::get(url)
         .await
-        .map_err(|e| anyhow::anyhow!("Download failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Download failed: {}", e))?
+        .error_for_status()
+        .map_err(|e| anyhow::anyhow!("Update download returned an error: {}", e))?;
 
     let bytes = response
         .bytes()
@@ -94,10 +106,11 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
 
     // Verify BLAKE3 hash before writing
     let actual_hash = hex::encode(blake3::hash(&bytes).as_bytes());
-    if actual_hash != manifest.binary_hash {
+    let expected_hash = manifest.binary_hash.trim().to_ascii_lowercase();
+    if expected_hash.len() != 64 || actual_hash != expected_hash {
         anyhow::bail!(
             "Binary hash mismatch — expected {}, got {}. Download may be corrupt or tampered.",
-            manifest.binary_hash,
+            expected_hash,
             actual_hash
         );
     }
@@ -144,22 +157,25 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
 }
 
 fn verify_manifest_signature(manifest: &UpdateManifest) -> bool {
-    let sig_bytes = match hex::decode(&manifest.signature) {
-        Ok(b) => b,
-        Err(_) => return false,
+    let verifying_key = match release_verifying_key() {
+        Some(key) => key,
+        None => {
+            warn!("Release public verification key is not configured or malformed; refusing automatic updates");
+            return false;
+        }
     };
-
+    let sig_bytes = match hex::decode(&manifest.signature) {
+        Ok(b) if b.len() == 64 => b,
+        _ => return false,
+    };
     let payload = format!(
         "{}{}{}",
         manifest.version, manifest.binary_hash, manifest.download_url
     );
-
-    // Verify Ed25519 signature
     use ring::signature::{UnparsedPublicKey, ED25519};
-    let pub_key = UnparsedPublicKey::new(&ED25519, RELEASE_SIGNING_KEY);
+    let pub_key = UnparsedPublicKey::new(&ED25519, verifying_key);
     pub_key.verify(payload.as_bytes(), &sig_bytes).is_ok()
 }
-
 async fn fetch_manifest() -> Result<UpdateManifest> {
     let resp = tokio::time::timeout(
         std::time::Duration::from_secs(10),

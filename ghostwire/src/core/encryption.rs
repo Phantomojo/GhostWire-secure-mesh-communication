@@ -9,6 +9,7 @@
 
 use crate::core::crl;
 use crate::core::double_ratchet;
+use crate::core::persistence_manager::PersistenceManager;
 use rand_core::OsRng;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -17,11 +18,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// ✅ NEW: Secure error types (no panic on invalid input)
 #[derive(Debug, thiserror::Error)]
@@ -111,9 +113,15 @@ impl KeyRotationAnnouncer for NoOpKeyRotationAnnouncer {
     fn announce_rotation(&self, _key_id: &str) {}
 }
 
+const USER_STATE_NAMESPACE: &str = "ghostwire/encryption-manager/v1";
+const USER_STATE_KEY: &str = "state";
+
 /// Enhanced encryption manager with advanced security features
 pub struct EncryptionManager {
+    /// Public metadata remains available while the profile is locked.
     key_pair: GhostKeyPair,
+    /// Private material is populated only after explicit user-keyed unlock.
+    private_key: Arc<Mutex<Option<Zeroizing<Vec<u8>>>>>,
     peer_keys: Arc<Mutex<HashMap<String, PeerKey>>>,
     rng: SystemRandom,
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
@@ -139,7 +147,7 @@ impl EncryptionManager {
     /// Extract the X25519 static secret for Sphinx packet processing.
     /// Returns None if the key pair is too short (legacy format).
     pub fn x25519_secret(&self) -> Option<x25519_dalek::StaticSecret> {
-        let pk = &self.key_pair.private_key;
+        let pk = self.private_key_snapshot().ok()?;
         if pk.len() < 34 {
             return None;
         }
@@ -154,7 +162,7 @@ impl EncryptionManager {
 
     /// Extract our X25519 public key bytes (32 bytes).
     pub fn x25519_public_key(&self) -> Option<[u8; 32]> {
-        let pk = &self.key_pair.private_key;
+        let pk = self.private_key_snapshot().ok()?;
         if pk.len() < 34 {
             return None;
         }
@@ -163,9 +171,8 @@ impl EncryptionManager {
         if pk.len() < start + 32 {
             return None;
         }
-        let secret = x25519_dalek::StaticSecret::from(
-            <[u8; 32]>::try_from(&pk[start..start + 32]).ok()?,
-        );
+        let secret =
+            x25519_dalek::StaticSecret::from(<[u8; 32]>::try_from(&pk[start..start + 32]).ok()?);
         Some(*x25519_dalek::PublicKey::from(&secret).as_bytes())
     }
 
@@ -173,21 +180,17 @@ impl EncryptionManager {
         let storage_path = Self::get_storage_path()?;
 
         if storage_path.exists() {
-            match Self::load_from_disk(&storage_path) {
-                Ok(manager) => {
-                    info!(
-                        "🔐 Loaded persistent encryption keys for key_id: {}",
-                        manager.key_pair.key_id
-                    );
-                    return Ok(manager);
-                }
-                Err(e) => {
-                    warn!(
-                        "⚠️ Failed to load encryption keys: {}. Rotating/Creating new.",
-                        e
-                    );
-                }
-            }
+            let manager = if Self::is_user_keyed() && !Self::master_key_path()?.exists() {
+                info!("🔒 Encryption private state is user-keyed and locked at startup");
+                Self::load_public_stub()?
+            } else {
+                Self::load_existing(&storage_path)?
+            };
+            info!(
+                "🔐 Loaded persistent encryption keys for key_id: {}",
+                manager.key_pair.key_id
+            );
+            return Ok(manager);
         }
 
         info!("🆕 Generating new persistent encryption keys...");
@@ -201,20 +204,7 @@ impl EncryptionManager {
 
         // Generate hybrid key pair (both Ed25519 and X25519)
         let key_pair = Self::generate_hybrid_key_pair(&rng)?;
-
-        Ok(EncryptionManager {
-            key_pair,
-            peer_keys: Arc::new(Mutex::new(HashMap::new())),
-            rng,
-            session_keys: Arc::new(Mutex::new(HashMap::new())),
-            key_rotation_interval: 86400 * 7, // 7 days
-            last_key_rotation: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            crl: Arc::new(crl::CrlStore::new()),
-            ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
-        })
+        Ok(Self::from_key_pair(key_pair))
     }
 
     fn get_storage_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
@@ -231,25 +221,131 @@ impl EncryptionManager {
         Ok(ghost_dir.join("encryption.json"))
     }
 
-    fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        // Use secure load
-        let persisted: PersistedEncryption = Self::secure_load(path)?;
+    /// Load an existing persistent encryption state without replacing it on failure.
+    /// A corrupt or undecryptable state is a recovery condition, not permission to
+    /// silently rotate the node's persistent encryption identity.
+    fn load_existing(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_from_disk(&path.to_path_buf())
+    }
 
-        let rng = SystemRandom::new();
-        // Reconstruct manager from persisted state
-        Ok(EncryptionManager {
-            key_pair: persisted.key_pair,
+    fn from_key_pair(key_pair: GhostKeyPair) -> Self {
+        let mut public = key_pair.clone();
+        let private = Zeroizing::new(key_pair.private_key.clone());
+        public.private_key.clear();
+        EncryptionManager {
+            key_pair: public,
+            private_key: Arc::new(Mutex::new(Some(private))),
             peer_keys: Arc::new(Mutex::new(HashMap::new())),
-            rng,
+            rng: SystemRandom::new(),
             session_keys: Arc::new(Mutex::new(HashMap::new())),
-            key_rotation_interval: persisted.key_rotation_interval,
-            last_key_rotation: persisted.last_key_rotation,
+            key_rotation_interval: 86400 * 7,
+            last_key_rotation: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
-        })
+        }
+    }
+
+    fn from_persisted(persisted: PersistedEncryption) -> Self {
+        let mut manager = Self::from_key_pair(persisted.key_pair);
+        manager.key_rotation_interval = persisted.key_rotation_interval;
+        manager.last_key_rotation = persisted.last_key_rotation;
+        manager
+    }
+
+    fn private_key_snapshot(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        self.private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))?
+            .as_ref()
+            .map(|key| key.to_vec())
+            .ok_or_else(|| "encryption private state is locked".into())
+    }
+
+    fn load_from_disk(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        let persisted: PersistedEncryption = Self::secure_load(path)?;
+        Ok(Self::from_persisted(persisted))
+    }
+
+    fn master_key_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            PathBuf::from(ghost_home)
+        } else {
+            dirs::home_dir().ok_or("No home dir")?.join(".ghostwire")
+        };
+        Ok(ghost_dir.join(cryptify::encrypt_string!("master.key")))
+    }
+
+    fn public_stub_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            PathBuf::from(ghost_home)
+        } else {
+            dirs::home_dir().ok_or("No home dir")?.join(".ghostwire")
+        };
+        std::fs::create_dir_all(&ghost_dir)?;
+        Ok(ghost_dir.join("encryption.user.public.json"))
+    }
+
+    fn load_public_stub() -> Result<Self, Box<dyn std::error::Error>> {
+        let path = Self::public_stub_path()?;
+        let mut persisted: PersistedEncryption = serde_json::from_slice(&std::fs::read(path)?)?;
+        persisted.key_pair.private_key.clear();
+        let mut manager = Self::from_persisted(persisted);
+        *manager
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? = None;
+        Ok(manager)
+    }
+
+    fn write_public_stub(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut persisted = self.persisted_state()?;
+        persisted.key_pair.private_key.clear();
+        let path = Self::public_stub_path()?;
+        let temp = path.with_extension("json.tmp");
+        let _ = std::fs::remove_file(&temp);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp)?;
+        file.write_all(&serde_json::to_vec_pretty(&persisted)?)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    }
+
+    pub fn activate_user_keyed(
+        &self,
+        persistence: &PersistenceManager,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let loaded = Self::load_user_keyed(persistence)?;
+        let private = loaded.private_key_snapshot()?;
+        *self
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? =
+            Some(Zeroizing::new(private));
+        Ok(())
+    }
+
+    /// Drop private encryption material from memory when the profile locks.
+    pub fn lock_private_state(&self) -> Result<(), Box<dyn std::error::Error>> {
+        *self
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? = None;
+        Ok(())
     }
 
     fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        if Self::is_user_keyed() {
+            return Err(
+                "machine master-key operations are disabled after user-key migration".into(),
+            );
+        }
         let ghost_dir =
             if let Ok(ghost_home) = std::env::var(cryptify::encrypt_string!("GHOSTWIRE_HOME")) {
                 std::path::PathBuf::from(ghost_home)
@@ -285,6 +381,92 @@ impl EncryptionManager {
             tracing::info!("🔑 Generated new Master Key for secure storage");
             Ok(key.to_vec())
         }
+    }
+
+    fn user_state_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let ghost_dir = if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
+            PathBuf::from(ghost_home)
+        } else {
+            dirs::home_dir()
+                .ok_or("Could not find home directory")?
+                .join(".ghostwire")
+        };
+        std::fs::create_dir_all(&ghost_dir)?;
+        Ok(ghost_dir.join("encryption.user.gwpe"))
+    }
+
+    fn persisted_state(&self) -> Result<PersistedEncryption, Box<dyn std::error::Error>> {
+        let mut key_pair = self.key_pair.clone();
+        key_pair.private_key = self.private_key_snapshot()?;
+        Ok(PersistedEncryption {
+            key_pair,
+            key_rotation_interval: self.key_rotation_interval,
+            last_key_rotation: self.last_key_rotation,
+        })
+    }
+
+    /// Re-wrap the EncryptionManager state under the already-unlocked user
+    /// PersistenceManager key. The legacy master.key remains intact during
+    /// compatibility migration so old readers cannot be bricked accidentally.
+    pub fn migrate_to_user_keyed(
+        &self,
+        persistence: &PersistenceManager,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        persistence
+            .ensure_user_unlocked()
+            .map_err(|e| format!("user persistence is locked: {e}"))?;
+        let needs_activation = self
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))?
+            .is_none();
+        if needs_activation {
+            self.activate_user_keyed(persistence)?;
+        }
+        let json = serde_json::to_vec(&self.persisted_state()?)?;
+        let wrapped = persistence
+            .encrypt_user_record(USER_STATE_NAMESPACE, USER_STATE_KEY, &json)
+            .map_err(|e| format!("user-keyed encryption state wrap failed: {e}"))?;
+        let path = Self::user_state_path()?;
+        let temp = path.with_extension("gwpe.tmp");
+        let _ = std::fs::remove_file(&temp);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp)?;
+        file.write_all(&wrapped)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, &path)?;
+        self.write_public_stub()?;
+        let master_key = Self::master_key_path()?;
+        if master_key.exists() {
+            std::fs::remove_file(master_key)?;
+        }
+        Ok(())
+    }
+
+    /// Load the user-keyed EncryptionManager state after the caller has
+    /// explicitly unlocked the profile. No machine master key is consulted.
+    pub fn load_user_keyed(
+        persistence: &PersistenceManager,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        persistence
+            .ensure_user_unlocked()
+            .map_err(|e| format!("user persistence is locked: {e}"))?;
+        let path = Self::user_state_path()?;
+        let wrapped = std::fs::read(path)?;
+        let json = persistence
+            .decrypt_user_record(USER_STATE_NAMESPACE, USER_STATE_KEY, &wrapped)
+            .map_err(|e| format!("user-keyed encryption state unwrap failed: {e}"))?;
+        let persisted: PersistedEncryption = serde_json::from_slice(&json)?;
+        Ok(Self::from_persisted(persisted))
+    }
+
+    pub fn is_user_keyed() -> bool {
+        Self::user_state_path()
+            .map(|path| path.exists())
+            .unwrap_or(false)
     }
 
     pub fn secure_save<T: Serialize>(
@@ -343,12 +525,7 @@ impl EncryptionManager {
 
     pub fn save_to_disk(&self) -> Result<(), Box<dyn std::error::Error>> {
         let path = Self::get_storage_path()?;
-        let persisted = PersistedEncryption {
-            key_pair: self.key_pair.clone(),
-            key_rotation_interval: self.key_rotation_interval,
-            last_key_rotation: self.last_key_rotation,
-        };
-
+        let persisted = self.persisted_state()?;
         Self::secure_save(&path, &persisted)?;
         Ok(())
     }
@@ -410,12 +587,18 @@ impl EncryptionManager {
     }
 
     fn generate_key_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
+        // Timestamp-only IDs collide when multiple fresh managers are created
+        // within one second. Keep the timestamp for observability, but bind a
+        // cryptographically random suffix so key IDs are unique in practice.
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        format!("key_{:x}", timestamp)
+        let mut random = [0u8; 8];
+        SystemRandom::new()
+            .fill(&mut random)
+            .expect("system RNG unavailable while generating key ID");
+        format!("key_{:x}_{}", timestamp, hex::encode(random))
     }
 
     pub fn get_public_key(&self) -> &[u8] {
@@ -442,6 +625,13 @@ impl EncryptionManager {
                 trust_score: 0.5, // Default trust score
             },
         );
+    }
+
+    /// Return whether a usable handshake key is currently available for a peer.
+    /// This is a presence check only; encryption still performs revocation,
+    /// derivation, PQC, AEAD, and signing checks.
+    pub fn has_peer_key(&self, peer_id: &str) -> bool {
+        self.peer_keys.lock().unwrap().contains_key(peer_id)
     }
 
     pub fn encrypt_message(
@@ -550,7 +740,7 @@ impl EncryptionManager {
             use pqcrypto_traits::kem::{Ciphertext as _, SecretKey as _};
 
             // Extract our Kyber Secret Key from private key blob
-            let priv_key_bytes = &self.key_pair.private_key;
+            let priv_key_bytes = self.private_key_snapshot()?;
             let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
             let pq_sk_bytes = &priv_key_bytes[2 + ed_len + 32..];
 
@@ -672,6 +862,116 @@ impl EncryptionManager {
         })
     }
 
+    /// Encrypt bytes with the machine-protected master key and caller-supplied AAD.
+    /// This is intended for authenticated persistence envelopes, not peer messaging.
+    pub fn encrypt_bytes_with_aad(
+        data: &[u8],
+        aad: &[u8],
+    ) -> Result<EncryptionResult, Box<dyn std::error::Error>> {
+        let master_key = Self::get_master_key()?;
+        Self::encrypt_with_xchacha20_aad(data, &master_key, aad)
+    }
+
+    /// Decrypt bytes with the machine-protected master key and caller-supplied AAD.
+    pub fn decrypt_bytes_with_aad(
+        ciphertext: &[u8],
+        nonce: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let master_key = Self::get_master_key()?;
+        Self::decrypt_with_xchacha20_aad(ciphertext, nonce, &master_key, aad)
+    }
+
+    /// Snapshot the legacy machine master key for compatibility migration.
+    /// New user-mode persistence must use a passphrase keyslot instead.
+    pub fn machine_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Self::get_master_key()
+    }
+
+    /// Encrypt bytes with an explicit caller-owned key and AAD.
+    /// The caller is responsible for key lifecycle and zeroization.
+    pub fn encrypt_bytes_with_key_aad(
+        data: &[u8],
+        key: &[u8],
+        aad: &[u8],
+    ) -> Result<EncryptionResult, Box<dyn std::error::Error>> {
+        Self::encrypt_with_xchacha20_aad(data, key, aad)
+    }
+
+    /// Decrypt bytes with an explicit caller-owned key and AAD.
+    pub fn decrypt_bytes_with_key_aad(
+        ciphertext: &[u8],
+        nonce: &[u8],
+        key: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Self::decrypt_with_xchacha20_aad(ciphertext, nonce, key, aad)
+    }
+
+    fn encrypt_with_xchacha20_aad(
+        data: &[u8],
+        key: &[u8],
+        aad: &[u8],
+    ) -> Result<EncryptionResult, Box<dyn std::error::Error>> {
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit, Payload},
+            XChaCha20Poly1305, XNonce,
+        };
+
+        if key.len() != 32 {
+            return Err("Key must be exactly 32 bytes for XChaCha20".into());
+        }
+
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let nonce_bytes = Self::generate_nonce();
+        let nonce = XNonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, Payload { msg: data, aad })
+            .map_err(|e| format!("XChaCha20 encryption with AAD failed: {}", e))?;
+
+        Ok(EncryptionResult {
+            ciphertext,
+            nonce: nonce_bytes.to_vec(),
+        })
+    }
+
+    fn decrypt_with_xchacha20_aad(
+        ciphertext: &[u8],
+        nonce: &[u8],
+        key: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit, Payload},
+            XChaCha20Poly1305, XNonce,
+        };
+
+        if key.len() != 32 {
+            return Err("Key must be exactly 32 bytes for XChaCha20".into());
+        }
+        if nonce.len() != 24 {
+            return Err("Nonce must be exactly 24 bytes for XChaCha20".into());
+        }
+        if ciphertext.len() < 16 {
+            return Err("Ciphertext too short".into());
+        }
+        if ciphertext.len() > 256 * 1024 * 1024 {
+            return Err("Ciphertext exceeds maximum allowed size".into());
+        }
+
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let nonce = XNonce::from_slice(nonce);
+        cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad,
+                },
+            )
+            .map_err(|_| "Decryption failed (authentication failed or corrupted data)".into())
+    }
+
     fn derive_session_key(
         &self,
         peer_id: &str,
@@ -698,7 +998,7 @@ impl EncryptionManager {
         let peer_x_pub = XPublicKey::from(x25519_peer_pub_bytes);
 
         // Our private key structure: [Ed25519 Len (2)] [Ed25519 PKCS8] [X25519 Private (32)]
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.private_key_snapshot()?;
         if priv_key_bytes.len() < 34 {
             return Err("Private key too short".into());
         }
@@ -751,7 +1051,9 @@ impl EncryptionManager {
     // Enhanced encryption method for CLI compatibility
     pub fn encrypt(&self, data: &[u8]) -> Vec<u8> {
         // Derive a strong 32-byte key from our key pair
-        let key = self.derive_cli_key();
+        let key = self
+            .derive_cli_key()
+            .unwrap_or_else(|error| panic!("CLI encryption unavailable: {}", error));
 
         match Self::encrypt_with_xchacha20(data, &key) {
             Ok(result) => {
@@ -771,17 +1073,14 @@ impl EncryptionManager {
     }
 
     // Derive a deterministic but unique 32-byte key for CLI operations
-    fn derive_cli_key(&self) -> Vec<u8> {
+    fn derive_cli_key(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         use ring::digest;
-
-        // Use SHA-256 to derive a 32-byte key from our keypair
         let mut ctx = digest::Context::new(&digest::SHA256);
         let domain = cryptify::encrypt_string!("GhostWire-CLI-v1");
-        ctx.update(domain.as_bytes()); // Domain separation
-        ctx.update(&self.key_pair.private_key[..]);
+        ctx.update(domain.as_bytes());
+        ctx.update(&self.private_key_snapshot()?[..]);
         ctx.update(&self.key_pair.public_key[..]);
-
-        ctx.finish().as_ref().to_vec()
+        Ok(ctx.finish().as_ref().to_vec())
     }
 
     // ✅ SECURE DECRYPTION: Returns Result instead of panic (DoS prevention)
@@ -796,7 +1095,9 @@ impl EncryptionManager {
         }
 
         // Derive the same key we used for encryption
-        let key = self.derive_cli_key();
+        let key = self
+            .derive_cli_key()
+            .map_err(|_| DecryptionError::DecryptionFailed)?;
 
         // Extract nonce and ciphertext
         let nonce = &data[..24];
@@ -812,7 +1113,7 @@ impl EncryptionManager {
     pub fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Use Ed25519 for signing
         // Extract plain Ed25519 PKCS8 bytes from binary hybrid key
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.private_key_snapshot()?;
         if priv_key_bytes.len() < 2 {
             return Err("Invalid private key length".into());
         }
@@ -881,10 +1182,22 @@ impl EncryptionManager {
     }
 
     pub fn rotate_keys_if_needed(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if Self::is_user_keyed() {
+            return Err(
+                "user-keyed encryption requires rotate_keys_if_needed_with_persistence".into(),
+            );
+        }
         if self.should_rotate_keys() {
             tracing::info!(msg = "Rotating encryption keys");
             let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
+            let private = Zeroizing::new(new_key_pair.private_key.clone());
             self.key_pair = new_key_pair;
+            self.key_pair.private_key.clear();
+            *self
+                .private_key
+                .lock()
+                .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? =
+                Some(private);
             self.last_key_rotation = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -893,6 +1206,34 @@ impl EncryptionManager {
             self.session_keys.lock().unwrap().clear();
             self.save_to_disk()?;
         }
+        Ok(())
+    }
+
+    /// Rotate and persist encryption keys through the user-keyed envelope.
+    pub fn rotate_keys_if_needed_with_persistence(
+        &mut self,
+        persistence: &PersistenceManager,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.should_rotate_keys() {
+            return Ok(());
+        }
+        persistence.ensure_user_unlocked()?;
+        tracing::info!(msg = "Rotating user-keyed encryption keys");
+        let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
+        let private = Zeroizing::new(new_key_pair.private_key.clone());
+        self.key_pair = new_key_pair;
+        self.key_pair.private_key.clear();
+        *self
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? =
+            Some(private);
+        self.last_key_rotation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        self.session_keys.lock().unwrap().clear();
+        self.migrate_to_user_keyed(persistence)?;
         Ok(())
     }
 
@@ -979,7 +1320,7 @@ impl EncryptionManager {
         shared_secret.copy_from_slice(&session_key);
 
         // Extract X25519 private key from hybrid key: [ed_len_u16][ed25519_pkcs8][x25519_32]
-        let priv_key_bytes = &self.key_pair.private_key;
+        let priv_key_bytes = self.private_key_snapshot()?;
         if priv_key_bytes.len() < 36 {
             return Err("Private key too short for X25519 extraction".into());
         }
@@ -1190,6 +1531,67 @@ mod tests {
 
         let decrypted = bob.decrypt_message(&encrypted).unwrap();
         assert_eq!(message, decrypted);
+    }
+
+    #[test]
+    fn corrupted_persistent_state_fails_closed_without_rotation() {
+        let path = std::env::temp_dir().join(format!(
+            "ghostwire-encryption-corrupt-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = b"corrupted-encryption-state";
+        std::fs::write(&path, original).unwrap();
+
+        let result = EncryptionManager::load_existing(&path);
+        assert!(result.is_err(), "corrupt persistent state must fail closed");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn user_keyed_rewrap_does_not_depend_on_machine_master_key() {
+        let home = tempfile::tempdir().unwrap();
+        let base = home.path().join("vault");
+        let persistence = std::sync::Arc::new(
+            crate::core::persistence_manager::PersistenceManager::new_with_base_dir_and_passphrase(
+                base,
+                Some("encryption-test".to_string()),
+                "encryption-test-passphrase",
+            )
+            .unwrap(),
+        );
+        let manager = EncryptionManager::create_new().unwrap();
+        manager.migrate_to_user_keyed(&persistence).unwrap();
+        assert!(EncryptionManager::is_user_keyed());
+    }
+
+    #[test]
+    fn user_keyed_restart_starts_public_only_until_explicit_activation() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("GHOSTWIRE_HOME", home.path());
+        let persistence =
+            crate::core::persistence_manager::PersistenceManager::new_with_base_dir_and_passphrase(
+                home.path().join("vault"),
+                Some("encryption-restart-test".to_string()),
+                "encryption-restart-passphrase",
+            )
+            .unwrap();
+        let manager = EncryptionManager::create_new().unwrap();
+        manager.save_to_disk().unwrap();
+        let key_id = manager.get_key_id();
+        manager.migrate_to_user_keyed(&persistence).unwrap();
+        assert!(!EncryptionManager::master_key_path().unwrap().exists());
+        assert!(EncryptionManager::public_stub_path().unwrap().exists());
+
+        let locked = EncryptionManager::load_or_create().unwrap();
+        assert_eq!(locked.get_key_id(), key_id);
+        assert!(locked.private_key_snapshot().is_err());
+        assert!(locked.sign_message(b"locked").is_err());
+        assert!(EncryptionManager::encrypt_bytes(b"machine-fallback").is_err());
+
+        locked.activate_user_keyed(&persistence).unwrap();
+        assert!(locked.private_key_snapshot().is_ok());
+        assert!(locked.sign_message(b"activated").is_ok());
     }
 
     #[test]

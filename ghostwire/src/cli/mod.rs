@@ -22,6 +22,8 @@ pub enum Commands {
     Init {
         #[arg(short = 'u', long)]
         username: Option<String>,
+        #[arg(long)]
+        start: bool,
     },
     /// Start the GhostWire node
     Start {
@@ -33,6 +35,9 @@ pub enum Commands {
         mesh_port: u16,
         #[arg(long)]
         web: bool,
+        /// Transport mode: hybrid, libp2p-only, reticulum-only
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
     },
     /// Send a message to a peer
     Send {
@@ -63,6 +68,9 @@ pub enum Commands {
     Connect {
         #[arg(short = 'u', long)]
         username: String,
+        /// Use anonymous introduction (SURB-based)
+        #[arg(long)]
+        anonymous: bool,
     },
     /// Manage GhostWire (start/stop/restart/status/logs/backup/restore)
     Manage {
@@ -138,15 +146,19 @@ async fn dispatch_cli_command(
     _config: &crate::config::Config,
 ) -> Result<()> {
     match command {
-        Commands::Init { username } => {
-            init_identity(core_arc, username).await?;
+        Commands::Init { username, start } => {
+            init_identity(core_arc, username, start).await?;
         }
         Commands::Start {
             host,
             port,
             mesh_port,
             web,
+            mode,
         } => {
+            if !mode.is_empty() {
+                info!("Transport mode: {}", mode);
+            }
             if web {
                 start_web_server(core_arc, host, port, mesh_port).await?;
             } else {
@@ -174,8 +186,15 @@ async fn dispatch_cli_command(
         Commands::Decrypt { encrypted } => {
             decrypt_message(core_arc, &encrypted).await?;
         }
-        Commands::Connect { username } => {
-            connect_by_username(core_arc, &username).await?;
+        Commands::Connect {
+            username,
+            anonymous,
+        } => {
+            if anonymous {
+                connect_anonymous(core_arc, &username).await?;
+            } else {
+                connect_by_username(core_arc, &username).await?;
+            }
         }
         Commands::Manage { subcommand } => {
             handle_manage(core_arc, subcommand).await?;
@@ -197,7 +216,7 @@ async fn dispatch_cli_command(
     Ok(())
 }
 
-async fn init_identity(core: &Arc<Core>, username: Option<String>) -> Result<()> {
+async fn init_identity(core: &Arc<Core>, username: Option<String>, auto_start: bool) -> Result<()> {
     info!("Initializing GhostWire identity...");
 
     let identity_id = core.get_identity_id().await;
@@ -212,6 +231,13 @@ async fn init_identity(core: &Arc<Core>, username: Option<String>) -> Result<()>
 
     if let Some(name) = username {
         println!("Username: {}", name);
+    }
+
+    if auto_start {
+        println!("\n🚀 Starting GhostWire node...");
+        start_node(core, "127.0.0.1".to_string(), 8080, 0).await?;
+    } else {
+        println!("\n💡 Run `ghostwire start` to begin mesh networking.");
     }
 
     Ok(())
@@ -274,8 +300,7 @@ pub async fn send_message(core: &Arc<Core>, recipient: &str, message: &str) -> R
     let mut final_recipient = recipient.to_string();
 
     // Resolve @username if provided
-    if recipient.starts_with('@') {
-        let username = &recipient[1..];
+    if let Some(username) = recipient.strip_prefix('@') {
         println!("🔍 Discovering peer for username: {}...", username);
 
         #[cfg(feature = "mesh")]
@@ -354,6 +379,90 @@ async fn connect_by_username(core: &Arc<Core>, username: &str) -> Result<()> {
         }
     } else {
         println!("❌ Mesh network not enabled.");
+    }
+
+    Ok(())
+}
+
+async fn connect_anonymous(core: &Arc<Core>, username: &str) -> Result<()> {
+    use crate::core::identity::anonymous_intro::generate_intro_invite;
+
+    let name = if username.starts_with('@') {
+        &username[1..]
+    } else {
+        username
+    };
+
+    println!("Generating anonymous introduction for {}...", name);
+
+    // Collect mesh peers as Sphinx relay nodes (minimum SPHINX_MIN_HOPS = 2)
+    let (route_keys, route_ids) = match core.get_mesh_topology().await {
+        Some(topology) => {
+            let peers: Vec<_> = topology
+                .nodes
+                .values()
+                .filter(|n| n.is_online && n.id != topology.local_node_id)
+                .take(3)
+                .collect();
+            if peers.len() < 2 {
+                println!(
+                    "Need at least 2 online peers as relay nodes, found {}.",
+                    peers.len()
+                );
+                return Ok(());
+            }
+            let keys: Vec<[u8; 32]> = peers
+                .iter()
+                .filter_map(|p| {
+                    if p.public_key.len() >= 32 {
+                        p.public_key[..32].try_into().ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let ids: Vec<String> = peers.iter().map(|p| p.id.clone()).collect();
+            (keys, ids)
+        }
+        None => {
+            println!("Mesh network not initialized. Start the node first.");
+            return Ok(());
+        }
+    };
+
+    let (ed25519_pub, nickname) = {
+        let id_lock = core.identity.read().await;
+        let key_bytes = id_lock.get_public_key();
+        let ed: [u8; 32] = key_bytes[..32]
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Ed25519 key not 32 bytes"))?;
+        (ed, id_lock.get_metadata().nickname.clone())
+    };
+
+    let x25519_pub: [u8; 32] = core
+        .encryption
+        .x25519_public_key()
+        .ok_or_else(|| anyhow::anyhow!("X25519 key not available"))?;
+
+    match generate_intro_invite(
+        &route_keys,
+        &route_ids,
+        ed25519_pub,
+        x25519_pub,
+        Some(nickname),
+    ) {
+        Ok(invite) => {
+            let invite_str = invite
+                .to_invite_string()
+                .map_err(|e| anyhow::anyhow!("Invite encode: {}", e))?;
+            println!("Anonymous introduction generated!");
+            println!("Invite string: {}", invite_str);
+            println!("Send this invite to {} through an anonymous channel.", name);
+            println!("   They can reply without knowing your identity.");
+        }
+        Err(e) => {
+            println!("Failed to generate introduction: {}", e);
+        }
     }
 
     Ok(())
@@ -697,7 +806,7 @@ async fn handle_setup() -> Result<()> {
 async fn run_tui_mode(core: &Arc<Core>) -> Result<()> {
     info!("🖥️  Starting GhostWire TUI (node running in background)...");
     let port = core.config.server.port;
-    crate::tui::run_tui(port, false)
+    crate::tui::run_tui(port)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {}", e))
 }

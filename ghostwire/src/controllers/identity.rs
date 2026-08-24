@@ -1,6 +1,6 @@
 use crate::api_v2_types::*;
 use crate::core::security_v2::{EntityType, ThreatLevel};
-use crate::web::AppState;
+use crate::web::{current_session_epoch, AppState, Claims, JWT_SECRET};
 use axum::http::StatusCode;
 use axum::{extract::State, response::IntoResponse, Json};
 use base64::{engine::general_purpose, Engine as _};
@@ -31,6 +31,8 @@ impl IdentityController {
             created_at: String,
             dht_published: bool,
             security_score: u8,
+            locked: bool,
+            has_identity: bool,
             setup_complete: bool,
         }
 
@@ -55,6 +57,8 @@ impl IdentityController {
             created_at: chrono::Utc::now().to_rfc3339(),
             dht_published: false,
             security_score,
+            locked: state.core.read().await.is_locked().await,
+            has_identity: true,
             setup_complete: metadata.setup_complete,
         };
 
@@ -69,13 +73,13 @@ impl IdentityController {
         tracing::info!(target: "identity_setup", "🔐 Identity setup request for: {}", req.nickname);
 
         // Validate input
-        if req.password.len() < 8 {
-            tracing::warn!(target: "identity_setup", "❌ Password too short: {} chars", req.password.len());
+        if req.password.as_bytes().len() < 12 {
+            tracing::warn!(target: "identity_setup", "❌ Passphrase too short: {} bytes", req.password.as_bytes().len());
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiV2Response::<()>::error(
                     StandardErrorCode::InvalidInput.as_str(),
-                    "Password must be at least 8 characters",
+                    "Passphrase must be at least 12 bytes",
                 )),
             )
                 .into_response();
@@ -83,21 +87,22 @@ impl IdentityController {
 
         let core = state.core.read().await;
 
-        tracing::info!(target: "identity_setup", "🔓 Attempting to unlock identity");
+        tracing::info!(target: "identity_setup", "🔓 Checking first-run identity state");
 
-        // 0. Unlock Identity using default password (required for first-time setup)
+        // The legacy handler used the hard-coded passphrase `ghostwire` to
+        // unlock a locked identity before replacing its encryption. That was
+        // unsafe and made setup fail on any hardened profile. Setup is now
+        // valid only for the fresh guest identity, which is already unlocked;
+        // locked users must use the named-profile creation flow instead.
         if core.is_locked().await {
-            if let Err(e) = core.unlock("ghostwire").await {
-                tracing::error!(target: "identity_setup", "❌ Failed to unlock: {}", e);
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ApiV2Response::<()>::error(
-                        StandardErrorCode::InvalidCredentials.as_str(),
-                        format!("Failed to unlock identity: {}", e),
-                    )),
-                )
-                    .into_response();
-            }
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InvalidCredentials.as_str(),
+                    "Active identity is locked; unlock it or create a named profile",
+                )),
+            )
+                .into_response();
         }
 
         // 1. Update Metadata (Nickname & Setup Complete flag)
@@ -119,9 +124,37 @@ impl IdentityController {
 
         tracing::info!(target: "identity_setup", "✅ Identity setup complete for {}", req.nickname);
 
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let claims = Claims {
+            sub: core.get_identity_id().await,
+            exp: (now + 60 * 60 * 24) as usize,
+            session_epoch: current_session_epoch(),
+        };
+        let token = match jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(JWT_SECRET.as_bytes()),
+        ) {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!(target: "identity_setup", error = %e, "Failed to issue setup session");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::InternalError.as_str(),
+                        "Identity secured but session issuance failed",
+                    )),
+                )
+                    .into_response();
+            }
+        };
         Json(ApiV2Response::success(serde_json::json!({
             "status": "identity_secured",
-            "nickname": req.nickname
+            "nickname": req.nickname,
+            "token": token
         })))
         .into_response()
     }
@@ -287,6 +320,26 @@ impl IdentityController {
         }
     }
 
+    /// POST /api/v2/profile/recover-legacy - Explicitly migrate a legacy
+    /// machine-sidecar identity. This is intentionally separate from normal
+    /// startup and must remain a local operator recovery action.
+    pub async fn recover_legacy_profile(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.recover_legacy_identity().await {
+            Ok(()) => Json(ApiV2Response::success(serde_json::json!({
+                "status": "recovered_and_migrated"
+            })))
+            .into_response(),
+            Err(error) => (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InvalidCredentials.as_str(),
+                    format!("Legacy identity recovery failed: {}", error),
+                )),
+            )
+                .into_response(),
+        }
+    }
     /// POST /api/v2/profile/unlock - Unlock profile with rate limiting and audit logging
     pub async fn unlock_profile(
         State(state): State<Arc<AppState>>,
@@ -348,9 +401,78 @@ impl IdentityController {
 
                 tracing::info!(target: "profile_unlock", "✅ Profile unlocked for user: {}", identity_id);
 
+                // Locked profiles skip MeshManager during Core construction. Build the
+                // manager in-place after unlock instead of rebuilding Core; the existing
+                // Core still owns the profile database lock and cannot be reconstructed
+                // safely while the request is running.
+                #[cfg(feature = "mesh")]
+                {
+                    if let Err(error) = core.initialize_mesh_after_unlock().await {
+                        tracing::error!(target: "profile_unlock", error = %error, "Failed to initialize mesh after profile unlock");
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(ApiV2Response::<()>::error(
+                                StandardErrorCode::InternalError.as_str(),
+                                "Profile unlocked but mesh initialization failed",
+                            )),
+                        )
+                            .into_response();
+                    }
+
+                    let mesh_host = state.config.mesh_host.clone();
+                    let mesh_port = state.config.mesh_port;
+                    let listen_addr = format!("/ip4/{}/tcp/{}", mesh_host, mesh_port);
+                    if let Err(error) = core.start_mesh(&listen_addr).await {
+                        tracing::error!(target: "profile_unlock", error = %error, "Failed to start mesh listener after profile unlock");
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(ApiV2Response::<()>::error(
+                                StandardErrorCode::InternalError.as_str(),
+                                "Profile unlocked but mesh listener failed to start",
+                            )),
+                        )
+                            .into_response();
+                    }
+                }
+
+                // Reticulum is an independent medium. Initialize it after the
+                // profile is unlocked, but do not make a broken optional RNS
+                // interface take down the working libp2p mesh.
+                #[cfg(feature = "reticulum")]
+                if core.config.network.reticulum_enabled {
+                    if let Err(error) = core.init_reticulum().await {
+                        tracing::warn!(target: "profile_unlock", error = %error, "Reticulum initialization degraded; libp2p mesh remains available");
+                    }
+                }
+
+                let expiration = now + 60 * 60 * 24;
+                let claims = Claims {
+                    sub: identity_id.clone(),
+                    exp: expiration as usize,
+                    session_epoch: current_session_epoch(),
+                };
+                let token = match jsonwebtoken::encode(
+                    &jsonwebtoken::Header::default(),
+                    &claims,
+                    &jsonwebtoken::EncodingKey::from_secret(JWT_SECRET.as_bytes()),
+                ) {
+                    Ok(token) => token,
+                    Err(e) => {
+                        tracing::error!(target: "profile_unlock", error = %e, "Failed to issue unlock session");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiV2Response::<()>::error(
+                                StandardErrorCode::InternalError.as_str(),
+                                "Identity unlocked but session issuance failed",
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
                 Json(ApiV2Response::success(serde_json::json!({
                     "status": "unlocked",
-                    "timestamp": now
+                    "timestamp": now,
+                    "token": token
                 })))
                 .into_response()
             }
