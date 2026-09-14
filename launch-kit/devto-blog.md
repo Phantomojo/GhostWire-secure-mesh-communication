@@ -38,7 +38,7 @@ If a node goes offline, the mesh routes around it. If the internet goes down,
 GhostWire switches to WiFi Direct, Bluetooth, or even LoRa radio.
 
 **Live site:** https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-**GitHub:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+**GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 
 ---
 
@@ -176,9 +176,9 @@ setup instructions.
 ## Links
 
 - **Website:** https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-- **GitHub:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
-- **Docs:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs
-- **Security:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/docs/SECURITY.md
+- **GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- **Docs:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs
+- **Security:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/docs/SECURITY.md
 
 ---
 

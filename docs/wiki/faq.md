@@ -33,4 +33,4 @@ See [Contributing](contributing.md) and join the community!
 ---
 
 ### Where can I get help or report bugs?
-Open an issue on [Codeberg](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues) or join Discord (coming soon).
+Open an issue on [GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication/issues) or join Discord (coming soon). 

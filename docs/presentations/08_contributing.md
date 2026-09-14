@@ -91,7 +91,7 @@ graph TD;
 ---
 
 ## 9. Further Reading & Resources
-- [GhostWire GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+- [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [Code of Conduct](../ghostwire/CODE_OF_CONDUCT.md)
 - [Open Source Guides](https://opensource.guide/)

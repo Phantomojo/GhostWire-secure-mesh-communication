@@ -22,7 +22,7 @@ const ROLES: Role[] = [
   { title: "Docs & Community", icon: BookOpen, desc: "Write technical documentation, tutorials, and the OpenAPI 3.1 spec. Triage issues, review PRs, welcome new contributors.", skills: ["technical writing", "Markdown", "Git", "dev relations"], firstIssues: "OpenAPI spec, install guide for Windows" },
 ];
 
-const GOOD_FIRST_ISSUES_URL = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22";
+const GOOD_FIRST_ISSUES_URL = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22";
 
 export function ContributorsSection() {
   const [showContributing, setShowContributing] = useState(false);

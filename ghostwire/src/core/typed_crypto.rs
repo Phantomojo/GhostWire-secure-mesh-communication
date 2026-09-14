@@ -106,8 +106,11 @@ impl TypedPublicKey {
         let kind = CryptoKind::from_tag(&tag)
             .ok_or_else(|| anyhow::anyhow!("Unknown crypto kind: {:?}", tag))?;
         let len = u32::from_le_bytes(bytes[4..8].try_into()?) as usize;
-        if bytes.len() < 8 + len {
-            anyhow::bail!("Wire key truncated: expected {} + 8 bytes", len);
+        if len == 0 {
+            anyhow::bail!("Wire key has zero length");
+        }
+        if bytes.len() != 8 + len {
+            anyhow::bail!("Wire key malformed: expected {} + 8 bytes", len);
         }
         Ok(Self {
             kind,
@@ -236,6 +239,13 @@ pub struct KeyBundle {
 
 impl KeyBundle {
     pub fn verify_self_consistent(&self) -> bool {
+        if self.ed25519_pub.kind != self.kind
+            || self.x25519_pub.kind != self.kind
+            || self.node_id.kind != self.kind
+            || self.mlkem_pub.as_ref().is_some_and(|k| k.kind != self.kind)
+        {
+            return false;
+        }
         let derived_id = NodeId::from_ed25519_pub(&self.ed25519_pub.key);
         derived_id == self.node_id
     }
@@ -310,5 +320,43 @@ mod tests {
             let recovered = CryptoKind::from_tag(&tag).unwrap();
             assert_eq!(recovered, kind);
         }
+    }
+
+    #[test]
+    fn wire_rejects_trailing_bytes() {
+        // Exact framing: trailing garbage after a valid frame must fail,
+        // otherwise concatenated frames desync or smuggle bytes.
+        let key = TypedPublicKey::new_gw0_ed25519(vec![0xBBu8; 32]);
+        let mut wire = key.to_wire();
+        wire.extend_from_slice(&[0xFF; 16]);
+        assert!(TypedPublicKey::from_wire(&wire).is_err());
+    }
+
+    #[test]
+    fn wire_rejects_empty_key() {
+        // An empty key must never parse into a usable identity.
+        let mut wire = Vec::new();
+        wire.extend_from_slice(b"GW00");
+        wire.extend_from_slice(&0u32.to_le_bytes());
+        assert!(TypedPublicKey::from_wire(&wire).is_err());
+    }
+
+    #[test]
+    fn bundle_kind_mismatch_is_inconsistent() {
+        // verify_self_consistent must catch cross-suite confusion:
+        // a GW1 key smuggled into a GW0 bundle must fail verification.
+        let ed = TypedPublicKey::new_gw0_ed25519(vec![0xAAu8; 32]);
+        let node_id = NodeId::from_ed25519_pub(&ed.key);
+        let mut x = TypedPublicKey::new_gw0_x25519(vec![0xBBu8; 32]);
+        x.kind = CryptoKind::GW1;
+        let bundle = KeyBundle {
+            kind: CryptoKind::GW0,
+            node_id,
+            ed25519_pub: ed,
+            x25519_pub: x,
+            mlkem_pub: None,
+            created_at: 0,
+        };
+        assert!(!bundle.verify_self_consistent());
     }
 }

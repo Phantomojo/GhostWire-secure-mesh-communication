@@ -252,6 +252,12 @@ impl MeshTransport {
         // Add relay transport for NAT traversal
         let (relay_transport, relay_client) = libp2p::relay::client::new(local_peer_id);
 
+        // WebSocket transport for Cloudflare-edge dialing (/ws locally, /wss
+        // via the edge which terminates TLS). Shares Noise+Yamux upgrade below.
+        let ws_tcp_transport =
+            libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true));
+        let ws_transport = libp2p::websocket::Config::new(ws_tcp_transport);
+
         // Add WebRTC transport for browser/P2P connectivity
         let webrtc_transport = webrtc::tokio::Transport::new(
             local_key.clone(),
@@ -264,6 +270,7 @@ impl MeshTransport {
         // Fallback to relay and WebRTC for NAT traversal
         let transport = tcp_transport
             .or_transport(relay_transport)
+            .or_transport(ws_transport)
             .upgrade(Version::V1)
             .authenticate(libp2p::noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -427,6 +434,23 @@ impl MeshTransport {
         // Listen on the specified address
         swarm.listen_on(listen_addr.clone())?;
 
+        // Opt-in WebSocket listener for Cloudflare Tunnel origin duty.
+        // Set GHOSTWIRE_WS_LISTEN=/ip4/127.0.0.1/tcp/4002/ws on the seed box;
+        // the Tunnel ingress forwards edge /wss to this local /ws listener.
+        // Unset = no behavior change.
+        if let Ok(raw_ws) = std::env::var("GHOSTWIRE_WS_LISTEN") {
+            match raw_ws.parse::<Multiaddr>() {
+                Ok(ws_addr) => {
+                    if let Err(e) = swarm.listen_on(ws_addr.clone()) {
+                        tracing::warn!("WS listen failed on {}: {}", ws_addr, e);
+                    } else {
+                        tracing::info!("Listening for WS origin traffic on {}", ws_addr);
+                    }
+                }
+                Err(_) => tracing::warn!("Ignoring bad GHOSTWIRE_WS_LISTEN: {}", raw_ws),
+            }
+        }
+
         // Explicit, opt-in test dial. This is deliberately environment-gated;
         // production startup never dials an arbitrary address from the environment.
         if let Ok(raw) = std::env::var("GHOSTWIRE_TEST_DIAL") {
@@ -496,8 +520,36 @@ impl MeshTransport {
             }
         }
 
-        let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);
-        let _traffic_armor = Arc::new(crate::core::traffic_armor::TrafficArmor::new(
+        // Opt-in relay reservation (circuit relay v2 client).
+        // GHOSTWIRE_RELAY=/ip4/<relay>/tcp/<port>/p2p/<relay-id>: listen on
+        // the relay's p2p-circuit address, which drives reservation + renewal
+        // through the relay client behaviour. Unset = no relay duty.
+        if let Ok(raw_relay) = std::env::var("GHOSTWIRE_RELAY") {
+            match raw_relay.trim().parse::<Multiaddr>() {
+                Ok(relay_addr) => {
+                    let circuit_addr = relay_addr.with(
+                        libp2p::multiaddr::Protocol::P2pCircuit,
+                    );
+                    match swarm.listen_on(circuit_addr.clone()) {
+                        Ok(_) => tracing::info!(
+                            "Requested relay reservation via {}",
+                            circuit_addr
+                        ),
+                        Err(e) => tracing::warn!(
+                            "Relay reservation listen failed on {}: {}",
+                            circuit_addr,
+                            e
+                        ),
+                    }
+                }
+                Err(_) => tracing::warn!(
+                    "Ignoring bad GHOSTWIRE_RELAY: {}",
+                    raw_relay
+                ),
+            }
+        }
+
+        let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);        let _traffic_armor = Arc::new(crate::core::traffic_armor::TrafficArmor::new(
             Some(cover_tx),
             crate::core::armor::DeviceTier::detect(),
         ));
@@ -702,8 +754,35 @@ impl MeshTransport {
         Ok(())
     }
 
-    pub fn add_bootstrap_nodes(&mut self, _nodes: Vec<Multiaddr>) {
-        tracing::warn!("Adding bootstrap nodes dynamically not supported in actor model yet");
+    pub fn add_bootstrap_nodes(&mut self, nodes: Vec<Multiaddr>) {
+        for addr in nodes {
+            let peer = addr.iter().find_map(|p| match p {
+                libp2p::multiaddr::Protocol::P2p(id) => Some(id),
+                _ => None,
+            });
+            match peer {
+                Some(peer_id) => {
+                    self.bootstrap_nodes.push(addr.clone());
+                    // Non-blocking handoff to the driver; actor model preserved.
+                    // Driver's AddAddress handler syncs swarm + Kademlia address books.
+                    let (tx, _rx) = oneshot::channel();
+                    if let Err(e) = self.command_tx.try_send(MeshCommand::AddAddress {
+                        peer_id,
+                        address: addr,
+                        reply: tx,
+                    }) {
+                        tracing::warn!("bootstrap AddAddress handoff failed: {}", e);
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        "bootstrap addr without /p2p/ peer id stored but not dialable: {}",
+                        addr
+                    );
+                    self.bootstrap_nodes.push(addr);
+                }
+            }
+        }
     }
 
     pub async fn publish_username(&mut self) -> Result<()> {
@@ -741,15 +820,26 @@ impl MeshTransport {
             .map(|(id, node)| (id.clone(), node.clone()))
             .collect();
 
+        // Direct single-hop routes for every known node. Multi-hop routing
+        // stays unimplemented until the DHT routing table feeds path discovery;
+        // callers must treat a one-entry route as direct-only, not as a path.
+        let routes = topo.keys().map(|id| (id.clone(), vec![id.clone()])).collect();
+
         MeshTopology {
             nodes,
-            routes: HashMap::new(),
+            routes,
             local_node_id: self.node_id.clone(),
         }
     }
 
-    pub fn find_route(&self, _target_node: &str) -> Option<Vec<String>> {
-        None
+    /// Direct-only route lookup against the known topology.
+    /// Returns `Some(single_hop)` when the target is a known node, `None`
+    /// otherwise. Multi-hop pathfinding is not implemented; the ticketing
+    /// for DHT-driven routes is tracked, not silently stubbed.
+    pub async fn find_route(&self, target_node: &str) -> Option<Vec<String>> {
+        let topo = self.topology.read().await;
+        topo.contains_key(target_node)
+            .then(|| vec![target_node.to_string()])
     }
 
     pub async fn update_connection_quality(&mut self, node_id: &str, quality: f32) {
@@ -1826,6 +1916,27 @@ impl MeshDriver {
                 }
                 request_response::Message::Response { response, .. } => {
                     debug!("Received chat response from {}: {}", peer, response.0);
+                }
+            }
+            return;
+        }
+        if let SwarmEvent::Behaviour(MeshBehaviourEvent::Relay(event)) = event {
+            use libp2p::relay::client::Event as RelayEvent;
+            match event {
+                RelayEvent::ReservationReqAccepted {
+                    relay_peer_id,
+                    renewal,
+                    ..
+                } => tracing::info!(
+                    "Relay reservation accepted by {} (renewal: {})",
+                    relay_peer_id,
+                    renewal
+                ),
+                RelayEvent::OutboundCircuitEstablished { relay_peer_id, .. } => {
+                    tracing::info!("Outbound circuit via relay {}", relay_peer_id)
+                }
+                RelayEvent::InboundCircuitEstablished { src_peer_id, .. } => {
+                    tracing::info!("Inbound circuit from {} via relay", src_peer_id)
                 }
             }
             return;

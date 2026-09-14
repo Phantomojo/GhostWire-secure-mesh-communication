@@ -568,14 +568,35 @@ impl ProfilesController {
             .into_response();
         }
         if !active_locked {
-            return (
-                StatusCode::CONFLICT,
-                Json(ApiV2Response::<()>::error(
-                    StandardErrorCode::ProfileLoadFailed.as_str(),
-                    "Lock the active profile before selecting another profile",
-                )),
-            )
-                .into_response();
+            // Fresh-daemon escape hatch: an unlocked active session with no
+            // persisted identity files means there is no vault to double-open,
+            // so the lock requirement is vacuous. Without this, a fresh node
+            // dead-ends on "lock first" with nothing to lock. Any persisted
+            // profile still requires the lock (fail-closed).
+            let any_persisted = fs::read_dir(Self::ghostwire_dir())
+                .map(|entries| {
+                    entries.filter_map(|e| e.ok()).any(|entry| {
+                        entry
+                            .file_name()
+                            .to_str()
+                            .map(|f| {
+                                (f.starts_with("identity_") && f.ends_with(".json"))
+                                    || f == "identity.json"
+                            })
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false);
+            if any_persisted {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::ProfileLoadFailed.as_str(),
+                        "Lock the active profile before selecting another profile",
+                    )),
+                )
+                    .into_response();
+            }
         }
 
         tracing::info!("Switching to profile: {:?}", profile_name);

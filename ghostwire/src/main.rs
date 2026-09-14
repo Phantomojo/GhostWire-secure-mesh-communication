@@ -42,6 +42,64 @@ use ghostwire::core::updater_fixed;
 use ghostwire::core::Core;
 use ghostwire::daemon;
 
+/// Fetch seed-hint peers from the Cloudflare bootstrap worker.
+///
+/// Contract (matches `cloudflare/bootstrap-worker`):
+/// `GET {base}/api/peers` -> `{peers: [{peer_id, multiaddrs[]}]}`.
+/// Records are UNTRUSTED discovery hints: every entry is validated here
+/// (peer ID parses, addr parses, /p2p/ suffix enforced) and anything the
+/// worker returns still passes the GhostWire handshake + local admission
+/// before application use. Fail-open: any error yields an empty list and
+/// the node continues in standalone/flag-configured mode.
+async fn fetch_worker_bootstrap_peers(base: &str) -> anyhow::Result<Vec<libp2p::Multiaddr>> {
+    #[derive(serde::Deserialize)]
+    struct PeerEntry {
+        peer_id: String,
+        multiaddrs: Vec<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct PeersResponse {
+        peers: Vec<PeerEntry>,
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let res = client
+        .get(format!("{}/api/peers", base))
+        .send()
+        .await?
+        .error_for_status()?;
+    let body: PeersResponse = res.json().await?;
+
+    let mut out = Vec::new();
+    for entry in body.peers {
+        let peer_id: libp2p::PeerId = match entry.peer_id.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                tracing::warn!("worker seed with bad peer_id ignored");
+                continue;
+            }
+        };
+        for addr in entry.multiaddrs {
+            match addr.parse::<libp2p::Multiaddr>() {
+                Ok(ma) => {
+                    let has_p2p = ma
+                        .iter()
+                        .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)));
+                    if has_p2p {
+                        out.push(ma);
+                    } else {
+                        out.push(ma.with(libp2p::multiaddr::Protocol::P2p(peer_id)));
+                    }
+                }
+                Err(_) => tracing::warn!("worker seed with bad multiaddr ignored"),
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Initialize logging with structured JSON output for production
 fn init_logging(filter: &str) {
     #[cfg(not(debug_assertions))]
@@ -547,6 +605,39 @@ async fn main() -> Result<()> {
     // If TAILSCALE=1, scan for GhostWire nodes on Tailscale network
     if std::env::var("TAILSCALE").unwrap_or_default() == "1" {
         tracing::info!("TAILSCALE=1 detected — scanning 100.64.0.0/10 for GhostWire peers");
+    }
+
+    // Cloudflare bootstrap workers (opt-in seed hints, never authority).
+    // GHOSTWIRE_BOOTSTRAP_WORKER_URLS: comma-separated independent rendezvous
+    // (different operators — same-domain entries add availability only, not
+    // privacy or eclipse resistance). Unset = standalone mode. Records from
+    // every source are untrusted hints: validated here, gated by the
+    // GhostWire handshake + local admission before any application use.
+    // Singular GHOSTWIRE_BOOTSTRAP_WORKER_URL still honored as a one-entry list.
+    let worker_urls: Vec<String> = std::env::var("GHOSTWIRE_BOOTSTRAP_WORKER_URLS")
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim_end_matches('/').to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let worker_urls: Vec<String> = if worker_urls.is_empty() {
+        std::env::var("GHOSTWIRE_BOOTSTRAP_WORKER_URL")
+            .map(|v| vec![v.trim_end_matches('/').to_string()])
+            .unwrap_or_default()
+    } else {
+        worker_urls
+    };
+    for base in &worker_urls {
+        match fetch_worker_bootstrap_peers(base).await {
+            Ok(addrs) => {
+                tracing::info!(worker = %base, seeds = addrs.len(), "Bootstrap worker supplied seed hints");
+                bootstrap_multiaddrs.extend(addrs);
+            }
+            Err(e) => tracing::warn!(worker = %base, "Bootstrap worker unreachable, continuing: {}", e),
+        }
     }
 
     // Set mesh size for gossipsub config (read by hardened_gossipsub_config)

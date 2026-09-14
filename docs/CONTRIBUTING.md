@@ -81,7 +81,7 @@ git clone https://github.com/YOUR_USERNAME/GhostWire-secure-mesh-communication.g
 cd GhostWire-secure-mesh-communication
 
 # Add the original repository as upstream
-git remote add upstream https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
+git remote add upstream https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
 ```
 
 ### **2. Setup Development Environment**
@@ -404,10 +404,10 @@ Add mockups or wireframes
 ## 📞 **Getting Help**
 
 ### **Resources**
-- **Codeberg issues** - [Report bugs or ask questions](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues)
-- **Codeberg discussions** - [Join the community](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
-- **Documentation** - [Read the docs](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/wiki)
-- **Code Examples** - [Look at existing code](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/webui/src)
+- **GitHub Issues** - [Report bugs or ask questions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
+- **GitHub Discussions** - [Join the community](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
+- **Documentation** - [Read the docs](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)
+- **Code Examples** - [Look at existing code](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/webui/src)
 
 ### **Contact**
 - **Maintainers** - @Phantomojo and the core team
@@ -430,7 +430,7 @@ Your contributions help make GhostWire the best peer-to-peer communication syste
 
 **🎯 Ready to contribute? Start by forking the repository and running `./launch-ghostwire-working.sh` to see all the working buttons!**
 
-[![Fork on GitHub](https://img.shields.io/github/forks/Phantomojo/GhostWire-secure-mesh-communication?style=social&label=Fork)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/network)
-[![Star on GitHub](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social&label=Star)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/stargazers)
+[![Fork on GitHub](https://img.shields.io/github/forks/Phantomojo/GhostWire-secure-mesh-communication?style=social&label=Fork)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/network)
+[![Star on GitHub](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social&label=Star)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
 
 </div> 

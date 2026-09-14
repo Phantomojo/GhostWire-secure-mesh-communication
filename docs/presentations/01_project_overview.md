@@ -134,7 +134,7 @@ A: Absolutely! See the Contributing chapter.
 
 ## 9. Further Reading & Resources
 
-- [GhostWire GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+- [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
 - [Mesh Networking 101](https://en.wikipedia.org/wiki/Mesh_networking)
 - [Briar Project](https://briarproject.org/)
 - [Meshtastic](https://meshtastic.org/)

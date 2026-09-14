@@ -69,7 +69,7 @@ Each layer is specified independently. Implementations MAY support any subset of
 ## Reference Implementation
 
 The canonical reference implementation is written in Rust and maintained at:
-- **Repository:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+- **Repository:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 - **Crate:** `ghostwire` (published to crates.io)
 - **License:** AGPL-3.0-or-later (application) / MIT+Apache-2.0 (library crates)
 

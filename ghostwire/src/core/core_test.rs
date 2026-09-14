@@ -9,6 +9,7 @@ fn test_profile(name: &str) -> Option<String> {
 
 #[tokio::test]
 async fn test_core_transport_switching() {
+    let _home = crate::core::encryption::test_home();
     let config = Config::default();
     let bootstrap_nodes = Vec::new();
     let profile = test_profile("transport_switching");
@@ -73,6 +74,7 @@ async fn test_core_send_message_via_active_transport() {
 
 #[tokio::test]
 async fn test_core_clone_shares_active_transport() {
+    let _home = crate::core::encryption::test_home();
     let config = Config::default();
     let profile = test_profile("clone_shares");
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();

@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/ghostwire-dtn.svg)](https://crates.io/crates/ghostwire-dtn)
 [![Documentation](https://docs.rs/ghostwire-dtn/badge.svg)](https://docs.rs/ghostwire-dtn)
-[![License](https://img.shields.io/crates/l/ghostwire-dtn)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+[![License](https://img.shields.io/crates/l/ghostwire-dtn)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication)
 
 Delay-Tolerant Networking with Spray-and-Wait + PRoPHET epidemic routing.
 

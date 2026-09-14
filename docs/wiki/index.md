@@ -29,7 +29,7 @@ It supports multiple transports (Bluetooth, WiFi, LoRa, WebRTC, TCP/IP), protoco
 
 ## 🌐 Community
 
-- [GitHub Repo](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+- [GitHub Repo](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
 - [Discord (coming soon)](#)
 - [Docs Home](../index.html)
 

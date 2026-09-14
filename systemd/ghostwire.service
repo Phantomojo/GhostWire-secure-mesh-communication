@@ -1,6 +1,6 @@
 [Unit]
 Description=GhostWire Secure Mesh Networking Service
-Documentation=https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+Documentation=https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 After=network.target docker.service
 Requires=docker.service
 

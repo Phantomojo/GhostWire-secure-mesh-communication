@@ -42,7 +42,7 @@
 ### Tuesday (Hacker News + Dev.to)
 - [ ] **7:00 AM PT** — Submit to Hacker News (Show HN)
   - Title: `Show HN: GhostWire – Decentralized mesh communication in Rust`
-  - URL: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+  - URL: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
   - Post first comment (from hacker-news.md)
 - [ ] **8:00 AM PT** — Publish Dev.to blog article
   - Title: "Building a Decentralized Mesh Network in Rust — Lessons from the Global South"
@@ -128,7 +128,7 @@
 
 ## Quick Links
 
-- **Repo:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+- **Repo:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 - **Website:** https://phantomojo.github.io/GhostWire-secure-mesh-communication/
-- **Docs:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs
+- **Docs:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs
 - **Launch Kit:** /launch-kit/ (this directory)

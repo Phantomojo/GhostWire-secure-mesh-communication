@@ -9,7 +9,8 @@ use tracing::debug;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-const MAX_SKIP: u32 = 200;
+const MAX_SKIP: u32 = 1000;
+const MAX_SKIPPED_KEYS: usize = 1000;
 const KEY_LEN: usize = 32;
 
 #[derive(Clone)]
@@ -195,7 +196,29 @@ impl RatchetState {
     }
 
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>, String> {
+        let snapshot = self.clone();
+        let result = self.decrypt_inner(msg);
+        if result.is_err() {
+            *self = snapshot;
+        }
+        result
+    }
+
+    fn decrypt_inner(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>, String> {
+        if let Some(index) = self.skipped_message_keys.iter().position(|sk| {
+            sk.dh_public == msg.header.dh_public && sk.message_number == msg.header.message_number
+        }) {
+            let skipped = self.skipped_message_keys.remove(index);
+            let key: [u8; KEY_LEN] = skipped
+                .key
+                .as_slice()
+                .try_into()
+                .map_err(|_| "Invalid skipped message key len")?;
+            return Self::decrypt_with_key(&key, msg);
+        }
+
         if msg.header.dh_public != self.dh_remote_public {
+            self.drain_old_chain(msg.header.previous_chain_length)?;
             self.dh_ratchet_step(&msg.header.dh_public)?;
         }
 
@@ -213,12 +236,16 @@ impl RatchetState {
         self.receiving_chain_key = output.chain_key.to_vec();
         self.receiving_message_number = msg.header.message_number + 1;
 
+        Self::decrypt_with_key(&output.message_key, msg)
+    }
+
+    fn decrypt_with_key(message_key: &[u8; KEY_LEN], msg: &RatchetMessage) -> Result<Vec<u8>, String> {
         use chacha20poly1305::{
             aead::{Aead, KeyInit},
             XChaCha20Poly1305, XNonce,
         };
 
-        let cipher = XChaCha20Poly1305::new(output.message_key.as_slice().into());
+        let cipher = XChaCha20Poly1305::new(message_key.as_slice().into());
         let plaintext = cipher
             .decrypt(XNonce::from_slice(&msg.nonce), msg.ciphertext.as_slice())
             .map_err(|e| format!("Decrypt failed: {}", e))?;
@@ -248,6 +275,9 @@ impl RatchetState {
         let remote_pub = XPublicKey::from(remote_bytes);
 
         let dh_output = our_secret.diffie_hellman(&remote_pub);
+        if dh_output.as_bytes() == &[0u8; 32] {
+            return Err("Non-contributory DH output rejected".into());
+        }
 
         let mut root_key_bytes = [0u8; KEY_LEN];
         root_key_bytes.copy_from_slice(&self.root_key);
@@ -264,6 +294,9 @@ impl RatchetState {
         let new_secret = StaticSecret::from(new_secret_bytes);
 
         let dh_output_send = new_secret.diffie_hellman(&remote_pub);
+        if dh_output_send.as_bytes() == &[0u8; 32] {
+            return Err("Non-contributory DH output rejected".into());
+        }
 
         let (new_root_key2, sending_chain_key) = kdf_rk(&new_root_key, dh_output_send.as_bytes());
 
@@ -278,6 +311,51 @@ impl RatchetState {
 
         debug!("DH ratchet step completed");
         Ok(())
+    }
+
+    fn drain_old_chain(&mut self, previous_chain_length: u32) -> Result<(), String> {
+        if self.receiving_chain_key.is_empty() {
+            return Ok(());
+        }
+        if previous_chain_length <= self.receiving_message_number {
+            return Ok(());
+        }
+        let skip_count = previous_chain_length - self.receiving_message_number;
+        if skip_count > MAX_SKIP {
+            return Err(format!(
+                "Previous chain too far ahead: {} (max skip: {})",
+                skip_count, MAX_SKIP
+            ));
+        }
+
+        let mut chain_key: [u8; KEY_LEN] = self
+            .receiving_chain_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| "Invalid chain key")?;
+
+        for i in 0..skip_count {
+            let n = self.receiving_message_number + i;
+            let output = kdf_chain(&chain_key, &n.to_le_bytes());
+
+            self.skipped_message_keys.push(SkippedKey {
+                dh_public: self.dh_remote_public.clone(),
+                message_number: n,
+                key: output.message_key.to_vec(),
+            });
+
+            chain_key = output.chain_key;
+        }
+
+        self.receiving_chain_key = chain_key.to_vec();
+        self.enforce_skipped_key_cap();
+        Ok(())
+    }
+
+    fn enforce_skipped_key_cap(&mut self) {
+        while self.skipped_message_keys.len() > MAX_SKIPPED_KEYS {
+            self.skipped_message_keys.remove(0);
+        }
     }
 
     fn try_skip_messages(&mut self, msg: &RatchetMessage) -> Result<(), String> {
@@ -312,6 +390,7 @@ impl RatchetState {
             }
 
             self.receiving_chain_key = chain_key.to_vec();
+            self.enforce_skipped_key_cap();
         }
 
         if msg_num < self.receiving_message_number {
@@ -569,5 +648,106 @@ mod tests {
 
         let result = bob.decrypt(&msg);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_out_of_order_within_window() {
+        let alice_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_pub = XPublicKey::from(&bob_secret);
+
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        let mut alice = RatchetState::init_alice(shared.as_bytes(), bob_pub.as_bytes());
+        let mut bob = RatchetState::init_bob(shared.as_bytes(), bob_secret.as_bytes());
+
+        let m0 = alice.encrypt(b"msg zero").unwrap();
+        let m1 = alice.encrypt(b"msg one").unwrap();
+        let m2 = alice.encrypt(b"msg two").unwrap();
+
+        // Deliver out of order: m2 first (stores skipped keys for m0, m1),
+        // then m0 and m1 must decrypt from the skipped-key store.
+        let p2 = bob.decrypt(&m2).unwrap();
+        assert_eq!(p2, b"msg two");
+        let p0 = bob.decrypt(&m0).unwrap();
+        assert_eq!(p0, b"msg zero");
+        let p1 = bob.decrypt(&m1).unwrap();
+        assert_eq!(p1, b"msg one");
+    }
+
+    #[test]
+    fn test_delayed_message_across_dh_step() {
+        let alice_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_pub = XPublicKey::from(&bob_secret);
+
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        let mut alice = RatchetState::init_alice(shared.as_bytes(), bob_pub.as_bytes());
+        let mut bob = RatchetState::init_bob(shared.as_bytes(), bob_secret.as_bytes());
+
+        let m0 = alice.encrypt(b"msg zero").unwrap();
+        let m1 = alice.encrypt(b"msg one").unwrap();
+        assert_eq!(bob.decrypt(&m0).unwrap(), b"msg zero");
+
+        let r0 = bob.encrypt(b"reply zero").unwrap();
+        assert_eq!(alice.decrypt(&r0).unwrap(), b"reply zero");
+
+        let m2 = alice.encrypt(b"msg two").unwrap();
+        assert_eq!(m2.header.previous_chain_length, 2);
+
+        assert_eq!(bob.decrypt(&m2).unwrap(), b"msg two");
+        assert_eq!(bob.decrypt(&m1).unwrap(), b"msg one");
+    }
+
+    #[test]
+    fn test_zero_dh_output_rejected() {
+        let alice_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_pub = XPublicKey::from(&bob_secret);
+
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        let mut alice = RatchetState::init_alice(shared.as_bytes(), bob_pub.as_bytes());
+        let mut bob = RatchetState::init_bob(shared.as_bytes(), bob_secret.as_bytes());
+
+        let m0 = alice.encrypt(b"msg zero").unwrap();
+        assert_eq!(bob.decrypt(&m0).unwrap(), b"msg zero");
+
+        let mut forged = alice.encrypt(b"forged").unwrap();
+        forged.header.dh_public = vec![0u8; 32];
+        let err = bob.decrypt(&forged).unwrap_err();
+        assert!(
+            err.contains("Non-contributory"),
+            "expected DH-layer rejection, got: {}",
+            err
+        );
+
+        let m2 = alice.encrypt(b"msg two").unwrap();
+        assert_eq!(bob.decrypt(&m2).unwrap(), b"msg two");
+    }
+
+    #[test]
+    fn test_forged_dh_step_preserves_state() {
+        let alice_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_secret = StaticSecret::random_from_rng(OsRng);
+        let bob_pub = XPublicKey::from(&bob_secret);
+
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        let mut alice = RatchetState::init_alice(shared.as_bytes(), bob_pub.as_bytes());
+        let mut bob = RatchetState::init_bob(shared.as_bytes(), bob_secret.as_bytes());
+
+        let m0 = alice.encrypt(b"msg zero").unwrap();
+        assert_eq!(bob.decrypt(&m0).unwrap(), b"msg zero");
+        let m1 = alice.encrypt(b"msg one").unwrap();
+
+        let fake_secret = StaticSecret::random_from_rng(OsRng);
+        let fake_pub = XPublicKey::from(&fake_secret);
+        let mut forged = m1.clone();
+        forged.header.dh_public = fake_pub.as_bytes().to_vec();
+        assert!(bob.decrypt(&forged).is_err());
+
+        assert_eq!(bob.decrypt(&m1).unwrap(), b"msg one");
     }
 }

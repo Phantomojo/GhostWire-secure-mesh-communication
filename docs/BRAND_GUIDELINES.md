@@ -181,7 +181,7 @@ Open University of Kenya
 
 📧 [your email]
 🌐 gcd4fe.bnu.edu.cn
-🔗 codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+🔗 github.com/Phantomojo/GhostWire-secure-mesh-communication
 
 [GhostWire Logo]
 GCD4F 2026 — AI for Society

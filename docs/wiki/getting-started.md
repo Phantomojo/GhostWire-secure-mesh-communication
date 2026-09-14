@@ -19,7 +19,7 @@ GhostWire is a modular, privacy-focused mesh networking and messaging platform. 
 
 ## 2. Clone the Repository
 ```bash
-git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
+git clone https://github.com/phantomojo/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication
 ```
 
@@ -65,4 +65,4 @@ npm run dev
 
 ---
 
-For any issues, open an [issue on Codeberg](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues) or join the community (Discord coming soon).
+For any issues, open an [issue on GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication/issues) or join the community (Discord coming soon). 

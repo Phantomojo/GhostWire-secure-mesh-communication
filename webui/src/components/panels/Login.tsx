@@ -18,10 +18,12 @@ export default function Login() {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [daemonLocked, setDaemonLocked] = useState<boolean | null>(null);
 
   useEffect(() => {
     Promise.all([profile.list(), auth.status()]).then(([profilesResult, identity]) => {
       setProfiles(profilesResult.profiles);
+      setDaemonLocked(identity.locked);
       // A fresh daemon creates an unsaved default identity. The status flag,
       // not the profile list, is authoritative for choosing setup mode.
       if (identity.setup_complete === false) setMode('setup');
@@ -64,12 +66,33 @@ export default function Login() {
     try {
       // Selection reconstructs Core and revokes old sessions. It must be a
       // backend transition, never a sessionStorage-only cosmetic change.
+      // The locked-screen endpoint requires a locked daemon: lock first when
+      // the cockpit is still unlocked, otherwise selection dead-ends.
+      if (daemonLocked === false) {
+        sessionStorage.removeItem('gw_token');
+        await auth.lock();
+        setDaemonLocked(true);
+        dispatch({ type: 'SET_LOCKED', payload: true });
+      }
       sessionStorage.removeItem('gw_token');
       await profile.selectLocked(name);
       setMode('unlock');
       toast('info', `${name} selected; enter its passphrase`);
     } catch (e: any) {
       setErr(e?.message ?? 'Profile selection failed');
+    } finally { setLoading(false); }
+  };
+
+  const handleLockForSelect = async () => {
+    setLoading(true); setErr('');
+    try {
+      sessionStorage.removeItem('gw_token');
+      await auth.lock();
+      setDaemonLocked(true);
+      dispatch({ type: 'SET_LOCKED', payload: true });
+      toast('info', 'Active profile locked; choose a profile');
+    } catch (e: any) {
+      setErr(e?.message ?? 'Lock failed');
     } finally { setLoading(false); }
   };
 
@@ -236,6 +259,11 @@ export default function Login() {
         {mode === 'select' && (
           <div>
             <div className="ops-label" style={{ marginBottom: 8 }}>Select local profile</div>
+            {daemonLocked === false && (
+              <button className="btn-ops btn-ops-primary" disabled={loading} onClick={() => void handleLockForSelect()} style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }}>
+                {loading ? 'Locking...' : '⬢ Lock active profile first'}
+              </button>
+            )}
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {profiles.length === 0 ? (
                 <div style={{ padding: 12, color: 'var(--t4)', fontSize: 10 }}>No persisted profiles found.</div>

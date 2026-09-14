@@ -31,7 +31,7 @@ It's AGPL-3.0 and compiles clean. We just achieved our first cross-machine ping 
 
 Looking for feedback from people who've self-hosted mesh networks or run community networks. Where do our assumptions break? What would you need to actually deploy this?
 
-Repo: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+Repo: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 
 ---
 
@@ -100,7 +100,7 @@ Most mesh network projects simulate their AI routing models on synthetic data. W
 - Feedback from community network operators
 - People who've deployed mesh networks in the real world
 
-The code is at https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication. No contribution is too small — docs, tests, bug reports, all welcome.
+The code is at https://github.com/Phantomojo/GhostWire-secure-mesh-communication. No contribution is too small — docs, tests, bug reports, all welcome.
 
 ---
 
@@ -142,7 +142,7 @@ I've been building GhostWire — a decentralized mesh network designed for priva
 2. For emergency communication, what privacy guarantees matter most?
 3. Would you trust a mesh network you could audit (AGPL-3.0, all source visible)?
 
-Code: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
+Code: https://github.com/Phantomojo/GhostWire-secure-mesh-communication
 
 ---
 

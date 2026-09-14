@@ -20,7 +20,7 @@
   ],
   "contact": {
     "email": "security@ghostwire.cc",
-    "github": "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
+    "github": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
   },
   "content": {
     "sections": [
@@ -54,6 +54,6 @@
   "attribution": {
     "required": true,
     "format": "GhostWire (https://www.ghostwire.cc)",
-    "link": "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
+    "link": "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
   }
 }

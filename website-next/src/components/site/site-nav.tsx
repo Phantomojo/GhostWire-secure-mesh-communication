@@ -82,7 +82,7 @@ export function SiteNav() {
             </a>
           ))}
           <a
-            href="https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
+            href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
             target="_blank"
             rel="noopener"
             className="flex items-center gap-1.5 text-[13px] text-[var(--gw-green)] no-underline px-3.5 py-1.5 border border-[var(--gw-border-2)] rounded hover:bg-[var(--gw-green-dim)] hover:border-[var(--gw-green)] transition-colors"
@@ -131,7 +131,7 @@ export function SiteNav() {
             </a>
           ))}
           <a
-            href="https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
+            href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
             target="_blank"
             rel="noopener"
             onClick={() => setMobileOpen(false)}

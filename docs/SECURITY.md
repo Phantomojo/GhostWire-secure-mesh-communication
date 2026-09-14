@@ -64,7 +64,7 @@ For sensitive security issues, please email us directly:
 
 **Primary Channels:**
 - **Email**: security@ghostwire.cc
-- **Security reports**: [Create a security advisory](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories)
+- **GitHub Security Advisories**: [Create a security advisory](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories)
 - **Encrypted Email**: [PGP Key coming soon]
 
 **⚠️ IMPORTANT**: DO NOT create public GitHub issues for security vulnerabilities. This exposes users to potential attacks before patches are available.
@@ -302,9 +302,9 @@ We welcome security researchers, cryptographers, and security enthusiasts to con
 ## 📞 **Security Contact**
 
 ### **🔍 Get in Touch**
-- **Security Issues**: [Security reports](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories)
-- **General Security**: [Codeberg discussions](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
-- **Documentation**: [Security Wiki](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/wiki)
+- **Security Issues**: [GitHub Security Advisories](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories)
+- **General Security**: [GitHub Discussions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
+- **Documentation**: [Security Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)
 
 ### **🛡️ Security Team**
 - **Lead Security**: @Phantomojo
@@ -327,7 +327,7 @@ Every button works, every connection is secure, and every user is protected. We 
 
 **🔒 Ready to experience secure communication? Run `./launch-ghostwire-working.sh` and test all the secure buttons!**
 
-[![Security](https://img.shields.io/badge/Security-First%20Priority-red?style=for-the-badge)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security)
-[![Encryption](https://img.shields.io/badge/Encryption-End--to--End-blue?style=for-the-badge)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+[![Security](https://img.shields.io/badge/Security-First%20Priority-red?style=for-the-badge)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security)
+[![Encryption](https://img.shields.io/badge/Encryption-End--to--End-blue?style=for-the-badge)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication)
 
 </div> 

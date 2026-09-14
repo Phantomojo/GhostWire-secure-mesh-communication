@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/trust-store.svg)](https://crates.io/crates/trust-store)
 [![Documentation](https://docs.rs/trust-store/badge.svg)](https://docs.rs/trust-store)
-[![License](https://img.shields.io/crates/l/trust-store)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+[![License](https://img.shields.io/crates/l/trust-store)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication)
 
 Web of Trust with TOFU (Trust-On-First-Use) key verification for P2P networks.
 

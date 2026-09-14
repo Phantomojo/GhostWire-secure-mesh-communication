@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["GhostWire Team"]
 description = "Secure mesh networking and messaging platform"
 license = "AGPL-3.0-or-later"
-repository = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
+repository = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
 homepage = "https://www.ghostwire.cc"
 keywords = ["mesh", "networking", "security", "privacy", "p2p"]
 categories = ["network-programming", "security", "asynchronous"]
@@ -20,7 +20,7 @@ serde_json = { version = "1.0" }
 serde_bytes = "0.11"
 toml = { version = "0.9" }
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
-libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor", "memory-connection-limits"] }
+libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor", "memory-connection-limits", "websocket"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 quinn = "0.11"
 quinn-proto = "0.11"

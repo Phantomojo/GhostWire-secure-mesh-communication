@@ -490,7 +490,7 @@ Control which subsystems are compiled into your application:
 ```toml
 [dependencies]
 ghostwire = {
-    git = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
+    git = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
     default-features = false,
     features = [
         "web",       # REST API + Web UI

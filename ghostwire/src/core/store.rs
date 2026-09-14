@@ -136,6 +136,7 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
+        let _home = crate::core::encryption::test_home();
         let dir = tempfile::tempdir().unwrap();
         let persistence = Arc::new(
             PersistenceManager::new_with_base_dir_and_passphrase(

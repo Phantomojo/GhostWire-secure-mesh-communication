@@ -728,6 +728,7 @@ mod tests {
 
     #[test]
     fn test_identity_lock_unlock() {
+        let _home = crate::core::encryption::test_home();
         let identity = Identity::create_new(None).unwrap();
 
         // New identity should start unlocked
@@ -788,10 +789,7 @@ mod tests {
 
     #[test]
     fn test_storage_roundtrip() {
-        use tempfile::tempdir;
-        let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
-
+        let _home = crate::core::encryption::test_home();
         let profile = Some("test_profile".to_string());
         let identity = Identity::create_new(profile.clone()).unwrap();
         let original_id = identity.id.clone();
@@ -814,6 +812,7 @@ mod tests {
 
     #[test]
     fn test_lock_zeroizes_keypair() {
+        let _home = crate::core::encryption::test_home();
         let identity = Identity::create_new(None).unwrap();
         identity.save_to_disk("test_password").unwrap();
 
@@ -836,6 +835,7 @@ mod tests {
 
     #[test]
     fn test_lock_unlock_roundtrip_preserves_key() {
+        let _home = crate::core::encryption::test_home();
         let identity = Identity::create_new(None).unwrap();
         identity.save_to_disk("roundtrip_password").unwrap();
 
@@ -853,10 +853,7 @@ mod tests {
 
     #[test]
     fn default_load_does_not_auto_unlock_from_legacy_sidecar() {
-        use tempfile::tempdir;
-
-        let dir = tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", dir.path());
+        let _home = crate::core::encryption::test_home();
         let profile = Some("identity_gate_red".to_string());
         let password = "identity-gate-password";
 
@@ -876,7 +873,5 @@ mod tests {
             loaded.is_locked(),
             "default load must not auto-unlock from a machine-derived legacy sidecar"
         );
-
-        std::env::remove_var("GHOSTWIRE_HOME");
     }
 }

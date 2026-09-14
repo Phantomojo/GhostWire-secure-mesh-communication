@@ -98,7 +98,7 @@ graph TD;
 ---
 
 ## 8. Further Reading & Resources
-- [GhostWire GitHub](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
+- [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
 - [Rust Book](https://doc.rust-lang.org/book/)
 - [GitHub Actions](https://docs.github.com/en/actions)
 

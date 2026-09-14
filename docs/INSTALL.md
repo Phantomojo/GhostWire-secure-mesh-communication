@@ -21,7 +21,7 @@ Complete guide for installing GhostWire on Linux, macOS, and Windows.
 ### Linux / macOS (One-liner)
 
 ```bash
-git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication
 ./install.sh
 ```
@@ -29,7 +29,7 @@ cd GhostWire-secure-mesh-communication
 ### Windows (PowerShell)
 
 ```powershell
-git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
+git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication
 .\install.ps1
 ```
@@ -452,6 +452,6 @@ GhostWire is licensed under the AGPL-3.0 License. See [LICENSE](../LICENSE) for 
 
 ## Support
 
-- **Issues**: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues
-- **Documentation**: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/wiki
-- **Community**: https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions
+- **Issues**: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues
+- **Documentation**: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki
+- **Community**: https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions

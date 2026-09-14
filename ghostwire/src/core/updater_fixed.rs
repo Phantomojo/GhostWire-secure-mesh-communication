@@ -141,9 +141,19 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
     // Install new binary
     match std::fs::rename(&temp_path, &current_exe) {
         Ok(_) => {
-            info!("Update installed. Restart to apply.");
             // Remove backup
             let _ = std::fs::remove_file(&backup_path);
+            // Supervised restart: if the user-level systemd unit owns this
+            // process, bounce it onto the new image. Best-effort — without a
+            // supervisor there is nothing to signal, and the operator must
+            // restart manually ("Restart to apply" below).
+            match restart_supervised_daemon() {
+                Ok(true) => info!("Update installed. Supervised restart triggered."),
+                Ok(false) => info!("Update installed. Restart to apply."),
+                Err(e) => {
+                    warn!("Update installed but supervised restart failed ({}). Restart to apply.", e);
+                }
+            }
             Ok(())
         }
         Err(e) => {
@@ -153,6 +163,30 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
             }
             anyhow::bail!("Install failed (rolled back): {}", e)
         }
+    }
+}
+
+/// Best-effort restart of the supervised daemon after an update.
+/// Returns Ok(true) if a restart was triggered, Ok(false) if no
+/// supervisor owns us (manual restart required), Err on failure.
+/// Never panics and never fails the update itself: callers log and continue.
+fn restart_supervised_daemon() -> anyhow::Result<bool> {
+    let systemctl = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "ghostwire-daemon"])
+        .status();
+    match systemctl {
+        Ok(status) if status.success() => {
+            let restarted = std::process::Command::new("systemctl")
+                .args(["--user", "restart", "ghostwire-daemon"])
+                .status();
+            match restarted {
+                Ok(s) if s.success() => Ok(true),
+                Ok(s) => Err(anyhow::anyhow!("systemctl restart exited {}", s)),
+                Err(e) => Err(anyhow::anyhow!("systemctl restart failed: {}", e)),
+            }
+        }
+        // systemctl missing or unit not active: nothing supervising us.
+        _ => Ok(false),
     }
 }
 

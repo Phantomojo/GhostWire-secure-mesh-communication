@@ -1431,12 +1431,32 @@ impl Default for EncryptionManager {
 
 pub type Encryption = EncryptionManager;
 
+/// Hermetic home for tests: a pristine per-test GHOSTWIRE_HOME held under a
+/// process-wide env lock, so parallel tests never observe each other's
+/// half-written global state (migrated keys, deleted master.key, foreign
+/// profiles). Every test that reaches HOME-derived paths must hold one.
+#[cfg(test)]
+pub(crate) struct TestHome {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+}
+
+#[cfg(test)]
+pub(crate) fn test_home() -> TestHome {
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = ENV_LOCK.lock().expect("test env lock poisoned");
+    let dir = tempfile::tempdir().expect("test GHOSTWIRE_HOME");
+    std::env::set_var("GHOSTWIRE_HOME", dir.path());
+    TestHome { _guard: guard, _dir: dir }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_encryption_roundtrip() {
+        let _home = super::test_home();
         let alice = EncryptionManager::new().unwrap();
         let bob = EncryptionManager::new().unwrap();
 
@@ -1469,6 +1489,7 @@ mod tests {
 
     #[test]
     fn test_signature_verification() {
+        let _home = super::test_home();
         let encryption = EncryptionManager::new().unwrap();
         let message = b"Verify me!";
         let signature = encryption.sign_message(message).unwrap();
@@ -1550,6 +1571,7 @@ mod tests {
 
     #[test]
     fn user_keyed_rewrap_does_not_depend_on_machine_master_key() {
+        let _home = super::test_home();
         let home = tempfile::tempdir().unwrap();
         let base = home.path().join("vault");
         let persistence = std::sync::Arc::new(
@@ -1567,8 +1589,8 @@ mod tests {
 
     #[test]
     fn user_keyed_restart_starts_public_only_until_explicit_activation() {
+        let _home = super::test_home();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("GHOSTWIRE_HOME", home.path());
         let persistence =
             crate::core::persistence_manager::PersistenceManager::new_with_base_dir_and_passphrase(
                 home.path().join("vault"),
@@ -1596,6 +1618,7 @@ mod tests {
 
     #[test]
     fn test_secure_storage() {
+        let _home = super::test_home();
         let file_path = std::path::Path::new("test_secure_storage.json");
 
         #[derive(Serialize, Deserialize, PartialEq, Debug)]

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 const REPO_RAW =
-  "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/raw/branch/main-promotion-20260824/";
+  "https://raw.githubusercontent.com/Phantomojo/GhostWire-secure-mesh-communication/main/";
 
 interface GithubDocModalProps {
   open: boolean;
@@ -81,9 +81,7 @@ export function GithubDocModal({ open, onClose, docPath, title }: GithubDocModal
   }, [open, docPath]);
 
   useEffect(() => {
-    if (!open) return;
-    const task = window.setTimeout(() => { void fetchDoc(); }, 0);
-    return () => window.clearTimeout(task);
+    if (open) fetchDoc();
   }, [open, fetchDoc]);
 
   useEffect(() => {
@@ -129,12 +127,12 @@ export function GithubDocModal({ open, onClose, docPath, title }: GithubDocModal
             <div className="text-[var(--gw-orange)] text-[14px] py-8">
               <p className="mb-2">Failed to load document.</p>
               <a
-                href={`https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main-promotion-20260824/${docPath}`}
+                href={`https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/${docPath}`}
                 target="_blank"
                 rel="noopener"
                 className="text-[var(--gw-green)] hover:underline text-[13px]"
               >
-                Open on Codeberg instead →
+                Open on GitHub instead →
               </a>
             </div>
           )}
@@ -148,16 +146,16 @@ export function GithubDocModal({ open, onClose, docPath, title }: GithubDocModal
 
           <div className="mt-6 pt-4 border-t border-[var(--gw-border)] flex items-center gap-4">
             <a
-              href={`https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/blob/main/${docPath}`}
+              href={`https://github.com/Phantomojo/GhostWire-secure-mesh-communication/blob/main/${docPath}`}
               target="_blank"
               rel="noopener"
               className="font-mono-gw text-[12px] text-[var(--gw-green)] hover:text-[var(--gw-white)] transition-colors"
             >
-              View on Codeberg →
+              View on GitHub →
             </a>
             <span className="text-[var(--gw-white-faint)] text-[11px]">·</span>
             <a
-              href={`https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/edit/main-promotion-20260824/${docPath}`}
+              href={`https://github.com/Phantomojo/GhostWire-secure-mesh-communication/edit/main/${docPath}`}
               target="_blank"
               rel="noopener"
               className="font-mono-gw text-[12px] text-[var(--gw-white-faint)] hover:text-[var(--gw-green)] transition-colors"

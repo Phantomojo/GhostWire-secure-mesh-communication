@@ -22,7 +22,7 @@ We welcome contributions of all kinds! Here’s how to get started and make your
 ---
 
 ## Reporting Issues
-- Use [Codeberg Issues](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues) for bugs, features, and questions.
+- Use [GitHub Issues](https://github.com/phantomojo/GhostWire-secure-mesh-communication/issues) for bugs, features, and questions.
 - Provide as much detail as possible (logs, OS, steps to reproduce).
 
 ---

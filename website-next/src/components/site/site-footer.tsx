@@ -110,7 +110,7 @@ export function SiteFooter() {
           <div>
             <h4 className="font-mono-gw text-[11px] tracking-[0.12em] text-[var(--gw-white-faint)] uppercase mb-4">Community</h4>
             <ul className="space-y-2.5 list-none p-0">
-              <FooterLink href="https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication" label="GitHub" external />
+              <FooterLink href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication" label="GitHub" external />
               <FooterDocLink doc={DOCS.contributing} onClick={setActiveDoc} />
               <FooterDocLink doc={DOCS.codeOfConduct} onClick={setActiveDoc} />
               <FooterLink href="mailto:admin@ghostwire.cc" label="Support" />
