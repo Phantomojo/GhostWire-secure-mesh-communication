@@ -17,7 +17,15 @@
 **Release Date:** February 16, 2026  
 **Status:** 🛡️ **ACTIVE HARDENING**
 
-### **🎯 What's New - Production Deployment Infrastructure!**
+### September 2026 — Mailbox Fail-Closed Patch
+
+The mailbox module previously had a `Default` implementation that created a usable (but unencrypted) mailbox on boot. This meant a node could start without proper encryption keys and still accept messages — a fail-open behavior.
+
+**Fix:** Removed the `Default` trait from `MailboxStore`. The `new()` constructor now requires encryption keys at creation time. If keys are missing, the node panics at startup instead of silently running unencrypted. This is fail-closed: no keys, no mailbox.
+
+Files changed: `gw-pipe/src/mailbox.rs` (removed Default impl), `gw-pipe/src/mailbox/mod.rs` (fallback path changed from silent default to `expect`).
+
+### 🎯 What's New - Production Deployment Infrastructure!
 
 **This release adds comprehensive small-scale production deployment capabilities!** We've transformed GhostWire from a development-only system to a production-ready platform with Docker containerization, monitoring, and automated deployment.
 

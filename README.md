@@ -14,9 +14,7 @@
 ![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge)
 ![Tech Stack](https://img.shields.io/badge/Tech-Rust%20%7C%20libp2p%20%7C%20ONNX%20%7C%20React-orange?style=for-the-badge)
 [![First Ping](https://img.shields.io/badge/First%20Ping-2026--04--05T22%3A50%3A37.125669222Z-brightgreen?style=for-the-badge)](docs/FIRST_PING.md)
-[![GitHub stars](https://img.shields.io/github/stars/Phantomojo/GhostWire-secure-mesh-communication?style=social)](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/stargazers)
-
-**GCD4F 2026 Submission** | [Learn More →](#-competition)
+[![Codeberg stars](https://img.shields.io/codeberg/stars/PHANTOMOJO/GhostWire-secure-mesh-communication?style=social)](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication)
 
 </div>
 
@@ -68,7 +66,7 @@ The reference implementation is written in **Rust** and includes a working mesh 
 | **📡 Delay-Tolerant** | PRoPHET epidemic routing — messages survive network partitions via store-carry-forward |
 | **🔒 Post-Quantum** | ML-KEM-768 (Kyber-768) hybrid key exchange — defends against harvest-now-decrypt-later |
 | **🎭 Anonymous Routing** | Sphinx onion routing (same protocol as Nym and Lightning Network) with SURBs |
-| **📶 Multi-Transport** | TCP, WebRTC, Bluetooth LE, LoRa, Reticulum — auto-failover based on conditions |
+| **📶 Multi-Transport** | TCP, WebRTC, Bluetooth LE, LoRa, QUIC — auto-failover based on conditions |
 | **🛡️ Censorship Resistance** | 4 pluggable transport modes (WebSocket, Shadowsocks, TLS, obfs4) with traffic armor |
 | **🚨 Coercion Resistance** | Duress PIN, panic wipe, dead man's switch — protection against physical coercion |
 | **🧠 Web of Trust** | TOFU key pinning with signed attestations and computed trust scores |
@@ -82,7 +80,7 @@ The reference implementation is written in **Rust** and includes a working mesh 
 ### Build & Run
 
 ```bash
-git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
 cd GhostWire-secure-mesh-communication/ghostwire
 cargo run --release
 ```
@@ -115,7 +113,7 @@ GhostWire is a **protocol**, not just an application. You can build on it in thr
 
 ```toml
 [dependencies]
-ghostwire = { git = "https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git" }
+ghostwire = { git = "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git" }
 ```
 
 ### 2. Use the REST API
@@ -135,6 +133,15 @@ Follow the specifications in [`docs/spec/`](docs/spec/) to build your own implem
 | Crate | Description | Status |
 |-------|-------------|--------|
 | [**sphinx-rs**](ghostwire-libs/crates/sphinx-rs/) | Sphinx onion routing with SURBs | ✅ Published — crates.io |
+| [**gw-reliability**](gw-reliability/) | Ack tracking, retry queues, TTL-based delivery | ✅ Working — cargo test passes |
+| [**gw-routing**](gw-routing/) | Peer table, peer health, Skademlia DHT | ✅ Working — cargo test passes |
+| [**gw-pipe**](gw-pipe/) | Mesh transport: TCP/Noise/Yamux + libp2p protocols | ✅ Working — 922-line core |
+| [**gw-vault**](gw-vault/) | Cryptographic key storage and management | ✅ Working — cargo test passes |
+| [**gw-identity**](gw-identity/) | Typed crypto identities and username resolution | ✅ Working — cargo test passes |
+| [**gw-trust**](gw-trust/) | Reputation scoring and certificate revocation | ✅ Working — cargo test passes |
+| [**gw-discovery**](gw-discovery/) | Peer discovery via mDNS, DHT, and bootstrap nodes | ✅ Working — cargo test passes |
+| [**gw-quic**](gw-quic/) | QUIC transport layer | ✅ Working |
+| [**gw-msg**](gw-msg/) | Message framing, wire protocol, DTN bundles | ✅ Working — 3063 lines |
 | ghostwire-dtn | Delay-tolerant networking (PRoPHET) | 🔄 In progress |
 | hlc-rs | Hybrid Logical Clocks | 🔄 In progress |
 | trust-store | Web of Trust + TOFU key management | 🔄 In progress |
@@ -152,7 +159,6 @@ Follow the specifications in [`docs/spec/`](docs/spec/) to build your own implem
 | **AI-powered routing** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Post-quantum crypto** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Multi-transport** | ✅ | ✅ | ❌ | ❌ | ✅ |
-| **Offline messaging** | ✅ | ❌ | ✅ | ❌ | ❌ |
 | **Censorship resistance** | ✅ | ❌ | ❌ | ❌ | ✅ |
 | **Coercion resistance** | ✅ | ❌ | ❌ | ❌ | ❌ |
 
@@ -234,13 +240,14 @@ graph TD;
 | **[🔧 Build Instructions](ghostwire/BUILD_INSTRUCTIONS.md)** | Compilation and development guide |
 | **[🏗️ Build on GhostWire](docs/build/OVERVIEW.md)** | How to build applications on the protocol |
 | **[📜 Governance](docs/GOVERNANCE.md)** | Protocol evolution process (GIPs) |
-| **[📋 Wiki](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
+| **[📋 Wiki](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/wiki)** | Full project knowledge base |
 
 ---
 
 ## 🏆 Competition
 
-### GCD4F 2026
+<details>
+<summary>GCD4F 2026 Submission</summary>
 
 GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F) 2026**, organized by Beijing Normal University and UNESCO IITE.
 
@@ -252,6 +259,8 @@ GhostWire is submitted to the **Global Competition on Design for Futures (GCD4F)
 | **Theme** | AI for Society |
 | **SDG Alignment** | SDG 9 (Infrastructure), SDG 11 (Communities), SDG 17 (Partnerships) |
 | **Submission** | 2026 | Track: Higher Education — AI for Society |
+
+</details>
 
 ---
 
@@ -283,7 +292,7 @@ We welcome contributors across all layers of the protocol:
 
 If referencing GhostWire in academic work:
 
-> Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient Peer-to-Peer Communication. Open University of Kenya. https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+> Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient Peer-to-Peer Communication. https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 
 Milestone reference: First verified cross-machine mesh communication — April 5, 2026 (v0.2.0).
 
@@ -319,11 +328,11 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ## 👥 Team
 
-**Team GhostWire** — Open University of Kenya, Nairobi
+**GhostWire** — Nairobi, Kenya
 
-| Name | Role | Contact |
-|------|------|---------|
-| **Michael Irungu Muriithi** | Team Lead, Protocol Architecture | licensing@ghostwire.cc |
+| Name | Role |
+|------|------|
+| **Michael Irungu Muriithi** | Protocol architecture, cryptography, implementation |
 
 ---
 
@@ -331,8 +340,8 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### Get Help
 - 📖 **Documentation:** [docs/](docs/)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/discussions)
-- 🐛 **Bug Reports:** [GitHub Issues](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues)
+- 💬 **Discussions:** [Codeberg Discussions](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/discussions)
+- 🐛 **Bug Reports:** [Codeberg Issues](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues)
 - 📧 **Contact:** contact@ghostwire.cc
 
 ### Stay Updated
@@ -341,7 +350,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 ### Security
 - 🔒 **Security Policy:** [docs/SECURITY.md](docs/SECURITY.md)
-- 🚨 **Report Vulnerability:** [GitHub Security Advisories](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
+- 🚨 **Report Vulnerability:** [Codeberg Security Advisories](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
 
 ---
 
@@ -359,15 +368,15 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 - [x] **First cross-machine ping** — April 5, 2026
 - [x] **Protocol specifications** — Formal specs in docs/spec/
 - [x] **Sphinx onion routing** — Published as sphinx-rs crate
+- [x] **gw-* crate ports** — reliability, routing, pipe, vault, identity, trust, discovery, quic, msg (September 2026)
+- [x] **Mailbox fail-closed boot** — Removed published-passphrase fallback, mailbox now expects encryption keys at startup
+- [x] **Codeberg migration** — Public repo moved from GitHub to Codeberg (nonprofit, no AI training)
 
 ### 🔄 In Progress
-- [ ] Message persistence and history
 - [ ] Full Double Ratchet with DH steps
 - [ ] GNN routing optimization (target: 85%+ accuracy)
 - [ ] Mobile clients (Tauri Android/iOS)
-- [ ] ghostwire-dtn crate publication
 - [ ] Reticulum (RNS) transport integration — core bridge complete, hybrid symbiosis in progress
-- [ ] Symbiotic libp2p+RNS architecture — unified peer table, cross-pollinate discovery
 
 ### 📋 Planned
 - [ ] Voice over mesh (VoIP)
@@ -392,7 +401,5 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 ---
 
 **Licensed under** [AGPL-3.0-or-later](LICENSE) **or** [Commercial License](COMMERCIAL_LICENSE.md)
-
-**GCD4F 2026 Submission** — Global Competition on Design for Futures
 
 </div>
