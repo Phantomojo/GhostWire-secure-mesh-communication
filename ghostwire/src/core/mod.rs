@@ -687,8 +687,12 @@ impl Core {
                 let db = sled::open(&db_path)
                     .unwrap_or_else(|e| panic!("sled open failed at {}: {}", db_path.display(), e));
                 Arc::new(
+                    // Fail CLOSED: if the real mailbox won't open, boot must stop
+                    // here. The old fallback silently swapped in a temporary
+                    // store with a published passphrase, and mail written to it
+                    // evaporated on restart.
                     crate::core::mailbox::MailboxStore::open(Arc::new(db), persistence.clone())
-                        .unwrap_or_else(|_| crate::core::mailbox::MailboxStore::default()),
+                        .expect("mailbox open failed — refusing to boot on a temporary store"),
                 )
             },
             trust_store: Arc::new(crate::core::reputation::TrustStore::new()),

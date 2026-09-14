@@ -668,22 +668,8 @@ impl MailboxStore {
     }
 }
 
-impl Default for MailboxStore {
-    fn default() -> Self {
-        let db = sled::Config::new()
-            .temporary(true)
-            .open()
-            .expect("temp sled db");
-        let base = std::env::temp_dir().join(format!(
-            "ghostwire-mailbox-fallback-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let persistence = PersistenceManager::new_with_base_dir_and_passphrase(
-            base,
-            Some("mailbox-fallback".to_string()),
-            "temporary-mailbox-fallback-passphrase",
-        )
-        .expect("MailboxStore fallback persistence");
-        Self::open(Arc::new(db), Arc::new(persistence)).expect("MailboxStore default")
-    }
-}
+// NOTE: `impl Default for MailboxStore` was removed 2026-09-14 (fail-closed
+// fix). It built a temporary on-disk store encrypted with a passphrase
+// published in source ("temporary-mailbox-fallback-passphrase") and silently
+// received mail when the real store failed to open. Tests construct stores
+// via `MailboxStore::open` (see tests::test_store) and are unaffected.
