@@ -103,7 +103,6 @@ const COMPARISON: ComparisonRow[] = [
   { feature: "AI-powered routing", ghostwire: true, libp2p: false, matrix: false, nostr: false, i2p: false },
   { feature: "Post-quantum", ghostwire: true, libp2p: false, matrix: false, nostr: false, i2p: false },
   { feature: "Multi-transport", ghostwire: true, libp2p: true, matrix: false, nostr: false, i2p: true },
-  { feature: "Offline messaging", ghostwire: true, libp2p: false, matrix: true, nostr: false, i2p: false },
   { feature: "Censorship resistance", ghostwire: true, libp2p: false, matrix: false, nostr: false, i2p: true },
   { feature: "Coercion resistance", ghostwire: true, libp2p: false, matrix: false, nostr: false, i2p: false },
 ];
@@ -218,7 +217,7 @@ export function AboutSection() {
                 </p>
                 {idx === 0 && (
                   <code className="font-mono-gw text-[11px] text-[var(--gw-green)] block mt-3 bg-[var(--gw-bg)] p-3 rounded border border-[var(--gw-border)]">
-                    ghostwire = {"{ git = \"https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git\" }"}
+                    ghostwire = {"{ git = \"https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git\" }"}
                   </code>
                 )}
                 {idx === 1 && (

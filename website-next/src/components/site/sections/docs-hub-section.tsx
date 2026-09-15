@@ -29,8 +29,6 @@ const DOC_GROUPS: DocGroup[] = [
     docs: [
       { title: "Architecture Guide", desc: "System overview, core components, transport layer, data flow.", docPath: "docs/ARCHITECTURE.md" },
       { title: "Security Policy", desc: "Threat model, responsible disclosure, PGP key.", docPath: "docs/SECURITY.md" },
-      { title: "Security Audit Report", desc: "February 2026 internal audit. All critical issues resolved. A+ rating.", docPath: "docs/SECURITY_AUDIT.md" },
-      { title: "Comprehensive Code Review", desc: "Full codebase review and recommendations.", docPath: "docs/COMPREHENSIVE_CODE_REVIEW.md" },
     ],
   },
   {
@@ -68,7 +66,7 @@ export function DocsHubSection() {
           Documentation — read the source of truth
         </h2>
         <p className="text-[15px] text-[var(--gw-white-dim)] max-w-2xl mb-12 leading-relaxed">
-          Full docs live in the repository. Click any card to read it here — no GitHub redirect needed.
+          Full docs live in the repository. Click any card to read it here — no redirect needed.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

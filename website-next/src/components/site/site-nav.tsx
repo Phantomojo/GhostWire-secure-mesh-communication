@@ -82,15 +82,15 @@ export function SiteNav() {
             </a>
           ))}
           <a
-            href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+            href="https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
             target="_blank"
             rel="noopener"
             className="flex items-center gap-1.5 text-[13px] text-[var(--gw-green)] no-underline px-3.5 py-1.5 border border-[var(--gw-border-2)] rounded hover:bg-[var(--gw-green-dim)] hover:border-[var(--gw-green)] transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" />
+              <path d="M11.999.747A11.974 11.974 0 0 0 0 12.75c0 2.254.635 4.465 1.833 6.376L11.837 6.19c.072-.092.251-.092.323 0l4.178 5.402h-2.992l.065.239h3.113l.882 1.138h-3.674l.103.374h3.86l.777 1.003h-4.358l.135.483h4.593l.695.894h-5.038l.165.589h5.326l.609.785h-5.717l.182.65h6.038l.562.727h-6.397l.183.65h6.717A12.003 12.003 0 0 0 24 12.75 11.977 11.977 0 0 0 11.999.747zm3.654 19.104.182.65h5.326c.173-.204.353-.433.513-.65zm.385 1.377.18.65h3.563c.233-.198.485-.428.712-.65zm.383 1.377.182.648h1.203c.356-.204.685-.412 1.042-.648zz" />
             </svg>
-            GitHub
+            Codeberg
           </a>
         </div>
 
@@ -131,13 +131,13 @@ export function SiteNav() {
             </a>
           ))}
           <a
-            href="https://github.com/Phantomojo/GhostWire-secure-mesh-communication"
+            href="https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication"
             target="_blank"
             rel="noopener"
             onClick={() => setMobileOpen(false)}
             className="py-3 text-[15px] text-[var(--gw-green)] no-underline"
           >
-            GitHub →
+            Codeberg →
           </a>
         </div>
       )}

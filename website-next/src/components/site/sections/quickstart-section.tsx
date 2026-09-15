@@ -17,7 +17,7 @@ function LinuxPanel() {
       <code>
         <span className="c-comment">{"# Clone and build"}</span>
         {"\n"}
-        git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+        git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
         {"\n"}
         cd GhostWire-secure-mesh-communication/ghostwire
         {"\n"}
@@ -61,7 +61,7 @@ function SourcePanel() {
       <code>
         <span className="c-comment">{"# Prerequisites: Rust 1.75+, Node 18+"}</span>
         {"\n"}
-        git clone https://github.com/Phantomojo/GhostWire-secure-mesh-communication.git
+        git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
         {"\n"}
         cd GhostWire-secure-mesh-communication/ghostwire
         {"\n\n"}

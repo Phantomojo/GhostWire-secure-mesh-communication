@@ -56,10 +56,10 @@ Four-layer AI routing system:
 ## Project Links
 
 - **Website:** https://www.ghostwire.cc/
-- **GitHub:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication
+- **GitHub:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 - **Security:** security@ghostwire.cc
 - **General contact:** admin@ghostwire.cc
-- **Protocol spec:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/tree/main/docs/spec
+- **Protocol spec:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/tree/main/docs/spec
 
 ## Key Pages (single-page app with anchor sections)
 
@@ -114,4 +114,4 @@ https://www.ghostwire.cc/
 - **General:** admin@ghostwire.cc
 - **Security:** security@ghostwire.cc
 - **PGP (encrypted reports):** security@ghostwire.cc
-- **GitHub Issues:** https://github.com/Phantomojo/GhostWire-secure-mesh-communication/issues
+- **GitHub Issues:** https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/issues

@@ -133,15 +133,15 @@ Follow the specifications in [`docs/spec/`](docs/spec/) to build your own implem
 | Crate | Description | Status |
 |-------|-------------|--------|
 | [**sphinx-rs**](ghostwire-libs/crates/sphinx-rs/) | Sphinx onion routing with SURBs | ✅ Published — crates.io |
-| [**gw-reliability**](gw-reliability/) | Ack tracking, retry queues, TTL-based delivery | ✅ Working — cargo test passes |
-| [**gw-routing**](gw-routing/) | Peer table, peer health, Skademlia DHT | ✅ Working — cargo test passes |
-| [**gw-pipe**](gw-pipe/) | Mesh transport: TCP/Noise/Yamux + libp2p protocols | ✅ Working — 922-line core |
-| [**gw-vault**](gw-vault/) | Cryptographic key storage and management | ✅ Working — cargo test passes |
-| [**gw-identity**](gw-identity/) | Typed crypto identities and username resolution | ✅ Working — cargo test passes |
-| [**gw-trust**](gw-trust/) | Reputation scoring and certificate revocation | ✅ Working — cargo test passes |
-| [**gw-discovery**](gw-discovery/) | Peer discovery via mDNS, DHT, and bootstrap nodes | ✅ Working — cargo test passes |
-| [**gw-quic**](gw-quic/) | QUIC transport layer | ✅ Working |
-| [**gw-msg**](gw-msg/) | Message framing, wire protocol, DTN bundles | ✅ Working — 3063 lines |
+| [**gw-reliability**](gw-reliability/) | Ack tracking, retry queues, TTL-based delivery | ✅ Standalone crate — cargo test passes |
+| [**gw-routing**](gw-routing/) | Peer table, peer health, Skademlia DHT | ✅ Standalone crate — cargo test passes |
+| gw-pipe | Mesh transport: TCP/Noise/Yamux + libp2p protocols | 📄 Source in newest/ — not yet standalone crate |
+| gw-vault | Cryptographic key storage and management | 📄 Source in newest/ — not yet standalone crate |
+| gw-identity | Typed crypto identities and username resolution | 📄 Source in newest/ — not yet standalone crate |
+| gw-trust | Reputation scoring and certificate revocation | 📄 Source in newest/ — not yet standalone crate |
+| gw-discovery | Peer discovery via mDNS, DHT, and bootstrap nodes | 📄 Source in newest/ — not yet standalone crate |
+| gw-quic | QUIC transport layer | 📄 Source in newest/ — not yet standalone crate |
+| gw-msg | Message framing, wire protocol, DTN bundles | 📄 Source in newest/ — not yet standalone crate |
 | ghostwire-dtn | Delay-tolerant networking (PRoPHET) | 🔄 In progress |
 | hlc-rs | Hybrid Logical Clocks | 🔄 In progress |
 | trust-store | Web of Trust + TOFU key management | 🔄 In progress |
@@ -368,7 +368,7 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 - [x] **First cross-machine ping** — April 5, 2026
 - [x] **Protocol specifications** — Formal specs in docs/spec/
 - [x] **Sphinx onion routing** — Published as sphinx-rs crate
-- [x] **gw-* crate ports** — reliability, routing, pipe, vault, identity, trust, discovery, quic, msg (September 2026)
+- [x] **gw-* crate ports** — reliability + routing as standalone crates; pipe, vault, identity, trust, discovery, quic, msg ported to source (September 2026)
 - [x] **Mailbox fail-closed boot** — Removed published-passphrase fallback, mailbox now expects encryption keys at startup
 - [x] **Codeberg migration** — Public repo moved from GitHub to Codeberg (nonprofit, no AI training)
 

@@ -214,7 +214,7 @@ const PERSONAS: Persona[] = [
       },
       {
         label: "AGPL-3.0 source",
-        text: "Full codebase on GitHub. Fork it, study it, ship it.",
+        text: "Full codebase on Codeberg. Fork it, study it, ship it.",
       },
       {
         label: "Memory-safe Rust core",
@@ -277,7 +277,7 @@ export function ForWhoSection() {
         title={active?.title ?? ""}
         ctaPrimary={{ href: "#quickstart", label: "Get GhostWire" }}
         ctaSecondary={{
-          href: "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+          href: "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
           label: "View Source",
         }}
       >

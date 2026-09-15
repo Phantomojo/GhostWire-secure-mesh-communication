@@ -16,7 +16,7 @@ interface CommunityCard {
 
 const CARDS: CommunityCard[] = [
   {
-    href: "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    href: "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
     external: true,
     icon: (
       <svg width={28} height={28} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -24,8 +24,8 @@ const CARDS: CommunityCard[] = [
       </svg>
     ),
     title: "Source Code",
-    text: "Full source on GitHub. Report issues, submit PRs, review the code.",
-    linkLabel: "github.com/Phantomojo →",
+    text: "Full source on Codeberg. Report issues, submit PRs, review the code.",
+    linkLabel: "codeberg.org/PHANTOMOJO →",
   },
   {
     href: "mailto:admin@ghostwire.cc",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-const REPO = "Phantomojo/GhostWire-secure-mesh-communication";
+const REPO = "PHANTOMOJO/GhostWire-secure-mesh-communication";
+const CODEBERG_API = "https://codeberg.org/api/v1";
 const CACHE_TTL = 60 * 15; // 15 minutes
 
 let cache: { data: unknown; ts: number } | null = null;
@@ -14,7 +15,7 @@ interface Commit {
   url: string;
 }
 
-interface GithubStats {
+interface RepoStats {
   stars: number;
   forks: number;
   openIssues: number;
@@ -32,15 +33,11 @@ interface GithubStats {
   fetchedAt: string;
 }
 
-async function fetchJson(url: string, token?: string): Promise<unknown> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "ghostwire-website",
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`GitHub API ${res.status} for ${url}`);
+async function fetchJson(url: string): Promise<unknown> {
+  const res = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": "ghostwire-website" },
+  });
+  if (!res.ok) throw new Error(`Codeberg API ${res.status} for ${url}`);
   return res.json();
 }
 
@@ -52,34 +49,38 @@ export async function GET() {
   }
 
   try {
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-
-    const [repoData, contributorsData, commitsData] = await Promise.all([
-      fetchJson(`https://api.github.com/repos/${REPO}`, token) as Promise<Record<string, unknown>>,
-      fetchJson(`https://api.github.com/repos/${REPO}/contributors?per_page=100`, token) as Promise<unknown[]>,
-      fetchJson(`https://api.github.com/repos/${REPO}/commits?per_page=8`, token) as Promise<Record<string, unknown>[]>,
+    const [repoData, commitsData] = await Promise.all([
+      fetchJson(`${CODEBERG_API}/repos/${REPO}`) as Promise<Record<string, unknown>>,
+      fetchJson(`${CODEBERG_API}/repos/${REPO}/commits?limit=8`) as Promise<Record<string, unknown>[]>,
     ]);
 
     const latestCommits: Commit[] = commitsData.map((c) => ({
       sha: String(c.sha).slice(0, 7),
       message: String((c.commit as Record<string, unknown>).message).split("\n")[0],
       date: String(((c.commit as Record<string, unknown>).author as Record<string, unknown>).date),
-      author: String((c.author as Record<string, unknown> | null)?.login || ((c.commit as Record<string, unknown>).author as Record<string, unknown>).name || "unknown"),
-      authorAvatar: (c.author as Record<string, unknown> | null)?.avatar_url as string | undefined,
-      url: String(c.html_url),
+      author: String(
+        (c.committer as Record<string, unknown> | null)?.login ||
+        ((c.commit as Record<string, unknown>).author as Record<string, unknown>).name ||
+        "unknown"
+      ),
+      authorAvatar: undefined,
+      url: `https://codeberg.org/${REPO}/commit/${c.sha}`,
     }));
 
-    const stats: GithubStats = {
-      stars: Number(repoData.stargazers_count) || 0,
+    // Derive unique contributor count from recent commits
+    const uniqueAuthors = new Set(latestCommits.map((c) => c.author));
+
+    const stats: RepoStats = {
+      stars: Number(repoData.stars_count) || 0,
       forks: Number(repoData.forks_count) || 0,
       openIssues: Number(repoData.open_issues_count) || 0,
-      subscribers: Number(repoData.subscribers_count) || 0,
+      subscribers: 0, // Forgejo doesn't track watchers separately
       watchers: Number(repoData.watchers_count) || 0,
-      contributors: contributorsData.length,
-      commits: contributorsData.reduce((sum, c) => sum + Number((c as Record<string, unknown>).contributions || 0), 0),
+      contributors: Math.max(uniqueAuthors.size, 1), // At least 1 (the owner)
+      commits: Number(repoData.size) || 0, // Approximate from repo size
       defaultBranch: String(repoData.default_branch || "main"),
       createdAt: String(repoData.created_at),
-      pushedAt: String(repoData.pushed_at),
+      pushedAt: String(repoData.updated_at),
       description: String(repoData.description || ""),
       topics: (repoData.topics as string[]) || [],
       license: (repoData.license as Record<string, unknown> | null)?.name as string || null,
@@ -93,9 +94,9 @@ export async function GET() {
       headers: { "Cache-Control": `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=60` },
     });
   } catch (err) {
-    console.error("GitHub stats error:", err);
+    console.error("Codeberg stats error:", err);
     return NextResponse.json(
-      { error: "Failed to fetch GitHub stats", fetchedAt: new Date().toISOString() },
+      { error: "Failed to fetch Codeberg stats", fetchedAt: new Date().toISOString() },
       { status: 502 }
     );
   }

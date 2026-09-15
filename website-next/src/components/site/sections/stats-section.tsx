@@ -30,7 +30,7 @@ interface Stats {
 }
 
 const REPO_URL =
-  "https://github.com/Phantomojo/GhostWire-secure-mesh-communication";
+  "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication";
 
 /**
  * Returns a short "Xh ago" / "Xd ago" / "Xw ago" style relative string.
@@ -129,7 +129,7 @@ export function StatsSection() {
       <div className="max-w-[1160px] mx-auto px-6 sm:px-8">
         <div className="gw-section-label mb-3">{"// live stats"}</div>
         <h2 className="font-display text-3xl sm:text-4xl font-bold text-[var(--gw-white)] mb-3">
-          Live from GitHub
+          Live from Codeberg
         </h2>
         <p className="text-[15px] text-[var(--gw-white-dim)] max-w-2xl mb-10">
           Real-time project health, fetched from the GhostWire repository.
@@ -151,7 +151,7 @@ export function StatsSection() {
               Stats temporarily unavailable
             </div>
             <p className="text-[13px] text-[var(--gw-white-dim)] mb-4">
-              We couldn&apos;t reach the GitHub API right now. You can still view
+              We couldn&apos;t reach the Codeberg API right now. You can still view
               the repository directly.
             </p>
             <a
@@ -160,7 +160,7 @@ export function StatsSection() {
               rel="noopener noreferrer"
               className="gw-btn-outline"
             >
-              View on GitHub →
+              View on Codeberg →
             </a>
           </div>
         )}
@@ -171,7 +171,7 @@ export function StatsSection() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 value={stats.stars}
-                label="GitHub stars"
+                label="Codeberg stars"
                 sub="Star the repo to support the project."
               />
               <StatCard
@@ -306,7 +306,7 @@ export function StatsSection() {
                   rel="noopener noreferrer"
                   className="gw-btn-outline mt-5 w-full justify-center"
                 >
-                  View on GitHub →
+                  View on Codeberg →
                 </a>
               </div>
             </div>

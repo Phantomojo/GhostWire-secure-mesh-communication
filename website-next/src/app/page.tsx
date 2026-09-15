@@ -31,7 +31,7 @@ const jsonLd = {
     "GhostWire is an open protocol for resilient peer-to-peer mesh communication. A decentralized networking stack built in Rust — encrypted, delay-tolerant, post-quantum ready, and AI-routed. It provides the cryptographic, routing, and transport layers that developers build communication tools on top of.",
   url: "https://ghostwire.cc/",
   downloadUrl:
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
   softwareVersion: "0.2.0",
   license: "https://www.gnu.org/licenses/agpl-3.0.html",
   programmingLanguage: "Rust",
@@ -106,7 +106,7 @@ const orgJsonLd = {
   description:
     "An open protocol for resilient peer-to-peer mesh communication. Decentralized networking stack built in Rust.",
   sameAs: [
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
   ],
   contactPoint: [
     {
@@ -142,7 +142,7 @@ const softwareSourceCodeJsonLd = {
     "P2P mesh communication protocol with post-quantum encryption, built in Rust",
   programmingLanguage: "Rust",
   codeRepository:
-    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
+    "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
   license: "https://www.gnu.org/licenses/agpl-3.0.html",
   runtimePlatform: "Linux, macOS, Windows, Android",
   softwareVersion: "0.2.0",

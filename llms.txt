@@ -7,7 +7,7 @@
 GhostWire creates ad-hoc mesh networks using libp2p. Devices connect directly to each other — no servers, no accounts, no central authority. Messages hop node-to-node across the mesh, with AI-powered routing that learns optimal paths from real network data.
 
 **Core capabilities:**
-- End-to-end encrypted messaging (AES-256-GCM, X25519 key exchange)
+- End-to-end encrypted messaging (XChaCha20-Poly1305, X25519 key exchange)
 - Post-quantum cryptography ready (ML-KEM-768)
 - 7 transport layers: WiFi Direct, Bluetooth LE, LoRa, WebRTC, TCP/IP, Reticulum, Briar
 - Delay-tolerant delivery (DTN) — messages queue when peers are offline
@@ -61,21 +61,27 @@ Security layer: Isolation Forest anomaly detection → Gemma 4 threat analysis.
 - **License:** AGPL-3.0-or-later
 - **Status:** Active development
 
+## Published Crates
+
+- **sphinx-rs**: Sphinx onion routing with SURBs (published on crates.io)
+- **gw-reliability**: Ack tracking, retry queues, TTL-based delivery (standalone crate, tests pass)
+- **gw-routing**: Peer table, peer health, Skademlia DHT (standalone crate, tests pass)
+- Additional gw-* modules (pipe, vault, identity, trust, discovery, quic, msg) exist as source in the newest/ directory
+
 ## Limitations (honest disclosure)
 
-- Not independently audited yet (internal audits available in docs/)
+- Not independently audited yet
 - Strong privacy, not full anonymity (traffic analysis risk)
 - Physical device seizure may expose local data
 - Endpoint compromise bypasses encryption
-- 100 emails/day limit on free SendGrid plan
+- gw-* crate ports: only 2 of 10 are standalone crates with passing tests
 
 ## How to Cite
 
 If referencing GhostWire in academic work:
 ```
-GhostWire Team. "GhostWire: Resilient Mesh Communication for
-Connectivity-Constrained Communities." 2026.
-https://www.ghostwire.cc/
+Muriithi, M.I. (2026). GhostWire: An Open Protocol for Resilient 
+Peer-to-Peer Communication. https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication
 ```
 
 ## Contact

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Codeberg Migration** (2026-09-14):
+  - Public repo moved from GitHub to Codeberg (nonprofit, no AI training)
+  - All links updated across README, website, docs
+- **Mailbox Fail-Closed Boot** (2026-09-12):
+  - Removed `Default` trait from `MailboxStore` — node now requires encryption keys at startup
+  - If keys missing, node panics instead of silently running unencrypted
+- **gw-* Crate Ports** (2026-09-09 to 2026-09-12):
+  - `gw-reliability`: AckTracker, RetryQueue, TTL-based delivery (8/8 tests pass)
+  - `gw-routing`: peer_table, peer_health, Skademlia DHT (20/20 tests pass)
+  - gw-pipe, gw-vault, gw-identity, gw-trust, gw-discovery, gw-quic, gw-msg: ported to source files from newest/ checkout (not yet standalone crates)
 - **Security Hardening** (2026-07-03):
   - Pinned minimum safe versions: curve25519-dalek >=4.1.3 (CVE-2024-58262), aes-gcm >=0.10.3 (CVE-2023-42811), reqwest >=0.11.23 (CVE-2025-0805)
   - X25519 small-order point defense: all-zero DH output check after key exchange (CVE-2025-62514)
@@ -256,9 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Future Versions**: Planned support
 
 ### Support Channels
-- **GitHub Issues**: Bug reports and feature requests
+- **Codeberg Issues**: Bug reports and feature requests
 - **Documentation**: Comprehensive guides and tutorials
-- **Community**: Discord and forum support
 - **Security**: Direct security contact for vulnerabilities
 
 ---
