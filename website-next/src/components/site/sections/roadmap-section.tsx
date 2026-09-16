@@ -12,7 +12,7 @@ interface RoadmapColumn {
   items: string[];
   tag: string;
   title: string;
-  ctaPrimary?: { href: string; label: string };
+  ctaPrimary?: { href: string; label: string; docPath?: string; docTitle?: string };
 }
 
 const COLUMNS: RoadmapColumn[] = [
