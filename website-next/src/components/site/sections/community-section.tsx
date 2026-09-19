@@ -24,7 +24,7 @@ const CARDS: CommunityCard[] = [
       </svg>
     ),
     title: "Source Code",
-    text: "Full source on Codeberg. Report issues, submit PRs, review the code.",
+    text: "Full source on Codeberg (primary) and GitHub (mirror). Report issues, submit PRs, review the code.",
     linkLabel: "codeberg.org/PHANTOMOJO →",
   },
   {

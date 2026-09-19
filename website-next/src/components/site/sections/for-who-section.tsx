@@ -214,7 +214,7 @@ const PERSONAS: Persona[] = [
       },
       {
         label: "AGPL-3.0 source",
-        text: "Full codebase on Codeberg. Fork it, study it, ship it.",
+        text: "Full codebase on Codeberg and GitHub. Fork it, study it, ship it.",
       },
       {
         label: "Memory-safe Rust core",

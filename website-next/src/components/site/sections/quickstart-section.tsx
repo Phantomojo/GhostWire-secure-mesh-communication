@@ -15,7 +15,7 @@ function LinuxPanel() {
   return (
     <pre className="gw-code mt-2 whitespace-pre">
       <code>
-        <span className="c-comment">{"# Clone and build"}</span>
+        <span className="c-comment">{"# Clone and build (Codeberg primary, GitHub mirror)"}</span>
         {"\n"}
         git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
         {"\n"}
@@ -60,6 +60,8 @@ function SourcePanel() {
     <pre className="gw-code mt-2 whitespace-pre">
       <code>
         <span className="c-comment">{"# Prerequisites: Rust 1.75+, Node 18+"}</span>
+        {"\n"}
+        <span className="c-comment">{"# Clone (Codeberg primary, GitHub mirror available)"}</span>
         {"\n"}
         git clone https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication.git
         {"\n"}

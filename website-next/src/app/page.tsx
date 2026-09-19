@@ -107,6 +107,7 @@ const orgJsonLd = {
     "An open protocol for resilient peer-to-peer mesh communication. Decentralized networking stack built in Rust.",
   sameAs: [
     "https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication",
+    "https://github.com/Phantomojo/GhostWire-secure-mesh-communication",
   ],
   contactPoint: [
     {
