@@ -3,7 +3,6 @@ name: Website Guard
 on:
   pull_request:
     paths:
-      - 'website/**'
       - 'website-next/**'
 
 permissions:
@@ -16,6 +15,5 @@ jobs:
       - name: Flag website changes
         run: |
           echo "::warning::Website files modified. The current deployed version (ghostwire.cc) is canonical."
-          echo "::warning::Changes to website/ deploy to GitHub Pages automatically on merge to main."
-          echo "::warning::Changes to website-next/ require manual deploy via 'npm run deploy'."
+          echo "::warning::Changes to website-next/ require manual deploy via 'bun run deploy' from website-next/."
           echo "::warning::Ensure changes are intentional and tested before merging."
