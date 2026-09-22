@@ -486,6 +486,11 @@ impl MeshTransport {
         swarm.behaviour_mut().gossipsub.subscribe(&dtn_topic)?;
         tracing::info!("Subscribed to DTN sync topic");
 
+        // Subscribe to CRL gossip topic for revocation propagation
+        let crl_gossip_topic = IdentTopic::new(crate::core::constants::topics::CRL_GOSSIP);
+        swarm.behaviour_mut().gossipsub.subscribe(&crl_gossip_topic)?;
+        tracing::info!("Subscribed to CRL gossip topic");
+
         if self.world_discovery_enabled {
             let discovery_topic =
                 IdentTopic::new(discovery_topic(&self.world_discovery_network_id));
@@ -998,6 +1003,11 @@ impl MeshDriver {
                     if let Some(enc) = Arc::get_mut(&mut self.encryption_manager) {
                         if let Err(e) = enc.rotate_keys_if_needed() {
                             tracing::warn!("Key rotation failed: {}", e);
+                        }
+                        // Garbage collect expired CRL entries
+                        let gc = enc.gc_crl();
+                        if gc > 0 {
+                            tracing::info!("CRL GC removed {} expired entries", gc);
                         }
                     }
                 }
@@ -2153,6 +2163,18 @@ impl MeshDriver {
 
         if topic_str == crate::core::constants::DTN_SYNC_TOPIC {
             return self.handle_dtn_sync(message).await;
+        }
+
+        if topic_str == crate::core::constants::topics::CRL_GOSSIP {
+            // Deserialize CRL gossip payloads and handle them
+            if let Ok(payloads) = serde_json::from_slice::<Vec<crate::core::crl::CrlGossipPayload>>(&message.data) {
+                let (accepted, duplicates, rejected) = self.encryption_manager.handle_crl_gossip(&payloads);
+                tracing::info!(
+                    "CRL gossip from {}: accepted={}, duplicates={}, rejected={}",
+                    peer_id, accepted, duplicates, rejected
+                );
+            }
+            return Ok(());
         }
 
         let is_dm_for_us = topic_str == crate::core::constants::topics::DM;

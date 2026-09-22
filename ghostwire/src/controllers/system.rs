@@ -155,14 +155,48 @@ impl SystemController {
         Json(ApiV2Response::success(logs))
     }
 
-    pub async fn rotate_keys(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error(
-                "NOT_IMPLEMENTED",
-                "Key rotation is not yet implemented",
-            )),
-        )
+    pub async fn rotate_keys(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        #[derive(Serialize)]
+        struct RotationStatus {
+            rotated: bool,
+            key_id: String,
+            reason: String,
+        }
+        // Rotation needs &mut EncryptionManager, so both Arcs must be
+        // uniquely owned. Otherwise rotation stays with the mesh hourly tick.
+        let mut core_guard = state.core.write().await;
+        let outcome: Result<RotationStatus, String> = (|| {
+            let core = Arc::get_mut(&mut *core_guard)
+                .ok_or_else(|| "Core shared; rotation deferred to mesh tick".to_string())?;
+            let enc = Arc::get_mut(&mut core.encryption)
+                .ok_or_else(|| "EncryptionManager shared; rotation deferred to mesh tick".to_string())?;
+            if !enc.should_rotate_keys() {
+                return Ok(RotationStatus {
+                    rotated: false,
+                    key_id: enc.get_key_id(),
+                    reason: "rotation interval not elapsed".to_string(),
+                });
+            }
+            if crate::core::encryption::EncryptionManager::is_user_keyed() {
+                enc.rotate_keys_if_needed_with_persistence(&core.persistence)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                enc.rotate_keys_if_needed().map_err(|e| e.to_string())?;
+            }
+            Ok(RotationStatus {
+                rotated: true,
+                key_id: enc.get_key_id(),
+                reason: "keys rotated".to_string(),
+            })
+        })();
+        match outcome {
+            Ok(status) => (StatusCode::OK, Json(ApiV2Response::success(status))).into_response(),
+            Err(reason) => (
+                StatusCode::CONFLICT,
+                Json(ApiV2Response::<()>::error("ROTATION_DEFERRED", reason)),
+            )
+                .into_response(),
+        }
     }
 
     pub async fn upgrade_encryption(State(_state): State<Arc<AppState>>) -> impl IntoResponse {

@@ -597,6 +597,18 @@ impl PersistenceManager {
         tree.clear()?;
         self.flush()
     }
+
+    /// Remove a single encrypted record from a named tree by key.
+    ///
+    /// Returns `Ok(())` if the key existed and was removed, or `Ok(())` if the
+    /// key was not found (idempotent). Use `tree.get(key)` beforehand if you
+    /// need to distinguish the two cases.
+    pub fn delete_record(&self, tree_name: &str, key: &str) -> Result<()> {
+        self.ensure_accessible()?;
+        let tree = self.get_tree(tree_name)?;
+        tree.remove(key)?;
+        self.flush()
+    }
 }
 
 fn db_path(base_dir: &Path, profile: Option<&str>) -> PathBuf {
@@ -841,5 +853,40 @@ mod tests {
         assert_eq!(manager.list_keys("items").unwrap().len(), 3);
         let all: Vec<i32> = manager.load_all_secure("items").unwrap();
         assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_delete_persisted_record_by_key() {
+        // Given a persistence manager with user mode unlocked
+        let dir = tempdir().unwrap();
+        let manager = PersistenceManager::new_with_base_dir_and_passphrase(
+            dir.path().to_path_buf(),
+            None,
+            "test passphrase",
+        )
+        .unwrap();
+
+        // When we store a record
+        let key = "my-deleted-key";
+        let value = ("deleted_item".to_string(), 99u32);
+        manager
+            .store_secure("delete_test", key, &value)
+            .unwrap();
+
+        // Then the record should be loadable
+        let loaded: (String, u32) = manager
+            .load_secure("delete_test", key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded, value);
+
+        // When we delete the record by key
+        manager.delete_record("delete_test", key).unwrap();
+
+        // Then the record should be absent
+        let after_delete: Option<(String, u32)> = manager
+            .load_secure("delete_test", key)
+            .unwrap();
+        assert!(after_delete.is_none(), "Record should have been deleted");
     }
 }
