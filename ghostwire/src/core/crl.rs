@@ -16,12 +16,15 @@
 //!
 //! - Entries are signed by the revoking node (non-repudiable)
 //! - Timestamps prevent replay of stale revocations
+//! - Monotonic `epoch` fail-closes gossip merge against rollback
+//!   (rejects entries whose epoch is below the per-issuer high-water mark)
 //! - Merge is idempotent — duplicate entries harmlessly ignored
 //! - TTL on entries prevents unbounded growth (default: 30 days)
 
 use dashmap::DashMap;
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
@@ -44,7 +47,11 @@ pub struct RevocationEntry {
     pub revoked_by: String,
     /// Unix timestamp when revocation was issued
     pub timestamp: u64,
-    /// Signature over (key_id + revoked_by + timestamp) by revoked_by's key
+    /// Monotonic issuer epoch (bumped on revoke and on key rotation).
+    /// Reject on merge when `epoch` < high-water for `revoked_by` (anti-rollback).
+    #[serde(default)]
+    pub epoch: u64,
+    /// Signature over (key_id + revoked_by + timestamp + epoch) by revoked_by's key
     pub signature: Vec<u8>,
 }
 
@@ -68,6 +75,8 @@ pub enum MergeResult {
     InvalidSignature,
     /// Entry timestamp is too old (expired)
     Expired,
+    /// Entry epoch is below the per-issuer high-water mark (rollback/stale)
+    StaleEpoch,
 }
 
 // ── CrlStore ──────────────────────────────────────────────────────────────────
@@ -78,6 +87,10 @@ pub struct CrlStore {
     entries: DashMap<String, RevocationEntry>,
     /// Per-node version tracking (for gossip dedup)
     _peer_versions: DashMap<String, u64>,
+    /// Per-issuer anti-rollback high-water: revoked_by → highest accepted epoch
+    peer_epochs: DashMap<String, u64>,
+    /// Local monotonic epoch (bumped on revoke and key rotation)
+    epoch: AtomicU64,
     /// TTL for entries
     entry_ttl: u64,
 }
@@ -87,6 +100,8 @@ impl CrlStore {
         Self {
             entries: DashMap::new(),
             _peer_versions: DashMap::new(),
+            peer_epochs: DashMap::new(),
+            epoch: AtomicU64::new(0),
             entry_ttl: DEFAULT_CRL_TTL,
         }
     }
@@ -108,8 +123,19 @@ impl CrlStore {
         self.entries.get(key_id).map(|e| e.clone())
     }
 
+    /// Local monotonic epoch (current value; revoke/rotation call `bump_epoch`).
+    pub fn epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
+
+    /// Bump the local CRL epoch (called on key rotation so rotated keys
+    /// cannot be rolled back to pre-rotation revocation state via gossip).
+    pub fn bump_epoch(&self) -> u64 {
+        self.epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
     /// Revoke a key locally (self-revocation or admin revocation).
-    /// Signs the entry with the provided signer.
+    /// Signs the entry with the provided signer. Bumps the local epoch.
     pub fn revoke(
         &self,
         key_id: &str,
@@ -117,22 +143,26 @@ impl CrlStore {
         sign_fn: &dyn Fn(&[u8]) -> Vec<u8>,
     ) -> RevocationEntry {
         let timestamp = now_secs();
+        let epoch = self.bump_epoch();
 
-        // Sign: key_id + revoked_by + timestamp
+        // Sign: key_id + revoked_by + timestamp + epoch
         let mut payload = Vec::new();
         payload.extend_from_slice(key_id.as_bytes());
         payload.extend_from_slice(signer_id.as_bytes());
         payload.extend_from_slice(&timestamp.to_le_bytes());
+        payload.extend_from_slice(&epoch.to_le_bytes());
         let signature = sign_fn(&payload);
 
         let entry = RevocationEntry {
             key_id: key_id.to_string(),
             revoked_by: signer_id.to_string(),
             timestamp,
+            epoch,
             signature,
         };
 
-        info!(key_id = %key_id, revoked_by = %signer_id, "Key revoked");
+        info!(key_id = %key_id, revoked_by = %signer_id, epoch, "Key revoked");
+        self.raise_peer_epoch(signer_id, epoch);
         self.entries.insert(key_id.to_string(), entry.clone());
         entry
     }
@@ -156,11 +186,26 @@ impl CrlStore {
             return MergeResult::Duplicate;
         }
 
-        // Verify signature
+        // Fail closed on epoch rollback (per-issuer high-water)
+        if let Some(high) = self.peer_epochs.get(&entry.revoked_by) {
+            if entry.epoch < *high {
+                warn!(
+                    key_id = %entry.key_id,
+                    revoked_by = %entry.revoked_by,
+                    entry_epoch = entry.epoch,
+                    high_water = *high,
+                    "Stale revocation epoch rejected"
+                );
+                return MergeResult::StaleEpoch;
+            }
+        }
+
+        // Verify signature (covers epoch so peers cannot inflate high-water)
         let mut payload = Vec::new();
         payload.extend_from_slice(entry.key_id.as_bytes());
         payload.extend_from_slice(entry.revoked_by.as_bytes());
         payload.extend_from_slice(&entry.timestamp.to_le_bytes());
+        payload.extend_from_slice(&entry.epoch.to_le_bytes());
 
         if !verify_fn(&payload, &entry.signature, &entry.revoked_by) {
             warn!(
@@ -174,10 +219,24 @@ impl CrlStore {
         info!(
             key_id = %entry.key_id,
             revoked_by = %entry.revoked_by,
+            epoch = entry.epoch,
             "Merged remote revocation"
         );
+        self.raise_peer_epoch(&entry.revoked_by, entry.epoch);
         self.entries.insert(entry.key_id.clone(), entry.clone());
         MergeResult::Accepted
+    }
+
+    /// Raise the per-issuer high-water mark (no-op if already higher).
+    fn raise_peer_epoch(&self, issuer: &str, epoch: u64) {
+        self.peer_epochs
+            .entry(issuer.to_string())
+            .and_modify(|h| {
+                if epoch > *h {
+                    *h = epoch;
+                }
+            })
+            .or_insert(epoch);
     }
 
     /// Garbage-collect expired entries. Call periodically.
@@ -277,6 +336,7 @@ mod tests {
             key_id: "key_abc".to_string(),
             revoked_by: "node_1".to_string(),
             timestamp: now_secs(),
+            epoch: 0,
             signature: vec![0xAB],
         };
 
@@ -291,6 +351,7 @@ mod tests {
             key_id: "key_abc".to_string(),
             revoked_by: "node_1".to_string(),
             timestamp: now_secs(),
+            epoch: 0,
             signature: vec![0xAB],
         };
 
@@ -305,6 +366,7 @@ mod tests {
             key_id: "key_abc".to_string(),
             revoked_by: "node_1".to_string(),
             timestamp: now_secs() - 7200, // 2 hours ago
+            epoch: 0,
             signature: vec![0xAB],
         };
 
@@ -319,6 +381,7 @@ mod tests {
             key_id: "key_abc".to_string(),
             revoked_by: "bad_node".to_string(),
             timestamp: now_secs(),
+            epoch: 0,
             signature: vec![0xAB],
         };
 
@@ -341,6 +404,7 @@ mod tests {
             key_id: "key_expired".to_string(),
             revoked_by: "node_1".to_string(),
             timestamp: now_secs() - 7200,
+            epoch: 0,
             signature: vec![0xAB],
         };
         store.entries.insert("key_expired".to_string(), expired);
@@ -359,5 +423,115 @@ mod tests {
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
         assert_eq!(store.gc(), 0);
+    }
+
+    #[test]
+    fn test_revoke_bumps_epoch() {
+        let store = CrlStore::new();
+        assert_eq!(store.epoch(), 0);
+        let e1 = store.revoke("key_a", "node_1", &dummy_sign);
+        assert_eq!(e1.epoch, 1);
+        assert_eq!(store.epoch(), 1);
+        let e2 = store.revoke("key_b", "node_1", &dummy_sign);
+        assert_eq!(e2.epoch, 2);
+        assert_eq!(store.epoch(), 2);
+    }
+
+    #[test]
+    fn test_bump_epoch() {
+        let store = CrlStore::new();
+        assert_eq!(store.bump_epoch(), 1);
+        assert_eq!(store.bump_epoch(), 2);
+        assert_eq!(store.epoch(), 2);
+    }
+
+    #[test]
+    fn test_merge_rejects_stale_epoch() {
+        let store = CrlStore::new();
+        let fresh = RevocationEntry {
+            key_id: "key_new".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 5,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&fresh, &dummy_verify), MergeResult::Accepted);
+
+        let stale = RevocationEntry {
+            key_id: "key_old".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 3,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&stale, &dummy_verify), MergeResult::StaleEpoch);
+        assert!(!store.is_revoked("key_old"));
+    }
+
+    #[test]
+    fn test_merge_accepts_forward_epoch() {
+        let store = CrlStore::new();
+        let e1 = RevocationEntry {
+            key_id: "key_a".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 2,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&e1, &dummy_verify), MergeResult::Accepted);
+
+        let e2 = RevocationEntry {
+            key_id: "key_b".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 7,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&e2, &dummy_verify), MergeResult::Accepted);
+        assert!(store.is_revoked("key_b"));
+    }
+
+    #[test]
+    fn test_merge_equal_epoch_ok() {
+        let store = CrlStore::new();
+        let e1 = RevocationEntry {
+            key_id: "key_a".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 4,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&e1, &dummy_verify), MergeResult::Accepted);
+
+        let e2 = RevocationEntry {
+            key_id: "key_b".to_string(),
+            revoked_by: "node_1".to_string(),
+            timestamp: now_secs(),
+            epoch: 4,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&e2, &dummy_verify), MergeResult::Accepted);
+    }
+
+    #[test]
+    fn test_peer_epoch_isolated_per_issuer() {
+        let store = CrlStore::new();
+        let from_a = RevocationEntry {
+            key_id: "key_a".to_string(),
+            revoked_by: "node_a".to_string(),
+            timestamp: now_secs(),
+            epoch: 10,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&from_a, &dummy_verify), MergeResult::Accepted);
+
+        let from_b = RevocationEntry {
+            key_id: "key_b".to_string(),
+            revoked_by: "node_b".to_string(),
+            timestamp: now_secs(),
+            epoch: 1,
+            signature: vec![0xAB],
+        };
+        assert_eq!(store.merge(&from_b, &dummy_verify), MergeResult::Accepted);
     }
 }

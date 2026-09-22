@@ -1204,6 +1204,7 @@ impl EncryptionManager {
                 .as_secs();
 
             self.session_keys.lock().unwrap().clear();
+            self.crl.bump_epoch();
             self.save_to_disk()?;
         }
         Ok(())
@@ -1233,6 +1234,7 @@ impl EncryptionManager {
             .unwrap()
             .as_secs();
         self.session_keys.lock().unwrap().clear();
+        self.crl.bump_epoch();
         self.migrate_to_user_keyed(persistence)?;
         Ok(())
     }

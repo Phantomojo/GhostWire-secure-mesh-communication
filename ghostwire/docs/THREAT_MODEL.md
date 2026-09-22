@@ -1,6 +1,6 @@
 # GhostWire Threat Model
 
-> **Version**: 1.1 | **Status**: Draft | **Last Updated**: 2026-07-03
+> **Version**: 1.2 | **Status**: Draft | **Last Updated**: 2026-09-22
 > **Standard**: STRIDE + NIST SP 800-57 | **Review Cycle**: Quarterly
 
 ---
@@ -66,6 +66,7 @@
 | Random number generator is secure | Key prediction, nonce reuse | `rand` crate with OS entropy |
 | At least one honest relay exists | Message delivery failure | Multiple transport fallbacks |
 | Majority of DHT nodes are honest | Eclipse attack, routing manipulation | Peer scoring, diverse discovery |
+| Honest outbound diversity — victim's outbound set is not fully attacker-controlled, including NAT'd (unreachable) peers | NAT-path eclipse: peerlist poisoning of reachable relays contaminates a NAT'd node's *only* connection surface; attacker needs public-IP Sybil nodes, not inbound to victim ([Shi et al., CCS 2026](https://arxiv.org/abs/2609.10260)) | Disjoint Kademlia lookups, per-/24 bucket caps, anchor connections to known-honest peers, CIDR-concentration self-check |
 
 ---
 
@@ -135,7 +136,7 @@
 
 **Mitigation**:
 - Forward secrecy via per-session key derivation
-- Key revocation via gossip-based CRL (v1.0 Phase 2)
+- Key revocation via gossip-based CRL — **shipped** (`src/core/crl.rs`, CRL_GOSSIP in mesh; epoch fail-closed freshness in progress, see §5.7/P0-B)
 - Secure key storage with encryption at rest
 
 ### 5.2 Key Compromise (Past Messages)
@@ -172,6 +173,30 @@
 - Social graph trust propagation
 - Proof-of-Work identity cost (planned)
 - **Status**: Partially mitigated — scoring exists, needs hardening
+
+Related: See §5.7 for the NAT-path adversary, a Sybil/eclipse class that specifically targets unreachable (NAT'd) peers — GhostWire's expected deployment shape in Nairobi.
+
+### 5.7 NAT-Path Adversary / Eclipse via Peer-Discovery Poisoning
+
+**Threat**: An adversary controls enough *reachable* (public-IP) mesh nodes to poison peerlists, then exploits the fact that NAT'd victims can only maintain outbound connections. Contaminated reachable relays feed the victim poisoned peer records during sync/handshake; the victim's entire outbound set becomes attacker-controlled. Because the victim cannot accept inbound connections, honest peers have no channel to heal the eclipse ([Shi et al., "Are Unreachable Nodes Truly Safe? Fully Eclipsing Monero's P2P Network!", ACM CCS 2026, arXiv:2609.10260](https://arxiv.org/abs/2609.10260) — attacks *Nyx* (slow network-wide poisoning) and *Moros* (fast bootstrap eclipse)).
+
+**Why this matters for GhostWire**: Nairobi offline-first deployment assumes many nodes sit behind carrier NAT / CGNAT with no inbound reachability. That is exactly the preconditions class the CCS 2026 paper shows is *not* safer — it is often *more* exposed, since outbound-only peers must trust whoever answers their dials.
+
+**Related results** (eclipse is a membership attack, not a forgery attack — signed records still verify when the attacker chooses *which* signed records you see):
+- [Heilman et al., USENIX Security 2015](https://eprint.iacr.org/2015/263.pdf) — Bitcoin eclipse with 32×/24 or ~4600 bots (85%); deployed counters: deterministic random eviction, random table selection, test-before-evict (v0.17), feeler connections (v0.13), anchor connections (v0.21).
+- [Marcus, Heilman, Goldberg, ePrint 2018](https://eprint.iacr.org/2018/236) — Ethereum Kademlia eclipse with **2 IPs**: XOR-distance predictability + free key generation; geth mitigated with max peers per /24.
+- [Tran et al., USENIX Security 2021](https://www.usenix.org/system/files/sec21fall-tran.pdf) — Erebus/RAP: malicious-AS network-Sybil; routing-aware peering fails under <6% route-inference error (not realistic for us — no BGP visibility).
+- [py-libp2p #1383 / #1399](https://github.com/libp2p/py-libp2p/issues/1383) — IP/subnet diversity in k-buckets (max 2 peers per /24 per bucket) + disjoint lookup paths (d≥2 independent lookups). Note: record signing authenticates content; eclipse attacks membership.
+
+**Mitigation (planned / partial)**:
+- Enable `disjoint_query_paths(true)` on Kademlia lookups (opt-in in rust-libp2p ≥0.20; multiplies attacker cost linearly) — **planned**
+- Cap ~2 peers per /24 (IPv4) / /48 (IPv6) per k-bucket, exempting loopback/private/relay — **planned**
+- Anchor connections to 2–3 known-honest peers (surviving sessions / operator-configured seeds) so a poisoned discovery path cannot fully replace the outbound set — **planned**
+- Peer scoring based on behavior (existing) — partial
+- Periodic eclipse self-check: alert if routing table shows high CIDR concentration vs. bootstrap diversity — **planned**
+- **Status**: ⚠️ Partially mitigated — peer scoring exists; disjoint lookups, /24 caps, anchors, and CIDR self-check not yet implemented
+
+**Non-goals** (rejected for GhostWire): proof-of-work peer IDs (libp2p interop break), centralized identity authority (contradicts permissionless mesh), full routing-aware peering / SABRE-style global relay fabric (needs BGP visibility or globally deployed infrastructure unavailable to an offline-first Nairobi mesh).
 
 ### 5.5 Censorship
 
@@ -281,5 +306,10 @@
 - [NIST SP 800-57](https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final) — Key Management
 - [OWASP Threat Modeling](https://owasp.org/www-community/Threat_Modeling)
 - [STRIDE Model](https://learn.microsoft.com/en-us/azure/security/develop/stride-model)
+- [Shi et al., CCS 2026 — Fully Eclipsing Monero via NAT](https://arxiv.org/abs/2609.10260) — NAT-path adversary (§5.7)
+- [Heilman et al., USENIX 2015 — Bitcoin Eclipse](https://eprint.iacr.org/2015/263.pdf)
+- [Marcus et al., ePrint 2018 — Ethereum Kademlia Eclipse](https://eprint.iacr.org/2018/236)
+- [Tran et al., USENIX 2021 — Erebus / Routing-Aware Peering](https://www.usenix.org/system/files/sec21fall-tran.pdf)
+- [py-libp2p #1383 — Kademlia eclipse hardening](https://github.com/libp2p/py-libp2p/issues/1383)
 - [GhostWire SECURITY.md](../SECURITY.md)
 - [GhostWire Layer Audit](~/Downloads/GhostWire_Layer_Audit_v1.md)

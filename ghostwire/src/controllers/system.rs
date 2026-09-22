@@ -161,6 +161,7 @@ impl SystemController {
             rotated: bool,
             key_id: String,
             reason: String,
+            crl_epoch: u64,
         }
         // Rotation needs &mut EncryptionManager, so both Arcs must be
         // uniquely owned. Otherwise rotation stays with the mesh hourly tick.
@@ -175,6 +176,7 @@ impl SystemController {
                     rotated: false,
                     key_id: enc.get_key_id(),
                     reason: "rotation interval not elapsed".to_string(),
+                    crl_epoch: enc.crl.epoch(),
                 });
             }
             if crate::core::encryption::EncryptionManager::is_user_keyed() {
@@ -187,6 +189,7 @@ impl SystemController {
                 rotated: true,
                 key_id: enc.get_key_id(),
                 reason: "keys rotated".to_string(),
+                crl_epoch: enc.crl.epoch(),
             })
         })();
         match outcome {
