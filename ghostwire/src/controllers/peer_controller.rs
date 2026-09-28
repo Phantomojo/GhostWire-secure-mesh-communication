@@ -395,7 +395,11 @@ impl PeerController {
         match tokio::time::timeout(std::time::Duration::from_secs(10), probe).await {
             Ok(Ok(rtt_ms)) => Json(ApiV2Response::success(serde_json::json!({
                 "node_id": node_id,
-                "rtt_ms": rtt_ms,
+                // Field name matches what the web UI already declares on
+                // `peers.ping` (`{ latency_ms: number }`). Emitting `rtt_ms`
+                // here would have left the UI reading `undefined` and hiding
+                // every latency reading behind its `!= null` guards.
+                "latency_ms": rtt_ms,
             })))
             .into_response(),
             Ok(Err(e)) => (

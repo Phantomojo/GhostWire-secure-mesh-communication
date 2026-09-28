@@ -303,22 +303,6 @@ export const auth = {
   },
 
   status: () => get<IdentityStatus>('/identity/status'),
-
-  login: async () => {
-    const res = await fetch(`${API_BASE.replace('/api', '')}/api/dev/token`, { credentials: 'include' });
-    const env: ApiEnvelope<string> = await res.json();
-    const token = env.data;
-    if (!token) throw new Error('No dev token');
-    const loginRes = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ token }),
-    });
-    const loginEnv: ApiEnvelope<{ token: string }> = await loginRes.json();
-    if (loginEnv.data?.token) sessionStorage.setItem('gw_token', loginEnv.data.token);
-    return loginEnv.data?.token;
-  },
 };
 
 // ── Profile ───────────────────────────────────────────────────────────────────
