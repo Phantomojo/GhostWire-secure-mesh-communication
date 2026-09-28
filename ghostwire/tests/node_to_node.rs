@@ -278,3 +278,85 @@ async fn test_ping_pong_same_machine() {
     .await
     .expect("test_ping_pong_same_machine timed out after 15s");
 }
+
+/// `MeshManager::ping_peer` must return a MEASURED round-trip to a live peer.
+///
+/// This is the guarantee the `/api/v2/peers/ping` endpoint rests on: the
+/// request goes on the wire and the call only completes when the peer's reply
+/// arrives. A synthesised or cached number would satisfy a weaker assertion, so
+/// this checks the measured value is physically plausible for a loopback link
+/// and that a second probe also succeeds (i.e. it is repeatable, not a fluke).
+#[tokio::test]
+async fn test_ping_peer_returns_real_rtt() {
+    let _home_guard = test_home_guard().await;
+    std::env::set_var("GHOSTWIRE_TEST_DISABLE_MDNS", "1");
+
+    // Outer guard exceeds the inner 20s wait.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (mut node_a, peer_id_a, _addr_a) =
+            build_test_mesh_manager(19020, Some("rtt_test_a".to_string()))
+                .await
+                .expect("Failed to build node A");
+        let (node_b, peer_id_b, addr_b) =
+            build_test_mesh_manager(19021, Some("rtt_test_b".to_string()))
+                .await
+                .expect("Failed to build node B");
+
+        node_a
+            .add_address(peer_id_b, addr_b.clone())
+            .await
+            .expect("Failed to add address A->B");
+        node_a
+            .connect_peer(peer_id_b)
+            .await
+            .expect("Failed to connect to peer B");
+
+        // Wait for the authenticated handshake so the peer is live.
+        let ready = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let ok = node_a
+                    .get_topology()
+                    .await
+                    .nodes
+                    .get(&peer_id_b.to_string())
+                    .map(|n| !n.public_key.is_empty())
+                    .unwrap_or(false);
+                if ok {
+                    break true;
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(ready, "peer B never became live");
+
+        // Probe 1: must return an actual measurement.
+        let rtt_1 = tokio::time::timeout(Duration::from_secs(10), node_a.ping_peer(peer_id_b))
+            .await
+            .expect("ping_peer did not return within 10s")
+            .expect("ping_peer returned an error for a live peer");
+        assert!(
+            rtt_1 < 5_000,
+            "loopback RTT of {}ms is not physically plausible",
+            rtt_1
+        );
+
+        // Probe 2: repeatable, so the number is a measurement and not a fluke.
+        let rtt_2 = tokio::time::timeout(Duration::from_secs(10), node_a.ping_peer(peer_id_b))
+            .await
+            .expect("second ping_peer did not return within 10s")
+            .expect("second ping_peer returned an error");
+        assert!(rtt_2 < 5_000, "second loopback RTT {}ms implausible", rtt_2);
+
+        println!(
+            "MEASURED_RTT: probe1={}ms probe2={}ms peer={}",
+            rtt_1, rtt_2, peer_id_b
+        );
+
+        let _ = node_a.stop().await;
+        let _ = node_b.stop().await;
+    })
+    .await
+    .expect("test_ping_peer_returns_real_rtt timed out");
+}

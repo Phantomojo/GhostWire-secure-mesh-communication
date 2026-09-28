@@ -7,7 +7,7 @@ use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, RwLock};
 use tracing::debug;
 
@@ -256,11 +256,14 @@ impl PeerHealthTracker {
 pub struct PendingPings {
     /// Maps ping timestamp → peer_id
     pings: HashMap<u32, String>,
-    /// Optional caller awaiting a single ping's result. The existing tracker
-    /// only recorded timestamps for periodic health sweeps, so an interactive
-    /// "ping this peer" request had no way to hand a measured RTT back to the
-    /// caller. Keyed by the same timestamp as `pings`.
-    waiters: HashMap<u32, oneshot::Sender<f64>>,
+    /// Interactive probes awaiting a reply, keyed by PEER ID rather than by
+    /// timestamp. The existing tracker only recorded timestamps for periodic
+    /// health sweeps, so an interactive "ping this peer" had no way to hand a
+    /// measured RTT back to its caller. Keying by peer is both simpler and
+    /// more correct than keying by `u32` millis: two probes to the same peer
+    /// inside one millisecond would collide on a timestamp key, and there is
+    /// no reason to allow two concurrent probes of one peer anyway.
+    waiters: HashMap<String, (Instant, oneshot::Sender<anyhow::Result<u64>>)>,
 }
 
 impl PendingPings {
@@ -271,23 +274,27 @@ impl PendingPings {
         }
     }
 
-    /// Register an in-flight ping that a caller is blocking on.
-    pub fn register(&mut self, ts: u32, peer_id: PeerId, reply: oneshot::Sender<f64>) {
-        self.pings.insert(ts, peer_id.to_string());
-        self.waiters.insert(ts, reply);
+    /// Register an interactive probe that a caller is blocking on.
+    pub fn register_waiter(
+        &mut self,
+        peer_id: PeerId,
+        reply: oneshot::Sender<anyhow::Result<u64>>,
+    ) {
+        self.waiters
+            .insert(peer_id.to_string(), (Instant::now(), reply));
     }
 
-    /// Resolve a ping, handing the measured RTT to any waiting caller.
-    /// Returns `(peer_id, rtt_ms)` as before, and additionally sends the RTT
-    /// over the caller's channel if one is registered.
-    pub fn resolve_with_reply(&mut self, pong_ts_ms: u32) -> Option<(String, f64)> {
-        let resolved = self.resolve(pong_ts_ms);
-        if let Some(sender) = self.waiters.remove(&pong_ts_ms) {
-            if let Some((_, rtt)) = resolved.as_ref() {
-                let _ = sender.send(*rtt);
-            }
-        }
-        resolved
+    /// Resolve the outstanding probe for a peer, if any, returning the measured
+    /// round-trip in milliseconds. The caller is handed the same value.
+    pub fn resolve_waiter(&mut self, peer_id: &PeerId) -> Option<f64> {
+        let key = peer_id.to_string();
+        let (start, sender) = self.waiters.remove(&key)?;
+        let rtt = Instant::now()
+            .saturating_duration_since(start)
+            .as_secs_f64()
+            * 1000.0;
+        let _ = sender.send(Ok(rtt as u64));
+        Some(rtt)
     }
 
     /// Fail every caller waiting on a ping that timed out, so a caller blocked

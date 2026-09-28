@@ -323,8 +323,12 @@ impl PeerController {
     }
 
     /// POST /api/v2/peers/ping — Ping a peer and get latency
+    ///
+    /// Returns a MEASURED round-trip. The request is put on the wire and the
+    /// call only completes when the peer's reply arrives, so a peer that never
+    /// answers yields a timeout rather than a fabricated number.
     pub async fn ping(
-        State(_state): State<Arc<AppState>>,
+        State(state): State<Arc<AppState>>,
         Json(req): Json<serde_json::Value>,
     ) -> impl IntoResponse {
         let node_id = req.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -338,14 +342,78 @@ impl PeerController {
             )
                 .into_response();
         }
-        tracing::warn!(target: "peers", "Peer ping unavailable for {}", &node_id[..8.min(node_id.len())]);
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error(
-                "PEER_PING_UNAVAILABLE",
-                "Peer ping is not wired to the live mesh manager yet",
-            )),
-        )
-            .into_response()
+        let peer_id: libp2p::PeerId = match node_id.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiV2Response::<()>::error(
+                        "INVALID_PEER_ID",
+                        format!("node_id is not a valid peer id: {}", e),
+                    )),
+                )
+                    .into_response();
+            }
+        };
+
+        // Refuse an explicitly blocked peer: a latency probe would otherwise
+        // open a live connection to someone the user has banned.
+        {
+            let core = state.core.read().await;
+            if core.trust_store.is_blocked(node_id).await {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(ApiV2Response::<()>::error(
+                        "PEER_BLOCKED",
+                        "peer is blocked",
+                    )),
+                )
+                    .into_response();
+            }
+        }
+
+        let mesh = {
+            let core = state.core.read().await;
+            core.mesh_manager.clone()
+        };
+        let Some(mesh) = mesh else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiV2Response::<()>::error(
+                    "MESH_UNAVAILABLE",
+                    "mesh is not running",
+                )),
+            )
+                .into_response();
+        };
+
+        // Bounded: a silent peer must not pin an HTTP worker indefinitely.
+        // The guard is bound to a local so it lives across the await; the
+        // transport lock is held only for the duration of the probe.
+        let mut guard = mesh.write().await;
+        let probe = guard.ping_peer(peer_id);
+        match tokio::time::timeout(std::time::Duration::from_secs(10), probe).await {
+            Ok(Ok(rtt_ms)) => Json(ApiV2Response::success(serde_json::json!({
+                "node_id": node_id,
+                "rtt_ms": rtt_ms,
+            })))
+            .into_response(),
+            Ok(Err(e)) => (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiV2Response::<()>::error(
+                    "PING_FAILED",
+                    format!("no reply from peer: {}", e),
+                )),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(ApiV2Response::<()>::error(
+                    "PING_TIMEOUT",
+                    "peer did not reply within 10s",
+                )),
+            )
+                .into_response(),
+        }
     }
 }

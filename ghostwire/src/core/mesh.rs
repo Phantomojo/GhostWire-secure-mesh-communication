@@ -76,6 +76,14 @@ pub enum MeshCommand {
         peer_id: PeerId,
         reply: oneshot::Sender<Result<()>>,
     },
+    /// Measure a real round-trip to a peer over the existing request_response
+    /// behaviour and resolve with the elapsed milliseconds. A peer answers
+    /// every request_response message with `ChatResponse("ACK")`, so this needs
+    /// no new protocol and older peers answer correctly unchanged.
+    PingPeer {
+        peer_id: PeerId,
+        reply: oneshot::Sender<Result<u64>>,
+    },
     SubscribeTopic {
         topic: String,
         reply: oneshot::Sender<Result<()>>,
@@ -646,6 +654,22 @@ impl MeshTransport {
         rx.await?
     }
 
+    /// Measure a real round-trip to a peer, in milliseconds.
+    ///
+    /// Sends an actual request over the existing `request_response` behaviour
+    /// and resolves only when the peer's reply arrives, so the number is a
+    /// measurement rather than a cached or synthesised figure. A peer answers
+    /// every request_response message with `ChatResponse("ACK")`, so this needs
+    /// no new protocol and an older peer answers correctly unchanged.
+    pub async fn ping_peer(&self, peer_id: PeerId) -> Result<u64> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(MeshCommand::PingPeer { peer_id, reply: tx })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
+        rx.await?
+    }
+
     pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
@@ -1132,6 +1156,32 @@ impl MeshDriver {
                     .dial(peer_id)
                     .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
                 let _ = reply.send(res);
+            }
+            MeshCommand::PingPeer { peer_id, reply } => {
+                // A peer answers EVERY request_response message with
+                // ChatResponse("ACK"), so a minimal well-formed message forces
+                // a real round-trip without introducing a new protocol.
+                let req = ChatRequest(Message::new(
+                    self._node_id.clone(),
+                    peer_id.to_string(),
+                    "ping".to_string(),
+                ));
+                // `send_request` returns an OutboundRequestId directly; it
+                // queues onto an established connection and does not itself
+                // report a failure. A peer that never answers is caught by the
+                // caller's timeout, not here.
+                self.swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_request(&peer_id, req);
+                // Register in the EXISTING PendingPings tracker
+                // (core/peer_health.rs) rather than adding a second, parallel
+                // ping table. The request_response reply path calls
+                // resolve_waiter, which hands the measured RTT to this caller.
+                self.pending_pings
+                    .lock()
+                    .await
+                    .register_waiter(peer_id, reply);
             }
             MeshCommand::SubscribeTopic { topic, reply } => {
                 let gossipsub_topic = IdentTopic::new(&topic);
@@ -1925,6 +1975,20 @@ impl MeshDriver {
                 }
                 request_response::Message::Response { response, .. } => {
                     debug!("Received chat response from {}: {}", peer, response.0);
+
+                    // This is the reply half of an interactive latency probe
+                    // issued by `MeshManager::ping_peer`. The periodic health
+                    // pings travel over gossipsub as FrameKind::Pong and are
+                    // resolved on that path instead; only the
+                    // request_response route can hand an RTT back to a caller
+                    // blocked inside `ping_peer`.
+                    let mut pending = self.pending_pings.lock().await;
+                    if let Some(rtt_ms) = pending.resolve_waiter(&peer) {
+                        self.peer_health
+                            .record_pong(&peer.to_string(), rtt_ms)
+                            .await;
+                        debug!("ping to {} resolved: RTT={:.1}ms", peer, rtt_ms);
+                    }
                 }
             }
             return;
@@ -2855,6 +2919,15 @@ impl MeshManager {
     }
 
     /// Connect to a peer by ID
+    /// Measure a real round-trip to a peer, in milliseconds.
+    ///
+    /// Delegates to the transport, which puts a request on the wire and only
+    /// resolves when the peer's reply arrives. A peer that never answers is
+    /// caught by the caller's timeout rather than reported as a number.
+    pub async fn ping_peer(&self, peer_id: PeerId) -> Result<u64> {
+        self.transport.ping_peer(peer_id).await
+    }
+
     pub async fn connect_peer(&mut self, peer_id: PeerId) -> Result<()> {
         self.transport.connect_peer(peer_id).await
     }
