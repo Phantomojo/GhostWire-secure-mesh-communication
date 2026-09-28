@@ -270,6 +270,10 @@ enum Commands {
         api_host: String,
         #[arg(long, default_value = "0.0.0.0")]
         mesh_host: String,
+        /// Mesh (libp2p) listen port. 0 = ephemeral, which binds a random port
+        /// and leaves you with nothing stable to firewall or advertise.
+        #[arg(long, default_value_t = 4001)]
+        mesh_port: u16,
         #[arg(long, default_value_t = 8080)]
         port: u16,
         /// QUIC transport port (0 = ephemeral)
@@ -750,6 +754,7 @@ async fn main() -> Result<()> {
         Some(Commands::Web {
             api_host,
             mesh_host,
+            mesh_port,
             port,
             quic_port,
             bootstrap,
@@ -763,8 +768,14 @@ async fn main() -> Result<()> {
             }
             core_arc
                 .clone()
-                .start_nervous_system(mesh_host.clone(), 0)
+                .start_nervous_system(mesh_host.clone(), mesh_port)
                 .await;
+            // Apply the web subcommand's own --quic-port. The earlier setup
+            // assigned from the global args, which shadowed this flag, so
+            // `ghostwire web --quic-port N` was accepted and then ignored.
+            let mut web_config = config.clone();
+            web_config.server.quic_port = quic_port;
+
             ghostwire::web::start_web_server(
                 Some(core_arc),
                 api_host,
@@ -772,8 +783,8 @@ async fn main() -> Result<()> {
                 bs,
                 None,
                 mesh_host,
-                0,
-                config.clone(),
+                mesh_port,
+                web_config,
             )
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
