@@ -40,9 +40,22 @@ async fn build_test_mesh_manager(
     port: u16,
     profile: Option<String>,
 ) -> anyhow::Result<(MeshManager, PeerId, libp2p::Multiaddr)> {
-    // Use a unique temp directory for each node to avoid DB lock conflicts
-    let temp_dir =
-        std::env::temp_dir().join(format!("ghostwire_test_{}_{}", port, std::process::id()));
+    // Use a unique temp directory for each node to avoid DB lock conflicts.
+    //
+    // The counter matters as much as the port: sled takes an exclusive lock on
+    // `vault/ghost_default/db`, and a previous MeshManager on the same port may
+    // still hold it when the next cycle rebuilds the node (the test runs
+    // A->B then B->A on the same two ports). Keying the directory on the port
+    // alone made the second cycle fail with
+    // "could not acquire lock ... WouldBlock".
+    static HOME_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = HOME_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ghostwire_test_{}_{}_{}",
+        port,
+        std::process::id(),
+        seq
+    ));
     let _ = std::fs::create_dir_all(&temp_dir);
     std::env::set_var("GHOSTWIRE_HOME", temp_dir.to_str().unwrap());
 
@@ -171,12 +184,12 @@ async fn run_delivery_cycle(sender_port: u16, receiver_port: u16, count: usize) 
         let msg_content = format!("delivery_harness_msg_{}", i);
         let message = Message::new(
             sender_psid.to_string(),
-            "recipient".to_string(),
+            receiver_psid.to_string(),
             msg_content.clone(),
         );
 
         sender
-            .send_direct_message("recipient".parse().unwrap(), message.clone())
+            .send_direct_message(receiver_psid.clone(), message.clone())
             .await
             .expect("Failed to send direct message");
 

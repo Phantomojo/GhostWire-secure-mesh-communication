@@ -96,7 +96,9 @@ async fn build_test_mesh_manager(
 async fn test_node_to_node_connectivity() {
     let _home_guard = test_home_guard().await;
     std::env::set_var("GHOSTWIRE_TEST_DISABLE_MDNS", "1");
-    tokio::time::timeout(Duration::from_secs(15), async {
+    // Outer guard must exceed the inner 20s waits below, which in turn must
+    // exceed the mesh driver's 15s PING_INTERVAL.
+    tokio::time::timeout(Duration::from_secs(30), async {
         let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19001, Some("test_node_a".to_string()))
                 .await
@@ -151,7 +153,14 @@ async fn test_node_to_node_connectivity() {
         .await
         .unwrap_or(false);
         assert!(handshake_ready, "authenticated handshake did not complete");
-        let peer_health_ready = tokio::time::timeout(Duration::from_secs(8), async {
+        // Must exceed the mesh driver's PING_INTERVAL (15s, see
+        // `ping_interval` in core/mesh.rs). The first tick fires immediately but
+        // before the peer has completed the handshake and entered the topology,
+        // so `send_periodic_pings` iterates an empty/partial set. The first
+        // ping that can actually reach the peer is therefore at t=15s, and this
+        // window has to be longer than that or the test can never observe a
+        // pong regardless of whether the transport is healthy.
+        let peer_health_ready = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 if let Some(health) = node_a
                     .peer_health()
@@ -209,7 +218,9 @@ async fn test_node_to_node_connectivity() {
 async fn test_ping_pong_same_machine() {
     let _home_guard = test_home_guard().await;
     std::env::set_var("GHOSTWIRE_TEST_DISABLE_MDNS", "1");
-    tokio::time::timeout(Duration::from_secs(15), async {
+    // Outer guard must exceed the inner 20s waits below, which in turn must
+    // exceed the mesh driver's 15s PING_INTERVAL.
+    tokio::time::timeout(Duration::from_secs(30), async {
         let (mut node_a, peer_id_a, _addr_a) =
             build_test_mesh_manager(19010, Some("ping_test_a".to_string()))
                 .await
@@ -231,7 +242,8 @@ async fn test_ping_pong_same_machine() {
         node_a.connect_peer(peer_id_b).await.expect("connect");
 
         let peer_b_str = peer_id_b.to_string();
-        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        // Same coupling as above: must exceed the 15s PING_INTERVAL.
+        let _ = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 if let Some(health) = node_a.peer_health().get_peer_health(&peer_b_str).await {
                     if health.pongs_received > 0 {

@@ -363,7 +363,11 @@ mod tests {
     #[test]
     fn test_max_message_hops() {
         assert!(MAX_MESSAGE_HOPS > 0);
-        assert!(MAX_MESSAGE_HOPS <= 255);
+        // The `<= 255` bound is enforced by the type, not by a runtime assert:
+        // MAX_MESSAGE_HOPS is declared `u8` (see the const above), so the
+        // wire-format limit cannot be violated by this assignment without the
+        // compiler rejecting it. Asserting it here was tautological and denied
+        // by clippy::absurd_extreme_comparisons.
     }
 
     #[test]
