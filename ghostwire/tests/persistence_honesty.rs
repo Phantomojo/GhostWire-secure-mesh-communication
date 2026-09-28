@@ -142,3 +142,43 @@ fn persistence_locked_maps_to_service_unavailable() {
          caller just needs to unlock."
     );
 }
+
+#[test]
+fn dev_profile_opens_machine_keyed_storage() {
+    let core = src("src/core/mod.rs");
+    assert!(
+        core.contains("GHOSTWIRE_DEV_PROFILE"),
+        "a dev node must be selectable so tests have a node that can actually \
+         store messages without a human unlocking a passphrase."
+    );
+    assert!(
+        core.contains("new_machine_mode_with_base_dir"),
+        "dev mode should open machine-keyed persistence, not the locked profile."
+    );
+    // Dev mode must be opt-in and never the default.
+    let main_rs = src("src/main.rs");
+    let default_is_locked =
+        core.contains("Arc::new(persistence_manager::PersistenceManager::new_locked(");
+    assert!(
+        default_is_locked,
+        "the non-dev path must still open a locked profile; a real identity \
+         should not silently become machine-keyed."
+    );
+    assert!(
+        main_rs.contains("dev-profile") || main_rs.contains("dev_profile"),
+        "dev mode should be reachable from the CLI."
+    );
+}
+
+#[test]
+fn dev_profile_refuses_a_passphrase_protected_profile() {
+    let pm = src("src/core/persistence_manager.rs");
+    // A profile created with a passphrase must not be silently downgraded to
+    // machine-keyed storage just because the env var is set.
+    assert!(
+        pm.contains("cannot be opened in machine mode")
+            || pm.contains("cannot be opened") && pm.contains("machine mode"),
+        "machine mode must refuse a user-mode profile rather than ignoring its \
+         passphrase protection."
+    );
+}

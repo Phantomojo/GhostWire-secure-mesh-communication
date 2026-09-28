@@ -274,6 +274,11 @@ enum Commands {
         /// and leaves you with nothing stable to firewall or advertise.
         #[arg(long, default_value_t = 4001)]
         mesh_port: u16,
+        /// Dev/test node: machine-keyed persistence with no passphrase, so the
+        /// node can actually store messages without anyone unlocking it.
+        /// For throwaway and CI nodes only -- NOT for real identities.
+        #[arg(long)]
+        dev_profile: bool,
         #[arg(long, default_value_t = 8080)]
         port: u16,
         /// QUIC transport port (0 = ephemeral)
@@ -725,6 +730,25 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(ProfilesController::load_active_profile);
 
+    // Dev-profile mode must be known BEFORE Core is constructed: Core reads
+    // this to decide between a locked passphrase profile and machine-keyed
+    // storage. Setting it inside the command match was too late -- core_arc was
+    // already built by then, so `--dev-profile` silently did nothing and the
+    // node came up locked anyway.
+    if matches!(
+        &args.command,
+        Some(Commands::Web {
+            dev_profile: true,
+            ..
+        })
+    ) {
+        std::env::set_var("GHOSTWIRE_DEV_PROFILE", "1");
+        println!(
+            "\n  ⚠️  DEV PROFILE MODE — machine-keyed storage, NO passphrase.\n     \
+             Throwaway/testing node. Do not put real secrets on it.\n"
+        );
+    }
+
     // Initialize core components
     let core = Core::new(
         config.clone(),
@@ -755,11 +779,13 @@ async fn main() -> Result<()> {
             api_host,
             mesh_host,
             mesh_port,
+            dev_profile,
             port,
             quic_port,
             bootstrap,
         }) => {
             info!("Starting web server via CLI on {}:{}", api_host, port);
+            let _ = dev_profile; // handled before Core::new
             let mut bs = bootstrap_multiaddrs.clone();
             for b in &bootstrap {
                 if let Ok(ma) = b.parse::<libp2p::Multiaddr>() {

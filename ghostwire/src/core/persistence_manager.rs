@@ -65,6 +65,44 @@ impl PersistenceManager {
         Self::new_locked_with_base_dir(base_dir, profile_name)
     }
 
+    /// Open in machine-key mode: encrypted at rest under a key derived from the
+    /// machine, with no passphrase and therefore no lock.
+    ///
+    /// This exists for throwaway and CI/dev nodes. `Core` otherwise always
+    /// calls `new_locked`, so a freshly created node cannot persist a single
+    /// message until someone POSTs to the unlock API -- which makes a node
+    /// useless for any automated test, and produced a real false-success: the
+    /// send endpoint answered `{"status":"accepted"}` while the store stayed
+    /// empty, because the profile had never been unlocked.
+    ///
+    /// The database is still encrypted at rest; what is given up is the
+    /// passphrase, not the encryption.
+    pub fn new_machine_mode_with_base_dir(
+        base_dir: PathBuf,
+        profile_name: Option<String>,
+    ) -> Result<Self> {
+        std::fs::create_dir_all(&base_dir)?;
+        let db = sled::open(db_path(&base_dir, profile_name.as_deref()))?;
+        if has_user_mode(&db)? {
+            anyhow::bail!(
+                "this profile was created with a passphrase and cannot be opened \
+                 in machine mode; unlock it instead, or use a fresh GHOSTWIRE_HOME \
+                 for a dev node"
+            );
+        }
+        let key = Zeroizing::new(
+            EncryptionManager::machine_master_key()
+                .map_err(|e| anyhow!("machine key initialization failed: {e}"))?,
+        );
+        Ok(Self {
+            db: RwLock::new(db),
+            base_dir,
+            profile_name,
+            key_source: RwLock::new(KeySource::Machine),
+            legacy_machine_key: RwLock::new(Some(key)),
+        })
+    }
+
     pub fn new_locked_with_base_dir(
         base_dir: PathBuf,
         profile_name: Option<String>,

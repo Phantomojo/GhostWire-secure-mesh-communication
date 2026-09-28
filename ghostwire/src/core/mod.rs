@@ -511,10 +511,43 @@ impl Core {
         let registry = Arc::new(RwLock::new(registry));
         let active_transport = Arc::new(RwLock::new(active_transport_inner));
 
-        // Initialize Persistence
-        let persistence = Arc::new(persistence_manager::PersistenceManager::new_locked(
-            profile.clone(),
-        )?);
+        // Initialize Persistence.
+        //
+        // A normal node opens LOCKED and stays that way until the unlock API is
+        // called, which is correct for a real identity. A dev node instead
+        // opens in machine-key mode so it can actually store things, because
+        // an automated test has nobody to type a passphrase.
+        //
+        // `GHOSTWIRE_DEV_PROFILE` is opt-in and loud: it is checked here, it
+        // has to be set deliberately, and the startup banner labels the node.
+        let dev_profile = std::env::var("GHOSTWIRE_DEV_PROFILE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let persistence = if dev_profile {
+            tracing::warn!(
+                target: "core",
+                "DEV PROFILE MODE: persistence is machine-keyed and NOT passphrase \
+                 protected. This node is for testing and must not carry real \
+                 secrets."
+            );
+            let base = match std::env::var("GHOSTWIRE_HOME") {
+                Ok(h) => std::path::PathBuf::from(h).join("vault"),
+                Err(_) => dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
+                    .join(".ghostwire")
+                    .join("vault"),
+            };
+            Arc::new(
+                persistence_manager::PersistenceManager::new_machine_mode_with_base_dir(
+                    base,
+                    profile.clone(),
+                )?,
+            )
+        } else {
+            Arc::new(persistence_manager::PersistenceManager::new_locked(
+                profile.clone(),
+            )?)
+        };
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
