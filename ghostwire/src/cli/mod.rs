@@ -1,5 +1,155 @@
 pub mod commands;
 
+/// Read the auth token the daemon writes to `<GHOSTWIRE_HOME>/token`.
+///
+/// This is the same file and header the TUI already uses, so a CLI invocation
+/// authenticates exactly like the terminal UI does.
+fn read_daemon_token() -> Option<String> {
+    // Must match the daemon's own resolution exactly (see the token reader in
+    // web.rs): GHOSTWIRE_HOME when set, otherwise config_dir()/ghostwire.
+    // Getting this wrong reads a STALE token from the default location while
+    // the daemon is using a different one, which surfaces as a confusing 401
+    // rather than as "wrong token file".
+    let config_dir = match std::env::var("GHOSTWIRE_HOME") {
+        Ok(home) => std::path::PathBuf::from(home),
+        Err(_) => dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ghostwire"),
+    };
+    let path = config_dir.join("token");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn daemon_base_url(port: u16) -> String {
+    format!("http://127.0.0.1:{}", port)
+}
+
+/// List peers by querying the RUNNING daemon over its HTTP API.
+///
+/// Previously `ghostwire peers` built a brand-new in-process `Core` — its own
+/// identity, its own mesh, its own encryption state — purely to print a peer
+/// list, while `src/cli/` contained no HTTP calls at all. With a daemon
+/// already running, the CLI's freshly-built node knew nothing about the
+/// daemon's peers, so the command reported a misleading empty list and paid
+/// full startup cost every time.
+///
+/// `status` and `tui` already took the correct approach by returning before
+/// the `Core` is constructed; this does the same.
+pub async fn list_peers_from_daemon(port: u16) -> Result<()> {
+    let url = format!("{}/api/v2/peers", daemon_base_url(port));
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(token) = read_daemon_token() {
+        req = req.header("X-Ghost-Token", token);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Could not reach the daemon at {}: {}", url, e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!(
+            "Daemon returned {} for /api/v2/peers. {}",
+            status,
+            body.trim()
+        );
+    }
+
+    let value: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Malformed peer list from daemon: {}", e))?;
+
+    let peers = value
+        .get("peers")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if peers.is_empty() {
+        println!("📡 No peers known to the daemon yet.");
+        return Ok(());
+    }
+
+    println!("📡 Mesh Network Peers ({}):", peers.len());
+    for peer in &peers {
+        let id = peer
+            .get("peer_id")
+            .and_then(|v| v.as_str())
+            .or_else(|| peer.get("id").and_then(|v| v.as_str()))
+            .unwrap_or("<unknown>");
+        let name = peer
+            .get("name")
+            .or_else(|| peer.get("nickname"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let status = peer
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        if name.is_empty() {
+            println!("  • {} [{}]", id, status);
+        } else {
+            println!("  • {} ({}) [{}]", name, id, status);
+        }
+    }
+    Ok(())
+}
+
+/// Send a message through the running daemon rather than a private node.
+pub async fn send_message_via_daemon(port: u16, recipient: &str, content: &str) -> Result<()> {
+    let url = format!("{}/api/v2/messages/send", daemon_base_url(port));
+    let client = reqwest::Client::new();
+    let mut req = client.post(&url).json(&serde_json::json!({
+        "recipient": recipient,
+        "content": content,
+    }));
+    if let Some(token) = read_daemon_token() {
+        req = req.header("X-Ghost-Token", token);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Could not reach the daemon at {}: {}", url, e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Daemon returned {}: {}", status, body.trim());
+    }
+
+    // A 2xx is NOT sufficient proof of delivery here. The API signals failure
+    // in the body while still returning HTTP 200:
+    //   {"error":{"code":"INTERNAL_ERROR",
+    //             "message":"Transmission failed: Invalid P2P Recipient ID: ..."}}
+    // Checking only the status code reported a successful send to a peer that
+    // does not exist. Surface the real outcome.
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Malformed response from daemon: {}", e))?;
+    if let Some(err) = body.get("error") {
+        let message = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        anyhow::bail!("{}", message);
+    }
+    if body.get("delivered").and_then(|d| d.as_bool()) == Some(false) {
+        anyhow::bail!("Daemon accepted the request but did not deliver the message");
+    }
+
+    println!("✅ Message sent to {}", recipient);
+    Ok(())
+}
+
 use crate::core::Core;
 use anyhow::Result;
 use clap::{Parser, Subcommand};

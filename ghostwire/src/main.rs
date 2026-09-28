@@ -130,7 +130,11 @@ fn init_logging(filter: &str) {
 #[command(name = "ghostwire")]
 #[command(about = "GhostWire - Secure Mesh Networking and Messaging")]
 #[command(version = "0.1.0")]
-#[command(disable_help_flag = true)]
+// `disable_help_flag` was set here, which made `ghostwire --help` fail with
+// "unexpected argument '--help' found" — the single most conventional flag in
+// any CLI. No custom help field replaced it (the `help` subcommand is
+// clap's own), so it was simply a leftover. `-h` is free: the only short flag
+// already claimed is `-v` for --verbose.
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -150,24 +154,31 @@ struct Args {
     #[arg(long, default_value_t = 8081)]
     quic_port: u16,
 
+    /// Peer multiaddrs to bootstrap the mesh from (repeatable)
     #[arg(long)]
     bootstrap: Vec<String>,
 
-    #[arg(long)]
+    /// Deprecated: use the `web` subcommand instead
+    #[arg(long, hide = true)]
     web: bool,
 
-    #[arg(long)]
+    /// Deprecated: this flag was never read; use the `cli` subcommand instead
+    #[arg(long, hide = true)]
     cli: bool,
 
+    /// Run in mesh node mode
     #[arg(long)]
     mesh: bool,
 
+    /// Path to a configuration file
     #[arg(long)]
     config: Option<String>,
 
+    /// Simulation listen address (used by the test harness)
     #[arg(long)]
     sim_addr: Option<String>,
 
+    /// Identity profile to operate as
     #[arg(long)]
     profile: Option<String>,
 
@@ -322,7 +333,17 @@ async fn main() -> Result<()> {
     // Anti-debug: abort if being traced (must run before any key material loads)
     ghostwire::core::binary_hardening::detect_debugger();
 
-    info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
+    // `status`, `peers` and `send` are short-lived client commands that talk to
+    // an existing daemon. The startup banner is noise for them: it appeared
+    // above the actual output and made a simple `ghostwire status` look like it
+    // was booting a node. Keep it for the long-running modes.
+    let is_daemon_client = matches!(
+        args.command,
+        Some(Commands::Status) | Some(Commands::Peers) | Some(Commands::Send { .. })
+    );
+    if !is_daemon_client {
+        info!("🚀 Starting GhostWire - Secure Mesh Networking and Messaging");
+    }
 
     // Handle daemon management commands (don't need Core — they talk to the daemon)
     #[cfg(feature = "cli")]
@@ -430,6 +451,39 @@ async fn main() -> Result<()> {
             }
             Some(Commands::Status) => {
                 println!("{}", daemon::daemon_status());
+                return Ok(());
+            }
+            // `peers` and `send` are daemon CLIENTS. They previously fell
+            // through to the code below that constructs a full in-process
+            // `Core` (own identity, own mesh, own crypto state) just to print
+            // a list or send a message, so with a daemon already running they
+            // reported a state the daemon knew nothing about. Route them to the
+            // running daemon's HTTP API, like `status` and `tui` already do.
+            // NOTE: deliberately no `is_daemon_running()` gate here. That
+            // helper only checks a PID file written by `ghostwire start`, so a
+            // daemon started any other way — `ghostwire web` in the
+            // foreground, a service unit, a manually launched process — is
+            // reported as "not running" even while it is serving HTTP. The
+            // request itself is the real liveness probe, and its connection
+            // error produces a better message than a stale PID file.
+            Some(Commands::Peers) => {
+                let port = args.port;
+                if let Err(e) = ghostwire::cli::list_peers_from_daemon(port).await {
+                    eprintln!("\n❌ {}", e);
+                    eprintln!("   Is the daemon running? Try: ghostwire start");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            Some(Commands::Send { recipient, content }) => {
+                let port = args.port;
+                if let Err(e) =
+                    ghostwire::cli::send_message_via_daemon(port, &recipient, &content).await
+                {
+                    eprintln!("\n❌ {}", e);
+                    eprintln!("   Is the daemon running? Try: ghostwire start");
+                    std::process::exit(1);
+                }
                 return Ok(());
             }
             Some(Commands::Tui) => {
