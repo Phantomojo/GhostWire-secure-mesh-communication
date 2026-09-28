@@ -636,7 +636,9 @@ async fn main() -> Result<()> {
                 tracing::info!(worker = %base, seeds = addrs.len(), "Bootstrap worker supplied seed hints");
                 bootstrap_multiaddrs.extend(addrs);
             }
-            Err(e) => tracing::warn!(worker = %base, "Bootstrap worker unreachable, continuing: {}", e),
+            Err(e) => {
+                tracing::warn!(worker = %base, "Bootstrap worker unreachable, continuing: {}", e)
+            }
         }
     }
 

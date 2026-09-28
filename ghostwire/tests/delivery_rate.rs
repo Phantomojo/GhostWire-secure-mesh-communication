@@ -107,14 +107,16 @@ async fn run_delivery_cycle(sender_port: u16, receiver_port: u16, count: usize) 
         build_test_mesh_manager(sender_port, Some("delivery_sender".to_string()))
             .await
             .expect("Failed to build sender");
-    let (mut receiver, _, receiver_addr) =
+    let (mut receiver, receiver_psid, receiver_addr) =
         build_test_mesh_manager(receiver_port, Some("delivery_receiver".to_string()))
             .await
             .expect("Failed to build receiver");
 
-    // Add cross-addresses so they can find each other
+    // Add cross-addresses so they can find each other.
+    // NOTE: these must be the real peer IDs returned by build_test_mesh_manager.
+    // A placeholder PublicKey::new([0u8; 32]) would address a peer that does not exist.
     sender
-        .add_address(PeerId::from(libp2p::identity::PublicKey::new([0u8; 32]).into(), receiver_addr.clone())
+        .add_address(receiver_psid.clone(), receiver_addr.clone())
         .await
         .expect("Failed to add address sender->receiver");
     receiver
@@ -133,7 +135,7 @@ async fn run_delivery_cycle(sender_port: u16, receiver_port: u16, count: usize) 
         .expect("Failed to subscribe to DM topic");
 
     sender
-        .connect_peer(PeerId::from(libp2p::identity::PublicKey::new([0u8; 32]).into())
+        .connect_peer(receiver_psid.clone())
         .await
         .expect("Failed to connect to peer");
 
@@ -144,8 +146,8 @@ async fn run_delivery_cycle(sender_port: u16, receiver_port: u16, count: usize) 
                 .get_topology()
                 .await
                 .nodes
-                .get(&PeerId::from(libp2p::identity::PublicKey::new([0u8; 32]).into().to_string())
-                .await
+                .get(&receiver_psid.to_string())
+                .map(|node| !node.public_key.is_empty())
                 .unwrap_or(false);
             let b_ready = receiver
                 .get_topology()
@@ -167,7 +169,11 @@ async fn run_delivery_cycle(sender_port: u16, receiver_port: u16, count: usize) 
     let mut delivered = 0;
     for i in 0..count {
         let msg_content = format!("delivery_harness_msg_{}", i);
-        let message = Message::new(sender_psid.to_string(), "recipient".to_string(), msg_content.clone());
+        let message = Message::new(
+            sender_psid.to_string(),
+            "recipient".to_string(),
+            msg_content.clone(),
+        );
 
         sender
             .send_direct_message("recipient".parse().unwrap(), message.clone())
@@ -210,10 +216,22 @@ async fn test_delivery_rate_two_nodes() {
     };
 
     println!("\n=== Delivery Rate Summary ===");
-    println!("Messages sent A->B: {} / delivered: {}", total_a_b, delivered_a_b);
-    println!("Messages sent B->A: {} / delivered: {}", total_b_a, delivered_b_a);
-    println!("Total sent: {} / total delivered: {}", total_sent, total_delivered);
-    println!("Delivery rate: {}/{} = {:.2}%", total_delivered, total_sent, pct);
+    println!(
+        "Messages sent A->B: {} / delivered: {}",
+        total_a_b, delivered_a_b
+    );
+    println!(
+        "Messages sent B->A: {} / delivered: {}",
+        total_b_a, delivered_b_a
+    );
+    println!(
+        "Total sent: {} / total delivered: {}",
+        total_sent, total_delivered
+    );
+    println!(
+        "Delivery rate: {}/{} = {:.2}%",
+        total_delivered, total_sent, pct
+    );
 
     // Verify at least some messages get through
     assert!(
@@ -245,15 +263,24 @@ async fn test_delivery_rate_three_nodes() {
     };
 
     println!("\n=== 3-Node Delivery Rate Summary ===");
-    println!("Messages sent A->B: {} / delivered: {}", total_a_b, delivered_a_b);
-    println!("Messages sent B->C: {} / delivered: {}", total_b_c, delivered_b_c);
-    println!("Total sent: {} / total delivered: {}", total_sent, total_delivered);
-    println!("Delivery rate: {}/{} = {:.2}%", total_delivered, total_sent, pct);
-
-    assert!(
-        total_delivered > 0,
-        "No messages delivered in 3-node test"
+    println!(
+        "Messages sent A->B: {} / delivered: {}",
+        total_a_b, delivered_a_b
     );
+    println!(
+        "Messages sent B->C: {} / delivered: {}",
+        total_b_c, delivered_b_c
+    );
+    println!(
+        "Total sent: {} / total delivered: {}",
+        total_sent, total_delivered
+    );
+    println!(
+        "Delivery rate: {}/{} = {:.2}%",
+        total_delivered, total_sent, pct
+    );
+
+    assert!(total_delivered > 0, "No messages delivered in 3-node test");
 
     // This assert ensures we report a real number on the funding call
     eprintln!("DELIVERY_RATE_3NODE: {:.2}%", pct);

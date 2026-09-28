@@ -527,13 +527,37 @@ impl Identity {
             *cached_encrypted = Some(encrypted_keypair.clone());
         }
 
+        // Store ONLY the public half in plaintext.
+        //
+        // This previously wrote `keypair_bytes`, which is
+        // `kp.to_protobuf_encoding()` — libp2p documents that method as
+        // "Encode a private key as protobuf structure", and for Ed25519 it
+        // contains the 32-byte SECRET scalar alongside the public point. The
+        // `encrypted_keypair` field sitting next to it in the same JSON file
+        // (Argon2id / XChaCha20-Poly1305) was therefore decorative: anyone who
+        // could read identity.json owned the identity outright, with no
+        // password, no KDF work, and no need to guess.
+        //
+        // The intent in the original comment ("store public key in plaintext
+        // for use when locked") is correct and is preserved — only the bytes
+        // were wrong. `kp.public()` is the genuine public key, so
+        // `get_public_key()` still works while locked, which is what
+        // consumers (SocialGraph, PairingManager) depend on.
+        let public_key_only = match &*state_guard {
+            IdentityState::Unlocked(kp, _) => kp
+                .public()
+                .try_into_ed25519()
+                .ok()
+                .map(|pk| pk.to_bytes().to_vec()),
+            IdentityState::Locked(_, stored_pub) => Some(stored_pub.clone()),
+        };
+
         let persisted = PersistedEncryptedIdentity {
             id: self.id.clone(),
             did: self.did.clone(),
             metadata: self.metadata.read().clone(),
             encrypted_keypair,
-            // CRITICAL FIX: Store public key in plaintext for use when locked
-            public_key_bytes: Some(keypair_bytes.clone()),
+            public_key_bytes: public_key_only,
         };
 
         let json = serde_json::to_string_pretty(&persisted)?;
@@ -723,6 +747,72 @@ struct PersistedEncryptedIdentity {
 }
 
 #[cfg(test)]
+mod setup_guard_tests {
+    use super::*;
+
+    /// The `/api/identity/setup` route is UNAUTHENTICATED (it is in the public
+    /// allowlist in web.rs), and its handler re-encrypts the on-disk identity
+    /// under a caller-supplied passphrase. Its guard therefore has to be
+    /// correct, not merely present.
+    ///
+    /// This test pins the guard's truth table rather than spinning up a `Core`
+    /// and an HTTP server. The two signals the handler reads are
+    /// `metadata.setup_complete` and `Identity::is_locked()`:
+    ///
+    ///   fresh guest      : setup_complete=false, locked=false  -> ALLOW (correct)
+    ///   already set up   : setup_complete=true,  locked=false  -> DENY  (the bug)
+    ///   hardened/locked  : setup_complete=true,  locked=true   -> DENY
+    ///   legacy sidecar   : setup_complete=false, locked=true   -> DENY
+    ///
+    /// The "already set up" row is the vulnerability: before the fix the guard
+    /// was `is_locked()` alone, which returned false there and let any
+    /// unauthenticated caller re-key the identity.
+    #[test]
+    fn setup_guard_truth_table() {
+        let allow = |setup_complete: bool, locked: bool| !(setup_complete || locked);
+
+        // Fresh guest identity: first-run setup must still work.
+        assert!(allow(false, false), "fresh guest must be allowed to set up");
+
+        // The vulnerability: already-configured but unlocked must be DENIED.
+        assert!(
+            !allow(true, false),
+            "a set-up identity must not be re-keyed by an unauthenticated caller"
+        );
+
+        // Locked identities stay denied regardless.
+        assert!(!allow(true, true), "locked identity must be denied");
+        assert!(!allow(false, true), "locked identity must be denied");
+
+        // And `setup_complete` is genuinely the signal the setup handler sets:
+        // it is the 4th argument of `update_metadata(.., Some(true))` in
+        // IdentityController::setup, and `IdentityMetadata` marks the field
+        // `#[serde(default)]` so an existing on-disk identity without the flag
+        // deserialises to false (treated as "not yet set up"), which is the
+        // safe direction for a first-run flow.
+        let decoded: IdentityMetadata = serde_json::from_str(
+            r#"{"identity_id":"x","did":"did:x","nickname":"","bio":"","avatar_url":null,
+                "verified_claims":[],"last_updated":0}"#,
+        )
+        .expect("metadata without the setup_complete field must still parse");
+        assert!(
+            !decoded.setup_complete,
+            "a legacy identity lacking the field must default to setup_complete=false"
+        );
+
+        // And an identity that HAS completed setup round-trips as true, so the
+        // guard can rely on it.
+        let mut done = decoded.clone();
+        done.setup_complete = true;
+        let round = serde_json::to_string(&done)
+            .ok()
+            .and_then(|s| serde_json::from_str::<IdentityMetadata>(&s).ok())
+            .expect("round-trip");
+        assert!(round.setup_complete, "setup_complete must persist as true");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -788,6 +878,82 @@ mod tests {
     }
 
     #[test]
+    /// F1 REGRESSION: the on-disk plaintext field must contain the PUBLIC key
+    /// only, never the private keypair encoding.
+    ///
+    /// `save_to_disk` used to write `kp.to_protobuf_encoding()` into
+    /// `public_key_bytes`. libp2p documents that method as "Encode a private
+    /// key as protobuf structure"; for Ed25519 it carries the 32-byte secret
+    /// scalar. The Argon2id/XChaCha20-Poly1305 `encrypted_keypair` field beside
+    /// it in the same JSON was then decorative — reading identity.json was
+    /// equivalent to stealing the identity.
+    ///
+    /// This asserts the security property directly, by attempting to RECOVER a
+    /// usable secret from the plaintext bytes alone, with no password. If a
+    /// future change re-introduces the private encoding, the round-trip below
+    /// succeeds and this test fails.
+    #[test]
+    fn identity_file_never_contains_a_recoverable_private_key() {
+        let _home = crate::core::encryption::test_home();
+        let profile = Some("f1_plaintext_secret".to_string());
+        let identity = Identity::create_new(profile.clone()).unwrap();
+
+        identity
+            .save_to_disk("correct horse battery staple")
+            .unwrap();
+
+        let storage_path =
+            Identity::get_storage_path(Some("f1_plaintext_secret".to_string())).unwrap();
+        let raw = std::fs::read(&storage_path).unwrap();
+        let persisted: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+
+        let stored = persisted["public_key_bytes"]
+            .as_array()
+            .expect("public_key_bytes must be a byte array")
+            .iter()
+            .map(|v| v.as_u64().expect("byte") as u8)
+            .collect::<Vec<u8>>();
+
+        // THE CORE ASSERTION: the plaintext blob must NOT be usable as a
+        // private key. `Keypair::from_protobuf_encoding` succeeds on a
+        // keypair encoding; on a bare public key it must fail.
+        let recovered = libp2p::identity::Keypair::from_protobuf_encoding(&stored);
+        assert!(
+            recovered.is_err(),
+            "SECURITY REGRESSION: identity.json plaintext field is a RECOVERABLE \
+             PRIVATE KEYPAIR ({} bytes). Anyone reading the file owns the identity. \
+             Expected a public-key-only encoding.",
+            stored.len()
+        );
+
+        // And positively: while unlocked, the correct public key is still
+        // available, so the locked-state feature this field exists for keeps
+        // working. 32 bytes for Ed25519.
+        let expected_pub = identity.get_public_key();
+        assert_eq!(
+            expected_pub.len(),
+            32,
+            "get_public_key() must return a 32-byte Ed25519 PUBLIC key"
+        );
+
+        // Reloading must yield a LOCKED identity whose advertised "public key"
+        // is the genuine public key, not a secret. This is the second half of
+        // F1: get_public_key() previously returned the stored private blob
+        // verbatim when locked, handing the secret to SocialGraph and
+        // PairingManager.
+        let loaded = Identity::load_or_create(profile).unwrap();
+        assert!(loaded.is_locked(), "reload must be locked");
+        let locked_pub = loaded.get_public_key();
+        assert_eq!(
+            locked_pub, expected_pub,
+            "a locked identity must advertise its real public key"
+        );
+        assert!(
+            libp2p::identity::Keypair::from_protobuf_encoding(&locked_pub).is_err(),
+            "a LOCKED identity must not hand out a recoverable private key"
+        );
+    }
+
     fn test_storage_roundtrip() {
         let _home = crate::core::encryption::test_home();
         let profile = Some("test_profile".to_string());

@@ -239,7 +239,10 @@ impl RatchetState {
         Self::decrypt_with_key(&output.message_key, msg)
     }
 
-    fn decrypt_with_key(message_key: &[u8; KEY_LEN], msg: &RatchetMessage) -> Result<Vec<u8>, String> {
+    fn decrypt_with_key(
+        message_key: &[u8; KEY_LEN],
+        msg: &RatchetMessage,
+    ) -> Result<Vec<u8>, String> {
         use chacha20poly1305::{
             aead::{Aead, KeyInit},
             XChaCha20Poly1305, XNonce,

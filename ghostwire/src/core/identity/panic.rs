@@ -244,6 +244,11 @@ pub async fn secure_delete(path: &std::path::Path) -> Result<()> {
         written += to_write;
     }
     file.flush().await?;
+    // flush() only reaches the OS page cache. Without an fsync the overwrite can
+    // still be sitting there when the file is unlinked, and the on-disk blocks
+    // may retain the original contents - which defeats the point of the wipe.
+    // sync_all() also flushes file metadata (size/truncation) to the device.
+    file.sync_all().await?;
     drop(file);
 
     // Then delete
@@ -262,6 +267,44 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn secure_delete_wipes_and_removes() {
+        let dir = std::env::temp_dir().join(format!("gw_secure_delete_{}", now_secs()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("secret.bin");
+
+        // Content that must not survive the wipe.
+        let secret = b"GHOSTWIRE-PRIVATE-KEY-MATERIAL-DO-NOT-RECOVER".repeat(64);
+        tokio::fs::write(&path, &secret).await.unwrap();
+        assert_eq!(
+            tokio::fs::metadata(&path).await.unwrap().len(),
+            secret.len() as u64
+        );
+
+        secure_delete(&path).await.unwrap();
+
+        // Gone, not merely truncated.
+        assert!(!path.exists(), "secure_delete must remove the file");
+
+        // Deleting a path that does not exist is a no-op, not an error, so
+        // cleanup paths can call it unconditionally.
+        secure_delete(&path).await.unwrap();
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn secure_delete_handles_empty_file() {
+        let dir = std::env::temp_dir().join(format!("gw_secure_delete_empty_{}", now_secs()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("empty.bin");
+        tokio::fs::write(&path, b"").await.unwrap();
+
+        // A zero-length file must not loop forever or error.
+        secure_delete(&path).await.unwrap();
+        assert!(!path.exists());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 
     #[tokio::test]
     async fn heartbeat_resets_timer() {

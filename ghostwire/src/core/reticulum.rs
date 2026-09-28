@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
-use uuid::Uuid;
 
 #[cfg(feature = "reticulum")]
 use rns_transport::hash::AddressHash;
@@ -219,7 +218,7 @@ impl ReticulumTransport {
                 }
             }
 
-            let mut rx_data = t.received_data_events();
+            let rx_data = t.received_data_events();
 
             let _local_dest = t
                 .add_destination(

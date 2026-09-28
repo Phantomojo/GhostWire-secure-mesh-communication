@@ -3,8 +3,6 @@ use crate::core::passphrase_keyslot::{self, PersistenceKey};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sled::{Db, Tree};
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{RwLock, RwLockReadGuard};
 use zeroize::Zeroizing;
@@ -869,24 +867,17 @@ mod tests {
         // When we store a record
         let key = "my-deleted-key";
         let value = ("deleted_item".to_string(), 99u32);
-        manager
-            .store_secure("delete_test", key, &value)
-            .unwrap();
+        manager.store_secure("delete_test", key, &value).unwrap();
 
         // Then the record should be loadable
-        let loaded: (String, u32) = manager
-            .load_secure("delete_test", key)
-            .unwrap()
-            .unwrap();
+        let loaded: (String, u32) = manager.load_secure("delete_test", key).unwrap().unwrap();
         assert_eq!(loaded, value);
 
         // When we delete the record by key
         manager.delete_record("delete_test", key).unwrap();
 
         // Then the record should be absent
-        let after_delete: Option<(String, u32)> = manager
-            .load_secure("delete_test", key)
-            .unwrap();
+        let after_delete: Option<(String, u32)> = manager.load_secure("delete_test", key).unwrap();
         assert!(after_delete.is_none(), "Record should have been deleted");
     }
 }

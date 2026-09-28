@@ -38,23 +38,35 @@ export default function SystemPanel() {
       </div>
 
       <div className="panel-grid-2" style={{ marginBottom:12 }}>
-        {/* CPU */}
+        {/* CPU — the daemon's /system/stats does not report CPU. Showing
+            "0%" would look like a real reading of an idle machine, so render
+            "n/a" when the value is absent. */}
         <div className="ops-panel" style={{ padding:14 }}>
           <div className="ops-label" style={{ marginBottom:4 }}>CPU</div>
           <div style={{ fontFamily:'var(--mono)',fontSize:28,fontWeight:700,
-            color:state.cpuPct>=90?'var(--crit)':state.cpuPct>=70?'var(--warn)':'var(--t1)' }}>
-            {state.cpuPct}%
+            color:state.cpuPct==null?'var(--t4)'
+              :state.cpuPct>=90?'var(--crit)':state.cpuPct>=70?'var(--warn)':'var(--t1)' }}>
+            {state.cpuPct==null ? 'n/a' : `${state.cpuPct}%`}
           </div>
-          <Bar value={state.cpuPct} />
+          {state.cpuPct==null
+            ? <div style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t4)' }}>
+                not reported by daemon
+              </div>
+            : <Bar value={state.cpuPct} />}
         </div>
-        {/* Memory */}
+        {/* Memory — same: /system/stats reports no memory figures. */}
         <div className="ops-panel" style={{ padding:14 }}>
           <div className="ops-label" style={{ marginBottom:4 }}>Memory</div>
           <div style={{ fontFamily:'var(--mono)',fontSize:28,fontWeight:700,
-            color:state.memPct>=90?'var(--crit)':state.memPct>=70?'var(--warn)':'var(--t1)' }}>
-            {state.memPct}%
+            color:state.memPct==null?'var(--t4)'
+              :state.memPct>=90?'var(--crit)':state.memPct>=70?'var(--warn)':'var(--t1)' }}>
+            {state.memPct==null ? 'n/a' : `${state.memPct}%`}
           </div>
-          <Bar value={state.memPct} />
+          {state.memPct==null
+            ? <div style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t4)' }}>
+                not reported by daemon
+              </div>
+            : <Bar value={state.memPct} />}
         </div>
       </div>
 

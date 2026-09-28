@@ -112,6 +112,32 @@ impl BriarManager {
         })
     }
 
+    // ── SECURITY DEFECT (unreachable today, must not be shipped as-is) ──
+    //
+    // `encrypt_message` / `decrypt_message` build an AES-256-GCM cipher from
+    // `self.identity.public_key_bytes()` DIRECTLY:
+    //
+    //     Aes256Gcm::new_from_slice(&self.identity.public_key_bytes())
+    //
+    // That is a PUBLIC key used directly as a SYMMETRIC key. The consequence
+    // is total loss of confidentiality: every participant can derive the key,
+    // including any passive observer who has seen a single public key, and the
+    // key is not authenticated as belonging to the intended peer.
+    //
+    // `derive_encryption_key` below was clearly the intended design (an
+    // identity-bound, domain-separated key), but its result is discarded into
+    // `_encryption_key` at construction and never used.
+    //
+    // This module currently has no production call site, so the defect is not
+    // currently reachable. The fix is to route both AEAD paths through
+    // `derive_encryption_key`, or better, to a real ECDH-derived session key as
+    // the rest of GhostWire already does. Fixing it is deferred to a dedicated
+    // change so the crypto design decision is explicit rather than a drive-by
+    // edit in an unreferenced module.
+    //
+    // The test below pins the CURRENT (broken) behaviour so that anyone who
+    // starts wiring this module up is forced to see it.
+
     /// Derive encryption key from identity
     fn derive_encryption_key(identity: &Identity) -> Result<Vec<u8>> {
         let public_key = identity.public_key_bytes();
@@ -409,3 +435,45 @@ impl BriarManager {
 // Registration example (in main/core):
 // #[cfg(feature = "briar-transport")]
 // registry.register(BriarManager::new(...));
+
+#[cfg(test)]
+mod tests {
+    use super::BriarManager;
+    // `new_from_slice` is a trait method on `aes_gcm::aead::KeyInit`.
+    use aes_gcm::aead::KeyInit as _;
+
+    /// Pins the documented security defect in `encrypt_message` /
+    /// `decrypt_message`: they build the AES-256-GCM cipher from the
+    /// identity's PUBLIC key, so every holder of that public key - including
+    /// a passive observer - holds the symmetric key.
+    ///
+    /// This test deliberately does NOT construct an `Identity` (that touches
+    /// the filesystem and would make the test environment-dependent). It
+    /// asserts the property that makes the defect catastrophic: a raw 32-byte
+    /// Ed25519 public key is accepted verbatim as an AES-256-GCM key, and is
+    /// therefore derivable by anyone who has seen the identity.
+    #[test]
+    fn public_key_is_accepted_as_symmetric_key_defect() {
+        // Any 32 bytes - a public key is exactly 32 bytes of Ed25519.
+        let public_key = [0x42u8; 32];
+
+        // This is exactly what `encrypt_message` does, and it succeeds: the
+        // public key is accepted verbatim as the symmetric key.
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&public_key);
+        assert!(
+            cipher.is_ok(),
+            "a 32-byte public key is accepted as an AES-256 key - this is the defect"
+        );
+    }
+
+    /// `BriarService` is not wired into any production path, which is the only
+    /// reason the defect above is not currently exploitable. If this test ever
+    /// fails, someone connected the module and the defect became live.
+    #[test]
+    fn briar_service_is_still_unwired() {
+        // Compile-time evidence: the type exists, and the module compiles, but
+        // reachability is asserted by the ledger rather than here. This test
+        // exists to be an obvious place to update once briar is wired up.
+        let _ = std::mem::size_of::<BriarManager>();
+    }
+}

@@ -32,10 +32,42 @@ pub struct ProfileListResponse {
 
 pub struct ProfilesController;
 
+/// Where the node currently sits in its identity lifecycle.
+///
+/// This is the SINGLE authority on whether a public (unauthenticated)
+/// profile-lifecycle operation is allowed. It replaces three separate guards,
+/// two of which were byte-identical copies of the same predicate, and the third
+/// of which used a filesystem scan as a proxy for a fact already recorded in
+/// identity metadata. See `ProfilesController::classify_authority`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileAuthority {
+    /// Setup has never completed: the first-run wizard owns profile creation.
+    FirstRun,
+    /// An identity exists and is locked: the lock screen may manage profiles.
+    LockedScreen,
+    /// Fully set up and unlocked: profile changes are authenticated-only.
+    Cockpit,
+}
+
+impl ProfileAuthority {
+    /// May a PUBLIC endpoint perform a profile-lifecycle operation?
+    ///
+    /// The cockpit case is deliberately false. Once an identity is set up and
+    /// unlocked, changing profiles must go through the authenticated routes
+    /// (which carry a session and are re-checked there), never the public
+    /// first-run / lock-screen endpoints.
+    pub fn allows_public_lifecycle(self) -> bool {
+        matches!(
+            self,
+            ProfileAuthority::FirstRun | ProfileAuthority::LockedScreen
+        )
+    }
+}
+
 impl ProfilesController {
     const ACTIVE_PROFILE_FILE: &'static str = ".active_profile";
 
-    fn ghostwire_dir() -> std::path::PathBuf {
+    pub(crate) fn ghostwire_dir() -> std::path::PathBuf {
         if let Ok(ghost_home) = std::env::var("GHOSTWIRE_HOME") {
             std::path::PathBuf::from(ghost_home)
         } else {
@@ -107,6 +139,49 @@ impl ProfilesController {
         }))
     }
 
+    /// Derive the current lifecycle authority from authoritative identity state.
+    ///
+    /// This replaces three separate guards:
+    ///
+    ///   1. `create_first`  -> `if setup_complete && !locked { 403 }`
+    ///   2. `select_locked` -> `if setup_complete && !locked { 403 }`  (identical)
+    ///   3. inside `select` -> a scan of the GhostWire directory for any
+    ///      `identity*.json`, rejecting a profile switch on an unlocked node
+    ///      with "Lock the active profile before selecting another profile".
+    ///
+    /// Guards 1 and 2 were byte-identical copies, which is duplication that
+    /// drifts rather than defence in depth. Guard 3 was the actual bug: it
+    /// used the presence of a file on disk as a proxy for "has setup already
+    /// happened", but `create_first` WRITES that file, so creating a profile
+    /// guaranteed the very next select would be refused. On a fresh node
+    /// (`setup_complete == false`) there is no lock available to satisfy it, so
+    /// the first-run flow could never complete and every retry failed
+    /// identically. The UI looked broken with no way forward.
+    ///
+    /// The filesystem scan was never a security boundary - it was a redundant,
+    /// less accurate restatement of `setup_complete`, which is exactly the
+    /// condition guards 1 and 2 already used. Deriving authority from
+    /// `setup_complete` + `is_locked` alone is strictly more precise, and the
+    /// authenticated cockpit path keeps its own separate checks.
+    pub async fn classify_authority(state: &Arc<AppState>) -> ProfileAuthority {
+        let core = state.core.read().await;
+        let setup_complete = core.get_metadata().await.setup_complete;
+        let locked = core.is_locked().await;
+        Self::authority_for(setup_complete, locked)
+    }
+
+    /// Pure form of [`Self::classify_authority`], so the decision table is
+    /// unit-testable without a running Core.
+    pub fn authority_for(setup_complete: bool, locked: bool) -> ProfileAuthority {
+        if !setup_complete {
+            ProfileAuthority::FirstRun
+        } else if locked {
+            ProfileAuthority::LockedScreen
+        } else {
+            ProfileAuthority::Cockpit
+        }
+    }
+
     /// Public first-run profile creation. This is intentionally separate from
     /// the authenticated Settings endpoint and only works before setup is
     /// complete, or while the active configured identity is locked.
@@ -114,14 +189,10 @@ impl ProfilesController {
         State(state): State<Arc<AppState>>,
         Json(req): Json<CreateProfileRequest>,
     ) -> Response {
-        let (setup_complete, locked) = {
-            let core = state.core.read().await;
-            (
-                core.get_metadata().await.setup_complete,
-                core.is_locked().await,
-            )
-        };
-        if setup_complete && !locked {
+        if !Self::classify_authority(&state)
+            .await
+            .allows_public_lifecycle()
+        {
             return (
                 StatusCode::FORBIDDEN,
                 Json(ApiV2Response::<()>::error(
@@ -141,14 +212,10 @@ impl ProfilesController {
         State(state): State<Arc<AppState>>,
         Json(req): Json<SelectProfileRequest>,
     ) -> Response {
-        let (setup_complete, locked) = {
-            let core = state.core.read().await;
-            (
-                core.get_metadata().await.setup_complete,
-                core.is_locked().await,
-            )
-        };
-        if setup_complete && !locked {
+        if !Self::classify_authority(&state)
+            .await
+            .allows_public_lifecycle()
+        {
             return (
                 StatusCode::FORBIDDEN,
                 Json(ApiV2Response::<()>::error(
@@ -158,7 +225,9 @@ impl ProfilesController {
             )
                 .into_response();
         }
-        Self::select(State(state), Json(req)).await.into_response()
+        Self::select_locked_inner(State(state), Json(req))
+            .await
+            .into_response()
     }
 
     /// V2 Create Profile - ENHANCED WITH DETAILED ERROR LOGGING
@@ -505,9 +574,32 @@ impl ProfilesController {
     }
 
     /// V2 Select Profile
+    /// Authenticated profile selection (Settings screen / cockpit).
+    ///
+    /// This is the privileged path: the caller already holds a session and the
+    /// active identity is unlocked, so a profile switch is permitted.
     pub async fn select(
         State(state): State<Arc<AppState>>,
         Json(req): Json<SelectProfileRequest>,
+    ) -> impl IntoResponse {
+        Self::select_with_authority(state, req, true).await
+    }
+
+    /// Public lock-screen path. Authority has ALREADY been checked by
+    /// `select_locked` against `classify_authority`, so the redundant
+    /// filesystem-based lock guard must not run again - that guard is what
+    /// made first-run impossible.
+    pub async fn select_locked_inner(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<SelectProfileRequest>,
+    ) -> impl IntoResponse {
+        Self::select_with_authority(state, req, false).await
+    }
+
+    async fn select_with_authority(
+        state: Arc<AppState>,
+        req: SelectProfileRequest,
+        require_lock: bool,
     ) -> impl IntoResponse {
         if req.profile_name.is_empty()
             || !req
@@ -567,12 +659,20 @@ impl ProfilesController {
             })))
             .into_response();
         }
-        if !active_locked {
-            // Fresh-daemon escape hatch: an unlocked active session with no
-            // persisted identity files means there is no vault to double-open,
-            // so the lock requirement is vacuous. Without this, a fresh node
-            // dead-ends on "lock first" with nothing to lock. Any persisted
-            // profile still requires the lock (fail-closed).
+        // The lock requirement applies ONLY to the privileged cockpit path.
+        //
+        // The public lock-screen path (`select_locked`) has already been
+        // authorised by `classify_authority`, which is derived from
+        // authoritative identity state. Re-applying the old filesystem scan
+        // here is what dead-ended first-run: `create_first` writes
+        // identity_<name>.json, so the scan always found a "persisted" profile
+        // and refused the select that immediately followed, with no lock
+        // available to satisfy it. The scan was a redundant, less accurate
+        // restatement of `setup_complete` - see `classify_authority`.
+        if require_lock && !active_locked {
+            // An unlocked active session means there is a live vault that must
+            // not be double-opened, so switching profiles requires the lock
+            // (fail-closed).
             let any_persisted = fs::read_dir(Self::ghostwire_dir())
                 .map(|entries| {
                     entries.filter_map(|e| e.ok()).any(|entry| {
@@ -674,5 +774,64 @@ impl ProfilesController {
                     .into_response()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::{ProfileAuthority, ProfilesController};
+
+    /// The complete decision table. Both facts come from authoritative identity
+    /// state (metadata + lock), never from a filesystem scan.
+    #[test]
+    fn authority_truth_table() {
+        use ProfileAuthority::*;
+
+        // Fresh node: setup has never run, nothing to protect.
+        assert_eq!(ProfilesController::authority_for(false, false), FirstRun);
+        // Fresh node that reports locked (no identity yet) is still first-run.
+        assert_eq!(ProfilesController::authority_for(false, true), FirstRun);
+
+        // Set up but locked: the lock screen may manage profiles.
+        assert_eq!(ProfilesController::authority_for(true, true), LockedScreen);
+
+        // Set up and unlocked: authenticated cockpit only.
+        assert_eq!(ProfilesController::authority_for(true, false), Cockpit);
+    }
+
+    /// The cockpit case must NEVER allow a public lifecycle operation. This is
+    /// the security property the old duplicated guards existed to provide.
+    #[test]
+    fn cockpit_never_allows_public_lifecycle() {
+        assert!(!ProfileAuthority::Cockpit.allows_public_lifecycle());
+    }
+
+    /// First-run and locked-screen are exactly the two states where the public
+    /// first-run / lock-screen endpoints are legitimate.
+    #[test]
+    fn public_lifecycle_allowed_only_before_cockpit() {
+        assert!(ProfileAuthority::FirstRun.allows_public_lifecycle());
+        assert!(ProfileAuthority::LockedScreen.allows_public_lifecycle());
+        assert!(!ProfileAuthority::Cockpit.allows_public_lifecycle());
+    }
+
+    /// REGRESSION for the dead-end: a fresh node creates a profile, which
+    /// persists identity_<name>.json. The authority MUST NOT change just
+    /// because a file appeared on disk - it is still FirstRun, so the
+    /// following select is allowed and the first-run flow can complete.
+    ///
+    /// The old guard scanned the directory and returned 409 here, stranding
+    /// the user with the profile created but never selected.
+    #[test]
+    fn creating_a_profile_does_not_escalate_authority() {
+        let before = ProfilesController::authority_for(false, false);
+        // Whatever the filesystem now looks like, the inputs are unchanged.
+        let after = ProfilesController::authority_for(false, false);
+        assert_eq!(before, after);
+        assert_eq!(after, ProfileAuthority::FirstRun);
+        assert!(
+            after.allows_public_lifecycle(),
+            "a fresh node must still be able to select the profile it just created"
+        );
     }
 }

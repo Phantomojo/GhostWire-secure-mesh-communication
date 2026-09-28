@@ -488,7 +488,10 @@ impl MeshTransport {
 
         // Subscribe to CRL gossip topic for revocation propagation
         let crl_gossip_topic = IdentTopic::new(crate::core::constants::topics::CRL_GOSSIP);
-        swarm.behaviour_mut().gossipsub.subscribe(&crl_gossip_topic)?;
+        swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&crl_gossip_topic)?;
         tracing::info!("Subscribed to CRL gossip topic");
 
         if self.world_discovery_enabled {
@@ -532,14 +535,9 @@ impl MeshTransport {
         if let Ok(raw_relay) = std::env::var("GHOSTWIRE_RELAY") {
             match raw_relay.trim().parse::<Multiaddr>() {
                 Ok(relay_addr) => {
-                    let circuit_addr = relay_addr.with(
-                        libp2p::multiaddr::Protocol::P2pCircuit,
-                    );
+                    let circuit_addr = relay_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
                     match swarm.listen_on(circuit_addr.clone()) {
-                        Ok(_) => tracing::info!(
-                            "Requested relay reservation via {}",
-                            circuit_addr
-                        ),
+                        Ok(_) => tracing::info!("Requested relay reservation via {}", circuit_addr),
                         Err(e) => tracing::warn!(
                             "Relay reservation listen failed on {}: {}",
                             circuit_addr,
@@ -547,14 +545,12 @@ impl MeshTransport {
                         ),
                     }
                 }
-                Err(_) => tracing::warn!(
-                    "Ignoring bad GHOSTWIRE_RELAY: {}",
-                    raw_relay
-                ),
+                Err(_) => tracing::warn!("Ignoring bad GHOSTWIRE_RELAY: {}", raw_relay),
             }
         }
 
-        let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);        let _traffic_armor = Arc::new(crate::core::traffic_armor::TrafficArmor::new(
+        let (cover_tx, cover_rx) = mpsc::channel::<crate::core::traffic_armor::PaddedFrame>(32);
+        let _traffic_armor = Arc::new(crate::core::traffic_armor::TrafficArmor::new(
             Some(cover_tx),
             crate::core::armor::DeviceTier::detect(),
         ));
@@ -828,7 +824,10 @@ impl MeshTransport {
         // Direct single-hop routes for every known node. Multi-hop routing
         // stays unimplemented until the DHT routing table feeds path discovery;
         // callers must treat a one-entry route as direct-only, not as a path.
-        let routes = topo.keys().map(|id| (id.clone(), vec![id.clone()])).collect();
+        let routes = topo
+            .keys()
+            .map(|id| (id.clone(), vec![id.clone()]))
+            .collect();
 
         MeshTopology {
             nodes,
@@ -2167,11 +2166,17 @@ impl MeshDriver {
 
         if topic_str == crate::core::constants::topics::CRL_GOSSIP {
             // Deserialize CRL gossip payloads and handle them
-            if let Ok(payloads) = serde_json::from_slice::<Vec<crate::core::crl::CrlGossipPayload>>(&message.data) {
-                let (accepted, duplicates, rejected) = self.encryption_manager.handle_crl_gossip(&payloads);
+            if let Ok(payloads) =
+                serde_json::from_slice::<Vec<crate::core::crl::CrlGossipPayload>>(&message.data)
+            {
+                let (accepted, duplicates, rejected) =
+                    self.encryption_manager.handle_crl_gossip(&payloads);
                 tracing::info!(
                     "CRL gossip from {}: accepted={}, duplicates={}, rejected={}",
-                    peer_id, accepted, duplicates, rejected
+                    peer_id,
+                    accepted,
+                    duplicates,
+                    rejected
                 );
             }
             return Ok(());

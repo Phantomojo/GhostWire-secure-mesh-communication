@@ -151,7 +151,10 @@ pub async fn apply_update(manifest: &UpdateManifest) -> Result<()> {
                 Ok(true) => info!("Update installed. Supervised restart triggered."),
                 Ok(false) => info!("Update installed. Restart to apply."),
                 Err(e) => {
-                    warn!("Update installed but supervised restart failed ({}). Restart to apply.", e);
+                    warn!(
+                        "Update installed but supervised restart failed ({}). Restart to apply.",
+                        e
+                    );
                 }
             }
             Ok(())

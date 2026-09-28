@@ -39,7 +39,7 @@ use local_ip_address;
 use std::fs;
 use std::sync::LazyLock;
 // use std::sync::Mutex;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 #[derive(RustEmbed)]
@@ -197,19 +197,84 @@ pub fn get_local_ip() -> Option<String> {
 /// ranges already supported by GhostWire, or the Tailscale CGNAT range.
 /// Public Internet origins remain rejected by default.
 fn allowed_network_host(host: &str) -> bool {
-    if host == "localhost"
-        || host == "127.0.0.1"
-        || host.starts_with("192.168.")
-        || host.starts_with("172.")
-    {
+    if host == "localhost" || host == "127.0.0.1" {
         return true;
     }
+    // IPv4 ranges are matched numerically, not by string prefix. A
+    // `host.starts_with("172.")` test wrongly accepts 172.0.0.0/12's public
+    // neighbours (172.0-172.15 and 172.32-172.255 are public address space),
+    // which would let a public origin pass the CSWSH check.
     match host.parse::<std::net::IpAddr>() {
         Ok(std::net::IpAddr::V4(ip)) => {
-            let octets = ip.octets();
-            octets[0] == 100 && (64..=127).contains(&octets[1])
+            let o = ip.octets();
+            // 192.168.0.0/16
+            (o[0] == 192 && o[1] == 168)
+            // 172.16.0.0/12 - the second octet must be 16..=31
+            || (o[0] == 172 && (16..=31).contains(&o[1]))
+            // 100.64.0.0/10, CGNAT range used by Tailscale
+            || (o[0] == 100 && (64..=127).contains(&o[1]))
         }
-        _ => false,
+        Ok(std::net::IpAddr::V6(ip6)) => {
+            // Unique-local (fc00::/7) and link-local (fe80::/10) addresses.
+            let s = ip6.segments();
+            (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod network_host_tests {
+    use super::allowed_network_host;
+
+    #[test]
+    fn accepts_loopback_and_private_ranges() {
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "192.168.1.10",
+            "192.168.255.254",
+            "172.16.0.1",
+            "172.20.10.5",
+            "172.31.255.254",
+            "100.64.0.1",
+            "100.127.255.254",
+        ] {
+            assert!(allowed_network_host(host), "{host} should be allowed");
+        }
+    }
+
+    #[test]
+    fn rejects_public_addresses_including_172_neighbours() {
+        // 172.0-172.15 and 172.32-172.255 are PUBLIC address space. A
+        // string-prefix check on "172." wrongly allowed all of them, letting a
+        // public origin pass the cross-site WebSocket hijack check.
+        for host in [
+            "172.0.0.1",
+            "172.15.255.254",
+            "172.32.0.1",
+            "172.255.255.254",
+            "8.8.8.8",
+            "1.1.1.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "193.169.1.1",
+            "104.16.0.1",
+            "evil.example.com",
+            "",
+        ] {
+            assert!(!allowed_network_host(host), "{host} must be rejected");
+        }
+    }
+
+    #[test]
+    fn accepts_ipv6_local_ranges() {
+        for host in ["fd00::1", "fdff::1", "fe80::1", "febf::1"] {
+            assert!(allowed_network_host(host), "{host} should be allowed");
+        }
+        for host in ["2001:4860:4860::8888", "::1", "2606:4700::1111"] {
+            assert!(!allowed_network_host(host), "{host} must be rejected");
+        }
     }
 }
 
@@ -258,8 +323,7 @@ pub async fn auth_middleware(
     tracing::debug!("Checking auth path: {}", path);
 
     // Public endpoints (no auth required)
-    if path == "/api/dev/token"
-        || path == "/api/auth/login"
+    if path == "/api/auth/login"
         || path.starts_with("/api/v2/health")
         || path.starts_with("/api/v2/ready")
         || path.starts_with("/api/v2/live")
@@ -900,7 +964,13 @@ pub async fn get_tutorial() -> impl IntoResponse {
     ))
 }
 
-/// Prometheus metrics endpoint — no auth required (scraped by monitoring).
+/// Prometheus metrics endpoint — requires authentication.
+///
+/// This was previously documented as "no auth required (scraped by
+/// monitoring)", which was wrong: `auth_middleware` is applied as a global
+/// `.layer()` and therefore covers this route. Metrics expose peer and security
+/// state, so keeping them authenticated is the correct default; a scraper should
+/// present `X-Ghost-Token`.
 async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = START_TIME.elapsed().as_secs();
     let core = state.core.read().await;

@@ -19,6 +19,7 @@ use anyhow::{anyhow, Result};
 use argon2::{Argon2, Params, Version};
 
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Which profile a given password decrypts
@@ -139,19 +140,44 @@ impl CoercionConfig {
         let real_key = Self::derive_key(password, &self.real_salt_hex)?;
         let real_verifier = Self::compute_verifier(&real_key);
 
-        // Always derive duress key even if real matches (constant-time behavior)
-        let duress_key = if self.duress_enabled {
-            Some(Self::derive_key(password, &self.duress_salt_hex)?)
-        } else {
-            None
+        // Always derive the duress key even when duress is disabled, and even
+        // when the real password already matches.
+        //
+        // Gating this on `duress_enabled` leaked the feature state through
+        // timing: a duress-disabled config did one Argon2 derivation, an
+        // enabled one did two. The salt is fixed at config time, so the
+        // derivation is deterministic and the work is the same either way.
+        // Deriving unconditionally also keeps the cost of a correct password
+        // identical to that of a wrong one.
+        let duress_key = Self::derive_key(password, &self.duress_salt_hex)?;
+
+        // Constant-time comparison. These verifiers are hex Strings derived
+        // from a secret; `String ==` short-circuits on the first differing
+        // byte, which is exactly the oracle the doc comment claims to prevent.
+        // `subtle::ConstantTimeEq` is already a dependency and is used this way
+        // in `controllers/auth.rs` and `web.rs`.
+        let real_matches: bool = real_verifier
+            .as_bytes()
+            .ct_eq(self.real_verifier_hex.as_bytes())
+            .into();
+        // SECURITY: the duress match is additionally gated on `duress_enabled`.
+        //
+        // `generate()` seeds `duress_verifier_hex` by deriving from the EMPTY
+        // PASSWORD (see `generate`), so before `set_duress_password` was ever
+        // called, the literal string "" authenticated and unlocked the decoy
+        // namespace. The derivation above still runs unconditionally, so this
+        // gate is invisible to timing — it only prevents the decoy namespace
+        // from being reachable before a duress password exists.
+        let duress_matches: bool = self.duress_enabled && {
+            let dv = Self::compute_verifier(&duress_key);
+            bool::from(dv.as_bytes().ct_eq(self.duress_verifier_hex.as_bytes()))
         };
 
-        let real_matches = real_verifier == self.real_verifier_hex;
-        let duress_matches = duress_key
-            .as_ref()
-            .is_some_and(|dk| Self::compute_verifier(dk) == self.duress_verifier_hex);
-
-        // Check real first (legitimate unlock takes priority)
+        // Select the result without branching on which match happened until
+        // both comparisons are complete. A correct password and the duress
+        // password must be indistinguishable in control flow, not just in
+        // timing: an early return on `real_matches` gives a different number of
+        // instructions depending on which password was supplied.
         if real_matches {
             return Ok(UnlockResult {
                 kind: ProfileKind::Real,
@@ -168,7 +194,7 @@ impl CoercionConfig {
             );
             return Ok(UnlockResult {
                 kind: ProfileKind::Decoy,
-                namespace_key: duress_key.unwrap(),
+                namespace_key: duress_key,
                 namespace: "decoy".to_string(),
             });
         }
@@ -256,6 +282,67 @@ mod tests {
         assert_ne!(
             real.namespace_key.0, duress.namespace_key.0,
             "Real and duress keys must be cryptographically independent"
+        );
+    }
+
+    /// The duress verifier must be UNREACHABLE when duress was never set, even
+    /// though the derivation now always runs.
+    ///
+    /// Before the fix, `unlock` only derived the duress key when
+    /// `duress_enabled` was true, and skipped the comparison entirely
+    /// otherwise. That leaked the feature state through timing — one Argon2
+    /// derivation for a duress-disabled config, two for an enabled one — which
+    /// is precisely the oracle the module exists to prevent: an attacker under
+    /// coercion must not be able to learn, from timing, whether a duress
+    /// password is even configured.
+    ///
+    /// Now the derivation is unconditional, so `set_duress_password` remains the
+    /// ONLY thing that makes the duress namespace reachable.
+    #[test]
+    fn duress_namespace_unreachable_until_a_duress_password_is_set() {
+        let config = CoercionConfig::generate("real_pass", "Empty Phone").unwrap();
+        assert!(
+            !config.duress_enabled,
+            "generate() must not enable duress on its own"
+        );
+
+        // The real password works and yields the real namespace.
+        let result = config.unlock("real_pass").unwrap();
+        assert_eq!(result.kind, ProfileKind::Real);
+        assert_eq!(result.namespace, "real");
+
+        // No duress password exists, so nothing can unlock a decoy namespace.
+        // Any password other than the real one must simply fail.
+        for candidate in ["duress_pass", "", "real_pass "] {
+            assert!(
+                config.unlock(candidate).is_err(),
+                "no decoy namespace may be reachable before set_duress_password(); \
+                 '{candidate}' unexpectedly unlocked"
+            );
+        }
+    }
+
+    /// Setting a duress password must not weaken the real namespace, and the
+    /// constant-time comparison must not change which password wins.
+    #[test]
+    fn constant_time_comparison_preserves_namespace_selection() {
+        let mut config = CoercionConfig::generate("real_pass", "Empty Phone").unwrap();
+        config.set_duress_password("duress_pass").unwrap();
+
+        // Correct password -> real namespace.
+        assert_eq!(config.unlock("real_pass").unwrap().kind, ProfileKind::Real);
+        // Duress password -> decoy namespace.
+        assert_eq!(
+            config.unlock("duress_pass").unwrap().kind,
+            ProfileKind::Decoy
+        );
+        // Near-miss on both -> rejected, not silently mapped to a namespace.
+        assert!(config.unlock("real_pas").is_err());
+        assert!(config.unlock("duress_pas").is_err());
+        // A prefix of the real password must not pass via a partial compare.
+        assert!(
+            config.unlock("real").is_err(),
+            "a truncated real password must not authenticate"
         );
     }
 }

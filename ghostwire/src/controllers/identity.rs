@@ -89,17 +89,27 @@ impl IdentityController {
 
         tracing::info!(target: "identity_setup", "🔓 Checking first-run identity state");
 
-        // The legacy handler used the hard-coded passphrase `ghostwire` to
-        // unlock a locked identity before replacing its encryption. That was
-        // unsafe and made setup fail on any hardened profile. Setup is now
-        // valid only for the fresh guest identity, which is already unlocked;
-        // locked users must use the named-profile creation flow instead.
-        if core.is_locked().await {
+        // Guard: setup must only be possible on a FRESH identity.
+        //
+        // The previous guard checked only `is_locked()`. A fresh guest daemon
+        // has an UNLOCKED identity, so on an unauthenticated route (this path
+        // is in the public allowlist in web.rs) any LAN client could POST an
+        // arbitrary >=12-byte passphrase and have `save_to_disk` re-encrypt the
+        // on-disk identity under a key THEY chose, receiving a valid admin JWT
+        // in return. That is full identity takeover with no credential.
+        //
+        // `setup_complete` is the correct signal: it is set to true only by this
+        // handler's own `update_metadata(.., Some(true))` call, and is already
+        // used this way by `create_first` / `select_locked` in
+        // controllers/profiles.rs. Checking both conditions preserves the
+        // existing locked-identity behaviour.
+        let already_set_up = core.get_metadata().await.setup_complete;
+        if already_set_up || core.is_locked().await {
             return (
                 StatusCode::CONFLICT,
                 Json(ApiV2Response::<()>::error(
                     StandardErrorCode::InvalidCredentials.as_str(),
-                    "Active identity is locked; unlock it or create a named profile",
+                    "Identity setup already completed; unlock it or create a named profile",
                 )),
             )
                 .into_response();

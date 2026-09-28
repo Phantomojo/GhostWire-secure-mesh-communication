@@ -7,10 +7,34 @@
 //! - Session key management
 
 use ghostwire::core::encryption::EncryptionManager;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// Serialises tests that mutate process-global state.
+///
+/// `EncryptionManager::new()` calls `load_or_create()`, which persists to the
+/// directory named by `GHOSTWIRE_HOME`. cargo runs the tests in this binary on
+/// parallel threads, so without this guard two tests race on the same on-disk
+/// store and the loser observes the winner's key material — which is what made
+/// `test_peer_key_management` fail intermittently while passing in isolation.
+///
+/// Setting the env var is itself process-global, so a mutex (not a thread-local)
+/// is required: it must cover the whole test body, not just the setup.
+fn home_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let lock = LOCK.get_or_init(|| Mutex::new(()));
+    let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().expect("test GHOSTWIRE_HOME");
+    std::env::set_var("GHOSTWIRE_HOME", dir.path());
+    // Leak the TempDir so it is not dropped (and the directory removed) while the
+    // EncryptionManager under test may still hold a handle to it.
+    std::mem::forget(dir);
+    guard
+}
 
 /// Test that encryption manager initializes correctly
 #[test]
 fn test_encryption_manager_initialization() {
+    let _guard = home_guard();
     let manager = EncryptionManager::new();
     assert!(
         manager.is_ok(),
@@ -28,6 +52,7 @@ fn test_encryption_manager_initialization() {
 /// Test that two different managers generate different key pairs
 #[test]
 fn test_unique_key_generation() {
+    let _guard = home_guard();
     // `new()` intentionally reloads persisted identity state. Use two isolated
     // persistence homes to test fresh generation without exposing private
     // production constructors to integration tests.
@@ -54,6 +79,7 @@ fn test_unique_key_generation() {
 /// Test hybrid key format (Ed25519 + X25519)
 #[test]
 fn test_hybrid_key_format() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let pub_key = mgr.get_public_key();
 
@@ -68,6 +94,7 @@ fn test_hybrid_key_format() {
 /// Test message signing and verification
 #[test]
 fn test_message_signing() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let message = b"Test message for signing";
 
@@ -88,6 +115,7 @@ fn test_message_signing() {
 /// Test that signature verification fails for tampered messages
 #[test]
 fn test_signature_tamper_detection() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let message = b"Original message";
     let tampered = b"Tampered message";
@@ -102,6 +130,7 @@ fn test_signature_tamper_detection() {
 /// Test symmetric CLI encryption/decryption roundtrip
 #[test]
 fn test_cli_encryption_roundtrip() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let plaintext = b"Secret CLI data that needs protection";
 
@@ -124,6 +153,7 @@ fn test_cli_encryption_roundtrip() {
 /// Test encryption with empty data
 #[test]
 fn test_empty_data_encryption() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let plaintext = b"";
 
@@ -140,6 +170,7 @@ fn test_empty_data_encryption() {
 /// Test encryption with large data
 #[test]
 fn test_large_data_encryption() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let plaintext: Vec<u8> = (0u8..=255).cycle().take(100_000).collect();
 
@@ -155,6 +186,7 @@ fn test_large_data_encryption() {
 /// Test peer key management
 #[test]
 fn test_peer_key_management() {
+    let _guard = home_guard();
     use ghostwire::core::encryption::KeyType;
 
     let mgr1 = EncryptionManager::new().unwrap();
@@ -178,6 +210,7 @@ fn test_peer_key_management() {
 /// Test key rotation detection
 #[test]
 fn test_key_rotation_detection() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
 
     // New key should not need rotation immediately
@@ -190,6 +223,7 @@ fn test_key_rotation_detection() {
 /// Test public key export
 #[test]
 fn test_public_key_export() {
+    let _guard = home_guard();
     let mgr = EncryptionManager::new().unwrap();
     let exported = mgr.export_public_key();
 

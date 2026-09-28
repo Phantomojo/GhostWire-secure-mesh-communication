@@ -34,7 +34,6 @@ jobs:
     name: 🧪 Test Suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -94,11 +93,57 @@ jobs:
         run: cargo check
         working-directory: ghostwire
 
+  # Dependency CVE scan. Reported, NOT enforced YET.
+  #
+  # 7 advisories were closed on 2026-09-28 (11 -> 4). The 4 that remain all
+  # require a MAJOR version bump of an upstream stack, not a lockfile edit:
+  #   hickory-proto 0.25.2 (2 advisories) - needs libp2p 0.57; libp2p is
+  #     already on the newest 0.56.x, and bumping the core networking stack of
+  #     an anonymity-sensitive mesh is not a routine change.
+  #   imbl-sized-chunks 0.1.3            - needs a matrix-sdk / imbl 0.2 tree.
+  #   rsa 0.9.10 (Marvin)                - "no fixed upgrade available", and
+  #     proven unreachable: every JWT site uses HMAC `from_secret`, so RSA never
+  #     executes. Could be dropped from the tree via a jsonwebtoken feature flag.
+  #
+  # Left non-blocking because `cargo audit` exits non-zero while any advisory is
+  # open, which would make this pipeline permanently red and train people to
+  # ignore red. The job exists so a NEW advisory is visible in the log.
+  # Flip `continue-on-error` to false and drop `|| true` once the count hits 0.
+  audit:
+    name: 🔎 Dependency Audit
+    if: success() || failure()
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable # pinned
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - name: Run cargo-audit
+        run: |
+          cargo install cargo-audit --locked
+          cd ghostwire
+          cargo audit || true
+      - name: Summarise
+        if: always()
+        run: |
+          echo "## Dependency Audit" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cd ghostwire && (cargo audit 2>&1 | tail -40 || true) >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
   coverage:
     name: 📊 Test Coverage
     if: success() || failure()
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # NOTE: coverage is reported, not enforced, so a coverage drop does not block
+    # a merge. The earlier comment here blamed "known-flaky crypto tests" sharing
+    # global ~/.ghostwire state; that cause was real but has since been fixed by
+    # giving each crypto test its own temporary GHOSTWIRE_HOME, so the `test` job
+    # is now blocking. Revisit this only if the coverage number itself needs a gate.
     continue-on-error: true
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

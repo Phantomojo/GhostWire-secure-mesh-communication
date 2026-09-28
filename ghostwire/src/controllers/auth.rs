@@ -14,6 +14,35 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Whether an address is local enough to be handed the master `AUTH_TOKEN`.
+///
+/// Numeric range matching, NOT string prefixes. A `starts_with("172.")` test
+/// wrongly accepts 172.0-172.15 and 172.32-172.255, which are PUBLIC address
+/// space rather than RFC1918, letting a remote Internet host mint fresh admin
+/// tokens. This is the same class of bug fixed in
+/// `web.rs::allowed_network_host`; both are now range-checked.
+pub(crate) fn is_local_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                // 172.16.0.0/12 - the Docker/Podman default bridge lives here
+                || (o[0] == 172 && (16..=31).contains(&o[1]))
+                // 192.168.0.0/16
+                || (o[0] == 192 && o[1] == 168)
+                // 100.64.0.0/10 - Tailscale CGNAT
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                // fc00::/7 unique-local
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // fe80::/10 link-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 pub struct AuthController;
 
 impl AuthController {
@@ -22,7 +51,11 @@ impl AuthController {
         State(_state): State<Arc<AppState>>,
         Json(payload): Json<LoginRequest>,
     ) -> impl IntoResponse {
-        if payload.token == *AUTH_TOKEN {
+        // Constant-time comparison. A plain `==` on a secret leaks its length and
+        // the position of the first differing byte via response timing, which is
+        // enough to recover a token byte-by-byte. web.rs already does this.
+        use subtle::ConstantTimeEq;
+        if bool::from(payload.token.as_bytes().ct_eq(AUTH_TOKEN.as_bytes())) {
             let expiration = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
@@ -127,9 +160,12 @@ impl AuthController {
         let ip = get_client_ip(&req, addr);
 
         // Strict check: local loopback OR Docker bridge IPs only
-        let is_local = ip.is_loopback() ||
-                       ip.to_string().starts_with("172.") || // Docker/Podman
-                       ip.to_string() == "::1";
+        // Numeric range matching, not string prefixes. A `172.` prefix test
+        // wrongly accepts 172.0-172.15 and 172.32-172.255, which are PUBLIC
+        // address space, not RFC1918 - so a remote Internet host could mint
+        // fresh admin tokens from a token it already held. Same class of bug
+        // as the one fixed in `web.rs::allowed_network_host`.
+        let is_local = is_local_address(ip);
 
         if !is_local {
             tracing::warn!(target: "web", "Unauthorized remote access attempt to /api/dev/token from {}", ip);
@@ -161,5 +197,62 @@ impl AuthController {
             )),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_local_address;
+    use std::net::IpAddr;
+
+    fn v4(s: &str) -> IpAddr {
+        s.parse().expect("valid ip")
+    }
+
+    /// The dev-token route hands out the MASTER `AUTH_TOKEN`, which is a
+    /// full-privilege credential. Anything that is not genuinely on the local
+    /// network must be refused.
+    #[test]
+    fn accepts_genuine_local_addresses() {
+        for ip in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "::1",
+            "172.17.0.2",     // Docker default bridge
+            "172.16.0.1",     // 172.16/12 lower edge
+            "172.31.255.254", // 172.16/12 upper edge
+            "192.168.1.10",
+            "100.64.0.1", // Tailscale
+            "100.127.255.254",
+            "fd00::1",
+            "fe80::1",
+        ] {
+            assert!(is_local_address(v4(ip)), "{ip} should be treated as local");
+        }
+    }
+
+    /// 172.0-172.15 and 172.32-172.255 are PUBLIC address space. A string
+    /// prefix check on "172." accepted all of them, so a remote host that had
+    /// obtained the token could mint new ones.
+    #[test]
+    fn rejects_public_addresses_including_172_neighbours() {
+        for ip in [
+            "172.0.0.1",
+            "172.15.255.254",
+            "172.32.0.1",
+            "172.255.255.254",
+            "8.8.8.8",
+            "1.1.1.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "193.169.1.1",
+            "104.16.0.1",
+            "2001:4860:4860::8888",
+        ] {
+            assert!(
+                !is_local_address(v4(ip)),
+                "{ip} must NOT be treated as local"
+            );
+        }
     }
 }

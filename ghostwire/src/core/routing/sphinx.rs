@@ -42,6 +42,126 @@ pub const SPHINX_MIN_HOPS: usize = 2;
 
 pub type HopPublicKey = [u8; 32];
 
+/// Maximum accepted encoded size for a Sphinx packet.
+///
+/// `SPHINX_HEADER_SIZE` (1024) + `SPHINX_PAYLOAD_SIZE` (1024) is the on-wire
+/// shape, so a real packet is ~2 KB. The allowance below leaves generous
+/// headroom while still refusing an absurd claim.
+pub const SPHINX_MAX_ENCODED: usize = 8 * 1024;
+
+/// Deserialize a Sphinx packet with a hard size limit.
+///
+/// `bincode::deserialize` on untrusted bytes is unbounded: the default
+/// configuration encodes every `Vec` length as a `u64` length PREFIX, and
+/// `Vec::with_capacity` is called with it BEFORE any payload bytes are read. An
+/// 88-byte hostile frame can therefore claim ~9.2 exabytes and abort the
+/// process on allocation failure. The gossipsub frame size limit does not help,
+/// because it bounds the frame that arrives, not the length that frame claims.
+///
+/// `bincode::DefaultOptions::with_limit()` refuses to read past the limit, so a
+/// claimed length is validated against the bytes actually available first.
+pub fn deserialize_packet_bounded(data: &[u8]) -> Result<SphinxPacket, String> {
+    if data.len() > SPHINX_MAX_ENCODED {
+        return Err(format!(
+            "sphinx packet {} bytes exceeds limit {}",
+            data.len(),
+            SPHINX_MAX_ENCODED
+        ));
+    }
+    // `with_limit` / `allow_trailing_bytes` live on the `Options` trait, which
+    // must be in scope for bincode 1.x.
+    use bincode::Options as _;
+    // `with_limit` / `allow_trailing_bytes` / `with_fixint_encoding` live on
+    // the `Options` trait, which must be in scope for bincode 1.x.
+    //
+    // The encoding MUST match the send path exactly. bincode 1.3's
+    // `serialize` helper is `DefaultOptions::new().with_fixint_encoding()`
+    // (see bincode-1.3.3/src/lib.rs:106), and the send path uses that helper
+    // at mesh.rs:1368 and sphinx.rs:646. A bare `DefaultOptions::new()`
+    // defaults to VARINT, so omitting `with_fixint_encoding()` would silently
+    // fail to decode every real packet. The round-trip test below is what
+    // caught that, and it must keep passing.
+    #[allow(unused_imports)]
+    use bincode::Options as _;
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .with_limit(SPHINX_MAX_ENCODED as u64)
+        .allow_trailing_bytes()
+        .deserialize::<SphinxPacket>(data)
+        .map_err(|e| format!("sphinx deserialize failed: {e}"))
+}
+
+#[cfg(test)]
+mod bounded_decode_tests {
+    use super::*;
+
+    /// A hostile frame that is only ~88 bytes on the wire but claims, via
+    /// bincode's u64 length prefix on `beta`, that it carries 2^64-1 bytes.
+    fn hostile_length_prefix_frame() -> Vec<u8> {
+        let mut f = Vec::new();
+        f.extend_from_slice(&[0u8; 32]); // alpha
+        f.extend_from_slice(&u64::MAX.to_le_bytes()); // beta length prefix
+        f.extend_from_slice(&[0u8; 32]); // gamma
+        f.extend_from_slice(&u64::MAX.to_le_bytes()); // delta length prefix
+        f
+    }
+
+    /// The bounded decoder must reject a hostile length prefix WITHOUT
+    /// attempting the allocation.
+    ///
+    /// The unbounded `bincode::deserialize` path is what makes this urgent: it
+    /// calls `Vec::with_capacity(u64::MAX)` and aborts the process. This test
+    /// deliberately does NOT call the unbounded variant, because doing so would
+    /// abort the test runner rather than fail an assertion. The call is
+    /// documented below so the original bug can be reproduced on purpose.
+    #[test]
+    fn hostile_length_prefix_is_rejected_without_allocating() {
+        let frame = hostile_length_prefix_frame();
+        assert!(
+            frame.len() < 128,
+            "attack frame must stay tiny, got {} bytes",
+            frame.len()
+        );
+
+        let result = deserialize_packet_bounded(&frame);
+        assert!(
+            result.is_err(),
+            "a frame claiming 2^64-1 bytes must be rejected, got {:?}",
+            result.map(|p| p.beta.len())
+        );
+
+        // Reproducing the original bug, in a scratch process ONLY:
+        //   bincode::deserialize::<SphinxPacket>(&frame)
+        // -> aborts with "capacity overflow" / OOM.
+    }
+
+    /// A legitimately-serialised packet must still decode, so the limit is not
+    /// simply "reject everything".
+    #[test]
+    fn legitimate_packet_still_decodes() {
+        let packet = SphinxPacket {
+            alpha: [7u8; 32],
+            beta: vec![1u8; 512],
+            gamma: [9u8; 32],
+            delta: vec![2u8; 512],
+        };
+        let encoded = bincode::serialize(&packet).expect("serialize");
+        let decoded = deserialize_packet_bounded(&encoded).expect("must decode");
+        assert_eq!(decoded.beta.len(), 512);
+        assert_eq!(decoded.delta.len(), 512);
+        assert_eq!(decoded.alpha, [7u8; 32]);
+    }
+
+    /// An oversized-but-otherwise-valid frame is refused by the explicit
+    /// length gate before bincode sees it.
+    #[test]
+    fn oversized_frame_is_refused_by_precheck() {
+        let big = vec![0u8; SPHINX_MAX_ENCODED + 1];
+        let err = deserialize_packet_bounded(&big).expect_err("must reject");
+        assert!(err.contains("exceeds limit"), "unexpected error: {err}");
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SphinxPacket {
     pub alpha: [u8; 32],

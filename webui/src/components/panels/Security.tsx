@@ -21,12 +21,19 @@ function ConfirmAction({ message, onConfirm, onCancel }: { message:string; onCon
 export default function SecurityPanel() {
   const { state, refreshMesh, toast } = useApp();
   const [auditLog, setAuditLog] = useState<any[]>([]);
+  // The backend `/system/audit` is a NOT_IMPLEMENTED (501) stub. Track that
+  // explicitly so the panel can say "not implemented" instead of showing
+  // "No audit events recorded" — which is indistinguishable from a real,
+  // healthy, empty log and actively misleads the operator.
+  const [auditUnsupported, setAuditUnsupported] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirm, setConfirm] = useState<null|'lockdown'|'rotate'>(null);
   const [locking, setLocking] = useState(false);
 
   useEffect(() => {
-    secApi.audit().then(setAuditLog).catch(() => {});
+    secApi.audit()
+      .then(data => { setAuditLog(Array.isArray(data) ? data : []); setAuditUnsupported(false); })
+      .catch(() => setAuditUnsupported(true));
   }, []);
 
   const handleRotate = async () => {
@@ -117,11 +124,17 @@ export default function SecurityPanel() {
         <div className="ops-section-header">
           <span className="ops-section-title">Audit log</span>
           <div style={{ flex:1 }} />
-          <button className="btn-ops" onClick={() => secApi.audit().then(setAuditLog).catch(()=>{})} style={{ padding:'3px 8px',fontSize:10 }}>
+          <button className="btn-ops" onClick={() => secApi.audit()
+            .then(data => { setAuditLog(Array.isArray(data) ? data : []); setAuditUnsupported(false); })
+            .catch(() => setAuditUnsupported(true))} style={{ padding:'3px 8px',fontSize:10 }}>
             ⟳ Refresh
           </button>
         </div>
-        {auditLog.length === 0 ? (
+        {auditUnsupported ? (
+          <div style={{ padding:'20px 0',textAlign:'center',fontFamily:'var(--mono)',fontSize:11,color:'var(--warn)' }}>
+            Audit log not implemented by the daemon (HTTP 501)
+          </div>
+        ) : auditLog.length === 0 ? (
           <div style={{ padding:'20px 0',textAlign:'center',fontFamily:'var(--mono)',fontSize:11,color:'var(--t4)' }}>
             No audit events recorded
           </div>

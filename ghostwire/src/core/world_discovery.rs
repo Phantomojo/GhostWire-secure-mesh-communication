@@ -7,6 +7,8 @@
 use anyhow::{anyhow, bail, Result};
 use libp2p::{identity::PublicKey, Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
+// `Ipv4Addr` is used only by the tests in this module.
+#[allow(unused_imports)]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};

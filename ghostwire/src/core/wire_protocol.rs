@@ -18,6 +18,32 @@ pub const FRAME_MAGIC: [u8; 4] = crate::genesis_constants::FRAME_MAGIC;
 /// 64 KB is generous for any legitimate Ghostwire message (Sphinx = 2 KB).
 pub const MAX_FRAME_SIZE: usize = 65_536;
 
+/// Deserialize an untrusted bincode payload with a hard byte limit.
+///
+/// `bincode::deserialize` is unsafe to call on network input: bincode encodes
+/// every `Vec` length as a u64 PREFIX and calls `Vec::with_capacity` with it
+/// BEFORE reading any payload bytes. A tiny hostile frame can therefore claim
+/// ~2^64 bytes and abort the process on allocation failure. The enclosing
+/// gossipsub/QUIC frame-size cap does not help, because it bounds the frame
+/// that arrives, not the length that frame claims.
+///
+/// `with_limit` makes the reader refuse to consume more than the limit, so a
+/// claimed length is validated against the bytes actually available.
+///
+/// The encoding MUST match the sender. `bincode::serialize` in bincode 1.3 is
+/// `DefaultOptions::new().with_fixint_encoding()` (bincode-1.3.3/src/lib.rs:106),
+/// while a bare `DefaultOptions::new()` is varint - using the wrong one silently
+/// fails to decode every real message.
+pub fn decode_bounded<T: for<'de> Deserialize<'de>>(data: &[u8]) -> Result<T> {
+    use bincode::Options as _;
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .with_limit(MAX_FRAME_SIZE as u64)
+        .allow_trailing_bytes()
+        .deserialize::<T>(data)
+        .map_err(|e| anyhow::anyhow!("bounded decode failed: {}", e))
+}
+
 /// High bit in FrameKind u16 signals payload is zstd-compressed.
 /// Transparent to receivers that don't support it: they see unknown kind 0x8XXX.
 const COMPRESSED_BIT: u16 = 0x8000;
@@ -64,8 +90,25 @@ impl Frame {
         Ok(Self { kind, payload })
     }
 
+    /// Decode the payload into `T` with a hard byte limit.
+    ///
+    /// `bincode::deserialize` is unbounded on untrusted input: the default
+    /// configuration encodes a `Vec` length as a u64 PREFIX and calls
+    /// `Vec::with_capacity` with it before reading any payload bytes. A small
+    /// frame can therefore claim an enormous length and abort the process on
+    /// allocation failure. `with_limit` validates the claimed length against
+    /// the bytes actually available.
+    ///
+    /// The encoding must match the sender: `bincode::serialize` in bincode
+    /// 1.3 is `DefaultOptions::new().with_fixint_encoding()`, so omitting
+    /// `with_fixint_encoding()` here would silently fail to decode real frames.
     pub fn decode<T: for<'de> Deserialize<'de>>(&self) -> Result<T> {
-        bincode::deserialize::<T>(&self.payload)
+        use bincode::Options as _;
+        bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .with_limit(MAX_FRAME_SIZE as u64)
+            .allow_trailing_bytes()
+            .deserialize::<T>(&self.payload)
             .map_err(|e| anyhow::anyhow!("Bincode decode failed: {}", e))
     }
 

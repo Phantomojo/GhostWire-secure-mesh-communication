@@ -327,10 +327,23 @@ impl SecurityManager {
         *self.lockdown_enabled.read().await
     }
 
-    pub fn save_config(&self, path: &str) -> std::io::Result<()> {
-        let rt = tokio::runtime::Handle::current();
-        let config_guard = rt.block_on(self.config.read());
-        let json = serde_json::to_string_pretty(&*config_guard)?;
+    /// Persist the current config to `path`.
+    ///
+    /// This is ASYNC and must be awaited. It was previously a sync fn doing
+    /// `Handle::current().block_on(self.config.read())`, which PANICS when
+    /// called from inside a runtime worker ("Cannot start a runtime from within
+    /// a runtime"). Both call sites are async axum handlers
+    /// (`controllers/system.rs`: `configure_firewall`, `backup_security`), so
+    /// those routes panicked the handler task on every request. The test
+    /// `save_config_panics_when_called_from_async_handler` in this module
+    /// reproduces the failure and is inverted to assert Ok once this lands.
+    pub async fn save_config(&self, path: &str) -> std::io::Result<()> {
+        // Snapshot under the lock, then perform the blocking file write
+        // outside it, so the lock is not held across IO.
+        let json = {
+            let config_guard = self.config.read().await;
+            serde_json::to_string_pretty(&*config_guard)?
+        };
         std::fs::write(path, json)?;
         Ok(())
     }
@@ -444,6 +457,59 @@ impl ProofOfWorkSybilDefense {
         }
 
         zero_bits >= self.difficulty
+    }
+
+    /// The configured proof-of-work difficulty, in leading zero bits.
+    pub fn difficulty(&self) -> usize {
+        self.difficulty
+    }
+
+    /// Record that a peer has PASSED proof-of-work.
+    ///
+    /// This was MISSING. `allow_new_peer` consults `verified_peers` and
+    /// `current_peers`, but nothing in the file ever wrote either map, so
+    /// wiring the type in as-is would have rejected every peer forever: the
+    /// verified lookup always missed, and the count stayed pinned at 0.
+    /// Wiring a feature is only half the job — the state it depends on has to
+    /// actually move.
+    pub fn mark_verified(&self, peer_id: &str) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        if let Ok(mut verified) = self.verified_peers.try_write() {
+            // Bound the table so it cannot grow without limit.
+            const MAX_TRACKED: usize = 10_000;
+            if verified.len() >= MAX_TRACKED && !verified.contains_key(peer_id) {
+                tracing::warn!(
+                    target: "security",
+                    "sybil verified_peers at capacity ({MAX_TRACKED}); pruning oldest entry"
+                );
+                if let Some(oldest) = verified
+                    .iter()
+                    .min_by_key(|(_, ts)| **ts)
+                    .map(|(k, _)| k.clone())
+                {
+                    verified.remove(&oldest);
+                }
+            }
+            verified.insert(peer_id.to_string(), now);
+        }
+
+        if let Ok(mut current) = self.current_peers.try_write() {
+            *current = self
+                .verified_peers
+                .try_read()
+                .map(|v| v.len())
+                .unwrap_or(*current);
+        }
+    }
+
+    /// How many peers have passed proof-of-work and are still within the
+    /// validity window.
+    pub fn verified_count(&self) -> usize {
+        self.verified_peers.try_read().map(|v| v.len()).unwrap_or(0)
     }
 }
 
@@ -867,5 +933,48 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         manager.cleanup_expired().await;
         assert!(!manager.is_blacklisted(peer));
+    }
+
+    /// REGRESSION GUARD for a real panic that was found and fixed.
+    ///
+    /// `save_config` used to be SYNC and read the async `self.config` lock with
+    /// `Handle::current().block_on(..)`. Both call sites are async axum handlers
+    /// (`controllers/system.rs`: `configure_firewall`, `backup_security`), so
+    /// `POST /api/system/firewall` and `POST /api/system/backup-security` PANICKED
+    /// the handler task on every authenticated request with "Cannot start a
+    /// runtime from within a runtime".
+    ///
+    /// `save_config` is now `async` and awaited at both call sites. This test
+    /// calls it from inside a `#[tokio::test]` body - i.e. from a runtime worker
+    /// thread, the same context as the handlers - and asserts it completes.
+    ///
+    /// Note for whoever revisits this: `tokio::task::block_in_place` does NOT
+    /// reproduce the panic (it parks the worker and permits `block_on`), so the
+    /// call must be made directly in the async body. An earlier version of this
+    /// test used `block_in_place` and wrongly reported the code as safe.
+    #[tokio::test]
+    async fn save_config_works_from_async_handler_context() {
+        let mgr = SecurityManager::new(SecurityConfig::default());
+        let path = std::env::temp_dir()
+            .join(format!("gw_save_config_ok_{}.json", std::process::id()))
+            .to_string_lossy()
+            .to_string();
+
+        // Must not panic now that the read is awaited rather than block_on'd.
+        mgr.save_config(&path)
+            .await
+            .expect("save_config must succeed from an async context");
+
+        // And it must actually have written the config.
+        let written = std::fs::read_to_string(&path).expect("config file written");
+        assert!(
+            !written.trim().is_empty(),
+            "save_config should persist a non-empty config"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&written).expect("config must be valid JSON");
+        assert!(parsed.is_object(), "config should be a JSON object");
+
+        let _ = std::fs::remove_file(&path);
     }
 }

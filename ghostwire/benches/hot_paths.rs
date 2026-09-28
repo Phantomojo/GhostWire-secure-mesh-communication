@@ -35,10 +35,9 @@ fn bench_xchacha20_roundtrip(c: &mut Criterion) {
     });
 
     g.bench_function("decrypt_64B", |b| {
-        let enc = ghostwire::core::encryption::EncryptionManager::encrypt_with_xchacha20(
-            &small, &key,
-        )
-        .unwrap();
+        let enc =
+            ghostwire::core::encryption::EncryptionManager::encrypt_with_xchacha20(&small, &key)
+                .unwrap();
         b.iter(|| {
             ghostwire::core::encryption::EncryptionManager::decrypt_with_xchacha20(
                 black_box(&enc.ciphertext),
@@ -129,9 +128,7 @@ fn bench_frame_codec(c: &mut Criterion) {
         })
     });
 
-    let msg_bytes = Frame::encode(FrameKind::Message, &msg)
-        .unwrap()
-        .to_bytes();
+    let msg_bytes = Frame::encode(FrameKind::Message, &msg).unwrap().to_bytes();
 
     g.bench_function("decode_message_512B", |b| {
         b.iter(|| {
@@ -314,6 +311,41 @@ fn bench_mailbox(c: &mut Criterion) {
     g.finish();
 }
 
+/// ML-KEM-768 post-quantum key establishment.
+///
+/// The Bible previously quoted an 890 microsecond on-device encapsulation figure
+/// that had no benchmark behind it anywhere in the repo. This measures the real
+/// cost of the three operations that make up the hybrid handshake, so the claim
+/// can cite a reproducible number instead.
+fn bench_mlkem768(c: &mut Criterion) {
+    use pqcrypto_mlkem::mlkem768;
+
+    let mut g = c.benchmark_group("mlkem768");
+
+    g.bench_function("keypair", |b| {
+        b.iter(|| black_box(mlkem768::keypair()));
+    });
+
+    let (pk, sk) = mlkem768::keypair();
+
+    g.bench_function("encapsulate", |b| {
+        b.iter(|| black_box(mlkem768::encapsulate(&pk)));
+    });
+
+    let (shared, ct) = mlkem768::encapsulate(&pk);
+
+    g.bench_function("decapsulate", |b| {
+        b.iter(|| black_box(mlkem768::decapsulate(&ct, &sk)));
+    });
+
+    // Sanity: encapsulating and decapsulating the same ciphertext must recover the
+    // same shared secret, or the timings above are meaningless.
+    let recovered = mlkem768::decapsulate(&ct, &sk);
+    assert_eq!(shared, recovered, "PQ round-trip sanity check failed");
+
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_xchacha20_roundtrip,
@@ -321,5 +353,6 @@ criterion_group!(
     bench_hlc,
     bench_dedup,
     bench_mailbox,
+    bench_mlkem768,
 );
 criterion_main!(benches);

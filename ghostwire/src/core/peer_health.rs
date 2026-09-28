@@ -3,11 +3,12 @@
 //! Tracks latency, packet loss, last_seen, and connection state for each
 //! connected peer. Driven by Ping/Pong frame exchange in the MeshDriver.
 
+use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 use tracing::debug;
 
 /// Health metrics for a single peer
@@ -255,12 +256,47 @@ impl PeerHealthTracker {
 pub struct PendingPings {
     /// Maps ping timestamp → peer_id
     pings: HashMap<u32, String>,
+    /// Optional caller awaiting a single ping's result. The existing tracker
+    /// only recorded timestamps for periodic health sweeps, so an interactive
+    /// "ping this peer" request had no way to hand a measured RTT back to the
+    /// caller. Keyed by the same timestamp as `pings`.
+    waiters: HashMap<u32, oneshot::Sender<f64>>,
 }
 
 impl PendingPings {
     pub fn new() -> Self {
         Self {
             pings: HashMap::new(),
+            waiters: HashMap::new(),
+        }
+    }
+
+    /// Register an in-flight ping that a caller is blocking on.
+    pub fn register(&mut self, ts: u32, peer_id: PeerId, reply: oneshot::Sender<f64>) {
+        self.pings.insert(ts, peer_id.to_string());
+        self.waiters.insert(ts, reply);
+    }
+
+    /// Resolve a ping, handing the measured RTT to any waiting caller.
+    /// Returns `(peer_id, rtt_ms)` as before, and additionally sends the RTT
+    /// over the caller's channel if one is registered.
+    pub fn resolve_with_reply(&mut self, pong_ts_ms: u32) -> Option<(String, f64)> {
+        let resolved = self.resolve(pong_ts_ms);
+        if let Some(sender) = self.waiters.remove(&pong_ts_ms) {
+            if let Some((_, rtt)) = resolved.as_ref() {
+                let _ = sender.send(*rtt);
+            }
+        }
+        resolved
+    }
+
+    /// Fail every caller waiting on a ping that timed out, so a caller blocked
+    /// on `ping_peer` is not left hanging until the process exits.
+    pub fn fail_waiters(&mut self) {
+        for (_, sender) in self.waiters.drain() {
+            // Dropping the sender causes the awaiting task to observe a
+            // RecvError, which the caller turns into a timeout error.
+            drop(sender);
         }
     }
 
@@ -315,7 +351,7 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn now_ms_u32() -> u32 {
+pub fn now_ms_u32() -> u32 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

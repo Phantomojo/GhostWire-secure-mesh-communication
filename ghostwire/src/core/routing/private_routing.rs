@@ -273,7 +273,12 @@ pub fn peel_onion_layer(
         .decrypt(nonce, ct)
         .map_err(|_| anyhow::anyhow!("Onion layer decryption failed — wrong hop or tampered"))?;
 
-    let envelope: HopEnvelope = bincode::deserialize(&envelope_bytes)?;
+    // Bounded decode. `HopEnvelope` has two `Vec` fields, and bincode reads
+    // their lengths from u64 prefixes before allocating. Reaching this point
+    // only requires the caller to hold a shared onion layer key, which any
+    // peer on the route can do, so the length must be validated against the
+    // bytes actually decrypted.
+    let envelope: HopEnvelope = crate::core::wire_protocol::decode_bounded(&envelope_bytes)?;
 
     Ok((envelope.next_hop, envelope.inner_payload))
 }
@@ -351,3 +356,47 @@ fn now_secs() -> u64 {
 // blake3 = "1.5"
 // rand = { version = "0.8", features = ["small_rng"] }  (already present)
 // ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::HopEnvelope;
+    use crate::core::wire_protocol::decode_bounded;
+
+    /// Round-trip guard for the bounded decoder used at the onion hop.
+    ///
+    /// `HopEnvelope` carries two `Vec` fields. The hop decrypts the layer with
+    /// a key shared across the route, so an attacker who is ON the route can
+    /// craft the plaintext and thus the length prefixes. Before the bounded
+    /// decoder, `bincode::deserialize` trusted those u64 length prefixes and
+    /// called `Vec::with_capacity` with them.
+    ///
+    /// This test exists because the onion hop path had no coverage at all, so a
+    /// wrong encoding choice here would have silently broken real routing while
+    /// the suite stayed green.
+    #[test]
+    fn hop_envelope_round_trips_through_bounded_decoder() {
+        let envelope = HopEnvelope {
+            next_hop: "12D3KooWpeer".to_string(),
+            inner_payload: vec![0xAB; 700],
+            _pad: vec![0x00; 300],
+        };
+        let encoded = bincode::serialize(&envelope).expect("serialize");
+        let decoded: HopEnvelope = decode_bounded(&encoded).expect("must decode");
+        assert_eq!(decoded.next_hop, envelope.next_hop);
+        assert_eq!(decoded.inner_payload.len(), 700);
+        assert_eq!(decoded._pad.len(), 300);
+    }
+
+    /// A hostile length prefix must be refused without a huge allocation.
+    #[test]
+    fn hop_envelope_hostile_length_prefix_is_rejected() {
+        // 8-byte u64 length prefix claiming u64::MAX bytes, then nothing.
+        let mut hostile = Vec::new();
+        hostile.extend_from_slice(&u64::MAX.to_le_bytes());
+        let result: Result<HopEnvelope, _> = decode_bounded(&hostile);
+        assert!(
+            result.is_err(),
+            "must reject a length prefix far larger than the input"
+        );
+    }
+}

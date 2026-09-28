@@ -365,9 +365,11 @@ export const messages = {
 
 export const security = {
   dashboard: () => get<SecurityDashboardV2>('/v2/security/dashboard'),
-  audit:     () => get<unknown[]>('/v2/security/audit'),
-  lockdown:  (enabled: boolean) => post<void>('/security/lockdown', { enabled }),
-  rotateKeys: () => post<void>('/security/rotate-keys'),
+  audit:     () => get<unknown[]>('/system/audit'),
+  lockdown:  (enabled: boolean) => post<void>('/system/lockdown', { enabled }),
+  // Backend registers this as PUT (web.rs system_routes), not POST —
+  // POST returns 405 Method Not Allowed.
+  rotateKeys: () => put<void>('/system/rotate-keys'),
 };
 
 export interface TransportRegistryDescriptor {
@@ -399,13 +401,17 @@ export const network = {
   transports: () => get<TransportHealthV2>('/v2/system/transports'),
   transportAction: (transport: string, action: 'start' | 'stop') =>
     post<TransportHealthV2>(`/v2/system/transports/${encodeURIComponent(transport)}/action`, { action }),
+  // SystemController::status — NOT IdentityController::get_profile.
+  // `/identity/status` returns identity metadata and has none of these fields.
   systemStatus: () => get<{
-    cpu_usage: number;
-    memory_used_kb: number;
-    memory_total_kb: number;
+    status: string;
     uptime_seconds: number;
+    local_ip: string;
     peer_count: number;
-  }>('/status'),
+    mesh_active: boolean;
+    threat_level: string;
+    blocked_connections: number;
+  }>('/system/stats'),
   transport: (): Promise<TransportStatus> =>
     network.meshHealth().then(h => ({
       tier: mapTransportTier(h.network_state.active_transport),

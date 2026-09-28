@@ -210,7 +210,11 @@ impl DaemonClient {
 
     /// Get my identity info
     pub async fn get_identity(&self) -> Option<DaemonIdentity> {
-        match self.authenticated_get("/api/v2/identity").send().await {
+        match self
+            .authenticated_get("/api/v2/identity/status")
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(val) => {
@@ -606,43 +610,6 @@ impl DaemonClient {
                 tracing::warn!(target: "tui", "Failed to reach messages endpoint: {}", e);
                 Vec::new()
             }
-        }
-    }
-
-    pub async fn get_ai_status_summary(&self) -> String {
-        match self
-            .http
-            .get(format!("{}/api/v2/ai/status", self.base_url))
-            .timeout(Duration::from_secs(2))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(val) => {
-                        let data = val.get("data").unwrap_or(&val);
-                        let active = data
-                            .get("active")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let layer = data
-                            .get("active_layer")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("none");
-                        let latency = data.get("latency_us").and_then(|v| v.as_u64());
-                        if active {
-                            match latency {
-                                Some(us) => format!("{} Active ({}μs)", layer, us),
-                                None => format!("{} Active", layer),
-                            }
-                        } else {
-                            "Inactive".to_string()
-                        }
-                    }
-                    Err(_) => "parse error".to_string(),
-                }
-            }
-            _ => "not available".to_string(),
         }
     }
 }

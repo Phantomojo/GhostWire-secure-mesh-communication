@@ -93,7 +93,6 @@ pub struct TuiApp {
     /// Encryption type
     encryption_type: String,
     bootstrap_state: String,
-    ai_status: String,
     discovery: DaemonDiscoveryHealth,
     transports: Vec<DaemonTransportDescriptor>,
     security: DaemonSecurityDashboard,
@@ -123,7 +122,6 @@ impl TuiApp {
             network_mode: String::from("Mesh P2P"),
             encryption_type: String::from("XChaCha20-Poly1305"),
             bootstrap_state: String::from("disabled"),
-            ai_status: String::from("Checking..."),
             discovery: DaemonDiscoveryHealth::default(),
             transports: Vec::new(),
             security: DaemonSecurityDashboard::default(),
@@ -253,16 +251,14 @@ impl TuiApp {
         let identity_fut = self.client.get_identity();
         let contacts_fut = self.client.get_contacts();
         let net_fut = self.client.get_network_status();
-        let ai_fut = self.client.get_ai_status_summary();
         let discovery_fut = self.client.get_discovery_health();
         let transport_fut = self.client.get_transport_registry();
         let security_fut = self.client.get_security_dashboard();
 
-        let (identity, contacts, net, ai_status, discovery, transports, security) = tokio::join!(
+        let (identity, contacts, net, discovery, transports, security) = tokio::join!(
             identity_fut,
             contacts_fut,
             net_fut,
-            ai_fut,
             discovery_fut,
             transport_fut,
             security_fut
@@ -283,7 +279,6 @@ impl TuiApp {
         self.network_mode = net.mode;
         self.encryption_type = net.encryption;
 
-        self.ai_status = ai_status;
         self.discovery = discovery;
         self.transports = transports;
         self.security = security;
@@ -423,29 +418,70 @@ impl TuiApp {
                 }
             }
             KeyCode::Backspace => {
+                // `cursor_pos` is a byte offset, so the byte before the cursor
+                // may be a UTF-8 continuation byte. Step back over the whole
+                // character, not one byte — the old code called `remove(pos-1)`
+                // unconditionally, which PANICKED ("start byte index N is not a
+                // char boundary") as soon as the message contained an emoji or
+                // any non-ASCII character.
                 if self.cursor_pos > 0 {
-                    self.input.remove(self.cursor_pos - 1);
-                    self.cursor_pos -= 1;
+                    // Walk back to the nearest char boundary at or before the
+                    // cursor. Scanning from the end of the prefix is the
+                    // reliable way to do this; `char_indices().next_back()` on
+                    // `input[..cursor_pos - 1]` is NOT, because that slice ends
+                    // mid-character and `next_back` then reports the start of
+                    // the PREVIOUS character, deleting two characters at once.
+                    let mut start = self.cursor_pos - 1;
+                    while start > 0 && !self.input.is_char_boundary(start) {
+                        start -= 1;
+                    }
+                    self.input.replace_range(start..self.cursor_pos, "");
+                    self.cursor_pos = start;
                 }
             }
             KeyCode::Delete => {
+                // Same boundary hazard one byte forward: delete the whole
+                // character at the cursor rather than a single byte.
                 if self.cursor_pos < self.input.len() {
-                    self.input.remove(self.cursor_pos);
+                    let next = self.input[self.cursor_pos..]
+                        .chars()
+                        .next()
+                        .map(|c| self.cursor_pos + c.len_utf8())
+                        .unwrap_or(self.input.len());
+                    self.input.replace_range(self.cursor_pos..next, "");
                 }
             }
             KeyCode::Left => {
+                // Move by a whole character, not a raw byte, so the cursor can
+                // never land inside a multi-byte UTF-8 sequence.
                 if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
+                    let mut start = self.cursor_pos - 1;
+                    while start > 0 && !self.input.is_char_boundary(start) {
+                        start -= 1;
+                    }
+                    self.cursor_pos = start;
                 }
             }
             KeyCode::Right => {
                 if self.cursor_pos < self.input.len() {
-                    self.cursor_pos += 1;
+                    let len = self.input[self.cursor_pos..]
+                        .chars()
+                        .next()
+                        .map_or(1, |c| c.len_utf8());
+                    self.cursor_pos += len;
                 }
             }
             KeyCode::Char(c) => {
+                // `cursor_pos` is a BYTE offset into `input` (it is fed to
+                // `String::insert`/`remove` below, which take byte indices).
+                // The old code advanced it by 1 per keypress, which is only
+                // correct for ASCII: typing a multi-byte character such as
+                // "é" or an emoji inserted len(c) bytes but advanced the
+                // cursor by 1, silently desynchronising it and making the next
+                // Backspace delete mid-character. Advance by the real byte
+                // length instead.
                 self.input.insert(self.cursor_pos, c);
-                self.cursor_pos += 1;
+                self.cursor_pos += c.len_utf8();
             }
             _ => {}
         }
@@ -1118,10 +1154,6 @@ impl TuiApp {
                 Span::styled("Bootstrap: ", theme::muted_style()),
                 Span::styled(&self.bootstrap_state, theme::text_style()),
             ]),
-            Line::from(vec![
-                Span::styled("AI Layer:  ", theme::muted_style()),
-                Span::styled(&self.ai_status, theme::text_style()),
-            ]),
         ])
         .block(theme::themed_block("Network"));
         f.render_widget(network, content[1]);
@@ -1228,4 +1260,152 @@ pub async fn run_tui(port: u16) -> io::Result<()> {
     let client = DaemonClient::new(port);
     let mut app = TuiApp::new(client);
     app.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// Build a TUI App pointed at a port nothing is listening on, so no
+    /// network I/O can succeed. Every test below therefore exercises the
+    /// pure render and input-handling paths deterministically.
+    fn app() -> TuiApp {
+        TuiApp::new(DaemonClient::new(1))
+    }
+
+    fn render(app: &mut TuiApp) -> String {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|f| app.ui(f)).expect("draw");
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Every view must render without panicking. A panic here is a real crash
+    /// for a user pressing '2', '3', '4' or '5'.
+    #[test]
+    fn every_view_renders_without_panicking() {
+        for view in [
+            View::Chat,
+            View::Contacts,
+            View::Dashboard,
+            View::Network,
+            View::Security,
+        ] {
+            let mut app = app();
+            app.view = view;
+            let out = render(&mut app);
+            assert!(!out.trim().is_empty(), "view {view:?} rendered nothing");
+        }
+    }
+
+    /// View-switching keys must actually change the view.
+    #[test]
+    fn number_keys_switch_views() {
+        for (key, expected) in [
+            ('2', View::Contacts),
+            ('3', View::Dashboard),
+            ('4', View::Network),
+            ('5', View::Security),
+        ] {
+            let mut app = app();
+            app.view = View::Chat;
+            app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+            assert_eq!(app.view, expected, "key '{key}' did not switch view");
+        }
+    }
+
+    /// Typing must land in the input buffer with a sane cursor, and Backspace
+    /// must remove exactly one character. This is the core of the chat flow and
+    /// it had no coverage at all before.
+    #[test]
+    fn typing_and_backspace_edit_the_input_buffer() {
+        let mut app = app();
+        app.view = View::Chat;
+        app.input_mode = true;
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.input, "hello");
+        assert_eq!(app.cursor_pos, 5, "cursor should trail the inserted text");
+
+        app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(
+            app.input, "hell",
+            "Backspace must remove exactly one character"
+        );
+        assert_eq!(app.cursor_pos, 4, "cursor must move back with the delete");
+    }
+
+    /// Esc must leave input mode; if it does not, the user is trapped typing.
+    #[test]
+    fn escape_exits_input_mode() {
+        let mut app = app();
+        app.input_mode = true;
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.input_mode, "Esc must exit input mode");
+    }
+
+    /// 'q' must request quit so the user can always get out.
+    #[test]
+    fn q_requests_quit() {
+        let mut app = app();
+        app.running = true;
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(!app.running, "'q' must stop the run loop");
+    }
+
+    /// `cursor_pos` is a byte offset (it is passed to `String::insert`/
+    /// `remove`). It must advance by the character's UTF-8 byte length, not by
+    /// 1, or a multi-byte keystroke desynchronises the cursor and the next
+    /// Backspace deletes mid-character.
+    #[test]
+    fn multibyte_characters_keep_the_cursor_aligned() {
+        let mut app = app();
+        app.view = View::Chat;
+        app.input_mode = true;
+        for ch in "aé🎉b".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.input, "aé🎉b");
+        assert_eq!(
+            app.cursor_pos,
+            app.input.len(),
+            "cursor must be a true byte offset into the string"
+        );
+
+        // Backspace must remove the whole 'b', not one stray byte.
+        app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "aé🎉", "Backspace must remove the whole char");
+
+        // And a multi-byte char must delete cleanly too.
+        app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "aé", "Backspace must remove the emoji whole");
+        assert_eq!(app.cursor_pos, "aé".len());
+    }
+
+    /// Typing in input mode must NOT be swallowed as a view-switch shortcut.
+    /// This is the classic TUI bug: pressing '3' to type a digit jumps views.
+    #[test]
+    fn digits_type_while_in_input_mode() {
+        let mut app = app();
+        app.view = View::Chat;
+        app.input_mode = true;
+        app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+        assert_eq!(
+            app.input, "3",
+            "digit must be typed, not treated as a shortcut"
+        );
+        assert_eq!(app.view, View::Chat, "view must not change while typing");
+    }
 }

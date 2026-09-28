@@ -21,7 +21,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::info;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -292,7 +292,7 @@ impl EncryptionManager {
         let path = Self::public_stub_path()?;
         let mut persisted: PersistedEncryption = serde_json::from_slice(&std::fs::read(path)?)?;
         persisted.key_pair.private_key.clear();
-        let mut manager = Self::from_persisted(persisted);
+        let manager = Self::from_persisted(persisted);
         *manager
             .private_key
             .lock()
@@ -609,8 +609,56 @@ impl EncryptionManager {
         self.key_pair.key_id.clone()
     }
 
+    /// Learn a peer's public key.
+    ///
+    /// SECURITY: this no longer silently overwrites an existing entry. A key
+    /// learned earlier must not be replaceable by a later unauthenticated
+    /// message, because the decrypt path looks a key up by the SENDER ID
+    /// carried in the message (`decrypt_message` -> `peer_keys`), and verifies
+    /// the signature against whatever is stored there. A peer able to overwrite
+    /// that entry could therefore make forged messages verify as a third party.
+    ///
+    /// The reachable path: `handle_handshake` (mesh.rs) calls this TWICE per
+    /// gossipsub frame — once keyed by the transport-authenticated `peer_id`,
+    /// and once keyed by `msg.sender`, which is a free-text field inside the
+    /// untrusted payload with no binding to `peer_id`. Nothing signs the
+    /// handshake content and nothing checked the sender string, so any peer
+    /// publishing to the DM topic could replace an arbitrary sender's key.
+    ///
+    /// First-write-wins is the minimal safe behaviour: an existing key is
+    /// KEPT. Rotating a genuinely changed key needs an explicit, authenticated
+    /// path, which does not exist yet - so a legitimate re-key would be
+    /// ignored. That is a deliberate trade: failing closed here is much better
+    /// than silently trusting an attacker-supplied key. `trust_score` and
+    /// `last_updated` are preserved from the original entry, so the first
+    /// observation time is not lost.
     pub fn add_peer_key(&self, peer_id: String, public_key: Vec<u8>, key_type: KeyType) {
         let mut peer_keys = self.peer_keys.lock().unwrap();
+        // Bound the map. `handle_handshake` calls this with `msg.sender`, a
+        // free-text field from an untrusted gossipsub frame, so without a cap a
+        // single peer can insert unlimited permanent entries by varying the
+        // string - no crypto, no valid packet structure, just one field. There
+        // is no eviction elsewhere, so this is the only bound.
+        const MAX_PEER_KEYS: usize = 10_000;
+        if peer_keys.len() >= MAX_PEER_KEYS && !peer_keys.contains_key(&peer_id) {
+            tracing::warn!(
+                target: "encryption",
+                "peer_keys at capacity ({MAX_PEER_KEYS}); refusing new key for an unknown id"
+            );
+            return;
+        }
+        if let Some(existing) = peer_keys.get(&peer_id) {
+            if existing.public_key == public_key {
+                // Same key, nothing to do. Do NOT refresh last_updated or
+                // re-stamp trust_score, so a replay cannot reset them.
+                return;
+            }
+            tracing::warn!(
+                target: "encryption",
+                "refusing to overwrite an existing peer key via an unauthenticated path",
+            );
+            return;
+        }
         peer_keys.insert(
             peer_id,
             PeerKey {
@@ -1168,6 +1216,15 @@ impl EncryptionManager {
         self.key_pair.public_key.clone()
     }
 
+    /// Test/inspection helper: read the currently stored key for an id.
+    pub fn stored_peer_key_for_test(&self, id: &str) -> Option<Vec<u8>> {
+        self.peer_keys
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|k| k.public_key.clone())
+    }
+
     pub fn get_peer_count(&self) -> usize {
         self.peer_keys.lock().unwrap().len()
     }
@@ -1290,33 +1347,65 @@ impl EncryptionManager {
         (accepted, duplicates, rejected)
     }
 
+    /// Establish the sending side of a ratchet session with a peer.
+    ///
+    /// `peer_public_key` is the peer's FULL hybrid public key, laid out
+    /// `[Ed25519 (32) | X25519 (32)]`, as stored in `peer_keys` and returned by
+    /// `get_public_key()`.
+    ///
+    /// Two bugs lived here, both of which made this function incapable of
+    /// succeeding:
+    ///
+    /// 1. It passed `self.key_pair.public_key[32..64].to_vec()` — our OWN
+    ///    X25519 half, 32 bytes — into `derive_session_key`, which requires
+    ///    `len >= 64` and then slices `[32..64]` ITSELF. That always failed with
+    ///    "Invalid peer public key length".
+    /// 2. Even passing our own key would be wrong. `derive_session_key` performs
+    ///    an ECDH against the key it is given, so both parties must pass the
+    ///    OTHER party's public key for the derived secret to agree. Passing our
+    ///    own would give alice and bob two different root keys, and the first
+    ///    decrypt would fail with an AEAD error.
+    ///
+    /// This is why the v4 ratchet was unreachable in production: not merely
+    /// unwired, but broken at its entry point. The ~40 ratchet tests drive
+    /// `double_ratchet` directly, so they never exercised this wrapper.
     pub fn init_ratchet_session(
         &self,
         peer_id: &str,
-        bob_public_key: &[u8; 32],
+        peer_public_key: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let session_key = self.derive_session_key(
-            peer_id,
-            &[self.key_pair.public_key[32..64].to_vec()].concat(),
-        )?;
+        if peer_public_key.len() < 64 {
+            return Err("Peer public key too short for ratchet setup (need >= 64)".into());
+        }
+        let session_key = self.derive_session_key(peer_id, peer_public_key)?;
+
+        // The X25519 half the ratchet itself needs for the initial DH.
+        let bob_public_key: [u8; 32] = peer_public_key[32..64].try_into()?;
 
         let mut shared_secret = [0u8; 32];
         shared_secret.copy_from_slice(&session_key);
 
         self.ratchet_sessions
-            .init_alice(peer_id, &shared_secret, bob_public_key);
+            .init_alice(peer_id, &shared_secret, &bob_public_key);
         Ok(())
     }
 
+    /// Establish the receiving side of a ratchet session with a peer.
+    ///
+    /// Same contract as `init_ratchet_session`: `peer_public_key` is the
+    /// peer's FULL hybrid public key. The original signature took only a
+    /// 32-byte slice and then passed `self.key_pair.public_key[32..64]`
+    /// (our own key, 32 bytes) into `derive_session_key`, which requires
+    /// `len >= 64` — so this could never succeed either.
     pub fn init_ratchet_session_as_bob(
         &self,
         peer_id: &str,
-        _alice_public_key: &[u8; 32],
+        peer_public_key: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let session_key = self.derive_session_key(
-            peer_id,
-            &[self.key_pair.public_key[32..64].to_vec()].concat(),
-        )?;
+        if peer_public_key.len() < 64 {
+            return Err("Peer public key too short for ratchet setup (need >= 64)".into());
+        }
+        let session_key = self.derive_session_key(peer_id, peer_public_key)?;
 
         let mut shared_secret = [0u8; 32];
         shared_secret.copy_from_slice(&session_key);
@@ -1388,6 +1477,34 @@ impl EncryptionManager {
             return Err("Expected ratchet message (v4)".into());
         }
 
+        // SECURITY: verify the sender's signature BEFORE touching the ratchet.
+        //
+        // This function previously did not call `verify_signature` at all,
+        // while the v3 path does (see `decrypt_message`, which fetches the peer
+        // key and verifies before deriving anything). The AEAD tag only proves
+        // the message decrypts with the chain key — it says the message decrypts,
+        // not WHO sent it. The sender does sign (`encrypt_message_ratchet`
+        // calls `sign_message` over the ratchet ciphertext) and the signature
+        // crosses the wire, but the receiver discarded it.
+        //
+        // Ordering matters: the check must precede `ratchet_sessions.decrypt`,
+        // because decrypting ADVANCES the chain and consumes a message key.
+        // Verifying afterwards would let an unauthenticated caller burn a peer's
+        // keys and desynchronise the session.
+        let peer_public_key = {
+            let peer_keys = self.peer_keys.lock().unwrap();
+            let peer_key = peer_keys
+                .get(&encrypted_msg.sender_id)
+                .ok_or("Sender not found in peer keys")?;
+            peer_key.public_key.clone()
+        };
+
+        self.verify_signature(
+            &encrypted_msg.ciphertext,
+            &encrypted_msg.signature,
+            &peer_public_key,
+        )?;
+
         let header_json = encrypted_msg
             .pq_key
             .as_ref()
@@ -1449,11 +1566,196 @@ pub(crate) fn test_home() -> TestHome {
     let guard = ENV_LOCK.lock().expect("test env lock poisoned");
     let dir = tempfile::tempdir().expect("test GHOSTWIRE_HOME");
     std::env::set_var("GHOSTWIRE_HOME", dir.path());
-    TestHome { _guard: guard, _dir: dir }
+    TestHome {
+        _guard: guard,
+        _dir: dir,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// F2 REGRESSION: a v4 ratchet message must be signature-verified, and the
+    /// check must reject a message whose signature does not match its sender.
+    ///
+    /// `decrypt_message_ratchet` did not call `verify_signature`, while v3
+    /// `decrypt_message` does. The ratchet's AEAD tag proves the message
+    /// decrypts with the chain key — NOT who sent it. The sender signs
+    /// (`encrypt_message_ratchet` calls `sign_message`) and the signature
+    /// crosses the wire, but the receiver ignored it entirely.
+    ///
+    /// Test design note, learned the hard way: simply replaying alice's
+    /// ciphertext with mallory's signature is NOT a valid probe here. The
+    /// ratchet consumes each message key, so a replay fails the AEAD check
+    /// regardless of the signature and the test passes even with verification
+    /// removed. To isolate the SIGNATURE check, each case below uses a FRESH
+    /// ratchet message (fresh chain key, fresh AEAD) and corrupts only the
+    /// signature field — so the only reason to reject is the signature.
+    #[test]
+    fn ratchet_message_requires_a_valid_signature() {
+        let _home = super::test_home();
+
+        let alice = EncryptionManager::new().unwrap();
+        let bob = EncryptionManager::new().unwrap();
+
+        // NOTE: a third `EncryptionManager` would NOT give us a different
+        // identity here. `new()` -> `load_or_create()` reads GHOSTWIRE_HOME,
+        // and `test_home()` sets ONE temp dir per test, so every manager built
+        // in this test loads the SAME identity file and therefore the same
+        // signing key. (An earlier draft of this test made that mistake and
+        // "passed" for the wrong reason: the forger signed with alice's key, so
+        // the signature was genuinely valid.) So the forger's key is generated
+        // directly with `ring`, guaranteeing a distinct Ed25519 identity.
+        let rng = ring::rand::SystemRandom::new();
+        let mallory_pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
+            .expect("generate attacker keypair");
+        let mallory_kp = ring::signature::Ed25519KeyPair::from_pkcs8(mallory_pkcs8.as_ref())
+            .expect("parse attacker keypair");
+
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+
+        // A genuine message round-trips: each side passes the OTHER's full
+        // hybrid public key so the ECDH yields the same shared secret.
+        alice
+            .init_ratchet_session(&bob.get_key_id(), bob.get_public_key())
+            .expect("alice establishes ratchet session");
+        bob.init_ratchet_session_as_bob(&alice.get_key_id(), alice.get_public_key())
+            .expect("bob establishes ratchet session");
+        let genuine = alice
+            .encrypt_message_ratchet("attack at dawn", &bob.get_key_id(), MessageType::Text)
+            .expect("alice encrypts via ratchet");
+        assert_eq!(
+            bob.decrypt_message_ratchet(&genuine)
+                .expect("bob decrypts alice's genuine message"),
+            "attack at dawn"
+        );
+
+        // CASE 1: a FRESH ratchet message whose signature was replaced with one
+        // made by a different key, while still claiming to be alice.
+        // The AEAD is valid (fresh chain key), so only signature verification
+        // can reject this.
+        bob.init_ratchet_session_as_bob(&alice.get_key_id(), alice.get_public_key())
+            .expect("re-establish session for a fresh chain key");
+        let fresh = alice
+            .encrypt_message_ratchet("second message", &bob.get_key_id(), MessageType::Text)
+            .expect("alice encrypts a second ratchet message");
+
+        let forged = EncryptedMessage {
+            ciphertext: fresh.ciphertext.clone(),
+            nonce: fresh.nonce.clone(),
+            // Signed by a genuinely different Ed25519 key, so only signature
+            // verification can reject this.
+            signature: mallory_kp.sign(&fresh.ciphertext).as_ref().to_vec(),
+            sender_id: alice.get_key_id(), // claims to be alice
+            timestamp: fresh.timestamp,
+            key_id: fresh.key_id.clone(),
+            message_type: fresh.message_type.clone(),
+            version: 0x04,
+            pq_key: fresh.pq_key.clone(),
+        };
+
+        assert!(
+            bob.decrypt_message_ratchet(&forged).is_err(),
+            "SECURITY REGRESSION: a v4 ratchet message signed by the WRONG key was \
+             accepted. A ratchet session is not sender authentication — the AEAD \
+             tag only proves the message decrypts, not who sent it."
+        );
+
+        // CASE 2: a garbage signature on a fresh message must also be rejected.
+        bob.init_ratchet_session_as_bob(&alice.get_key_id(), alice.get_public_key())
+            .expect("re-establish session again");
+        let fresh2 = alice
+            .encrypt_message_ratchet("third message", &bob.get_key_id(), MessageType::Text)
+            .expect("alice encrypts a third ratchet message");
+        let tampered = EncryptedMessage {
+            signature: vec![0xAAu8; 64],
+            ..fresh2.clone()
+        };
+        assert!(
+            bob.decrypt_message_ratchet(&tampered).is_err(),
+            "a ratchet message with a bogus signature must be rejected"
+        );
+    }
+    /// F3 REGRESSION: an existing peer key must not be replaceable through the
+    /// unauthenticated `add_peer_key` path.
+    ///
+    /// `handle_handshake` (mesh.rs) calls `add_peer_key` twice per gossipsub
+    /// frame: once under the transport-authenticated `peer_id`, and once under
+    /// `msg.sender` - a free-text field inside the untrusted payload, with no
+    /// binding to `peer_id` and no signature over the handshake. `add_peer_key`
+    /// used to `insert` unconditionally, so any peer publishing to the DM topic
+    /// could replace the key stored for an ARBITRARY third party. The decrypt
+    /// path looks a key up by sender id and verifies the signature against it,
+    /// so a substituted key turns forged messages into messages that verify.
+    #[test]
+    fn peer_key_substitution_is_refused() {
+        let _home = super::test_home();
+        let mgr = EncryptionManager::new().unwrap();
+
+        let genuine = vec![0xABu8; 32];
+        let attacker = vec![0xCDu8; 32];
+
+        // First observation is accepted.
+        mgr.add_peer_key("victim".to_string(), genuine.clone(), KeyType::Hybrid);
+        assert_eq!(
+            mgr.stored_peer_key_for_test("victim").as_deref(),
+            Some(genuine.as_slice()),
+            "the first key for an id must be stored"
+        );
+
+        // A substituted key from the unauthenticated path must be REFUSED.
+        mgr.add_peer_key("victim".to_string(), attacker.clone(), KeyType::Hybrid);
+        assert_eq!(
+            mgr.stored_peer_key_for_test("victim").as_deref(),
+            Some(genuine.as_slice()),
+            "SECURITY REGRESSION: an existing peer key was overwritten via the \
+             unauthenticated path; forged messages would verify against it"
+        );
+
+        // Re-announcing the SAME key is a no-op, not an error, and must not
+        // churn state.
+        mgr.add_peer_key("victim".to_string(), genuine.clone(), KeyType::Hybrid);
+        assert_eq!(
+            mgr.stored_peer_key_for_test("victim").as_deref(),
+            Some(genuine.as_slice())
+        );
+
+        // Distinct ids still work, so the fix does not break normal operation.
+        mgr.add_peer_key("other".to_string(), attacker.clone(), KeyType::Hybrid);
+        assert_eq!(
+            mgr.stored_peer_key_for_test("other").as_deref(),
+            Some(attacker.as_slice())
+        );
+        assert_eq!(mgr.get_peer_count(), 2, "only two distinct ids expected");
+    }
+
+    /// DoS REGRESSION: the peer-key map must be bounded.
+    ///
+    /// `handle_handshake` supplies `msg.sender` verbatim, so a single peer
+    /// could insert unlimited permanent entries by varying one string, with no
+    /// crypto and no valid packet structure. There is no eviction elsewhere.
+    #[test]
+    fn peer_key_map_is_bounded() {
+        let _home = super::test_home();
+        let mgr = EncryptionManager::new().unwrap();
+        let key = vec![0x11u8; 32];
+
+        for i in 0..10_050 {
+            mgr.add_peer_key(format!("attacker-{i}"), key.clone(), KeyType::Hybrid);
+        }
+
+        let count = mgr.get_peer_count();
+        assert!(
+            count <= 10_000,
+            "SECURITY REGRESSION: peer_keys grew unbounded to {count} entries; \
+             one peer can DoS the node by varying msg.sender"
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -1554,6 +1856,87 @@ mod tests {
 
         let decrypted = bob.decrypt_message(&encrypted).unwrap();
         assert_eq!(message, decrypted);
+    }
+
+    /// HYBRID DOWNGRADE — regression guard, currently PASSING.
+    ///
+    /// A hybrid KEM is only worth more than its classical half if the PQ half
+    /// cannot be dropped by whoever controls the wire. `pq_key` is an
+    /// `Option<Vec<u8>>` on the wire and `decrypt_message` applies the PQ mix
+    /// only `if let Some(pq_ciphertext)`, which looks like a silent
+    /// classical-downgrade path.
+    ///
+    /// It is NOT exploitable as written, and the reason is worth recording: for
+    /// a peer holding an ML-KEM key, `encrypt_message` always sets `pq_key`, so
+    /// `final_key` is the MIXED key. If an attacker strips or corrupts `pq_key`,
+    /// the receiver derives the UNMIXED classical key instead, and the XChaCha20-
+    /// Poly1305 tag check fails. The AEAD turns the derivation mismatch into a
+    /// hard failure.
+    ///
+    /// The safety therefore depends on an implicit invariant: "sender included
+    /// PQ  =>  receiver must also apply PQ". That invariant is enforced by
+    /// authentication failure rather than by an explicit check, so it is easy
+    /// to break later by, for example, tolerating a missing `pq_key`. This test
+    /// exists to make such a regression loud.
+    ///
+    /// The residual risk is a peer whose key is NOT >= 64+1184 bytes: for that
+    /// peer `pq_key` is legitimately `None` on both sides, and the session is
+    /// classical by design rather than downgraded.
+    #[test]
+    fn stripping_pq_key_must_not_silently_downgrade_to_classical() {
+        let alice = EncryptionManager::create_new().unwrap();
+        let bob = EncryptionManager::create_new().unwrap();
+
+        assert_eq!(bob.key_pair.key_type, KeyType::Ultimate);
+        alice.add_peer_key(
+            bob.get_key_id(),
+            bob.get_public_key().to_vec(),
+            KeyType::Ultimate,
+        );
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Ultimate,
+        );
+
+        let encrypted = alice
+            .encrypt_message(
+                "hybrid downgrade probe",
+                &bob.get_key_id(),
+                MessageType::Text,
+            )
+            .unwrap();
+        assert!(
+            encrypted.pq_key.is_some(),
+            "sender should include a PQ component"
+        );
+
+        // Sanity: intact frame decrypts.
+        assert_eq!(
+            bob.decrypt_message(&encrypted).unwrap(),
+            "hybrid downgrade probe"
+        );
+
+        // Attack: strip the PQ component entirely.
+        let mut stripped = encrypted.clone();
+        stripped.pq_key = None;
+        let stripped_result = bob.decrypt_message(&stripped);
+
+        // Attack: keep the field but corrupt the KEM ciphertext.
+        let mut corrupted = encrypted.clone();
+        let mut bad = corrupted.pq_key.clone().unwrap();
+        bad[0] ^= 0xFF;
+        corrupted.pq_key = Some(bad);
+        let corrupted_result = bob.decrypt_message(&corrupted);
+
+        assert!(
+            stripped_result.is_err() && corrupted_result.is_err(),
+            "hybrid receiver must REJECT a frame whose PQ component was removed or corrupted, \
+             otherwise an active attacker downgrades the connection to classical X25519. \
+             stripped={:?} corrupted={:?}",
+            stripped_result.map(|_| "DECRYPTED"),
+            corrupted_result.map(|_| "DECRYPTED"),
+        );
     }
 
     #[test]

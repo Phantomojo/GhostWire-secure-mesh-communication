@@ -69,7 +69,36 @@ impl SyncBloom {
         self.count += 1;
     }
 
+    /// True when the filter is shaped as we expect (16 x u64 for BLOOM_BITS).
+    ///
+    /// SECURITY: `SyncBloom` derives `Deserialize`, and a bloom filter arrives
+    /// from an UNTRUSTED gossipsub peer inside `DtnSyncHandshake`
+    /// (`handle_dtn_sync` -> `on_encounter` -> `contains`). Nothing on that
+    /// path validated the vector length, so a peer sending `bits: vec![]` (a
+    /// perfectly valid, allocation-bounded bincode payload) made
+    /// `self.bits[pos / 64]` index out of bounds.
+    ///
+    /// With `panic = "abort"` in release (Cargo.toml:135) that is a FULL
+    /// PROCESS KILL from a single unauthenticated frame, not a task-local
+    /// unwind. `contains` now checks this and reports "not present" instead of
+    /// indexing. Failing closed is correct here: a malformed filter means we
+    /// cannot know what the peer already holds, and the safe assumption is that
+    /// they need the bundle. That costs a wasted transfer rather than a forged
+    /// or lost route.
+    pub fn is_well_formed(&self) -> bool {
+        self.bits.len() == BLOOM_BITS / 64
+    }
+
     pub fn contains(&self, cid: &[u8; 32]) -> bool {
+        if !self.is_well_formed() {
+            tracing::warn!(
+                target: "dtn",
+                "rejecting malformed SyncBloom of length {} (expected {})",
+                self.bits.len(),
+                BLOOM_BITS / 64,
+            );
+            return false;
+        }
         Self::hash_positions(cid)
             .iter()
             .all(|&pos| self.bits[pos / 64] & (1u64 << (pos % 64)) != 0)
@@ -607,5 +636,69 @@ mod tests {
 
         let delivered = store.drain_local_deliveries().await;
         assert_eq!(delivered.len(), 1);
+    }
+
+    /// DoS REGRESSION: a malformed bloom filter from an untrusted peer must not
+    /// panic.
+    ///
+    /// `DtnSyncHandshake.have_bloom` is `#[derive(Deserialize)]` and arrives
+    /// from any gossipsub peer. `bits` is a plain `Vec<u64>` with no length
+    /// contract, so `vec![]` is a valid, allocation-bounded bincode payload.
+    /// `contains` then evaluated `self.bits[pos / 64]` with `pos < BLOOM_BITS`,
+    /// i.e. index up to 15 — an out-of-bounds panic. Because release builds set
+    /// `panic = "abort"` (Cargo.toml:135), that is a full process kill from one
+    /// unauthenticated frame.
+    ///
+    /// The `bits` field is private, so this constructs the malformed value the
+    /// way the network would: serialize a `DtnSyncHandshake` carrying a
+    /// hand-built short filter, then deserialize it exactly as
+    /// `handle_dtn_sync` does.
+    #[test]
+    fn malformed_bloom_from_peer_does_not_panic() {
+        // Build the hostile filter the way a peer would: right shape, wrong
+        // length. Constructed inside this module so the private field is
+        // reachable.
+        let hostile = SyncBloom {
+            bits: vec![],
+            count: 0,
+        };
+        assert!(!hostile.is_well_formed(), "empty filter must be rejected");
+
+        // Round-trip it through the real wire format to prove the hostile
+        // value genuinely arrives from a decode, not just a hand-built struct.
+        let handshake = DtnSyncHandshake {
+            node_id: [0xEEu8; 32],
+            have_bloom: hostile,
+            delivery_scores: vec![],
+            ts: 1,
+        };
+        let wire = bincode::serialize(&handshake).expect("serialize");
+        let decoded: DtnSyncHandshake =
+            bincode::deserialize(&wire).expect("decode - bounded and valid");
+        assert_eq!(decoded.have_bloom.bits.len(), 0);
+
+        // THE ASSERTION: this used to panic. A truncated filter must report
+        // "not present" so the peer is treated as needing the bundle.
+        let cid = [0x42u8; 32];
+        assert!(
+            !decoded.have_bloom.contains(&cid),
+            "a malformed bloom must report 'not present', never index out of bounds"
+        );
+
+        // A filter that is too LONG is equally untrusted and equally unchecked.
+        let oversized = SyncBloom {
+            bits: vec![0u64; 4_096],
+            count: 0,
+        };
+        assert!(!oversized.is_well_formed());
+        assert!(!oversized.contains(&cid));
+
+        // And a well-formed filter still behaves normally, so the guard did not
+        // break the real path.
+        let mut good = SyncBloom::new();
+        assert!(good.is_well_formed());
+        assert!(!good.contains(&cid), "empty-but-valid filter holds nothing");
+        good.insert(&cid);
+        assert!(good.contains(&cid), "inserted CID must be found");
     }
 }

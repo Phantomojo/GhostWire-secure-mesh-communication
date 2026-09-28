@@ -24,7 +24,7 @@ export default function ChannelsPanel() {
     if (!selected) return;
     channelsApi.messages(selected.topic_id)
       .then(setMsgs)
-      .catch(() => {});
+      .catch(() => setMsgs([]));
   }, [selected]);
 
   const handleCreate = async () => {
@@ -56,10 +56,18 @@ export default function ChannelsPanel() {
   };
 
   const handleLeave = async (ch: GhostChannel) => {
-    await channelsApi.leave(ch.topic_id).catch(() => {});
-    toast('info', 'Left channel');
-    if (selected?.topic_id === ch.topic_id) setSelected(null);
-    await load();
+    // Was: `.catch(() => {})` followed by an unconditional
+    // toast('info','Left channel'). A failed leave still reported success and
+    // then cleared the selection, so the operator was told they had left a
+    // channel they were still in. Surface the real error instead.
+    try {
+      await channelsApi.leave(ch.topic_id);
+      toast('info', 'Left channel');
+      if (selected?.topic_id === ch.topic_id) setSelected(null);
+      await load();
+    } catch (e: any) {
+      toast('error', e.message ?? 'Leave failed');
+    }
   };
 
   const handlePublish = async () => {

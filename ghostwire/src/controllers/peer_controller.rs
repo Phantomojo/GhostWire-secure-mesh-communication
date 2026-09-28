@@ -28,6 +28,47 @@ pub struct RespondRequestBody {
     pub accept: bool,
 }
 
+/// Append a peer id to the on-disk blocklist.
+///
+/// The `TrustStore` is in-memory and rebuilt from scratch on restart, so a
+/// block recorded there alone would silently lapse the next time the daemon
+/// starts — a user who blocked a peer would find them connected again with no
+/// warning. This writes the id to `blocked_peers.json` under the GhostWire
+/// home so the decision survives a restart.
+///
+/// This is deliberately separate from `SecurityManager::blacklist`, which is an
+/// in-memory, IP-keyed, 1-hour-TTL rate-limit list for connection attempts. That
+/// is a different concern from a durable, peer-identity ban and reusing it
+/// would give a user block that expires after an hour.
+async fn persist_blocklist(peer_id: &str) {
+    use std::collections::BTreeSet;
+
+    let dir = crate::controllers::profiles::ProfilesController::ghostwire_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        tracing::warn!(target: "social", "cannot create GhostWire dir for blocklist");
+        return;
+    }
+    let path = dir.join("blocked_peers.json");
+
+    // Read-modify-write. BTreeSet keeps the file deterministic for diffing.
+    let mut set: BTreeSet<String> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default();
+    if !set.insert(peer_id.to_string()) {
+        return; // already present
+    }
+    match serde_json::to_string_pretty(&set.into_iter().collect::<Vec<_>>()) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!(target: "social", "failed to persist block: {}", e);
+            }
+        }
+        Err(e) => tracing::warn!(target: "social", "failed to serialise blocklist: {}", e),
+    }
+}
+
 impl PeerController {
     /// GET /api/v2/peers — All known peers with their connection states
     ///
@@ -35,7 +76,7 @@ impl PeerController {
     /// from libp2p events yet, so topology is the real source. When social_graph
     /// gets wired to swarm events, this deduplicates naturally.
     pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-        use crate::core::social::social_graph::{ConnectionState, PeerFilter};
+        use crate::core::social::social_graph::PeerFilter;
 
         let core = state.core.read().await;
         let all_peers = core.social_graph.list_peers(PeerFilter::All).await;
@@ -225,17 +266,45 @@ impl PeerController {
 
     /// POST /api/v2/peers/:node_id/block — Block a node
     pub async fn block(
-        State(_state): State<Arc<AppState>>,
+        State(state): State<Arc<AppState>>,
         Path(node_id): Path<String>,
     ) -> impl IntoResponse {
-        tracing::warn!(target: "social", "Block unavailable; social-graph mutation is not wired for {}", &node_id[..8.min(node_id.len())]);
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(ApiV2Response::<()>::error(
-                "PEER_BLOCK_UNAVAILABLE",
-                "Peer blocking is not wired to the authenticated social graph yet",
-            )),
-        )
+        if node_id.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    "INVALID_NODE_ID",
+                    "node id is required",
+                )),
+            )
+                .into_response();
+        }
+
+        // Enforcement point: record the block in the TrustStore.
+        // `TrustStore::block` creates a Blocked record even for a peer that is
+        // not yet known, so blocking someone you have never met is not
+        // silently a no-op (regression test in reputation.rs).
+        let newly_inserted = {
+            let core = state.core.read().await;
+            core.trust_store.block(&node_id).await
+        };
+        // The TrustStore is in-memory and rebuilt on restart, so persist the
+        // block or it silently lapses on the next daemon start.
+        persist_blocklist(&node_id).await;
+
+        tracing::info!(
+            target: "social",
+            "Peer blocked: {} (new record: {})",
+            &node_id[..8.min(node_id.len())],
+            newly_inserted
+        );
+
+        Json(ApiV2Response::success(serde_json::json!({
+            "status": "blocked",
+            "node_id": node_id,
+            "new_record": newly_inserted,
+        })))
+        .into_response()
     }
 
     /// GET /api/v2/peers/:node_id/profile — Get a peer's public profile

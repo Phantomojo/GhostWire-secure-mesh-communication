@@ -169,8 +169,9 @@ impl SystemController {
         let outcome: Result<RotationStatus, String> = (|| {
             let core = Arc::get_mut(&mut *core_guard)
                 .ok_or_else(|| "Core shared; rotation deferred to mesh tick".to_string())?;
-            let enc = Arc::get_mut(&mut core.encryption)
-                .ok_or_else(|| "EncryptionManager shared; rotation deferred to mesh tick".to_string())?;
+            let enc = Arc::get_mut(&mut core.encryption).ok_or_else(|| {
+                "EncryptionManager shared; rotation deferred to mesh tick".to_string()
+            })?;
             if !enc.should_rotate_keys() {
                 return Ok(RotationStatus {
                     rotated: false,
@@ -255,6 +256,7 @@ impl SystemController {
             .security_manager
             .clone()
             .save_config(path)
+            .await
         {
             Ok(_) => Json(ApiV2Response::success(
                 "Firewall rules applied and persisted".to_string(),
@@ -354,6 +356,7 @@ impl SystemController {
             .security_manager
             .clone()
             .save_config(&filename)
+            .await
         {
             Ok(_) => Json(ApiV2Response::success(format!(
                 "Security configuration backed up to {}",

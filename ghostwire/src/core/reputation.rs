@@ -240,12 +240,56 @@ impl TrustStore {
         Ok(())
     }
 
-    /// Block a peer
-    pub async fn block(&self, peer_id: &str) {
+    /// Block a peer.
+    ///
+    /// Previously this silently did nothing when the peer was not already in
+    /// the store: `if let Some(record) = peers.get_mut(peer_id)` simply fell
+    /// through, and the caller had no way to tell. A user who blocked a peer
+    /// they had never recorded would be told it worked, and the peer would
+    /// remain fully trusted. Blocking is a security decision the user made
+    /// explicitly, so it must be recorded even for an unknown peer — an
+    /// explicit deny has to win over a missing record.
+    ///
+    /// Returns `true` if the peer was newly inserted (i.e. was not previously
+    /// known), so callers can report what actually happened.
+    pub async fn block(&self, peer_id: &str) -> bool {
         let mut peers = self.peers.write().await;
         if let Some(record) = peers.get_mut(peer_id) {
             record.trust_level = TrustLevel::Blocked;
+            false
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            peers.insert(
+                peer_id.to_string(),
+                PeerRecord {
+                    peer_id: peer_id.to_string(),
+                    pinned_key: Vec::new(),
+                    current_key: Vec::new(),
+                    trust_level: TrustLevel::Blocked,
+                    first_seen: now,
+                    last_seen: now,
+                    attestations: Vec::new(),
+                    interaction_count: 0,
+                    display_name: None,
+                },
+            );
+            true
         }
+    }
+
+    /// Is this peer explicitly blocked?
+    ///
+    /// A missing record is NOT blocked. Callers that want fail-closed behaviour
+    /// must consult this explicitly rather than infer it from absence.
+    pub async fn is_blocked(&self, peer_id: &str) -> bool {
+        let peers = self.peers.read().await;
+        peers
+            .get(peer_id)
+            .map(|r| r.trust_level == TrustLevel::Blocked)
+            .unwrap_or(false)
     }
 
     /// Get trust info for a peer
@@ -491,4 +535,63 @@ pub fn compute_score_with_decay(
 
     let score = (base_trust * age_decay as f32 + interaction_bonus) * recency_boost;
     score.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::{TrustLevel, TrustStore};
+
+    /// REGRESSION: blocking a peer that is not yet in the store must still
+    /// record the block. The old implementation used `if let Some(..)`, so an
+    /// unknown peer was silently NOT blocked while the caller reported success.
+    #[tokio::test]
+    async fn blocking_unknown_peer_is_recorded() {
+        let store = TrustStore::new();
+        let peer = "12D3KooW-unknown-peer-never-seen-before";
+
+        assert!(
+            !store.is_blocked(peer).await,
+            "unknown peer starts unblocked"
+        );
+
+        let newly_inserted = store.block(peer).await;
+        assert!(
+            newly_inserted,
+            "blocking an unknown peer must report that it was newly inserted"
+        );
+        assert!(
+            store.is_blocked(peer).await,
+            "SECURITY REGRESSION: an explicit block on an unknown peer was silently \
+             dropped, so the peer stayed fully trusted"
+        );
+    }
+
+    /// Blocking a peer that IS already known must work too, and must be idempotent.
+    #[tokio::test]
+    async fn blocking_known_peer_is_idempotent() {
+        let store = TrustStore::new();
+        let peer = "12D3KooW-known-peer";
+        store.block(peer).await;
+
+        let second = store.block(peer).await;
+        assert!(!second, "re-blocking a known peer must not re-insert it");
+        assert!(store.is_blocked(peer).await);
+    }
+
+    /// Absence must not read as "blocked" — callers wanting fail-closed
+    /// behaviour have to ask explicitly via `is_blocked`.
+    #[tokio::test]
+    async fn absent_peer_is_not_blocked() {
+        let store = TrustStore::new();
+        assert!(!store.is_blocked("never-seen").await);
+    }
+
+    /// A block must be visible in the peer listing so the UI can show it.
+    #[tokio::test]
+    async fn blocked_peer_appears_in_listing() {
+        let store = TrustStore::new();
+        store.block("12D3KooW-listed-blocked").await;
+        let all = store.all_peers().await;
+        assert!(all.iter().any(|p| p.trust_level == TrustLevel::Blocked));
+    }
 }

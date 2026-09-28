@@ -51,9 +51,11 @@ interface AppState {
   activePanel: ActivePanel;
   toasts: Toast[];
 
-  // System metrics
-  cpuPct: number;
-  memPct: number;
+  // System metrics. `cpuPct`/`memPct` are `null` when the daemon does not
+  // report them — the System panel must show "n/a", not 0, because a 0%
+  // reading looks like a real measurement of an idle machine.
+  cpuPct: number | null;
+  memPct: number | null;
   uptimeSecs: number;
 }
 
@@ -70,7 +72,9 @@ type Action =
   | { type: 'ADD_MESSAGE'; payload: MessageV2 }
   | { type: 'SET_ACTIVE_RECIPIENT'; payload: string }
   | { type: 'SET_SECURITY'; payload: { score: number; pqc: boolean; threat: string } }
-  | { type: 'SET_SYSTEM'; payload: { cpu: number; mem: number; uptime: number; peers: number } }
+  // `cpu`/`mem` are optional: `/system/stats` does not report them, so the
+  // System panel renders them as unavailable rather than as a fake 0%.
+  | { type: 'SET_SYSTEM'; payload: { cpu?: number; mem?: number; uptime: number; peers: number } }
   | { type: 'SET_EMERGENCY'; payload: boolean }
   | { type: 'SET_STEALTH'; payload: boolean }
   | { type: 'SET_PANIC'; payload: boolean }
@@ -131,8 +135,8 @@ function reducer(state: AppState, action: Action): AppState {
     };
     case 'SET_SYSTEM':           return {
       ...state,
-      cpuPct: action.payload.cpu,
-      memPct: action.payload.mem,
+      cpuPct: action.payload.cpu ?? null,
+      memPct: action.payload.mem ?? null,
       uptimeSecs: action.payload.uptime,
       peerCount: action.payload.peers,
     };
@@ -232,10 +236,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (sys.status === 'fulfilled') {
         const s = sys.value;
+        // NOTE: `/system/stats` does NOT report CPU or memory. The previous
+        // code read `s.cpu_usage` / `s.memory_total_kb`, which were never in
+        // the response, so the UI displayed a hardcoded, always-zero "0% CPU"
+        // and "0% MEM" that looked like real readings. The daemon exposes
+        // `status`, `local_ip`, `mesh_active`, `threat_level` and
+        // `blocked_connections` instead — surface what is actually measured
+        // and leave CPU/MEM unset rather than fabricate a 0.
         dispatch({ type: 'SET_SYSTEM', payload: {
-          cpu: Math.round(s.cpu_usage ?? 0),
-          mem: s.memory_total_kb > 0
-            ? Math.round((s.memory_used_kb / s.memory_total_kb) * 100) : 0,
           uptime: s.uptime_seconds,
           peers: s.peer_count,
         }});
