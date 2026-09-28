@@ -2,7 +2,7 @@ use crate::api_v2_types::*;
 use crate::web::AppState;
 use axum::{
     extract::{Query, State},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -44,13 +44,14 @@ impl MessagingController {
     pub async fn broadcast(
         State(state): State<Arc<AppState>>,
         Json(req): Json<BroadcastRequest>,
-    ) -> impl IntoResponse {
+    ) -> Response {
         // ✅ SECURITY: Validate broadcast message size
         if req.message.len() > MAX_MESSAGE_SIZE {
-            return Json(ApiV2Response::error(
+            return ApiV2Response::<serde_json::Value>::error_response(
                 StandardErrorCode::InvalidInput.as_str(),
                 format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
-            ));
+            )
+            .into_response();
         }
 
         let timestamp = SystemTime::now()
@@ -98,35 +99,38 @@ impl MessagingController {
 
         tracing::info!("Broadcast message sent to {} peers", peer_count);
 
-        Json(ApiV2Response::success(result))
+        Json(ApiV2Response::success(result)).into_response()
     }
 
     pub async fn send_message(
         State(state): State<Arc<AppState>>,
         Json(payload): Json<SendMessageRequest>,
-    ) -> impl IntoResponse {
+    ) -> Response {
         // ✅ SECURITY: Validate message size
         if payload.content.len() > MAX_MESSAGE_SIZE {
-            return Json(ApiV2Response::<serde_json::Value>::error(
+            return ApiV2Response::<serde_json::Value>::error_response(
                 StandardErrorCode::InvalidInput.as_str(),
                 format!("Message too large (max {} bytes)", MAX_MESSAGE_SIZE),
-            ));
+            )
+            .into_response();
         }
 
         // ✅ SECURITY: Validate content is not empty
         if payload.content.trim().is_empty() {
-            return Json(ApiV2Response::<serde_json::Value>::error(
+            return ApiV2Response::<serde_json::Value>::error_response(
                 StandardErrorCode::InvalidInput.as_str(),
                 "Message content cannot be empty",
-            ));
+            )
+            .into_response();
         }
 
         // ✅ SECURITY: Validate recipient format
         if payload.recipient.len() > 256 {
-            return Json(ApiV2Response::<serde_json::Value>::error(
+            return ApiV2Response::<serde_json::Value>::error_response(
                 StandardErrorCode::InvalidInput.as_str(),
                 "Recipient ID too long",
-            ));
+            )
+            .into_response();
         }
 
         let sender_id = state.core.read().await.get_identity_id().await;
@@ -153,11 +157,13 @@ impl MessagingController {
                         "message_id": message.id.to_string(),
                         "recipient": recipient,
                     }),
-                )),
-                Err(e) => Json(ApiV2Response::<serde_json::Value>::error(
+                ))
+                .into_response(),
+                Err(e) => ApiV2Response::<serde_json::Value>::error_response(
                     StandardErrorCode::InternalError.as_str(),
                     format!("Broadcast failed: {}", e),
-                )),
+                )
+                .into_response(),
             }
         } else {
             match state
@@ -174,11 +180,13 @@ impl MessagingController {
                         "message_id": message.id.to_string(),
                         "recipient": recipient,
                     }),
-                )),
-                Err(e) => Json(ApiV2Response::<serde_json::Value>::error(
+                ))
+                .into_response(),
+                Err(e) => ApiV2Response::<serde_json::Value>::error_response(
                     StandardErrorCode::InternalError.as_str(),
                     format!("Transmission failed: {}", e),
-                )),
+                )
+                .into_response(),
             }
         }
     }

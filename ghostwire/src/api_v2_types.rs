@@ -1,6 +1,7 @@
 // API V2 Response Types - Standardized envelopes
 // Add to web.rs near the top with other types
 
+use axum::Json;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -111,6 +112,53 @@ impl<T: Serialize> ApiV2Response<T> {
             links: None,
             rate_limit: None,
         }
+    }
+
+    /// Build an error response PAIRED with a correct HTTP status code.
+    ///
+    /// `Json(Self::error(..))` on its own serialises the error envelope with an
+    /// implicit HTTP 200, so any client that decides success from the status
+    /// code alone — a script, monitoring, a CLI — treats the failure as a
+    /// success. That is not hypothetical: `/api/v2/messages/send` was observed
+    /// returning `200 OK` with
+    /// `{"error":{"code":"INTERNAL_ERROR","message":"Transmission failed: ..."}}`,
+    /// and a CLI built against it printed "Message sent" for a peer that does
+    /// not exist.
+    ///
+    /// Returning the pair together makes the correct pairing the easy one, and
+    /// removes the class of bug rather than just these instances of it.
+    pub fn error_response(
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> (axum::http::StatusCode, Json<Self>) {
+        use axum::http::StatusCode;
+        let code_str = code.into();
+        let status = match code_str.as_str() {
+            c if c.contains("INVALID")
+                || c.contains("REQUIRED")
+                || c.contains("TOO_LONG")
+                || c.contains("EMPTY")
+                || c.contains("MALFORMED") =>
+            {
+                StatusCode::BAD_REQUEST
+            }
+            c if c.contains("UNAUTHORIZED") || c.contains("AUTH") || c.contains("TOKEN") => {
+                StatusCode::UNAUTHORIZED
+            }
+            c if c.contains("FORBIDDEN") || c.contains("BLOCKED") => StatusCode::FORBIDDEN,
+            c if c.contains("NOT_FOUND") || c.contains("UNKNOWN_PEER") => StatusCode::NOT_FOUND,
+            c if c.contains("CONFLICT") || c.contains("ALREADY") || c.contains("DEFERRED") => {
+                StatusCode::CONFLICT
+            }
+            c if c.contains("UNAVAILABLE") => StatusCode::SERVICE_UNAVAILABLE,
+            c if c.contains("TIMEOUT") => StatusCode::GATEWAY_TIMEOUT,
+            c if c.contains("RATE_LIMIT") || c.contains("QUOTA") => StatusCode::TOO_MANY_REQUESTS,
+            c if c.contains("UNIMPLEMENTED") || c.contains("NOT_IMPLEMENTED") => {
+                StatusCode::NOT_IMPLEMENTED
+            }
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (status, Json(Self::error(code_str, message)))
     }
 
     /// Add pagination metadata

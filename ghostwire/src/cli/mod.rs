@@ -23,6 +23,40 @@ fn read_daemon_token() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// A CLI command that talks to the daemon failed. `Unreachable` means nothing
+/// is listening (so the "start the daemon" hint is useful); `Rejected` means
+/// the daemon answered with an error and the hint would be misleading.
+#[derive(Debug)]
+pub enum DaemonError {
+    Unreachable(String),
+    Rejected(String),
+}
+
+impl std::error::Error for DaemonError {}
+
+impl std::fmt::Display for DaemonError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DaemonError::Unreachable(m) | DaemonError::Rejected(m) => write!(f, "{}", m),
+        }
+    }
+}
+
+/// Pull the human-readable message out of an ApiV2 error envelope, falling
+/// back to the raw body when it is not the expected shape. Dumping the whole
+/// envelope at a user is unreadable.
+fn extract_error_message(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| body.trim().to_string())
+}
+
 fn daemon_base_url(port: u16) -> String {
     format!("http://127.0.0.1:{}", port)
 }
@@ -46,19 +80,19 @@ pub async fn list_peers_from_daemon(port: u16) -> Result<()> {
         req = req.header("X-Ghost-Token", token);
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Could not reach the daemon at {}: {}", url, e))?;
+    let resp = req.send().await.map_err(|e| {
+        DaemonError::Unreachable(format!("Could not reach the daemon at {}: {}", url, e))
+    })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!(
-            "Daemon returned {} for /api/v2/peers. {}",
+        return Err(DaemonError::Rejected(format!(
+            "Daemon returned {} for /api/v2/peers: {}",
             status,
-            body.trim()
-        );
+            extract_error_message(&body)
+        ))
+        .into());
     }
 
     let value: serde_json::Value = resp
@@ -114,15 +148,19 @@ pub async fn send_message_via_daemon(port: u16, recipient: &str, content: &str) 
         req = req.header("X-Ghost-Token", token);
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Could not reach the daemon at {}: {}", url, e))?;
+    let resp = req.send().await.map_err(|e| {
+        DaemonError::Unreachable(format!("Could not reach the daemon at {}: {}", url, e))
+    })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Daemon returned {}: {}", status, body.trim());
+        return Err(DaemonError::Rejected(format!(
+            "Daemon returned {}: {}",
+            status,
+            extract_error_message(&body)
+        ))
+        .into());
     }
 
     // A 2xx is NOT sufficient proof of delivery here. The API signals failure

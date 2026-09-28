@@ -294,6 +294,21 @@ enum Commands {
     Web { host: String, port: u16 },
 }
 
+/// Print a daemon-client failure. The "is it running?" hint is only shown when
+/// nothing was listening — after a 500 from a live daemon it is noise, and it
+/// previously appeared on every error.
+fn report_daemon_error(err: anyhow::Error) {
+    use ghostwire::cli::DaemonError;
+    eprintln!("\n❌ {}", err);
+    let unreachable = err
+        .downcast_ref::<DaemonError>()
+        .map(|d| matches!(d, DaemonError::Unreachable(_)))
+        .unwrap_or(false);
+    if unreachable {
+        eprintln!("   Is the daemon running? Try: ghostwire start");
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(feature = "cli")]
@@ -469,8 +484,7 @@ async fn main() -> Result<()> {
             Some(Commands::Peers) => {
                 let port = args.port;
                 if let Err(e) = ghostwire::cli::list_peers_from_daemon(port).await {
-                    eprintln!("\n❌ {}", e);
-                    eprintln!("   Is the daemon running? Try: ghostwire start");
+                    report_daemon_error(e);
                     std::process::exit(1);
                 }
                 return Ok(());
@@ -480,8 +494,7 @@ async fn main() -> Result<()> {
                 if let Err(e) =
                     ghostwire::cli::send_message_via_daemon(port, &recipient, &content).await
                 {
-                    eprintln!("\n❌ {}", e);
-                    eprintln!("   Is the daemon running? Try: ghostwire start");
+                    report_daemon_error(e);
                     std::process::exit(1);
                 }
                 return Ok(());

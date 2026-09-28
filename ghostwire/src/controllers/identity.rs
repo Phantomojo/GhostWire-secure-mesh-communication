@@ -183,10 +183,10 @@ impl IdentityController {
         let username = req.get("username").and_then(|v| v.as_str()).unwrap_or("");
 
         if username.is_empty() || username.len() > 32 {
-            return Json(ApiV2Response::<()>::error(
+            return ApiV2Response::<()>::error_response(
                 "INVALID_USERNAME",
                 "Username must be 1-32 characters",
-            ))
+            )
             .into_response();
         }
 
