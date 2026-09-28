@@ -1781,6 +1781,7 @@ impl MeshDriver {
 
         if let SwarmEvent::ConnectionClosed {
             peer_id,
+            num_established,
             cause: Some(ref e),
             ..
         } = &event
@@ -1790,7 +1791,29 @@ impl MeshDriver {
             {
                 let mut topo = self.topology.write().await;
                 if let Some(node) = topo.get_mut(&peer_id.to_string()) {
-                    node.is_online = false;
+                    // Only mark the PEER offline when its LAST connection went
+                    // away. `num_established` is how many connections to this
+                    // peer remain after this close.
+                    //
+                    // This handler used to ignore that field (`..`) and set
+                    // is_online = false unconditionally, which is wrong because
+                    // libp2p multiplexes several connections per peer. Observed
+                    // 2026-09-28 with two live nodes: "Connection established
+                    // ... (3 total)" / "(4 total)" alternating, while
+                    // /api/v2/peers reported the peer Disconnected during
+                    // eight consecutive successful pings (30-137ms) with zero
+                    // connection events in between. The peer was connected the
+                    // whole time; one of its three connections closing was
+                    // enough to declare it offline.
+                    if *num_established == 0 {
+                        node.is_online = false;
+                    } else {
+                        tracing::debug!(
+                            "Connection to {} closed but {} remain; keeping peer online",
+                            peer_id,
+                            num_established
+                        );
+                    }
                 }
             }
 

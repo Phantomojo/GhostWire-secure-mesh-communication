@@ -90,13 +90,44 @@ impl PeerController {
 
         for p in &all_peers {
             seen.insert(p.node_id.clone());
+
+            // Live mesh state WINS over the social graph's record.
+            //
+            // The two can disagree, and the social graph is the one that is
+            // wrong: the topology is written by real ConnectionEstablished /
+            // ConnectionClosed events, while a social-graph entry is a record
+            // of a handshake that can go stale. Observed live on 2026-09-28:
+            // this endpoint reported
+            //
+            //     {"node_id":"12D3KooWRuoJ...","connection_state":"Disconnected",
+            //      "is_online":false}
+            //
+            // for a peer that was simultaneously answering pings
+            // (latency_ms 175, 70, 108, 52, 97, 56 across six samples).
+            // Previously the topology was only consulted for peers the social
+            // graph had never seen (`if seen.contains(id) { continue; }`), so
+            // exactly the peers with a stale social-graph record -- the ones you
+            // most want an accurate answer about -- never got the live value.
+            let live = topo_nodes.and_then(|nodes| nodes.get(&p.node_id));
+            let is_online = live.map(|n| n.is_online).unwrap_or(p.is_online);
+            let connection_state: String = match live {
+                Some(n) => {
+                    if n.is_online {
+                        "Connected".to_string()
+                    } else {
+                        "Disconnected".to_string()
+                    }
+                }
+                None => format!("{:?}", p.connection_state),
+            };
+
             peers_json.push(serde_json::json!({
                 "node_id": p.node_id,
                 "did": p.did,
                 "nickname": p.nickname,
                 "avatar_cid": p.avatar_cid,
-                "connection_state": format!("{:?}", p.connection_state),
-                "is_online": p.is_online,
+                "connection_state": connection_state,
+                "is_online": is_online,
                 "signal": p.signal,
                 "discovered_via": format!("{:?}", p.discovered_via),
                 "last_seen": p.last_seen,
