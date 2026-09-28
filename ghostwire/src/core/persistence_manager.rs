@@ -181,10 +181,17 @@ impl PersistenceManager {
             .ok_or_else(|| anyhow!("legacy machine key is unavailable"))
     }
 
+    /// Whether private records can currently be read and written.
+    ///
+    /// Previously this returned true only for `KeySource::User`, which meant
+    /// machine-key mode — a fully working, usable database — reported itself
+    /// locked. Any caller using this as a health check would conclude a healthy
+    /// node was broken. The only state that actually blocks writes is
+    /// `KeySource::Locked`.
     pub fn is_unlocked(&self) -> bool {
-        matches!(
+        !matches!(
             *self.key_source.read().unwrap_or_else(|e| e.into_inner()),
-            KeySource::User(_)
+            KeySource::Locked
         )
     }
 

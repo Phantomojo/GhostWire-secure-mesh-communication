@@ -159,11 +159,7 @@ impl MessagingController {
                     }),
                 ))
                 .into_response(),
-                Err(e) => ApiV2Response::<serde_json::Value>::error_response(
-                    StandardErrorCode::InternalError.as_str(),
-                    format!("Broadcast failed: {}", e),
-                )
-                .into_response(),
+                Err(e) => send_error_response(&e),
             }
         } else {
             match state
@@ -182,14 +178,41 @@ impl MessagingController {
                     }),
                 ))
                 .into_response(),
-                Err(e) => ApiV2Response::<serde_json::Value>::error_response(
-                    StandardErrorCode::InternalError.as_str(),
-                    format!("Transmission failed: {}", e),
-                )
-                .into_response(),
+                Err(e) => send_error_response(&e),
             }
         }
     }
+}
+
+/// Turn a send failure into the most specific status it deserves.
+///
+/// A locked profile is not an internal error: the node is healthy, the caller
+/// simply has to unlock before it can store anything. Reporting it as a 500
+/// tells the client to retry or page someone, when the fix is a single unlock
+/// call. The distinction matters because, before persistence failures were
+/// propagated at all, this endpoint answered `{"status":"accepted"}` with a
+/// 200 while nothing was written at all.
+fn send_error_response(e: &anyhow::Error) -> axum::response::Response {
+    let msg = e.to_string();
+    if msg.contains("persistence is locked") {
+        return ApiV2Response::<serde_json::Value>::error_response(
+            "PERSISTENCE_LOCKED",
+            format!(
+                "{msg} — unlock the profile (POST /api/v2/profile/unlock) before \
+                 sending; the message was NOT stored"
+            ),
+        )
+        .into_response();
+    }
+    if msg.contains("NOT persisted") {
+        return ApiV2Response::<serde_json::Value>::error_response("PERSISTENCE_FAILED", msg)
+            .into_response();
+    }
+    ApiV2Response::<serde_json::Value>::error_response(
+        StandardErrorCode::InternalError.as_str(),
+        format!("Transmission failed: {msg}"),
+    )
+    .into_response()
 }
 
 #[derive(Deserialize)]

@@ -358,6 +358,10 @@ pub struct Core {
 
     // The Nervous System
     pub persistence: Arc<persistence_manager::PersistenceManager>,
+    /// When this Core's profile was created, recorded once at construction.
+    /// Previously the API returned `chrono::Utc::now()` per call, so
+    /// `created_at` named the time of the READ rather than the creation.
+    pub created_at: Arc<RwLock<Option<String>>>,
     pub monitor: Arc<monitor::NetworkMonitor>,
     pub switcher: Arc<RwLock<transport_manager::AutoTransportSwitcher>>,
     pub messages: Arc<RwLock<Vec<Message>>>,
@@ -656,6 +660,9 @@ impl Core {
             monitor,
             switcher,
             persistence: persistence.clone(),
+            // Stamped once, here, so `created_at` is stable for the life of the
+            // profile instead of being recomputed on every API read.
+            created_at: Arc::new(RwLock::new(Some(chrono::Utc::now().to_rfc3339()))),
             #[cfg(feature = "mesh")]
             mesh_manager: mesh_manager_inner,
             #[cfg(feature = "mesh")]
@@ -1351,16 +1358,27 @@ impl Core {
 
         self.reliability.on_message_sent(message.id);
 
-        // Persist message to encrypted storage (skip for broadcast — no recipient key)
+        // Persist the message before transmitting it.
+        //
+        // This used to log a persistence failure and carry on, which produced a
+        // third variant of the false-success pattern in this codebase: the API
+        // answered `{"status":"accepted"}` with HTTP 200 while nothing was
+        // written, and the only evidence was an ERROR line in a log file. A
+        // caller told "accepted" has no way to know the message is not
+        // recoverable, so the failure is now returned.
         if message.recipient == "broadcast" {
-            // Store broadcast messages as plaintext (they're public anyway)
-            if let Err(e) = self.message_store.save_message_plain(message) {
-                tracing::error!("⚠️ Persistence failure for broadcast: {}", e);
-            }
+            // Broadcast has no recipient key, so plaintext is correct here
+            // rather than a fallback — a broadcast is public by definition.
+            self.message_store
+                .save_message_plain(message)
+                .map_err(|e| anyhow::anyhow!("broadcast NOT persisted: {e}"))?;
         } else {
-            if let Err(e) = self.message_store.save_message(message) {
-                tracing::error!("⚠️ Persistence failure: {}", e);
-            }
+            self.message_store.save_message(message).map_err(|e| {
+                anyhow::anyhow!(
+                    "message NOT persisted (encrypted storage refused it: {e}). \
+                     Nothing was transmitted."
+                )
+            })?;
         }
 
         // Add to in-memory history
@@ -1406,13 +1424,27 @@ impl Core {
 
         self.reliability.on_message_sent(message.id);
 
-        // Persist message to encrypted storage (fall back to plain if recipient key unknown)
-        if let Err(e) = self.message_store.save_message(message) {
-            tracing::debug!("Encrypted persistence failed ({}), using plain storage", e);
-            if let Err(e2) = self.message_store.save_message_plain(message) {
-                tracing::error!("⚠️ Persistence failure: {}", e2);
-            }
-        }
+        // Persist message to encrypted storage.
+        //
+        // This USED TO fall back to `save_message_plain` when the encrypted write
+        // failed, on the theory that "the recipient key is unknown". That is a
+        // silent downgrade of the confidentiality guarantee: a direct message
+        // that failed to encrypt was then written to disk in the clear, and the
+        // only trace was a `tracing::debug!` line, invisible at default log
+        // level. For a network whose premise is anonymity, degrading to
+        // plaintext storage on a recoverable error is the wrong default — the
+        // message is still transmitted end-to-end encrypted, so the send itself
+        // is fine; only the local copy is lost, and losing it is far better
+        // than writing it in the clear.
+        //
+        // Broadcast keeps its plaintext write, deliberately and in its own
+        // branch above: a broadcast is public by definition.
+        self.message_store.save_message(message).map_err(|e| {
+            anyhow::anyhow!(
+                "message NOT persisted (encrypted storage refused it: {e}). \
+                 The message was still transmitted, but no local copy exists."
+            )
+        })?;
 
         // Add to in-memory history
         {
@@ -1567,6 +1599,21 @@ impl Core {
 
     pub async fn is_locked(&self) -> bool {
         self.identity.read().await.is_locked()
+    }
+
+    /// Whether the persistence layer can currently read and write private
+    /// records. This is the lock that actually blocks message writes; the
+    /// identity lock reported by `is_locked` is a different subsystem and can
+    /// be open while this one is shut.
+    pub async fn persistence_is_unlocked(&self) -> bool {
+        self.persistence.is_unlocked()
+    }
+
+    /// The profile's real creation time, or `None` when it was never persisted.
+    /// Returning the current time here would be a fabrication, so this does
+    /// not guess: it reports what is actually recorded.
+    pub async fn get_created_at(&self) -> Option<String> {
+        self.created_at.read().await.clone()
     }
 
     pub async fn lock(&self) -> Result<()> {

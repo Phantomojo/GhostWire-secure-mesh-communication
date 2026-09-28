@@ -28,10 +28,13 @@ impl IdentityController {
             bio: String,
             public_key: String,
             key_id: String,
-            created_at: String,
+            /// `None` when the creation time was never recorded. Reported as null rather
+            /// than filled in with the current time.
+            created_at: Option<String>,
             dht_published: bool,
             security_score: u8,
             locked: bool,
+            identity_locked: bool,
             has_identity: bool,
             setup_complete: bool,
         }
@@ -54,10 +57,17 @@ impl IdentityController {
             bio: metadata.bio,
             public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
             key_id: state.core.read().await.get_key_id(),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: state.core.read().await.get_created_at().await,
             dht_published: false,
             security_score,
-            locked: state.core.read().await.is_locked().await,
+            // `Core::is_locked()` reads the IDENTITY lock, which is a different
+            // subsystem from the PERSISTENCE lock that actually refuses message
+            // writes with "persistence is locked; unlock the profile first". A
+            // node reported `locked: false` here while every write failed, so the
+            // field now reports persistence readiness and the identity state is
+            // surfaced separately rather than conflated under one name.
+            locked: !state.core.read().await.persistence_is_unlocked().await,
+            identity_locked: state.core.read().await.is_locked().await,
             has_identity: true,
             setup_complete: metadata.setup_complete,
         };
@@ -240,14 +250,16 @@ impl IdentityController {
             key_id: String,
             algorithm: String,
             public_key: String,
-            created_at: String,
+            /// When the key was generated, not when this request arrived. This
+            /// was a second `chrono::Utc::now()` reported as a creation time.
+            created_at: Option<String>,
         }
 
         Json(ApiV2Response::success(PublicKeyResponse {
             key_id: state.core.read().await.get_key_id(),
             algorithm: "Ed25519".to_string(),
             public_key: general_purpose::STANDARD.encode(state.core.read().await.get_public_key()),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: state.core.read().await.get_created_at().await,
         }))
     }
 

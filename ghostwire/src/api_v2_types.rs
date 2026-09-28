@@ -150,6 +150,10 @@ impl<T: Serialize> ApiV2Response<T> {
             c if c.contains("CONFLICT") || c.contains("ALREADY") || c.contains("DEFERRED") => {
                 StatusCode::CONFLICT
             }
+            // A locked profile is a temporary, recoverable state: the node is
+            // healthy and the caller unlocks it. 503 says "not now, try again",
+            // where 500 would page someone for a self-inflicted call.
+            c if c.contains("PERSISTENCE_LOCKED") => StatusCode::SERVICE_UNAVAILABLE,
             c if c.contains("UNAVAILABLE") => StatusCode::SERVICE_UNAVAILABLE,
             c if c.contains("TIMEOUT") => StatusCode::GATEWAY_TIMEOUT,
             c if c.contains("RATE_LIMIT") || c.contains("QUOTA") => StatusCode::TOO_MANY_REQUESTS,
