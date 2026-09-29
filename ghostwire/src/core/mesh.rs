@@ -232,6 +232,24 @@ impl StealthTransport {
     }
 }
 
+/// Everything `MeshManager::new` needs, captured so a panicked driver can be
+/// rebuilt. All fields are cheap to clone (Arcs and owned config).
+#[derive(Clone)]
+pub struct MeshRebuildInputs {
+    pub identity: Arc<Identity>,
+    pub security_manager: Arc<SecurityManager>,
+    pub encryption_manager: Arc<EncryptionManager>,
+    pub core_messages: Arc<RwLock<Vec<Message>>>,
+    pub message_store: Arc<crate::core::store::SecureMessageStore>,
+    pub bootstrap_nodes: Vec<Multiaddr>,
+    pub username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
+    pub event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+    pub reliability: Arc<crate::core::reliability::ReliabilityLayer>,
+    pub discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    pub handshake_secret: Option<Vec<u8>>,
+    pub quic_port: u16,
+}
+
 /// Mesh transport implementation with enhanced security
 pub struct MeshTransport {
     swarm: Option<Swarm<MeshBehaviour>>,
@@ -247,6 +265,11 @@ pub struct MeshTransport {
     _message_store: Arc<crate::core::store::SecureMessageStore>,
     pub bootstrap_nodes: Vec<Multiaddr>,
     username_discovery: Arc<crate::core::username_discovery::UsernameDiscovery>,
+    /// Retained so a panicked driver can be REBUILT, not just reported.
+    /// `MeshManager::new` takes these by value and the Swarm consumes them, so
+    /// without a copy there is nothing to reconstruct a replacement from.
+    _handshake_secret: Option<Vec<u8>>,
+    quic_port: u16,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
     topology: Arc<RwLock<HashMap<String, MeshNode>>>,
     peer_count_cache: Option<Arc<AtomicUsize>>,
@@ -577,6 +600,8 @@ impl MeshTransport {
             _message_store: message_store,
             bootstrap_nodes,
             username_discovery,
+            _handshake_secret,
+            quic_port,
             event_bus,
             topology: Arc::new(RwLock::new(HashMap::new())),
             peer_count_cache: None,
@@ -840,6 +865,53 @@ impl MeshTransport {
             tracing::error!("Mesh is now DOWN (driver stopped). Peers will be unreachable.");
         });
         Ok(())
+    }
+
+    /// Every input needed to construct a replacement `MeshManager`.
+    ///
+    /// `MeshDriver::run` consumes the Swarm, so a panicked driver leaves
+    /// nothing to restart -- only a Swarm can drive a Swarm. This captures the
+    /// inputs (all `Arc`s, so cloning is cheap) so a supervisor can rebuild the
+    /// mesh instead of leaving the node permanently unable to reach a peer.
+    pub fn rebuild_inputs(&self) -> MeshRebuildInputs {
+        MeshRebuildInputs {
+            identity: self.identity.clone(),
+            security_manager: self.security_manager.clone(),
+            encryption_manager: self.encryption_manager.clone(),
+            core_messages: self._core_messages.clone(),
+            message_store: self._message_store.clone(),
+            bootstrap_nodes: self.bootstrap_nodes.clone(),
+            username_discovery: self.username_discovery.clone(),
+            event_bus: self.event_bus.clone(),
+            reliability: self.reliability.clone(),
+            discovery_directory: self.discovery_directory.clone(),
+            handshake_secret: self._handshake_secret.clone(),
+            quic_port: self.quic_port,
+        }
+    }
+
+    /// Build a fresh, replacement mesh from captured inputs.
+    ///
+    /// This does NOT reimplement the driver -- it just reconstructs the
+    /// `MeshManager` (and with it a fresh Swarm) so a supervisor can spawn a
+    /// new driver task after the old one panicked. Ports may briefly be in
+    /// TIME_WAIT, so the caller should back off and retry.
+    pub async fn rebuild(inputs: &MeshRebuildInputs) -> Result<Self> {
+        Self::new(
+            inputs.identity.clone(),
+            inputs.security_manager.clone(),
+            inputs.encryption_manager.clone(),
+            inputs.core_messages.clone(),
+            inputs.message_store.clone(),
+            inputs.bootstrap_nodes.clone(),
+            inputs.username_discovery.clone(),
+            inputs.event_bus.clone(),
+            inputs.handshake_secret.clone(),
+            inputs.reliability.clone(),
+            inputs.discovery_directory.clone(),
+            inputs.quic_port,
+        )
+        .await
     }
 
     /// Whether the swarm driver task is still running.
