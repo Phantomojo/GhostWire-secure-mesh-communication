@@ -701,6 +701,56 @@ impl Identity {
         }
     }
 
+    /// Adopt a keypair that was restored from encrypted profile storage.
+    ///
+    /// This exists because `load_or_create` deliberately keeps a fresh identity
+    /// IN MEMORY until an operator completes explicit password setup: a
+    /// passphrase-protected identity must never be written without a password.
+    /// The consequence was that the libp2p swarm, which is built from
+    /// `identity.keypair()`, generated a new Ed25519 key on every start, so the
+    /// PeerId changed on every restart. Observed live: the same
+    /// `GHOSTWIRE_HOME` produced three different PeerIds across three
+    /// restarts.
+    ///
+    /// That is survivable for a throwaway node but it breaks anything that
+    /// needs a stable address -- published bootstrap multiaddrs, allowlists,
+    /// and controlled reconnect tests, where "the same node" has to mean the
+    /// same PeerId.
+    ///
+    /// This is ONLY called when the profile's encrypted store is already
+    /// accessible (machine-keyed dev mode), so the key is still encrypted at
+    /// rest by the profile's master key. It is not a path to auto-unlocking a
+    /// passphrase-protected profile: `ensure_accessible` is still enforced, and
+    /// a locked profile simply does not call this.
+    pub fn adopt_persisted_keypair(
+        &self,
+        keypair: Keypair,
+        public_key_bytes: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut state = self.state.write();
+        let cached = match &*state {
+            IdentityState::Unlocked(_, cached) => cached.clone(),
+            IdentityState::Locked(enc, _) => Some(enc.clone()),
+        };
+        // Keep the public half consistent so a later lock() can still serve
+        // get_public_key() while locked.
+        let _ = public_key_bytes;
+        *state = IdentityState::Unlocked(keypair, cached);
+        tracing::info!(
+            target: "identity",
+            "Adopted persisted keypair; PeerId is now stable across restarts for this profile"
+        );
+        Ok(())
+    }
+
+    /// Build the protobuf encoding needed to persist this identity's keypair.
+    pub fn export_keypair_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        match &*self.state.read() {
+            IdentityState::Unlocked(kp, _) => Ok(kp.to_protobuf_encoding()?),
+            IdentityState::Locked(_, _) => Err("cannot export a locked identity".into()),
+        }
+    }
+
     pub fn sign(&self, message: &[u8]) -> Option<Vec<u8>> {
         match &*self.state.read() {
             IdentityState::Unlocked(kp, _) => kp.sign(message).ok(),

@@ -20,9 +20,13 @@ async fn test_core_transport_switching() {
     let core_arc = Arc::new(core);
 
     {
+        // A transport is active at startup, but which one is an implementation
+        // detail rather than a contract. It used to be "quic" purely as a side
+        // effect of the dead registry provider winning the `is_none()` race in
+        // Core::new. What matters here is that init_default_transport installs
+        // the documented StealthTCP default, which is asserted below.
         let transport = core_arc.active_transport.read().await;
-        assert!(transport.is_some());
-        assert_eq!(transport.as_ref().unwrap().name(), "quic");
+        assert!(transport.is_some(), "a transport must be active at startup");
     }
 
     // 2. Initialize default transport
@@ -79,13 +83,23 @@ async fn test_core_clone_shares_active_transport() {
     let profile = test_profile("clone_shares");
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();
 
+    // The startup default is whatever Core::new registered, plus whatever
+    // init_default_transport selects. This used to assert Some("quic"), which
+    // only passed because the structurally dead QuicTransportProvider was
+    // registered in Core::new and won the `is_none()` race. That provider is
+    // gone (it stole the swarm's UDP port and could never address a peer), so
+    // the assertion now checks the real contract: a transport is active, and a
+    // clone observes the same one after an explicit switch.
     let initial_name = core
         .active_transport
         .read()
         .await
         .as_ref()
         .map(|t| t.name().to_string());
-    assert_eq!(initial_name.as_deref(), Some("quic"));
+    assert!(
+        initial_name.is_some(),
+        "a transport must be active at startup"
+    );
 
     {
         let mut registry = core.transport_registry.write().await;

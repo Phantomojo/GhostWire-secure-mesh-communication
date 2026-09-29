@@ -493,9 +493,32 @@ impl Core {
         // registration stops the port conflict and leaves one QUIC
         // implementation, which is the only one that works.
 
+        // Install a real default transport when nothing else claimed the slot.
+        //
+        // `init_default_transport` is the documented way to select StealthTCP,
+        // but nothing in the production startup path called it. The only thing
+        // that used to populate `active_transport` here was the dead
+        // QuicTransportProvider (it won the `is_none()` race), so removing that
+        // provider left the slot empty. An empty slot means `set_active_transport`
+        // has nothing to fall back to and the transport API reports no active
+        // transport at all.
+        //
+        // Simulated mode still wins if it claimed the slot above, matching the
+        // previous precedence.
+        if active_transport_inner.is_none() {
+            let stealth = Arc::new(crate::core::stealth_tcp::StealthTCPProvider::new(
+                None,
+                security_manager.clone(),
+                None,
+                true, // Stealth mode, as init_default_transport does
+            ));
+            let stealth_kind = crate::core::transport::TransportKind::StealthTCP(stealth);
+            registry.register(stealth_kind.clone());
+            active_transport_inner = Some(stealth_kind);
+        }
+
         let registry = Arc::new(RwLock::new(registry));
         let active_transport = Arc::new(RwLock::new(active_transport_inner));
-
         // Initialize Persistence.
         //
         // A normal node opens LOCKED and stays that way until the unlock API is
@@ -533,6 +556,77 @@ impl Core {
                 profile.clone(),
             )?)
         };
+
+        // Restore a stable node identity from the profile's encrypted store.
+        //
+        // Without this, `Identity::load_or_create` mints a brand new Ed25519
+        // keypair on every start (it keeps a fresh identity in memory until an
+        // operator completes explicit password setup, which is correct for a
+        // real profile). The swarm is built from `identity.keypair()`, so the
+        // PeerId changed on every restart -- observed live: the same
+        // GHOSTWIRE_HOME gave three different PeerIds across three restarts.
+        //
+        // That breaks anything keyed on a stable address: published bootstrap
+        // multiaddrs, peer allowlists, and controlled reconnect testing, where
+        // "the same node" has to mean the same PeerId.
+        //
+        // Gated on `is_unlocked()`, so this only runs for the machine-keyed dev
+        // profile whose store is already open. A passphrase profile stays
+        // locked and keeps its existing behaviour; this is NOT a route to
+        // auto-unlocking a real identity. The key is stored through
+        // `store_secure`, so it remains encrypted at rest under the profile's
+        // master key.
+        if persistence.is_unlocked() {
+            const IDENTITY_TREE: &str = "node_identity";
+            const IDENTITY_KEY: &str = "libp2p_keypair";
+
+            match persistence.load_secure::<Vec<u8>>(IDENTITY_TREE, IDENTITY_KEY) {
+                Ok(Some(stored)) => {
+                    match libp2p::identity::Keypair::from_protobuf_encoding(&stored) {
+                        Ok(kp) => {
+                            let pub_bytes = identity.get_public_key();
+                            if let Err(e) = identity.adopt_persisted_keypair(kp, pub_bytes) {
+                                tracing::warn!(
+                                    "Could not adopt persisted node keypair ({}); PeerId will \
+                                 change on restart until this is fixed",
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => tracing::warn!(
+                            "Stored node keypair could not be decoded ({}); generating a new one",
+                            e
+                        ),
+                    }
+                }
+                Ok(None) => {
+                    // First run for this profile: persist what we just generated.
+                    match identity.export_keypair_bytes() {
+                        Ok(bytes) => {
+                            if let Err(e) =
+                                persistence.store_secure(IDENTITY_TREE, IDENTITY_KEY, &bytes)
+                            {
+                                tracing::warn!(
+                                    "Could not persist node keypair ({}); PeerId will change \
+                                     on restart",
+                                    e
+                                );
+                            } else {
+                                tracing::info!(
+                                    "Persisted a new node keypair; PeerId is now stable for \
+                                     this profile"
+                                );
+                            }
+                        }
+                        Err(e) => tracing::warn!("Could not export node keypair: {}", e),
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    "Could not read the stored node keypair ({}); PeerId will change on restart",
+                    e
+                ),
+            }
+        }
 
         // Adapter registry
         let mut adapter_registry = AdapterRegistry::new();
