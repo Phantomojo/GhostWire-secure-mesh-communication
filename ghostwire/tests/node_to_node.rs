@@ -80,6 +80,7 @@ async fn build_test_mesh_manager(
         None, // no handshake secret
         Arc::new(ReliabilityLayer::with_defaults()),
         Arc::new(DiscoveryDirectory::new()),
+        0, // quic_port: 0 disables the QUIC listener for these tests
     )
     .await?;
 

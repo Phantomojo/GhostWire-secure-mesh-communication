@@ -193,7 +193,9 @@ pub struct MeshBehaviour {
     /// The per-peer cap is deliberately 2, not 1. `libp2p-request-response`
     /// asserts internally (0.29.0, src/lib.rs:678):
     ///
+    /// ```text
     ///     debug_assert_eq!(connections.is_empty(), remaining_established == 0);
+    /// ```
     ///
     /// i.e. its own per-peer connection list must be empty exactly when
     /// libp2p reports zero remaining. With a cap of 1 libp2p closes the
@@ -201,9 +203,11 @@ pub struct MeshBehaviour {
     /// disagree mid-teardown, which panics a debug build. Observed live on the
     /// Elitebook node with `with_max_established(Some(1))`:
     ///
+    /// ```text
     ///     thread 'tokio-rt-worker' panicked at
     ///       libp2p-request-response-0.29.0/src/lib.rs:678:9:
     ///     assertion `left == right` failed  left: false  right: true
+    /// ```
     ///
     /// 2 still collapses the observed 3-4 connections to a stable pair while
     /// leaving request-response a spare to tear down against, so the assert
@@ -274,6 +278,7 @@ impl MeshTransport {
         _handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
         discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+        quic_port: u16,
     ) -> Result<Self> {
         let local_key = identity.keypair().ok_or_else(|| {
             anyhow::anyhow!("Identity is locked during Mesh Transport initialization")
@@ -311,24 +316,101 @@ impl MeshTransport {
             webrtc::tokio::Certificate::generate(&mut OsRng)?,
         );
 
+        // QUIC transport on the operator's chosen UDP port (--quic-port, default
+        // 8081). QUIC runs over UDP, so a TCP-throttling middlebox or a
+        // TCP-only firewall still lets it through -- that is the whole point of
+        // running it.
+        //
+        // Placed in the stack AFTER the Noise+Yamux upgrade for the other
+        // transports, because libp2p's QUIC transport performs its own TLS 1.3
+        // handshake with Noise-style identity verification: libp2p-quic
+        // authenticates the remote peer inside that handshake, so wrapping it
+        // in Noise again is not required for confidentiality or peer
+        // authentication. Putting it before .authenticate() would fail to
+        // compile, since the QUIC transport is already a full authenticated
+        // connection upgrade.
+        let mut quic_transport =
+            libp2p::quic::tokio::Transport::new(libp2p::quic::Config::new(&local_key));
+        if quic_port > 0 {
+            let quic_addr: libp2p::Multiaddr = format!("/ip4/0.0.0.0/udp/{}/quic-v1", quic_port)
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid QUIC multiaddr for udp/{quic_port}: {e}"))?;
+            use libp2p::core::transport::{ListenerId, Transport};
+            // QUIC is an ADDITIONAL path, not the only one. A failed bind must
+            // not take the node down: TCP/relay/WS/WebRTC all still work, and
+            // the operator can still reach the node. Making this fatal broke 17
+            // unrelated tests, because Core::new died whenever udp/8081 was
+            // already held (two nodes on one host, or a parallel test run).
+            //
+            // A node that cannot bind its QUIC port is `degraded`, not `failed`
+            // -- it still has a working mesh on the other transports.
+            match quic_transport.listen_on(ListenerId::next(), quic_addr) {
+                Ok(listener_id) => {
+                    tracing::info!("QUIC transport listening on udp/{}", quic_port);
+                    let _ = listener_id;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "QUIC listener unavailable on udp/{} ({}); continuing on TCP/relay/WebSocket/WebRTC. The node is degraded, not down.",
+                        quic_port,
+                        e
+                    );
+                }
+            }
+        }
+
         // Build the transport stack:
         // TCP → Noise (encryption) → Yamux (multiplexing)
         // obfs4 obfuscation is applied at the connection layer
-        // Fallback to relay and WebRTC for NAT traversal
-        let transport = tcp_transport
+        // Fallback to relay, WebSocket, QUIC and WebRTC for NAT traversal
+        //
+        // The base stack is boxed before QUIC and WebRTC are added. Boxing
+        // erases the Either nesting to a single level, so the final `.map`
+        // stays two-armed instead of needing one closure per transport group.
+        let base_transport = tcp_transport
             .or_transport(relay_transport)
             .or_transport(ws_transport)
             .upgrade(Version::V1)
             .authenticate(libp2p::noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
-            .or_transport(webrtc_transport)
-            .map(|either, _| match either {
+            .map(|out, _state| {
+                let (peer_id, muxer) = out;
+                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+            })
+            .boxed();
+
+        // QUIC's Connection and WebRTC's Connection are different types, so each
+        // branch is erased to StreamMuxerBox separately before they are joined.
+        let quic_boxed = quic_transport
+            .map(|out, _state| {
+                let (peer_id, conn) = out;
+                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(conn))
+            })
+            .boxed();
+        let webrtc_boxed = webrtc_transport
+            .map(|out, _state| {
+                let (peer_id, conn) = out;
+                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(conn))
+            })
+            .boxed();
+
+        // Each `.or_transport` introduces one Either level, so join one at a
+        // time and erase as we go rather than stacking three transports and
+        // trying to match a 3-deep Either by hand.
+        let transport = base_transport
+            .or_transport(quic_boxed)
+            .map(|either, _state| match either {
                 libp2p::futures::future::Either::Left((peer_id, muxer)) => {
                     (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
                 }
-                libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, muxer),
+            })
+            .or_transport(webrtc_boxed)
+            .map(|either, _state| match either {
+                libp2p::futures::future::Either::Left((peer_id, muxer)) => {
                     (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
                 }
+                libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, muxer),
             })
             .boxed();
 
@@ -2857,6 +2939,7 @@ impl MeshManager {
         handshake_secret: Option<Vec<u8>>,
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
         discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+        quic_port: u16,
     ) -> Result<Self> {
         let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
@@ -2873,6 +2956,7 @@ impl MeshManager {
             handshake_secret,
             reliability.clone(),
             discovery_directory,
+            quic_port,
         )
         .await?;
 

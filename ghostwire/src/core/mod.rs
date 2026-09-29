@@ -647,6 +647,7 @@ impl Core {
                         handshake_secret.clone(),
                         reliability.clone(),
                         discovery_directory.clone(),
+                        config.server.quic_port,
                     )
                     .await?,
                 )))
@@ -1889,6 +1890,7 @@ impl Core {
                     self.handshake_secret.clone(),
                     self.reliability.clone(),
                     self.discovery_directory.clone(),
+                    self.config.server.quic_port,
                 )
                 .await?;
                 let mut mesh_manager = mesh_manager;
@@ -1944,6 +1946,7 @@ impl Core {
                 self.handshake_secret.clone(),
                 self.reliability.clone(),
                 self.discovery_directory.clone(),
+                self.config.server.quic_port,
             )
             .await?;
             mesh_manager.set_peer_count_cache(self.mesh_peer_count_cache.clone());
