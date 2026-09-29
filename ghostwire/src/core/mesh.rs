@@ -319,11 +319,52 @@ impl MeshTransport {
             libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true));
         let ws_transport = libp2p::websocket::Config::new(ws_tcp_transport);
 
-        // Add WebRTC transport for browser/P2P connectivity
-        let webrtc_transport = webrtc::tokio::Transport::new(
-            local_key.clone(),
-            webrtc::tokio::Certificate::generate(&mut OsRng)?,
-        );
+        // WebRTC is opt-in and, as wired today, INCOMPLETE.
+        //
+        // It was previously constructed unconditionally and joined into the
+        // transport chain, which made it look supported. It could not move a
+        // byte, for two independent reasons:
+        //
+        //  1. libp2p-webrtc's dial path borrows a `udp_mux` from an existing
+        //     listener and hard-fails without one:
+        //         self.listeners.iter().next().ok_or(TransportError::Other(Error::NoListeners))?
+        //     Nothing in src/ ever called `listen_on` for WebRTC, so the
+        //     listener list was always empty and every dial failed there
+        //     regardless of the address offered.
+        //  2. The certificate is regenerated with `Certificate::generate` on
+        //     every process start, so the certhash is never stable across
+        //     restarts and is never published. Even with a listener, a peer
+        //     would have no way to learn a matching /certhash to dial.
+        //
+        // So it is gated behind an explicit env var instead of sitting in the
+        // chain looking live. Turning this on is necessary but NOT sufficient to
+        // make WebRTC work: it also needs a real listener and a stable,
+        // published certhash. Until that exists, treat WebRTC as unimplemented
+        // rather than as a fallback.
+        let webrtc_enabled = std::env::var("GHOSTWIRE_WEBRTC")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let webrtc_boxed = if webrtc_enabled {
+            let webrtc_transport = webrtc::tokio::Transport::new(
+                local_key.clone(),
+                webrtc::tokio::Certificate::generate(&mut OsRng)?,
+            );
+            tracing::warn!(
+                "WebRTC enabled by operator, but it is still INCOMPLETE: no listener is \
+                 created and the certhash is regenerated every start, so peers still cannot \
+                 dial it. See the comment above."
+            );
+            Some(
+                webrtc_transport
+                    .map(|out, _state| {
+                        let (peer_id, conn) = out;
+                        (peer_id, libp2p::core::muxing::StreamMuxerBox::new(conn))
+                    })
+                    .boxed(),
+            )
+        } else {
+            None
+        };
 
         // QUIC transport on the operator's chosen UDP port (--quic-port, default
         // 8081). QUIC runs over UDP, so a TCP-throttling middlebox or a
@@ -396,32 +437,40 @@ impl MeshTransport {
                 (peer_id, libp2p::core::muxing::StreamMuxerBox::new(conn))
             })
             .boxed();
-        let webrtc_boxed = webrtc_transport
-            .map(|out, _state| {
-                let (peer_id, conn) = out;
-                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(conn))
-            })
-            .boxed();
 
         // Each `.or_transport` introduces one Either level, so join one at a
         // time and erase as we go rather than stacking three transports and
         // trying to match a 3-deep Either by hand.
-        let transport = base_transport
-            .or_transport(quic_boxed)
-            .map(|either, _state| match either {
-                libp2p::futures::future::Either::Left((peer_id, muxer)) => {
-                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
-                }
-                libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, muxer),
-            })
-            .or_transport(webrtc_boxed)
-            .map(|either, _state| match either {
-                libp2p::futures::future::Either::Left((peer_id, muxer)) => {
-                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
-                }
-                libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, muxer),
-            })
-            .boxed();
+        // WebRTC is joined only when the operator opted in; by default the
+        // chain is base + QUIC. See the WebRTC comment above for why it is
+        // opt-in rather than always-on.
+        let transport = match webrtc_boxed {
+            Some(w) => base_transport
+                .or_transport(quic_boxed)
+                .map(|either, _state| match either {
+                    libp2p::futures::future::Either::Left((peer_id, muxer)) => (peer_id, muxer),
+                    libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                        (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                    }
+                })
+                .or_transport(w)
+                .map(|either, _state| match either {
+                    libp2p::futures::future::Either::Left((peer_id, muxer)) => (peer_id, muxer),
+                    libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                        (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                    }
+                })
+                .boxed(),
+            None => base_transport
+                .or_transport(quic_boxed)
+                .map(|either, _state| match either {
+                    libp2p::futures::future::Either::Left((peer_id, muxer)) => (peer_id, muxer),
+                    libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                        (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                    }
+                })
+                .boxed(),
+        };
 
         // Create network behavior with hardened S/Kademlia parameters
         // FIXED: replaced GossipsubConfig::default() with hardened config from skademlia.rs

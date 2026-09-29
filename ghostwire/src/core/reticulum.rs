@@ -11,6 +11,12 @@ use tracing::{info, warn};
 
 #[cfg(feature = "reticulum")]
 use rns_transport::hash::AddressHash;
+
+/// Reticulum's standard local auto-discovery bind address.
+///
+/// 29716 is the conventional Reticulum UDP/TCP discovery port. Binding it is
+/// what makes the default "AutoInterface" actually able to find LAN peers.
+const RNS_AUTO_BIND: &str = "0.0.0.0:29716";
 #[cfg(feature = "reticulum")]
 use rns_transport::identity::PrivateIdentity;
 #[cfg(feature = "reticulum")]
@@ -184,7 +190,16 @@ impl ReticulumTransport {
         config.set_broadcast(true);
         config.set_link_idle_timeout_secs(900);
 
-        let _rns_config = rns_transport::config::Config::from_ini(interfaces_ini)?;
+        // Validate the operator's interface config up front so a malformed file
+        // fails loudly here rather than silently yielding an RNS transport that
+        // can reach nobody.
+        //
+        // This call's RESULT used to be assigned to `_rns_config` and dropped.
+        // The parsed `interfaces` vec was never read, so "AutoInterface" -- the
+        // one interface the default config names -- was never constructed
+        // anywhere in src/. Kept for validation only; the interface list is
+        // honoured explicitly in the spawn loop below.
+        rns_transport::config::Config::from_ini(interfaces_ini)?;
 
         // Wrap transport creation and announce in a timeout. The default
         // GhostWire configuration uses local AutoInterface only; any WAN
@@ -192,10 +207,25 @@ impl ReticulumTransport {
         // rest of the node when unreachable.
         let init_timeout = std::time::Duration::from_secs(15);
 
-        let interfaces_configured = interfaces_ini
-            .lines()
-            .filter(|line| line.trim_start().starts_with("interface "))
-            .count();
+        // Count interfaces we ACTUALLY spawn, not lines in a config string.
+        //
+        // This used to be:
+        //     interfaces_ini.lines().filter(|l| l.starts_with("interface ")).count()
+        // which counted the text "interface 0 = AutoInterface" in the DEFAULT
+        // config and reported 1. But the only spawn loop below reads `target `
+        // lines, and the default config has none -- the parsed `Config` was even
+        // discarded as `let _rns_config`. So the default node spawned ZERO
+        // interfaces while reporting 1.
+        //
+        // That number is load-bearing and dishonest: mesh_health.rs computes
+        //     rns_ready = initialized && !degraded && interfaces_configured > 0
+        // and reports "ready" -- the best possible state -- for a transport
+        // with no interfaces, and mod.rs feeds it into bootstrap readiness. A
+        // config string was being counted as a bound socket.
+        //
+        // Now it is incremented at the point of a real spawn, so it is
+        // arithmetically incapable of over-reporting.
+        let mut interfaces_configured: usize = 0;
         let mut degraded = false;
         let (transport, mut rx_data) = match tokio::time::timeout(init_timeout, async {
             let t = Transport::new(config);
@@ -204,6 +234,40 @@ impl ReticulumTransport {
                 let mut mgr = iface_mgr.lock().await;
                 for line in interfaces_ini.lines() {
                     let line = line.trim();
+
+                    // "interface N = AutoInterface" is what the DEFAULT config
+                    // ships (config.rs default_reticulum_interfaces). It was
+                    // parsed and then thrown away as `let _rns_config`, so the
+                    // one interface the default configuration names was never
+                    // constructed anywhere in src/. The only loop that spawned
+                    // anything read `target ` lines, which the default config
+                    // does not have -- so a default node created a Transport
+                    // with an identity, a destination and an announce, and zero
+                    // network interfaces.
+                    //
+                    // Map it to the crate's multicast UDP interface, which is
+                    // how Reticulum does local peer discovery. Without this the
+                    // "AutoInterface" in the default config is a fiction.
+                    let is_auto_interface = line
+                        .strip_prefix("interface ")
+                        .and_then(|rest| rest.split_once('=').map(|(_, v)| v.trim()))
+                        .map(|value| {
+                            value.eq_ignore_ascii_case("autointerface")
+                                || value.eq_ignore_ascii_case("auto_interface")
+                        })
+                        .unwrap_or(false);
+                    if is_auto_interface {
+                        info!("Spawning AutoInterface (multicast UDP {} )", RNS_AUTO_BIND);
+                        let (_hash, _routing, _status) =
+                            rns_transport::iface::udp::spawn_multicast_udp_with_status(
+                                &mut mgr,
+                                RNS_AUTO_BIND.to_string(),
+                                None,
+                            );
+                        interfaces_configured += 1;
+                        continue;
+                    }
+
                     if let Some(addr) = line
                         .strip_prefix("target ")
                         .and_then(|s| s.split_once('=').map(|(_, v)| v.trim()))
@@ -214,7 +278,17 @@ impl ReticulumTransport {
                             tcp_client,
                             rns_transport::iface::tcp_client::TcpClient::spawn,
                         );
+                        interfaces_configured += 1;
                     }
+                }
+                if interfaces_configured == 0 {
+                    warn!(
+                        "Reticulum configured zero interfaces: the node has an RNS identity \
+                         and destination but cannot reach any RNS peer. Configure an \
+                         'interface N = AutoInterface' or 'target N = host:port' entry, or \
+                         set network.reticulum_enabled = false so health does not imply \
+                         readiness."
+                    );
                 }
             }
 
