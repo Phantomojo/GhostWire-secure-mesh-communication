@@ -177,7 +177,13 @@ impl Default for Config {
                 max_peers: 50,
                 connection_timeout_secs: 30,
                 stealth_handshake_secret: None,
-                obfs4_enabled: true,    // Always-on obfuscation by default
+                // This flag is READ ONLY by the startup warning in startup.rs.
+                // Nothing in the transport stack consults it: there is no obfs4
+                // handshake, framing or socket wrapper, so setting it (or leaving
+                // it true) does NOT obfuscate any traffic. It is retained so the
+                // existing config surface and the warning keep working, not because
+                // it enables anything. Do not read this as "obfuscation is on".
+                obfs4_enabled: true,
                 obfs4_secret_key: None, // Generated randomly if not provided
                 hybrid_mode: default_hybrid_mode(),
                 discovery_interval: default_discovery_interval(),
