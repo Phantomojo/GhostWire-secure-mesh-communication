@@ -170,6 +170,45 @@ pub struct MeshBehaviour {
     pub relay: libp2p::relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
     pub request_response: libp2p::request_response::cbor::Behaviour<ChatRequest, ChatResponse>,
+    /// Caps parallel connections per peer.
+    ///
+    /// Four independent discovery sources (mdns, kad_provider, kad_closest,
+    /// world_discovery) each dial a peer's advertised addresses, and
+    /// `dial_peer_if_needed` only suppresses a dial when the peer is already
+    /// connected *or* has a dial in flight. Those two guards do not stop a
+    /// second dial on a different address once the first connection is
+    /// established, so the swarm settled at 3-4 parallel connections to a
+    /// single peer and then pruned the extras, which surfaced as
+    /// ConnectionEstablished/ConnectionClosed churn.
+    ///
+    /// Measured 2026-09-28 across two live nodes: closes landed in the
+    /// :30-:39 window of each minute, aligned to the 60s world-discovery
+    /// republish, in bursts averaging 6, with 3 addresses advertised per node.
+    /// libp2p prunes the surplus connections and the peer oscillates between
+    /// 3 and 4 established.
+    ///
+    /// This uses the already-enabled `memory-connection-limits` feature, so no
+    /// new dependency is introduced.
+    ///
+    /// The per-peer cap is deliberately 2, not 1. `libp2p-request-response`
+    /// asserts internally (0.29.0, src/lib.rs:678):
+    ///
+    ///     debug_assert_eq!(connections.is_empty(), remaining_established == 0);
+    ///
+    /// i.e. its own per-peer connection list must be empty exactly when
+    /// libp2p reports zero remaining. With a cap of 1 libp2p closes the
+    /// connection as soon as the second one is refused, and the two counts
+    /// disagree mid-teardown, which panics a debug build. Observed live on the
+    /// Elitebook node with `with_max_established(Some(1))`:
+    ///
+    ///     thread 'tokio-rt-worker' panicked at
+    ///       libp2p-request-response-0.29.0/src/lib.rs:678:9:
+    ///     assertion `left == right` failed  left: false  right: true
+    ///
+    /// 2 still collapses the observed 3-4 connections to a stable pair while
+    /// leaving request-response a spare to tear down against, so the assert
+    /// holds.
+    pub connection_limits: libp2p::connection_limits::Behaviour,
 }
 
 /// A libp2p transport that wraps TCP in a Stealth Handshake
@@ -352,6 +391,17 @@ impl MeshTransport {
             relay: relay_client,
             dcutr,
             request_response,
+            // Cap parallel connections per peer. Two, not one: see the
+            // connection_limits doc comment for the request-response debug
+            // assert that a cap of 1 trips. Collapses the observed 3-4
+            // connections to a stable pair. Pending dials are bounded too so
+            // a discovery burst cannot queue unbounded dials.
+            connection_limits: libp2p::connection_limits::Behaviour::new(
+                libp2p::connection_limits::ConnectionLimits::default()
+                    .with_max_established(Some(2))
+                    .with_max_pending_incoming(Some(16))
+                    .with_max_pending_outgoing(Some(16)),
+            ),
         };
 
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
