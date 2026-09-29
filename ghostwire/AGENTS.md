@@ -1,3 +1,27 @@
+<!-- HERMES:BEGIN -->
+## ⚠️ READ THIS FIRST — mandatory orientation
+
+Before any other action in this repo, read **`../ORIENTATION.md`** in full.
+
+It is short and it prevents the single most common and most expensive mistake in
+this codebase: **trusting code that looks finished but is never called.** Three
+separate audits have found modules that are well written, documented as
+working, and have zero callers. The one-line check that catches all of them:
+
+    grep -rn '<symbol>' src/ --include=*.rs | grep -v '<its own file>'
+
+Also read `../GHOSTWIRE_LEDGER.md` (the findings record) when picking up work,
+and check the blackboard (`post`/`read`/`wait` MCP tools, topic `anti-re`) —
+another agent is working this repo and may have posted a handoff.
+
+Key facts: canonical checkout is `/home/phantomojo/rescue/gw-push` (NOT the 1TB
+checkouts). `docs/ARCHITECTURE.md` and `docs/CONFIGURATION.md` currently
+OVERCLAIM anti-censorship features — do not trust them, verify instead.
+Do not `git push` without asking.
+
+Original project AGENTS.md content follows.
+<!-- HERMES:END -->
+
 # GhostWire — Agent Context File
 # Universal format (Claude Code, Qwen Code, Cursor, Copilot, Gemini CLI)
 # Steward: Michael Irungu Muriithi (Phantomojo) · Nairobi, Kenya
