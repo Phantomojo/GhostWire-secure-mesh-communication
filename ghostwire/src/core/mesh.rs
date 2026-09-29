@@ -253,7 +253,9 @@ pub struct MeshRebuildInputs {
 /// Mesh transport implementation with enhanced security
 pub struct MeshTransport {
     swarm: Option<Swarm<MeshBehaviour>>,
-    command_tx: mpsc::Sender<MeshCommand>,
+    /// A `Sender` is useless once its `Receiver` dies with the panicked
+    /// driver, so the cell is swappable to re-point sends at a rebuilt one.
+    command_tx: Arc<tokio::sync::RwLock<mpsc::Sender<MeshCommand>>>,
     command_rx: Option<mpsc::Receiver<MeshCommand>>,
     node_id: String,
     identity: Arc<Identity>,
@@ -292,6 +294,9 @@ pub struct MeshTransport {
     /// live-looking node with no connectivity. `is_mesh_alive` lets callers
     /// report `degraded` instead of pretending.
     alive: Arc<std::sync::atomic::AtomicBool>,
+    /// Set by `stop()`. A supervisor that sees this after its driver dies
+    /// returns instead of rebuilding, so shutdown does not resurrect the mesh.
+    stopping: Arc<std::sync::atomic::AtomicBool>,
     world_discovery_network_id: String,
     world_discovery_enabled: bool,
     world_discovery_health: SharedWorldDiscoveryHealth,
@@ -580,7 +585,7 @@ impl MeshTransport {
 
         Ok(Self {
             swarm: Some(swarm),
-            command_tx,
+            command_tx: Arc::new(tokio::sync::RwLock::new(command_tx)),
             command_rx: Some(command_rx),
             node_id: node_id.clone(),
             identity,
@@ -596,6 +601,7 @@ impl MeshTransport {
             })),
             current_shard: shard_id.to_string(),
             alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             _core_messages: core_messages,
             _message_store: message_store,
             bootstrap_nodes,
@@ -624,10 +630,11 @@ impl MeshTransport {
         })
     }
 
-    /// Start the mesh network with enhanced security
-    pub async fn start(&mut self, listen_addr: Multiaddr) -> Result<()> {
-        tracing::info!("Starting secure mesh network on {}", listen_addr);
-
+    /// Take the Swarm and command receiver and return a ready-to-run driver.
+    ///
+    /// Split out of `start` so a supervisor can re-enter this path after the
+    /// driver panics: only a freshly-built Swarm can drive a Swarm.
+    async fn build_driver(&mut self, listen_addr: &Multiaddr) -> Result<MeshDriver> {
         let mut swarm = self
             .swarm
             .take()
@@ -823,6 +830,14 @@ impl MeshTransport {
             cover_rx,
         };
 
+        Ok(driver)
+    }
+
+    /// Start the mesh network with enhanced security
+    pub async fn start(&mut self, listen_addr: Multiaddr) -> Result<()> {
+        tracing::info!("Starting secure mesh network on {}", listen_addr);
+        let driver = self.build_driver(&listen_addr).await?;
+
         // Supervise the swarm driver.
         //
         // `run()` owns the Swarm and is consumed by it, so if it panics there is
@@ -832,38 +847,96 @@ impl MeshTransport {
         // node carried on answering API calls and logging autonomic lines while
         // being completely unable to reach a single peer.
         //
-        // `catch_unwind` cannot repair the mesh, but it converts a silent
-        // permanent failure into a loud, attributable one and lets us flip the
-        // liveness flag so the API can report `degraded` honestly.
+        // `catch_unwind` cannot repair the mesh, but the rebuild loop can: it
+        // flips liveness off, then re-enters `build_driver` with the captured
+        // inputs, re-points the shared command cell at the new driver so the
+        // `MeshTransport` the process still holds keeps working, and only then
+        // flips liveness back on.
         let alive = self.alive.clone();
-        let driver_alive = alive.clone();
-        tokio::spawn(async move {
-            let driver_future = std::panic::AssertUnwindSafe(driver.run());
-            match futures_util::FutureExt::catch_unwind(driver_future).await {
-                Ok(()) => tracing::error!(
-                    "Mesh driver exited unexpectedly; the node has no mesh connectivity"
-                ),
-                Err(payload) => {
-                    let detail = payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "non-string panic payload".to_string());
-                    tracing::error!(
-                        "Mesh driver PANICKED: {}. The node is still serving the API but has \
-                         NO mesh connectivity until it is restarted.",
-                        detail
-                    );
-                    tracing::error!(
-                        backtrace = %std::backtrace::Backtrace::force_capture(),
-                        "mesh driver panic backtrace"
-                    );
+        let stopping = self.stopping.clone();
+        let command_tx = self.command_tx.clone();
+        let inputs = self.rebuild_inputs();
+
+        // Clones for the closure: `alive`/`stopping` are also passed to
+        // `supervise_mesh` below, so moving them into the closure would use
+        // them twice. Cloning an `Arc<AtomicBool>` is a refcount bump.
+        let rebuild_alive = alive.clone();
+        let rebuild_stopping = stopping.clone();
+        let rebuild = move || {
+            let inputs = inputs.clone();
+            let alive = rebuild_alive.clone();
+            let stopping = rebuild_stopping.clone();
+            let command_tx = command_tx.clone();
+            let listen_addr = listen_addr.clone();
+            async move {
+                let mut fresh = MeshTransport::rebuild(&inputs).await?;
+                // Hand the rebuilt transport this generation's shared cells so
+                // every generation writes through one liveness flag and one
+                // command sender, however many rebuilds happen.
+                fresh.alive = alive;
+                fresh.stopping = stopping;
+                // Scope the guards: a tokio RwLockWriteGuard held across the
+                // `start()` await makes the whole future !Send, and the
+                // supervisor is spawned onto the multithreaded runtime.
+                {
+                    let fresh_tx = fresh.command_tx.read().await.clone();
+                    *command_tx.write().await = fresh_tx;
                 }
+                fresh.command_tx = command_tx;
+                fresh.spawn_supervised(&listen_addr).await
             }
-            // Mark dead in every exit path, panic or clean.
-            driver_alive.store(false, std::sync::atomic::Ordering::SeqCst);
-            tracing::error!("Mesh is now DOWN (driver stopped). Peers will be unreachable.");
-        });
+        };
+
+        tokio::spawn(supervise_mesh(
+            Box::pin(driver.run()),
+            rebuild,
+            alive,
+            stopping,
+            crate::core::mesh::MESH_REBUILD_ATTEMPTS,
+            MESH_REBUILD_BACKOFF_BASE,
+        ));
+        Ok(())
+    }
+
+    /// Build a replacement driver for a fresh transport and spawn its
+    /// supervisor. This is what the supervisor's rebuild closure calls.
+    ///
+    /// It deliberately does NOT call `start()`: `start()` spawns a supervisor
+    /// and returns, and calling it from inside a supervisor's own `Send` future
+    /// makes the whole chain `!Send`, which fails to compile on the multithreaded
+    /// runtime. Building the driver and spawning the supervisor directly keeps
+    /// the recursion flat.
+    /// Spawn a supervisor for this transport's driver.
+    ///
+    /// Deliberately NOT called from inside the supervisor's own rebuild closure.
+    /// A function that calls `tokio::spawn` has an inherently `!Send` future,
+    /// and the rebuild closure must be `Send` to run on the multithreaded
+    /// runtime. So the closure below does the rebuild work inline and spawns the
+    /// replacement supervisor itself, rather than recursing through here.
+    async fn spawn_supervised(&mut self, listen_addr: &Multiaddr) -> Result<()> {
+        let driver = self.build_driver(listen_addr).await?;
+        let alive = self.alive.clone();
+        let stopping = self.stopping.clone();
+        let command_tx = self.command_tx.clone();
+        let inputs = self.rebuild_inputs();
+        let listen_addr = listen_addr.clone();
+
+        let rebuild = make_rebuild(
+            inputs,
+            alive.clone(),
+            stopping.clone(),
+            command_tx,
+            listen_addr,
+        );
+
+        tokio::spawn(supervise_mesh(
+            Box::pin(driver.run()),
+            rebuild,
+            alive,
+            stopping,
+            crate::core::mesh::MESH_REBUILD_ATTEMPTS,
+            MESH_REBUILD_BACKOFF_BASE,
+        ));
         Ok(())
     }
 
@@ -925,6 +998,8 @@ impl MeshTransport {
     pub async fn put_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::PutRecord {
                 key,
                 value,
@@ -938,6 +1013,8 @@ impl MeshTransport {
     pub async fn get_record(&self, key: Vec<u8>) -> Result<Vec<u8>> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::GetRecord { key, reply: tx })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
@@ -947,6 +1024,8 @@ impl MeshTransport {
     pub async fn broadcast_message(&self, message: &Message) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::BroadcastMessage {
                 message: message.clone(),
                 reply: tx,
@@ -959,6 +1038,8 @@ impl MeshTransport {
     pub async fn connect_peer(&self, peer_id: PeerId) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::ConnectPeer { peer_id, reply: tx })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
@@ -975,6 +1056,8 @@ impl MeshTransport {
     pub async fn ping_peer(&self, peer_id: PeerId) -> Result<u64> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::PingPeer { peer_id, reply: tx })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))?;
@@ -984,6 +1067,8 @@ impl MeshTransport {
     pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::SubscribeTopic {
                 topic: topic.to_string(),
                 reply: tx,
@@ -996,6 +1081,8 @@ impl MeshTransport {
     pub async fn publish_world_discovery(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::PublishWorldDiscovery { reply: tx })
             .await?;
         rx.await?
@@ -1004,6 +1091,8 @@ impl MeshTransport {
     pub async fn set_world_discovery_provider(&self, enabled: bool) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::SetWorldDiscoveryProvider { enabled, reply: tx })
             .await?;
         rx.await?
@@ -1012,6 +1101,8 @@ impl MeshTransport {
     pub async fn refresh_world_discovery_providers(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::RefreshWorldDiscoveryProviders { reply: tx })
             .await?;
         rx.await?
@@ -1026,6 +1117,8 @@ impl MeshTransport {
     pub async fn publish_to_topic(&self, topic: &str, data: Vec<u8>) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::PublishToTopic {
                 topic: topic.to_string(),
                 data,
@@ -1039,6 +1132,8 @@ impl MeshTransport {
     pub async fn send_direct_message(&self, recipient: PeerId, message: Message) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::SendMessage {
                 recipient,
                 message,
@@ -1053,6 +1148,8 @@ impl MeshTransport {
         let (tx, rx) = oneshot::channel();
         if let Err(e) = self
             .command_tx
+            .read()
+            .await
             .send(MeshCommand::GetListeners { reply: tx })
             .await
         {
@@ -1069,6 +1166,8 @@ impl MeshTransport {
     pub async fn add_address(&self, peer_id: PeerId, address: Multiaddr) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::AddAddress {
                 peer_id,
                 address,
@@ -1102,7 +1201,17 @@ impl MeshTransport {
                     // Non-blocking handoff to the driver; actor model preserved.
                     // Driver's AddAddress handler syncs swarm + Kademlia address books.
                     let (tx, _rx) = oneshot::channel();
-                    if let Err(e) = self.command_tx.try_send(MeshCommand::AddAddress {
+                    // `try_read`, not `read().await`: this fn is synchronous
+                    // and the send is explicitly non-blocking, so blocking on
+                    // the cell here would defeat the actor handoff. If the
+                    // supervisor is momentarily swapping the sender we skip
+                    // this bootstrap address rather than stall; the driver
+                    // re-adds from its own list on rebuild.
+                    let Ok(cell) = self.command_tx.try_read() else {
+                        tracing::debug!("command cell busy; skipping bootstrap address {:?}", addr);
+                        continue;
+                    };
+                    if let Err(e) = cell.try_send(MeshCommand::AddAddress {
                         peer_id,
                         address: addr,
                         reply: tx,
@@ -1124,6 +1233,8 @@ impl MeshTransport {
     pub async fn publish_username(&mut self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.command_tx
+            .read()
+            .await
             .send(MeshCommand::PublishUsername { reply: tx })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send PublishUsername command: {}", e))?;
@@ -1187,9 +1298,165 @@ impl MeshTransport {
 
     pub async fn stop(&self) -> Result<()> {
         tracing::info!("Sending shutdown command to mesh driver...");
-        let _ = self.command_tx.send(MeshCommand::Shutdown).await;
+        // Tell the supervisor this was a deliberate shutdown, not a dead driver,
+        // so it does not race to rebuild the mesh we are tearing down.
+        self.stopping
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = self
+            .command_tx
+            .read()
+            .await
+            .send(MeshCommand::Shutdown)
+            .await;
         Ok(())
     }
+}
+
+/// How many times the supervisor will try to rebuild a dead mesh driver before
+/// giving up and leaving the node up but offline.
+pub const MESH_REBUILD_ATTEMPTS: u32 = 10;
+/// First rebuild delay; doubles per attempt, capped at `MESH_REBUILD_BACKOFF_MAX`.
+pub const MESH_REBUILD_BACKOFF_BASE: std::time::Duration = std::time::Duration::from_secs(2);
+pub const MESH_REBUILD_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Run one mesh driver generation and, if it dies, try to bring the mesh back.
+///
+/// A `Swarm` cannot be restarted once its driver task is gone, so recovery means
+/// building a *new* transport via `rebuild` rather than reviving this one. Liveness
+/// is cleared first and restored only once the replacement driver is actually
+/// running, so a failed rebuild never reports a mesh that is not there.
+///
+/// The retry budget is finite and backs off: an unrecoverable identity or
+/// listen-address problem would otherwise spin forever. On giving up we return
+/// quietly rather than panicking, because the HTTP API, TUI and autonomic loop
+/// all still need to answer — they just report a node that cannot reach peers.
+/// Build the rebuild closure for a supervisor generation.
+///
+/// Exists as a free function so the recursive rebuild is written ONCE: the
+/// closure both rebuilds the transport and spawns the replacement supervisor,
+/// and needs to hand the replacement an identical closure. A closure cannot
+/// refer to itself, so this factory does that job.
+///
+/// Takes ownership of the shared cells and clones them per call, so every
+/// generation writes through the SAME liveness flag, stopping flag and command
+/// cell however many times it rebuilds.
+fn make_rebuild(
+    inputs: MeshRebuildInputs,
+    alive: Arc<std::sync::atomic::AtomicBool>,
+    stopping: Arc<std::sync::atomic::AtomicBool>,
+    command_tx: Arc<tokio::sync::RwLock<mpsc::Sender<MeshCommand>>>,
+    listen_addr: Multiaddr,
+) -> impl FnMut() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+       + Send
+       + 'static {
+    move || {
+        let inputs = inputs.clone();
+        let alive = alive.clone();
+        let stopping = stopping.clone();
+        let command_tx = command_tx.clone();
+        let listen_addr = listen_addr.clone();
+        Box::pin(async move {
+            let mut fresh = MeshTransport::rebuild(&inputs).await?;
+            fresh.alive = alive.clone();
+            fresh.stopping = stopping.clone();
+            {
+                // Scope the guards: a tokio write guard held across the awaits
+                // below would make this future `!Send`.
+                let fresh_tx = fresh.command_tx.read().await.clone();
+                *command_tx.write().await = fresh_tx;
+            }
+            fresh.command_tx = command_tx.clone();
+
+            let replacement = fresh.build_driver(&listen_addr).await?;
+            // Spawn the replacement supervisor here rather than recursing into
+            // `spawn_supervised`: a spawning function is `!Send`, and this
+            // future has to be `Send` to run on the multithreaded runtime.
+            let next = make_rebuild(
+                inputs.clone(),
+                alive.clone(),
+                stopping.clone(),
+                command_tx.clone(),
+                listen_addr.clone(),
+            );
+            tokio::spawn(supervise_mesh(
+                Box::pin(replacement.run()),
+                next,
+                fresh.alive.clone(),
+                stopping,
+                crate::core::mesh::MESH_REBUILD_ATTEMPTS,
+                MESH_REBUILD_BACKOFF_BASE,
+            ));
+            Ok(())
+        })
+    }
+}
+
+pub async fn supervise_mesh<R, Fut>(
+    driver: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+    mut rebuild: R,
+    driver_alive: Arc<std::sync::atomic::AtomicBool>,
+    stopping: Arc<std::sync::atomic::AtomicBool>,
+    max_attempts: u32,
+    initial_backoff: std::time::Duration,
+) where
+    R: FnMut() -> Fut + Send,
+    Fut: std::future::Future<Output = Result<()>> + Send,
+{
+    use std::sync::atomic::Ordering::SeqCst;
+
+    match futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(driver)).await {
+        Ok(()) => {
+            tracing::error!("Mesh driver exited unexpectedly; the node has no mesh connectivity");
+        }
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "non-string panic payload".to_string());
+            tracing::error!("Mesh driver PANICKED: {}", detail);
+            tracing::error!(
+                backtrace = %std::backtrace::Backtrace::force_capture(),
+                "mesh driver panic backtrace"
+            );
+        }
+    }
+
+    driver_alive.store(false, SeqCst);
+
+    if stopping.load(SeqCst) {
+        tracing::info!("Mesh driver exited during shutdown; not rebuilding");
+        return;
+    }
+
+    for attempt in 0..max_attempts {
+        let backoff = initial_backoff
+            .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+            .unwrap_or(MESH_REBUILD_BACKOFF_MAX)
+            .min(MESH_REBUILD_BACKOFF_MAX);
+        tokio::time::sleep(backoff).await;
+
+        match rebuild().await {
+            Ok(()) => {
+                driver_alive.store(true, SeqCst);
+                tracing::info!("Mesh driver recovered on rebuild attempt {}", attempt + 1);
+                return;
+            }
+            Err(e) => {
+                tracing::error!(
+                    attempt = attempt + 1,
+                    of = max_attempts,
+                    error = %e,
+                    "Mesh rebuild attempt failed"
+                );
+            }
+        }
+    }
+
+    tracing::error!(
+        "Mesh rebuild budget exhausted after {} attempts; the node is running with NO mesh connectivity",
+        max_attempts
+    );
 }
 
 struct MeshDriver {
