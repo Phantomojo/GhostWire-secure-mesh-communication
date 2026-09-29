@@ -116,7 +116,7 @@ Why each choice was made, not just what was chosen.
 | libp2p WebRTC | Browser clients | Working (alpha) |
 | BLE (bluer) | Local mesh, no internet | Feature-gated |
 | Stealth TCP | Traffic morphing, DPI evasion | Working |
-| Obfs4 | Tor-grade obfuscation | Foundation laid |
+| Obfs4 | Tor-grade obfuscation | **NOT IMPLEMENTED** — no handshake, no framing, not in the transport chain. The old placeholder even set the "public key" to the secret key. |
 | Simulated | Hardware testing (BT/WiFi) | Working |
 
 **Trade-off:** Multiple transports increase code surface and testing matrix. The alternative (one transport) means failing in censorship or no-infrastructure scenarios. GhostWire chose coverage over simplicity.
@@ -260,7 +260,7 @@ BLOOM_BITS = 1024  # Sync filter size
 ### Maturity vs Ambition
 - The ONNX routing model is loaded from a file that may not exist (`ghostwire_routing.onnx`). The system degrades to PRoPHET when it's missing, but the fallback is slower and less optimal.
 - BLE transport is feature-gated and not fully implemented. The `bluer` crate (v0.17) supports BlueZ D-Bus, but the `ble_controller` module referenced in AGENTS.md isn't built yet.
-- The Obfs4 transport has a foundation but not a complete handshake implementation.
+- The Obfs4 transport is NOT implemented. There is no handshake, no framing and no socket wrapper, and it is not wired into the libp2p transport chain. `obfs4_enabled` is read only by a startup warning. Until that is built, GhostWire has NO transport obfuscation: TCP carries plaintext framed by Noise, and against a real DPI adversary its handshake is fingerprintable.
 - The GNN router requires pre-computed node embeddings (`node_embeddings.json`) from Guifi.net training data. Without these files, it falls back to PRoPHET.
 
 ### Dependency Footprint

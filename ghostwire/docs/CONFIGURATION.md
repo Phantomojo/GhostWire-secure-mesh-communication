@@ -222,8 +222,8 @@ The `web` subcommand uses slightly different defaults than the daemon:
 |---|---|---|
 | `GHOSTWIRE_MAX_CONNECTIONS_PER_IP` | `10` | Max simultaneous connections from one IP |
 | `GHOSTWIRE_STEALTH_SECRET` | none | Stealth handshake secret key |
-| `GHOSTWIRE_OBFS4_ENABLED` | `true` | Enable obfs4 DPI evasion |
-| `GHOSTWIRE_OBFS4_SECRET` | none | Obfs4 secret key (hex). Random key generated if not set. |
+| `GHOSTWIRE_OBFS4_ENABLED` | `true` | **NO EFFECT.** Obfs4 is not implemented; this flag is read only by a startup warning. |
+| `GHOSTWIRE_OBFS4_SECRET` | none | **NO EFFECT** today. Unused until obfs4 exists. |
 
 ### Bridges
 
@@ -281,7 +281,9 @@ export GHOSTWIRE_STEALTH_SECRET="your-handshake-secret"
 export GHOSTWIRE_OBFS4_SECRET="hex-encoded-obfs4-key"
 ```
 
-If `GHOSTWIRE_OBFS4_SECRET` is not set, GhostWire generates a random key at startup. This random key changes on restart, which breaks persistent obfuscation. Set a fixed key if you need stable obfs4 sessions.
+> **Currently inert.** Obfs4 is not implemented, so this variable has no effect on
+> traffic. It is retained so the config surface and the startup warning keep
+> working. Do not rely on it for obfuscation.
 
 ## Config Precedence in Practice
 

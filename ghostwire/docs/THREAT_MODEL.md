@@ -37,7 +37,7 @@
 ├─────────────────────────────────────────────┤
 │  Privacy Layer (Sphinx, cover traffic)       │
 ├─────────────────────────────────────────────┤
-│  Transport Layer (libp2p, Iroh, BT, Obfs4)  │
+│  Transport Layer (libp2p TCP+QUIC, Reticulum)     │
 ├─────────────────────────────────────────────┤
 │  Network Layer (GossipSub, Kademlia DHT)     │
 ├─────────────────────────────────────────────┤
@@ -49,7 +49,7 @@
 
 | Boundary | Trusted Side | Untrusted Side | Enforcement |
 |----------|-------------|----------------|-------------|
-| **B1: Network** | Local node | P2P network | Transport encryption (Noise/Iroh) |
+| **B1: Network** | Local node | P2P network | Transport encryption (Noise over libp2p) |
 | **B2: API** | Authenticated client | HTTP requests | Biscuit token + rate limiting |
 | **B3: Storage** | Encrypted store | Disk/filesystem | AES-256-GCM at rest |
 | **B4: Identity** | Private keys | Public keys | Ed25519 signatures |
@@ -77,7 +77,7 @@
 | ID | Threat | Likelihood | Impact | Status | Mitigation |
 |----|--------|-----------|--------|--------|------------|
 | S1 | Peer impersonation | Medium | Critical | ✅ Defended | Ed25519 signatures, Biscuit tokens |
-| S2 | Man-in-the-middle | Medium | Critical | ✅ Defended | Noise/Iroh transport encryption |
+| S2 | Man-in-the-middle | Medium | Critical | ✅ Defended | Noise transport encryption (libp2p) |
 | S3 | DNS/DHT poisoning | Low | High | ⚠️ Partial | Kademlia DHT with peer scoring |
 | S4 | Replay attacks | Medium | High | ✅ Defended | Nonces + message ordering |
 
@@ -205,7 +205,7 @@ Related: See §5.7 for the NAT-path adversary, a Sybil/eclipse class that specif
 **Impact**: Nodes cannot communicate.
 
 **Mitigation**:
-- Multiple transport options (TCP, QUIC, BT, Obfs4)
+- Multiple transport options: TCP and QUIC (libp2p) plus Reticulum. NOTE: no transport obfuscation — obfs4 and Bluetooth are NOT implemented.
 - Stealth TCP mimics HTTPS traffic
 - Circuit relay v2 for blocked nodes
 - **Status**: Defended — multiple fallback paths

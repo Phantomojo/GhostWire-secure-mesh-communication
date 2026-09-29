@@ -50,7 +50,7 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
 ├───────────────────────┼────────────────────────────────────┤
 │            Transport Layer (pluggable)                      │
 │  ┌──────┐ ┌──────┐ ┌────┐ ┌──────┐ ┌────────┐            │
-│  │libp2p│ │ Iroh │ │ BT │ │Obfs4 │ │Circuit │            │
+│  │libp2p│ │RNS │ │Obfs4✗│ │Circuit │              │
 │  │TCP   │ │QUIC  │ │BLE │ │      │ │Relay v2│            │
 │  └──┬───┘ └──┬───┘ └─┬──┘ └──┬───┘ └───┬────┘            │
 ├─────┼────────┼────────┼───────┼─────────┼──────────────────┤
@@ -86,8 +86,8 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
 
 | # | Layer | Score | Status | Notes |
 |---|-------|-------|--------|-------|
-| 1 | Transport | 8/10 | ✅ Working | libp2p, Iroh, BT, Obfs4 |
-| 2 | Privacy | 6/10 | ⚠️ Static | Sphinx works, cover traffic not device-aware |
+| 1 | Transport | 5/10 | ⚠️ Partial | libp2p (TCP+QUIC) and Reticulum work. Obfs4 is NOT implemented (no handshake/framing, not in the transport chain). Iroh and Bluetooth are not in the tree. |
+| 2 | Privacy | 4/10 | ⚠️ Incomplete | Message padding works. Cover traffic is built but NEVER STARTED, so idle periods stay distinguishable. `presence_obfuscation` has zero callers, so intersection attacks are unmitigated. |
 | 3 | Encryption | 8/10 | ✅ Working | AES-256-GCM, X25519, ML-KEM, small-order defense |
 | 4 | Identity | 6/10 | ⚠️ Partial | Keys work, revocation missing |
 | 5 | Security | 8/10 | ✅ Working | SecurityManager, Audit, RateLimit, CVE patches |
@@ -108,7 +108,7 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
 
 | Boundary | Trusted Side | Untrusted Side | Enforcement |
 |----------|-------------|----------------|-------------|
-| **B1: Network** | Local node | P2P network | Noise/Iroh transport |
+| **B1: Network** | Local node | P2P network | Noise (libp2p). Iroh NOT in tree. |
 | **B2: API** | Authenticated client | HTTP requests | Biscuit token + rate limit |
 | **B3: Storage** | Encrypted store | Disk | AES-256-GCM at rest |
 | **B4: Identity** | Private keys | Public keys | Ed25519 signatures |
@@ -129,10 +129,10 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
    d. Signs with Ed25519
 5. PrivacyLayer:
    a. Wraps in Sphinx packet (fixed 2252B)
-   b. Adds cover traffic (512B blocks)
+   b. Adds padding (512B blocks) — WORKS. Cover traffic is built but never started.
    c. Applies Poisson timing (planned)
 6. TransportManager:
-   a. Selects best transport (libp2p/Iroh/BT/Obfs4)
+   a. Selects best transport (libp2p TCP+QUIC, Reticulum). Obfs4 NOT implemented.
    b. Routes via GossipSub or direct connection
 7. Recipient receives, decrypts, verifies, ACKs
 ```
@@ -236,10 +236,10 @@ Cover Traffic Padding (512B blocks)
     ↓
 Transport Selection:
   ├── libp2p TCP + Noise + yamux (primary)
-  ├── Iroh QUIC v1.0 (NAT traversal, ~90% success)
+  ├── Reticulum RNS (AutoInterface / TCP targets) — WORKING
   ├── Circuit Relay v2 (fallback)
-  ├── Bluetooth BLE (local mesh)
-  ├── Obfs4 (censorship circumvention)
+  ├── Bluetooth BLE (local mesh) — NOT IMPLEMENTED
+  ├── Obfs4 (censorship circumvention) — NOT IMPLEMENTED
   └── TURN (last resort)
 ```
 
