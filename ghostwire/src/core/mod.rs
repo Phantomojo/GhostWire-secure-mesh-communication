@@ -478,35 +478,20 @@ impl Core {
             active_transport_inner = Some(sim_kind);
         }
 
-        {
-            let quic_port = if config.server.quic_port == 0 {
-                config.server.port.wrapping_add(1).max(5001)
-            } else {
-                config.server.quic_port
-            };
-            let quic_addr: std::net::SocketAddr = format!("0.0.0.0:{}", quic_port).parse()?;
-            let quic =
-                match crate::core::quic_transport::QuicTransportProvider::new(quic_addr).await {
-                    Ok(q) => Ok(q),
-                    Err(_) => {
-                        let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
-                        crate::core::quic_transport::QuicTransportProvider::new(fallback).await
-                    }
-                };
-            match quic {
-                Ok(quic) => {
-                    let quic_kind = crate::core::transport::TransportKind::Quic(Arc::new(quic));
-                    registry.register(quic_kind.clone());
-                    if active_transport_inner.is_none() {
-                        active_transport_inner = Some(quic_kind);
-                    }
-                    tracing::info!("QUIC transport registered on port {}", quic_port);
-                }
-                Err(e) => {
-                    tracing::warn!("QUIC transport init failed (port {}): {}", quic_port, e);
-                }
-            }
-        }
+        // QUIC is now provided by the libp2p swarm itself (see MeshManager::new),
+        // where it is a real transport that can carry peer traffic.
+        //
+        // The custom QuicTransportProvider used to be registered here as well,
+        // and that was actively harmful: it bound the SAME udp port the swarm
+        // wants, so whichever initialised first won and the other logged
+        // "QUIC listener unavailable". Observed live: the registry provider took
+        // udp/8081 (fd=9) and the swarm's own QUIC listener was refused.
+        //
+        // It is also structurally dead -- QuicTransportProvider::register_peer is
+        // never called from outside its own module, so peer_map stays empty and
+        // send_message always fails with "No address for peer". Removing the
+        // registration stops the port conflict and leaves one QUIC
+        // implementation, which is the only one that works.
 
         let registry = Arc::new(RwLock::new(registry));
         let active_transport = Arc::new(RwLock::new(active_transport_inner));
