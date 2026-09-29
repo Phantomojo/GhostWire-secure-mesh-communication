@@ -260,6 +260,15 @@ pub struct MeshTransport {
     mdns_last_event: Arc<AtomicU64>,
     mdns_enabled: bool,
     discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    /// False once the swarm driver task has stopped (panic or clean exit).
+    ///
+    /// The driver owns the Swarm and is consumed by `run()`, so if it dies
+    /// there is no mesh any more -- but nothing recorded that. The node kept
+    /// answering API calls and logging autonomic/transport lines while the mesh
+    /// was completely dead, which is the worst possible failure mode: a
+    /// live-looking node with no connectivity. `is_mesh_alive` lets callers
+    /// report `degraded` instead of pretending.
+    alive: Arc<std::sync::atomic::AtomicBool>,
     world_discovery_network_id: String,
     world_discovery_enabled: bool,
     world_discovery_health: SharedWorldDiscoveryHealth,
@@ -514,6 +523,7 @@ impl MeshTransport {
                 security_stats: SecurityStats::default(),
             })),
             current_shard: shard_id.to_string(),
+            alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             _core_messages: core_messages,
             _message_store: message_store,
             bootstrap_nodes,
@@ -739,8 +749,56 @@ impl MeshTransport {
             cover_rx,
         };
 
-        tokio::spawn(driver.run());
+        // Supervise the swarm driver.
+        //
+        // `run()` owns the Swarm and is consumed by it, so if it panics there is
+        // no mesh left and nothing can rebuild it in place. Observed live on the
+        // Elitebook: an upstream `libp2p-request-response` connection-bookkeeping
+        // assert fired after a connection timeout, the driver task died, and the
+        // node carried on answering API calls and logging autonomic lines while
+        // being completely unable to reach a single peer.
+        //
+        // `catch_unwind` cannot repair the mesh, but it converts a silent
+        // permanent failure into a loud, attributable one and lets us flip the
+        // liveness flag so the API can report `degraded` honestly.
+        let alive = self.alive.clone();
+        let driver_alive = alive.clone();
+        tokio::spawn(async move {
+            let driver_future = std::panic::AssertUnwindSafe(driver.run());
+            match futures_util::FutureExt::catch_unwind(driver_future).await {
+                Ok(()) => tracing::error!(
+                    "Mesh driver exited unexpectedly; the node has no mesh connectivity"
+                ),
+                Err(payload) => {
+                    let detail = payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "non-string panic payload".to_string());
+                    tracing::error!(
+                        "Mesh driver PANICKED: {}. The node is still serving the API but has \
+                         NO mesh connectivity until it is restarted.",
+                        detail
+                    );
+                    tracing::error!(
+                        backtrace = %std::backtrace::Backtrace::force_capture(),
+                        "mesh driver panic backtrace"
+                    );
+                }
+            }
+            // Mark dead in every exit path, panic or clean.
+            driver_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+            tracing::error!("Mesh is now DOWN (driver stopped). Peers will be unreachable.");
+        });
         Ok(())
+    }
+
+    /// Whether the swarm driver task is still running.
+    ///
+    /// False means the node is serving the API but has no mesh connectivity.
+    /// Callers should report `degraded` rather than implying a healthy node.
+    pub fn is_mesh_alive(&self) -> bool {
+        self.alive.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub async fn put_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
