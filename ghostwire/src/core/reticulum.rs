@@ -625,6 +625,27 @@ fn parse_address_hash(hex_str: &str) -> Option<AddressHash> {
     Some(AddressHash::new_from_slice(&bytes))
 }
 
+/// Whether a recipient string is a Reticulum destination address.
+///
+/// STRICT on purpose, and deliberately narrower than `parse_address_hash`.
+/// That helper accepts ANY hex of ANY length, so it happily "parses" a
+/// libp2p PeerId or any other hex-looking id into a truncated 16-byte
+/// `AddressHash::new_from_slice`. If this were used to decide which transport
+/// a recipient belongs to, a mistyped or non-RNS id would be silently sent to
+/// RNS and encrypted to a destination nobody holds the key for.
+///
+/// A real Reticulum address hash is exactly 16 bytes, i.e. 32 hex characters
+/// (ADDRESS_HASH_SIZE in reticulum-rs-transport). PeerIds are base58 and start
+/// with `12D3KooW`, so they cannot collide with this.
+pub fn is_reticulum_address(recipient: &str) -> bool {
+    let hex = recipient.trim().trim_start_matches("0x");
+    hex.len() == rns_transport::hash::ADDRESS_HASH_SIZE * 2
+        && hex.chars().all(|c| c.is_ascii_hexdigit())
+        // A bare 32-hex-digit string is ambiguous in principle; require it not
+        // to look like the hex form of anything else we route.
+        && !hex.starts_with("12D3Koo")
+}
+
 // ---------------------------------------------------------------------------
 // Manager — orchestrates transport lifecycle
 // ---------------------------------------------------------------------------
@@ -747,6 +768,15 @@ impl ReticulumManager {
         let mut stats = self.stats.write().await;
         stats.messages_relayed += 1;
         Ok(())
+    }
+
+    /// Whether the RNS transport is currently usable.
+    ///
+    /// A recipient that is a Reticulum address can only be delivered if this is
+    /// true, so the send path checks it rather than assuming a registered
+    /// transport is running.
+    pub async fn is_alive(&self) -> bool {
+        self.transport.read().await.transport.is_some()
     }
 
     pub async fn receive_message(&self) -> Result<Option<Message>> {
@@ -952,5 +982,53 @@ mod tests {
         };
         assert!(topo.nodes.is_empty());
         assert!(topo.routes.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::is_reticulum_address;
+
+    // A real Reticulum address hash is 16 bytes -> 32 hex chars.
+    const RNS: &str = "adf74d1c1b1e5c1a3f9c1e2b3d4f5a6b";
+    // A real libp2p PeerId, base58, from a live node.
+    const PEER: &str = "12D3KooWWHvd9Z3VQdjtjWe42xSP9TFNSDeD4K73zfVxTdCXAUFY9";
+
+    #[test]
+    fn a_reticulum_address_is_routed_to_rns() {
+        assert!(is_reticulum_address(RNS));
+    }
+
+    #[test]
+    fn a_libp2p_peer_id_is_never_treated_as_a_reticulum_address() {
+        // The whole point of the strict check. parse_address_hash accepts ANY
+        // hex of ANY length, so an over-permissive test would misroute a PeerId
+        // (or any hex-looking id) to RNS and encrypt it to a destination nobody
+        // holds the key for.
+        assert!(!is_reticulum_address(PEER));
+    }
+
+    #[test]
+    fn wrong_length_hex_is_rejected() {
+        assert!(!is_reticulum_address("abcd"));
+        assert!(!is_reticulum_address("adf74d1c1b1e5c1a3f9c1e2b3d4f5a6bcd"));
+    }
+
+    #[test]
+    fn non_hex_is_rejected() {
+        // Same length as a real address, but not hex.
+        assert!(!is_reticulum_address("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+    }
+
+    #[test]
+    fn prefixed_and_padded_addresses_are_tolerated() {
+        assert!(is_reticulum_address(
+            "  0xadf74d1c1b1e5c1a3f9c1e2b3d4f5a6b "
+        ));
+    }
+
+    #[test]
+    fn an_empty_recipient_is_rejected() {
+        assert!(!is_reticulum_address(""));
     }
 }

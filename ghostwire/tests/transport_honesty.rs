@@ -82,22 +82,64 @@ fn webrtc_is_not_silently_joined_while_being_undialable() {
 }
 
 #[test]
-fn rns_send_path_is_still_known_to_be_unreachable() {
-    // This is a RECORD of a known defect, not a claim it is fixed. Core's
-    // send_message returns from the mesh branch before active_transport is read,
-    // so TransportKind::Reticulum can never be selected for a peer message, and
-    // send_direct_message demands a libp2p PeerId, which an RNS address hash is
-    // not. Keep this pinned so the gap stays visible until it is closed.
+fn rns_recipients_are_routed_to_rns_instead_of_failing_a_peerid_parse() {
     let m = src("src/core/mod.rs");
-    let mesh_return = m.find("return mgr.send_message(message).await;");
-    let active_read = m.find("self.active_transport.read().await.as_ref()");
+    // This USED to assert the defect: send_direct_message only tried
+    // `recipient.parse::<PeerId>()` and returned "Invalid P2P Recipient ID"
+    // for everything else, so a valid Reticulum address could not even be
+    // expressed. Now the recipient shape decides the transport.
     assert!(
-        mesh_return.is_some() && active_read > mesh_return,
-        "send_message must return from the mesh branch before active_transport is \
-         consulted -- that ordering is why RNS is currently unreachable"
+        m.contains("is_reticulum_address(&recipient)"),
+        "send_direct_message must route a Reticulum address to RNS"
     );
     assert!(
-        m.contains("Mesh network not available"),
-        "send_direct_message has no transport fallback at all, only this error"
+        m.contains("is a Reticulum address but the RNS transport is not running"),
+        "a Reticulum recipient with no RNS transport must say so, not fall \
+         through to a PeerId parse error"
+    );
+}
+
+#[test]
+fn rns_receives_through_a_pump_instead_of_filling_an_undrained_channel() {
+    let m = src("src/core/mod.rs");
+    // ReticulumManager::receive_message had ZERO callers: the rx task filled a
+    // 256-slot mpsc that nobody read, so RNS could buffer but never receive.
+    assert!(
+        m.contains("rns_rx_pump"),
+        "a receive pump must exist and be cancellable, or RNS cannot receive"
+    );
+    assert!(
+        m.contains("receive_message().await"),
+        "the pump must actually drain the RNS receive channel"
+    );
+    // And it must not downgrade a private message to plaintext.
+    assert!(
+        m.contains("store.save_message(&msg)"),
+        "inbound RNS messages must be persisted encrypted via save_message, \
+         which fails closed on a locked profile"
+    );
+    assert!(
+        !m.contains("save_message_plain(&msg)"),
+        "never fall back to plaintext storage for an inbound RNS message"
+    );
+    assert!(
+        m.contains("handle.abort()"),
+        "stopping RNS must stop the pump rather than leak a task per cycle"
+    );
+}
+
+#[test]
+fn rns_routing_check_is_strict_about_length() {
+    let r = src("src/core/reticulum.rs");
+    // parse_address_hash accepts ANY hex of ANY length, so using it to pick a
+    // transport would truncate a PeerId into a bogus 16-byte destination and
+    // encrypt a private message to a key nobody holds.
+    assert!(
+        r.contains("ADDRESS_HASH_SIZE * 2"),
+        "the RNS address check must require the exact Reticulum address length"
+    );
+    assert!(
+        r.contains("is_ascii_hexdigit"),
+        "the check must also reject non-hex input of the right length"
     );
 }

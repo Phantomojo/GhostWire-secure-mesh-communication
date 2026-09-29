@@ -350,6 +350,9 @@ pub struct Core {
     pub late_mesh_manager: Arc<RwLock<Option<Arc<RwLock<MeshManager>>>>>,
     #[cfg(feature = "reticulum")]
     pub reticulum_manager: Arc<RwLock<Option<Arc<RwLock<ReticulumManager>>>>>,
+    /// Handle to the Reticulum receive pump, so it is stopped rather than
+    /// leaked across repeated init/stop cycles.
+    pub(crate) rns_rx_pump: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub security_manager: Arc<SecurityManager>,
     pub transport_registry: Arc<RwLock<TransportRegistry>>,
     pub active_transport: Arc<RwLock<Option<crate::core::transport::TransportKind>>>,
@@ -782,6 +785,7 @@ impl Core {
             late_mesh_manager: Arc::new(RwLock::new(None)),
             #[cfg(feature = "reticulum")]
             reticulum_manager: Arc::new(RwLock::new(None)),
+            rns_rx_pump: Arc::new(std::sync::Mutex::new(None)),
             messages,
             message_store,
             bootstrap_nodes,
@@ -1571,6 +1575,33 @@ impl Core {
         // We do NOT broadcast direct messages to the event bus indiscriminately
         // But we might want to emit a "MessageSent" event for UI updates
 
+        // Route by recipient shape.
+        //
+        // A Reticulum destination is a 16-byte address hash in hex; a libp2p
+        // PeerId is base58. They are different address spaces, so the recipient
+        // decides the transport rather than "whatever happens to be active".
+        //
+        // Previously this only tried PeerId and returned
+        // `Invalid P2P Recipient ID` for everything else -- including a
+        // perfectly valid Reticulum address, which could not even be expressed.
+        // That is why TransportKind::Reticulum could never be selected for a
+        // direct message even when RNS was running and announced.
+        #[cfg(feature = "reticulum")]
+        if crate::core::reticulum::is_reticulum_address(&recipient) {
+            if let Some(mgr) = self.reticulum_manager.read().await.as_ref() {
+                let mgr = mgr.read().await;
+                if mgr.is_alive().await {
+                    let mut outbound = message.clone();
+                    outbound.recipient = recipient.clone();
+                    return mgr.send_message(&outbound).await;
+                }
+            }
+            return Err(anyhow::anyhow!(
+                "Recipient {} is a Reticulum address but the RNS transport is not running",
+                recipient
+            ));
+        }
+
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
@@ -2250,7 +2281,56 @@ impl Core {
                 self.transport_registry.write().await.register(
                     crate::core::transport::TransportKind::Reticulum(reticulum_transport),
                 );
-                *slot = Some(reticulum_handle);
+                *slot = Some(reticulum_handle.clone());
+
+                // Drain the RNS receive channel.
+                //
+                // Without this, `ReticulumTransport::receive_message` -- which
+                // decodes a real envelope with domain separation and a 16 KiB
+                // cap -- had ZERO callers, and the rx task filled a 256-slot
+                // mpsc that nobody read. On a busy link that channel would
+                // backpressure the broadcast receiver and start dropping.
+                //
+                // So RNS could not RECEIVE at all, only buffer. Discovery was
+                // real (announces fed the topology map); delivery was absent.
+                let pump_handle = reticulum_handle.clone();
+                // The pump outlives this borrow of self, so it takes owned
+                // clones of exactly what it needs rather than capturing &self.
+                let store = self.message_store.clone();
+                let events = self.event_bus.clone();
+                let handle = tokio::spawn(async move {
+                    loop {
+                        let msg = {
+                            let mgr = pump_handle.read().await;
+                            match mgr.receive_message().await {
+                                Ok(Some(m)) => Some(m),
+                                Ok(None) => None,
+                                Err(e) => {
+                                    tracing::warn!("RNS receive error: {}", e);
+                                    None
+                                }
+                            }
+                        };
+                        if let Some(msg) = msg {
+                            // Encrypted at rest via store_secure, and it FAILS
+                            // CLOSED when the profile is locked -- no plaintext
+                            // downgrade for a private message.
+                            match store.save_message(&msg) {
+                                Ok(()) => {
+                                    let _ = events.send(CoreEvent::NewMessage(msg));
+                                }
+                                Err(e) => {
+                                    tracing::warn!("RNS inbound message not stored: {}", e)
+                                }
+                            }
+                        }
+                        // Nothing to read yet: back off instead of spinning.
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                });
+                if let Ok(mut slot) = self.rns_rx_pump.lock() {
+                    *slot = Some(handle);
+                }
                 tracing::info!("Reticulum network initialized and registered");
             }
         }
@@ -2261,10 +2341,31 @@ impl Core {
         Ok(())
     }
 
+    /// Persist and publish a message that arrived over a non-mesh transport.
+    ///
+    /// Uses `save_message`, which goes through `store_secure` and therefore
+    /// stays encrypted at rest and FAILS CLOSED when the profile is locked --
+    /// no plaintext fallback. That is deliberate: a message that arrived over
+    /// RNS is still a private message, and silently downgrading it to plaintext
+    /// is the exact defect fixed in 7ecc472.
+    async fn persist_and_emit_incoming(
+        &self,
+        message: crate::core::message::Message,
+    ) -> Result<()> {
+        self.message_store.save_message(&message)?;
+        let _ = self.event_bus.send(CoreEvent::NewMessage(message));
+        Ok(())
+    }
+
     /// Stop the Reticulum medium and remove its runtime registration.
     pub async fn stop_reticulum(&self) -> Result<()> {
         #[cfg(feature = "reticulum")]
         {
+            if let Ok(mut slot) = self.rns_rx_pump.lock() {
+                if let Some(handle) = slot.take() {
+                    handle.abort();
+                }
+            }
             if let Some(reticulum_manager) = self.reticulum_manager.write().await.take() {
                 let mut manager = reticulum_manager.write().await;
                 manager.stop().await?;
