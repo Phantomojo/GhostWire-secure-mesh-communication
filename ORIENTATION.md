@@ -39,7 +39,19 @@ This is the single most important thing to know.
 | `network/presence_obfuscation.rs` | intersection-attack defence | 282 lines, **zero callers.** |
 | QUIC provider (older) | working QUIC | Was a dead inner wrapper; fixed in `f893453`. |
 
-**The check that catches all of them:**
+**That check is a HEURISTIC, not proof.** Three audit findings in this project
+have been wrong, twice because of it. Before calling a module dead:
+- Does its **constructor have side effects**? `TrafficArmor::new` starts a
+  `CoverTrafficScheduler` internally, so `CoverTrafficScheduler` has no callers
+  outside its own file yet cover traffic demonstrably flows. "No caller" is not
+  "no effect".
+- **Measure at runtime or write a test that waits for the effect.** Idle
+  interface TX counters on the Elitebook showed ~1480 B/s with no real messages
+  — proof of something running that source-reading could not see.
+- Note the receiver half of a channel is often the part the driver uses
+  (`cover_rx` in the `select!`), not the object the sender is bound to.
+
+**The check that catches most of them:**
 ```
 grep -rn '<symbol>' src/ --include=*.rs | grep -v '<its own file>'
 ```

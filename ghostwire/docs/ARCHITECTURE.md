@@ -87,7 +87,7 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
 | # | Layer | Score | Status | Notes |
 |---|-------|-------|--------|-------|
 | 1 | Transport | 5/10 | ⚠️ Partial | libp2p (TCP+QUIC) and Reticulum work. Obfs4 is NOT implemented (no handshake/framing, not in the transport chain). Iroh and Bluetooth are not in the tree. |
-| 2 | Privacy | 4/10 | ⚠️ Incomplete | Message padding works. Cover traffic is built but NEVER STARTED, so idle periods stay distinguishable. `presence_obfuscation` has zero callers, so intersection attacks are unmitigated. |
+| 2 | Privacy | 4/10 | ⚠️ Incomplete | Message padding works, and cover traffic IS emitted (verified: 512B frames, scheduler started by `TrafficArmor::new`). The real gap is `presence_obfuscation` — zero callers, so intersection attacks are unmitigated. Note cover traffic rides gossipsub on the DM topic; that is padding, not wire-layer obfuscation, and does not survive an active prober. |
 | 3 | Encryption | 8/10 | ✅ Working | AES-256-GCM, X25519, ML-KEM, small-order defense |
 | 4 | Identity | 6/10 | ⚠️ Partial | Keys work, revocation missing |
 | 5 | Security | 8/10 | ✅ Working | SecurityManager, Audit, RateLimit, CVE patches |
@@ -129,7 +129,7 @@ GhostWire is a decentralized P2P encrypted mesh communication system built in Ru
    d. Signs with Ed25519
 5. PrivacyLayer:
    a. Wraps in Sphinx packet (fixed 2252B)
-   b. Adds padding (512B blocks) — WORKS. Cover traffic is built but never started.
+   b. Adds padding (512B blocks) — WORKS. Cover traffic (512B random frames on the DM topic) also runs.
    c. Applies Poisson timing (planned)
 6. TransportManager:
    a. Selects best transport (libp2p TCP+QUIC, Reticulum). Obfs4 NOT implemented.
