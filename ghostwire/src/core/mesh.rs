@@ -17,6 +17,7 @@ use futures_util::StreamExt;
 use libp2p::gossipsub::IdentTopic;
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Behaviour as Kad;
+use rand::Rng;
 // NoTcpTransport needed
 use libp2p::{
     core::{transport::upgrade::Version, transport::Transport},
@@ -107,6 +108,8 @@ pub enum MeshCommand {
     PublishWorldDiscovery {
         reply: oneshot::Sender<Result<()>>,
     },
+    /// Announce after a random delay, without blocking the Swarm event loop.
+    DeferredAnnounce,
     SetWorldDiscoveryProvider {
         enabled: bool,
         reply: oneshot::Sender<Result<()>>,
@@ -285,6 +288,12 @@ pub struct MeshTransport {
     mdns_last_event: Arc<AtomicU64>,
     mdns_enabled: bool,
     discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
+    /// Presence-obfuscation settings, handed to each driver generation.
+    ///
+    /// Lives here (not only on the driver) because the supervisor rebuilds the
+    /// mesh: each replacement driver must inherit the same policy, or a rebuild
+    /// would silently revert to fixed-cadence announcing.
+    presence: crate::core::network::presence_obfuscation::PresenceConfig,
     /// False once the swarm driver task has stopped (panic or clean exit).
     ///
     /// The driver owns the Swarm and is consumed by `run()`, so if it dies
@@ -600,6 +609,7 @@ impl MeshTransport {
                 security_stats: SecurityStats::default(),
             })),
             current_shard: shard_id.to_string(),
+            presence: Default::default(),
             alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             _core_messages: core_messages,
@@ -787,6 +797,8 @@ impl MeshTransport {
         ));
 
         let driver = MeshDriver {
+            presence: self.presence.clone(),
+            deferred_announce_at: None,
             swarm,
             command_rx,
             _node_id: self.node_id.clone(),
@@ -1469,6 +1481,20 @@ struct MeshDriver {
     encryption_manager: Arc<EncryptionManager>,
     _username_discovery: Arc<UsernameDiscovery>,
     event_bus: Option<tokio::sync::broadcast::Sender<crate::core::CoreEvent>>,
+    /// Presence-obfuscation settings.
+    ///
+    /// World discovery used to publish on a fixed 60s timer AND immediately on
+    /// every `NewListenAddr`. Both are fingerprintable: an observer learns
+    /// exactly when this node came up and can count announces to the second.
+    /// `apply_connect_jitter` delays the connect-time publish, and the periodic
+    /// publish randomises its interval so the cadence carries no constant period.
+    presence: crate::core::network::presence_obfuscation::PresenceConfig,
+    /// Armed deadline for a jittered startup announce, or None.
+    ///
+    /// A deadline in the driver's select! rather than a `sleep` in the handler:
+    /// the handler runs on the same loop that must keep servicing the Swarm, so
+    /// awaiting there starves connections. See MeshCommand::DeferredAnnounce.
+    deferred_announce_at: Option<tokio::time::Instant>,
     pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
     message_store: Arc<crate::core::store::SecureMessageStore>,
     core_messages: Arc<RwLock<Vec<Message>>>,
@@ -1597,7 +1623,50 @@ impl MeshDriver {
                         }
                     }
                 }
+                _ = async {
+                    match self.deferred_announce_at {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        // Park forever when no announce is pending. `pending()`
+                        // is a far-future deadline, so this branch never fires.
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    self.deferred_announce_at = None;
+                    let _ = self.publish_world_discovery().await;
+                }
                 _ = world_discovery_interval.tick() => {
+                    // Randomise the interval, not just the first publish.
+                    //
+                    // A fixed period is itself a signal: an observer who
+                    // timestamps N announces recovers the exact constant, and
+                    // an exactly-60s cadence is trivially distinctive next to
+                    // ordinary traffic. Varying it means the gaps carry no
+                    // information beyond "some time passed".
+                    let jitter = if self.presence.jitter_on_connect {
+                        rand::rng().random_range(
+                            0..=self.presence.connect_jitter_max_secs.max(1) * 1000,
+                        )
+                    } else {
+                        0
+                    };
+                    // Do NOT sleep here. This runs inside the driver's single
+                    // `select!` over the Swarm, so awaiting a timer would stall
+                    // the whole event loop: no inbound frames, no pings, and
+                    // peers timing out while we "wait to announce". That broke
+                    // delivery_rate (peers cancelled their dials as
+                    // `PeerCondition::Disconnected` no longer held).
+                    //
+                    // Jittering a timer is only meaningful if the timer itself
+                    // varies, so re-arm the interval with a random period
+                    // instead of delaying the publish. The announce fires at a
+                    // randomised cadence and the loop never blocks.
+                    if self.presence.jitter_on_connect {
+                        let spread = self.presence.connect_jitter_max_secs.max(1) * 1000;
+                        let jitter = rand::rng().random_range(0..=spread);
+                        world_discovery_interval.reset_after(std::time::Duration::from_millis(
+                            60_000 + jitter,
+                        ));
+                    }
                     let _ = self.publish_world_discovery().await;
                 }
                 _ = key_rotation_interval.tick() => {
@@ -1786,6 +1855,26 @@ impl MeshDriver {
             MeshCommand::PublishWorldDiscovery { reply } => {
                 let result = self.publish_world_discovery().await;
                 let _ = reply.send(result);
+            }
+            MeshCommand::DeferredAnnounce => {
+                // Delay on a SEPARATE task and come back through the command
+                // channel. Awaiting the delay here would block the same select!
+                // that drives the Swarm, which is exactly the bug that made
+                // delivery_rate fail (peers cancelled their dials while we
+                // "waited to announce"). The command channel is Clone, so the
+                // detached task can re-enter the loop safely.
+                // Sleep on a detached task that OWNS NOTHING but a timer, and
+                // leave an armed deadline in the driver's select!. The driver
+                // consumes command_rx and has no sender, so it cannot re-enter
+                // itself; the timer branch is the wake-up.
+                let delay_ms = if self.presence.jitter_on_connect {
+                    rand::rng()
+                        .random_range(0..=self.presence.connect_jitter_max_secs.max(1) * 1000)
+                } else {
+                    0
+                };
+                self.deferred_announce_at =
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_millis(delay_ms));
             }
             MeshCommand::SetWorldDiscoveryProvider { enabled, reply } => {
                 let key = libp2p::kad::RecordKey::new(&provider_record_key(
@@ -2198,7 +2287,29 @@ impl MeshDriver {
         if let SwarmEvent::NewListenAddr { address, .. } = &event {
             if self.world_discovery_enabled {
                 tracing::info!(address = %address, "World discovery listener available; publishing signed presence");
-                let _ = self.publish_world_discovery().await;
+                // NO delay here, deliberately. This runs inside the Swarm event
+                // loop, so awaiting a timer would stall every other event:
+                // inbound frames, pings, and connection maintenance. That is not
+                // hypothetical -- it broke delivery_rate. Node A slept up to 30s
+                // inside its event handler, node B's dial was cancelled because
+                // `PeerCondition::Disconnected` no longer held, and both nodes
+                // then looked like broken transports.
+                //
+                // The connect-time jitter is instead applied by the deferred
+                // announce below, which runs on its own task rather than
+                // blocking the loop.
+                // Arm a jittered deadline rather than publishing now. The
+                // driver IS the event loop here, so it sets the timer and the
+                // select! branch above fires the announce. Blocking here would
+                // stall every other Swarm event and break peer dials.
+                let delay_ms = if self.presence.jitter_on_connect {
+                    rand::rng()
+                        .random_range(0..=self.presence.connect_jitter_max_secs.max(1) * 1000)
+                } else {
+                    0
+                };
+                self.deferred_announce_at =
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_millis(delay_ms));
             }
         }
         if let SwarmEvent::ConnectionEstablished {
