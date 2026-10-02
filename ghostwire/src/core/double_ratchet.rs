@@ -473,6 +473,18 @@ impl RatchetSessionManager {
         self.sessions.write().remove(peer_id).is_some()
     }
 
+    /// Drop every ratchet session at once.
+    ///
+    /// Needed by `EncryptionManager::lock_private_state`. A ratchet session
+    /// carries its own root key, chain key and DH private key and is
+    /// completely independent of the manager's `private_key`, so clearing
+    /// only `private_key` left a locked node able to decrypt v4 traffic
+    /// indefinitely. `remove_session` cannot cover this because the caller
+    /// has no list of peer ids to iterate.
+    pub fn clear_all_sessions(&self) {
+        self.sessions.write().clear();
+    }
+
     pub fn session_count(&self) -> usize {
         self.sessions.read().len()
     }
