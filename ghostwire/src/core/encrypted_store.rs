@@ -13,6 +13,7 @@
 //!
 //! This replaces the unencrypted sled usage throughout Ghostwire.
 
+use crate::core::binary_hardening::LockedBuffer;
 use anyhow::Result;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -28,15 +29,13 @@ use sled::Db;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const STORE_VERSION: u8 = 1;
 const NONCE_LEN: usize = 12;
 const KEY_HASH_PREFIX: &[u8] = b"gw_khash_v1:";
 
-/// The encrypted storage layer master key. ZeroizedOnDrop for safety.
-#[derive(Zeroize, ZeroizeOnDrop)]
-struct MasterKey([u8; 32]);
+/// The encrypted storage layer master key. Zeroized on drop via LockedBuffer.
+struct MasterKey(LockedBuffer);
 
 /// Metadata stored alongside each encrypted value
 #[derive(Debug, Serialize, Deserialize)]
@@ -316,7 +315,13 @@ impl EncryptedStore {
         let copy_len = bytes.len().min(32);
         key[..copy_len].copy_from_slice(&bytes[..copy_len]);
 
-        Ok(MasterKey(key))
+        // Copy into the locked buffer FIRST, then wipe the stack array.
+        // Wiping before the copy would leave the master key as 32 zero bytes.
+        let master_key = MasterKey(LockedBuffer::from_bytes(&key));
+        for b in key.iter_mut() {
+            *b = 0;
+        }
+        Ok(master_key)
     }
 }
 
@@ -345,6 +350,16 @@ mod tests {
         store.put("my_key", b"secret value", None).await.unwrap();
         let val = store.get("my_key").await.unwrap().unwrap();
         assert_eq!(val, b"secret value");
+    }
+
+    #[tokio::test]
+    async fn master_key_is_not_all_zero() {
+        let store = make_store().await;
+        let key = store.master_key.read().await;
+        assert!(
+            key.0.iter().any(|&b| b != 0),
+            "master key derived as 32 zero bytes"
+        );
     }
 
     #[tokio::test]

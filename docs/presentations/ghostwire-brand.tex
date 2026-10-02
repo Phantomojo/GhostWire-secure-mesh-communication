@@ -1,0 +1,206 @@
+% GhostWire Bible — branded LaTeX/PDF stylesheet
+% Identity per docs/BRAND_GUIDELINES.md
+
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{tcolorbox}
+\usepackage{hyperref}
+\usepackage{tocloft}
+
+% ── Brand palette ──────────────────────────────────────────────
+\definecolor{GWGreen}{HTML}{00DC9A}      % GhostWire Green — primary accent
+\definecolor{GWDeep}{HTML}{0F172A}       % Deep Space Blue — primary ink
+\definecolor{GWSun}{HTML}{F97316}        % Sunrise Orange — alerts / risk
+\definecolor{GWTrust}{HTML}{3B82F6}      % Trust Blue — informational
+\definecolor{GWYellow}{HTML}{FBBF24}     % Safeguard Yellow — caution
+\definecolor{GWMuted}{HTML}{64748B}      % Muted slate — secondary text
+\definecolor{GWLine}{HTML}{CBD5E1}       % Hairline rules
+\definecolor{GWPanel}{HTML}{F1F5F9}      % Panel background
+
+\geometry{letterpaper, top=1in, bottom=1in, left=1in, right=1in}
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+
+% ── Type ───────────────────────────────────────────────────────
+% lmodern covers Latin/Greek but not every symbol the chapters use (≤, β, γ,
+% ≤, arrows). DejaVu Sans has far wider coverage and ships with the system.
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\renewcommand{\familydefault}{\sfdefault}
+% Declare the math/symbol ranges pdflatex cannot derive from T1 encoding, so
+% Greek letters and comparison operators used in the PRoPHET sections typeset
+% instead of erroring.
+\DeclareUnicodeCharacter{03B2}{$\beta$}
+\DeclareUnicodeCharacter{03B3}{$\gamma$}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{00D7}{\ensuremath{\times}}
+\DeclareUnicodeCharacter{00B5}{\ensuremath{\mu}}
+\DeclareUnicodeCharacter{00B1}{\ensuremath{\pm}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+
+% ── Headings ───────────────────────────────────────────────────
+\titleformat{\section}{\Large\bfseries\color{GWDeep}}{\thesection}{0.75em}{}
+\titleformat{\subsection}{\large\bfseries\color{GWDeep}}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{GWTrust}}{\thesubsubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+\titlespacing*{\subsection}{0pt}{14pt}{6pt}
+
+% ── Links ──────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=GWDeep,
+  urlcolor=GWTrust,
+  citecolor=GWTrust,
+  pdftitle={GhostWire Bible},
+  pdfauthor={Michael Irungu Muriithi},
+  pdfsubject={Secure Modular Mesh Networking},
+  pdfkeywords={GhostWire, mesh networking, libp2p, post-quantum, Sphinx, anonymity}
+}
+
+% ── Running header/footer ──────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\color{GWMuted}GhostWire Bible}
+\fancyhead[R]{\footnotesize\color{GWGreen}\textbf{GW}}
+\fancyfoot[C]{\footnotesize\color{GWMuted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{GWLine}\leaders\hrule height \headrulewidth\hfill}}
+
+% ── TOC ────────────────────────────────────────────────────────
+\renewcommand{\contentsname}{Contents}
+\renewcommand{\cftsecfont}{\color{GWDeep}}
+\renewcommand{\cftsecpagefont}{\color{GWGreen}}
+\setlength{\cftbeforesecskip}{6pt}
+
+% ── Images / diagrams ──────────────────────────────────────────
+% Rendered mermaid diagrams arrive as PNGs. Constrain them to the text block
+% so wide architecture diagrams scale down instead of running off the page.
+% pandoc's own template defines \maxwidth; ours must too, and it must be a
+% length assignment, not a \renewcommand.
+\newcommand{\maxwidth}{0.95\linewidth}
+\usepackage{graphicx}
+\let\Oldincludegraphics\includegraphics
+\renewcommand{\includegraphics}[2][]{%
+  \IfNoValueTF{#1}%
+    {\Oldincludegraphics[width=\maxwidth]{#2}}%
+    {\Oldincludegraphics[#1,width=\maxwidth]{#2}}%
+}
+\usepackage{float}
+% pandoc wraps every image in \pandocbounded{...}; without a definition for it,
+% LaTeX silently discards the image. Provide a no-op passthrough.
+\providecommand{\pandocbounded}[1]{#1}
+% pandoc already emits a well-formed figure environment with \centering and a
+% caption, and images are width-constrained above. Wrapping \figure again here
+% breaks that structure, so leave it alone.
+\usepackage{caption}
+\captionsetup{font=small,labelfont={bf,color=GWDeep},skip=6pt}
+\renewcommand{\figurename}{Diagram}
+
+% ── pandoc helper macros ───────────────────────────────────────
+% pandoc's default template defines these; without them list spacing and
+% nested content render wrong.
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\providecommand{\passthrough}[1]{#1}
+% Longtables: pandoc uses them for wide tables and needs these three.
+\providecommand{\LTpost}{}
+\providecommand{\LTend}{}
+\setlength{\LTcapwidth}{0.95\textwidth}
+
+% ── Tables ─────────────────────────────────────────────────────
+% pandoc emits \begin{longtable} for wide tables and booktabs rules
+% (\toprule/\midrule/\bottomrule) for styled ones. Without these packages
+% loaded, those tables fail to typeset. \real{} (used for column-width
+% arithmetic in pandoc's longtable preamble) additionally requires calc.
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{calc}
+
+% ── Unicode symbols ────────────────────────────────────────────
+% The chapters use Greek letters and comparison operators. pdflatex cannot
+% derive these from T1 encoding alone, so declare them explicitly.
+\DeclareUnicodeCharacter{03B2}{\ensuremath{\beta}}
+\DeclareUnicodeCharacter{03B3}{\ensuremath{\gamma}}
+\DeclareUnicodeCharacter{03BC}{\ensuremath{\mu}}
+\DeclareUnicodeCharacter{03A3}{\ensuremath{\Sigma}}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+\DeclareUnicodeCharacter{00D7}{\ensuremath{\times}}
+\DeclareUnicodeCharacter{00B1}{\ensuremath{\pm}}
+\DeclareUnicodeCharacter{2192}{\ensuremath{\rightarrow}}
+\DeclareUnicodeCharacter{21D2}{\ensuremath{\Rightarrow}}
+\DeclareUnicodeCharacter{2014}{---}
+\DeclareUnicodeCharacter{2013}{--}
+\DeclareUnicodeCharacter{2018}{`}
+\DeclareUnicodeCharacter{2019}{'}
+\DeclareUnicodeCharacter{201C}{``}
+\DeclareUnicodeCharacter{201D}{''}
+% ── Code ───────────────────────────────────────────────────────
+\usepackage{listings}
+\lstdefinestyle{gwcode}{
+  backgroundcolor=\color{GWPanel},
+  basicstyle=\ttfamily\small\color{GWDeep},
+  keywordstyle=\bfseries\color{GWGreen},
+  commentstyle=\itshape\color{GWMuted},
+  frame=single,
+  rulecolor=\color{GWLine},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible
+}
+\lstset{style=gwcode}
+
+% ── Callout boxes ──────────────────────────────────────────────
+\newtcolorbox{gwverified}{
+  colback=GWGreen!8, colframe=GWGreen, coltitle=GWDeep,
+  fonttitle=\bfseries, title={Verified}, boxrule=0.8pt, arc=2pt
+}
+\newtcolorbox{gwplanned}{
+  colback=GWYYellow!8, colframe=GWYYellow, coltitle=GWDeep,
+  fonttitle=\bfseries, title={Planned / not implemented}, boxrule=0.8pt, arc=2pt
+}
+\newtcolorbox{gwstatus}{
+  colback=GWTrust!7, colframe=GWTrust, coltitle=GWDeep,
+  fonttitle=\bfseries, title={Capability status}, boxrule=0.8pt, arc=2pt
+}
+
+% ── Deferred setup ─────────────────────────────────────────────
+% Called from the document body (see the prelude the build script generates),
+% because array/longtable/booktabs/tocloft are loaded after header-includes.
+\newcommand{\gwdocsetup}{%
+  % \arraystretch is intentionally not set here: it is only a valid length once
+  % the array package is loaded, and pandoc's template loads array AFTER this
+  % header-include. Setting it here raises "Illegal unit of measure" and aborts
+  % the build. The template's own default is correct.
+  \renewcommand{\cftsecfont}{\color{GWDeep}}%
+  \renewcommand{\cftsecpagefont}{\color{GWGreen}}%
+  \setlength{\cftbeforesecskip}{6pt}%
+}
+
+% ── Cover ──────────────────────────────────────────────────────
+\newcommand{\gwcover}{%
+  \begin{titlepage}
+  \thispagestyle{empty}
+  \centering
+  \vspace*{1.2in}
+  {\Huge\bfseries\color{GWDeep} GhostWire Bible\par}
+  \vspace{0.4cm}
+  {\Large\color{GWGreen} The Comprehensive Guide to Secure, Modular Mesh Networking\par}
+  \vspace{0.8cm}
+  {\color{GWGreen}\rule{3in}{2pt}\par}
+  \vspace{0.6cm}
+  {\large\itshape\color{GWMuted} Communication for everyone, everywhere, every time.\par}
+  \vfill
+  {\small\color{GWMuted}
+    Version 2.1 \textbullet{} September 2026\par
+    Michael Irungu Muriithi \textbullet{} Nairobi, Kenya\par}
+  \vspace{0.4cm}
+  {\footnotesize\color{GWMuted}Capability claims verified against \texttt{rescue/sep-disk-tree} @ \texttt{e4028f2}\par}
+  \end{titlepage}
+}

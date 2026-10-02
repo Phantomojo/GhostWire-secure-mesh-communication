@@ -57,8 +57,44 @@ fn extract_error_message(body: &str) -> String {
         .unwrap_or_else(|| body.trim().to_string())
 }
 
+/// Base URL for talking to a running daemon over its HTTP API.
+///
+/// `--api-host` is a real, accepted flag, but the URL builder below used to
+/// hardcode `127.0.0.1` regardless of it. That made the flag silently
+/// ineffective: a daemon bound to a Tailscale address (the normal setup for a
+/// two-node mesh test, where the daemon must be reachable off-box) answered
+/// requests on its LAN/overlay address while the CLI dialled loopback and
+/// reported "Is the daemon running? Try: ghostwire start" — a message that
+/// points at the wrong problem entirely, because the daemon was running and
+/// healthy.
+///
+/// Honour the host the caller actually passed. `GHOSTWIRE_API_HOST` lets
+/// scripts and the TUI set it without repeating the flag.
 fn daemon_base_url(port: u16) -> String {
-    format!("http://127.0.0.1:{}", port)
+    let host = std::env::var("GHOSTWIRE_API_HOST")
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| {
+            let args: Vec<String> = std::env::args().collect();
+            let mut it = args.iter();
+            while let Some(a) = it.next() {
+                if a == "--api-host" {
+                    return it.next().cloned();
+                }
+                if let Some(v) = a.strip_prefix("--api-host=") {
+                    return Some(v.to_string());
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    // An IPv6 literal must be bracketed in a URL authority.
+    if host.contains(':') && !host.starts_with('[') {
+        format!("http://[{}]:{}", host, port)
+    } else {
+        format!("http://{}:{}", host, port)
+    }
 }
 
 /// List peers by querying the RUNNING daemon over its HTTP API.

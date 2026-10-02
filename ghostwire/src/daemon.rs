@@ -13,6 +13,7 @@
 use anyhow::{anyhow, Result};
 use std::fs;
 use std::io::{self, Read, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -132,32 +133,72 @@ fn default_quic_port() -> u16 {
 
 /// Wait until the daemon is serving a successful HTTP health response.
 /// A PID only proves that the child exists; this proves the API is usable.
-pub fn wait_for_ready(port: u16, timeout: Duration) -> Result<()> {
+///
+/// `api_host` must be the host the daemon was told to bind. This used to probe
+/// `127.0.0.1` unconditionally, so a daemon started with
+/// `--api-host <tailscale-ip>` was reported "did not become ready" after 20
+/// seconds even though it was up and answering on its real address — the
+/// readiness probe was dialling a loopback port nothing was listening on. That
+/// false negative is what made a healthy two-node mesh look broken.
+///
+/// Loopback is still tried as a fallback: if the daemon did bind all
+/// interfaces, `0.0.0.0`/`::` means loopback is valid too.
+pub fn wait_for_ready(port: u16, api_host: &str, timeout: Duration) -> Result<()> {
     let deadline = Instant::now() + timeout;
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+
+    let host = if api_host.is_empty() || api_host == "0.0.0.0" || api_host == "::" {
+        Ipv4Addr::LOCALHOST.to_string()
+    } else {
+        api_host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string()
+    };
+
     let request = format!(
-        "GET /api/v2/ready HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
-        port
+        "GET /api/v2/ready HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
+        host, port
     );
 
+    let probe = |addr: &str| -> bool {
+        let Ok(ip) = addr.parse::<IpAddr>() else {
+            return false;
+        };
+        let target = SocketAddr::new(ip, port);
+        let Ok(mut stream) =
+            std::net::TcpStream::connect_timeout(&target, Duration::from_millis(250))
+        else {
+            return false;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .ok();
+        stream
+            .set_write_timeout(Some(Duration::from_millis(500)))
+            .ok();
+        if stream.write_all(request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut response = [0u8; 256];
+        match stream.read(&mut response) {
+            Ok(size) => {
+                let head = String::from_utf8_lossy(&response[..size]);
+                head.starts_with("HTTP/") && head.contains(" 200 ")
+            }
+            Err(_) => false,
+        }
+    };
+
+    let candidates = if host == Ipv4Addr::LOCALHOST.to_string() {
+        vec![Ipv4Addr::LOCALHOST.to_string()]
+    } else {
+        vec![host.clone(), Ipv4Addr::LOCALHOST.to_string()]
+    };
+
     while Instant::now() < deadline {
-        if let Ok(mut stream) =
-            std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250))
-        {
-            stream
-                .set_read_timeout(Some(Duration::from_millis(500)))
-                .ok();
-            stream
-                .set_write_timeout(Some(Duration::from_millis(500)))
-                .ok();
-            if stream.write_all(request.as_bytes()).is_ok() {
-                let mut response = [0u8; 256];
-                if let Ok(size) = stream.read(&mut response) {
-                    let head = String::from_utf8_lossy(&response[..size]);
-                    if head.starts_with("HTTP/") && head.contains(" 200 ") {
-                        return Ok(());
-                    }
-                }
+        for addr in &candidates {
+            if probe(addr) {
+                return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(200));

@@ -1,0 +1,173 @@
+% GhostWire Bible — DARK stylesheet
+% Identity per docs/BRAND_GUIDELINES.md, applied to a Deep Space Blue ground.
+% Pair with the dark mermaid theme (GW_DARK=1) so diagrams match the page.
+%
+% Long-form reading on pure white is uncomfortable for many readers; the brand
+% already carries a dark ground (#0F172A), so this uses it rather than
+% inventing a new one.
+
+% \rowcolors (table row banding) only exists when xcolor is loaded with the
+% 'table' option.
+\usepackage[table]{xcolor}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{tocloft}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{calc}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{caption}
+
+% ── Brand palette on dark ──────────────────────────────────────
+\definecolor{GWGreen}{HTML}{00DC9A}      % GhostWire Green — primary accent
+\definecolor{GWDeep}{HTML}{0F172A}      % Deep Space Blue — page ground
+\definecolor{GWSun}{HTML}{F97316}       % Sunrise Orange
+\definecolor{GWTrust}{HTML}{60A5FA}     % Trust Blue, lightened for dark ground
+\definecolor{GWYellow}{HTML}{FBBF24}    % Safeguard Yellow
+\definecolor{GWInk}{HTML}{E2E8F0}       % Body text — soft off-white, not #FFF
+\definecolor{GWMuted}{HTML}{94A3B8}     % Secondary text
+\definecolor{GWLine}{HTML}{334155}      % Hairline rules
+\definecolor{GWPanel}{HTML}{111C33}     % Panel / code background
+\definecolor{GWCard}{HTML}{14342C}      % Verified-panel background
+\definecolor{GWAlt}{HTML}{1E293B}     % Table row banding
+
+\geometry{letterpaper, top=1in, bottom=1in, left=1in, right=1in}
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+
+\pagecolor{GWDeep}
+\color{GWInk}
+
+% ── Type ───────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\renewcommand{\familydefault}{\sfdefault}
+\DeclareUnicodeCharacter{03B2}{\ensuremath{\beta}}
+\DeclareUnicodeCharacter{03B3}{\ensuremath{\gamma}}
+\DeclareUnicodeCharacter{03BC}{\ensuremath{\mu}}
+\DeclareUnicodeCharacter{03A3}{\ensuremath{\Sigma}}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+\DeclareUnicodeCharacter{00D7}{\ensuremath{\times}}
+\DeclareUnicodeCharacter{00B1}{\ensuremath{\pm}}
+\DeclareUnicodeCharacter{2014}{---}
+\DeclareUnicodeCharacter{2013}{--}
+
+% ── Headings ───────────────────────────────────────────────────
+\titleformat{\section}{\Large\bfseries\color{GWGreen}}{\thesection}{0.75em}{}
+\titleformat{\subsection}{\large\bfseries\color{GWInk}}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{GWTrust}}{\thesubsubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+\titlespacing*{\subsection}{0pt}{14pt}{6pt}
+
+% ── Links ──────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=GWGreen,
+  urlcolor=GWTrust,
+  citecolor=GWTrust,
+  pdfauthor={Michael Irungu Muriithi},
+  pdfsubject={Secure Modular Mesh Networking}
+}
+
+% ── Running header/footer ──────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\color{GWMuted}GhostWire Bible}
+\fancyhead[R]{\footnotesize\color{GWGreen}\textbf{GW}}
+\fancyfoot[C]{\footnotesize\color{GWMuted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{GWLine}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0pt}
+
+% ── TOC ────────────────────────────────────────────────────────
+% TOC restyling happens in the document body (see \gwdocsetup below), by which
+% point the template has loaded tocloft. Header-includes run too early for it.
+
+% ── Images ─────────────────────────────────────────────────────
+\newcommand{\maxwidth}{0.95\linewidth}
+\let\Oldincludegraphics\includegraphics
+\renewcommand{\includegraphics}[2][]{%
+  \IfNoValueTF{#1}%
+    {\Oldincludegraphics[width=\maxwidth]{#2}}%
+    {\Oldincludegraphics[#1,width=\maxwidth]{#2}}%
+}
+\providecommand{\pandocbounded}[1]{#1}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\providecommand{\passthrough}[1]{#1}
+\providecommand{\LTpost}{}
+\providecommand{\LTend}{}
+\setlength{\LTcapwidth}{0.95\textwidth}
+
+\captionsetup{font=small,labelfont={bf,color=GWGreen},textfont={color=GWMuted},skip=6pt}
+\renewcommand{\figurename}{Diagram}
+
+% ── Tables ─────────────────────────────────────────────────────
+% Table styling is applied by \gwdocsetup, invoked at the top of the document
+% body, because array/longtable/booktabs are loaded after header-includes.
+
+% ── Code ───────────────────────────────────────────────────────
+\lstdefinestyle{gwcode}{
+  backgroundcolor=\color{GWPanel},
+  basicstyle=\ttfamily\small\color{GWInk},
+  keywordstyle=\bfseries\color{GWGreen},
+  commentstyle=\itshape\color{GWMuted},
+  stringstyle=\color{GWYellow},
+  frame=single,
+  rulecolor=\color{GWLine},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible
+}
+\lstset{style=gwcode}
+
+% ── Deferred setup ─────────────────────────────────────────────
+% Called from the document body, where every package the template loads is
+% available. Applies table and TOC styling.
+% pandoc's template does not load tocloft; the header does, so \gwdocsetup can
+% restyle the TOC. \usepackage is illegal in the document body, hence the split.
+\newcommand{\gwdocsetup}{%
+  % Row spacing: pandoc's own template already sets \arraystretch after
+  % loading array, and setting it from a header-include races that load.
+  % Leaving it at the template default is correct, not an omission.
+  % Booktabs rules are deliberately left at their defaults. They expand to
+  % \noalign, which is only legal inside an alignment, so they cannot be
+  % redefined or wrapped in \textcolor from the preamble. On the dark ground
+  % the default rules read as light hairlines, which is the correct weight
+  % anyway. Colouring them would need \noalign-safe redefinition per table.
+  % Row banding and \arrayrulecolor are deliberately omitted: both need
+  % xcolor's 'table' option, which pandoc's own \usepackage{xcolor} (loaded
+  % after this header) drops. Booktabs rules carry the table structure.
+  %
+  \renewcommand{\cftsecfont}{\color{GWInk}}%
+  \renewcommand{\cftsecpagefont}{\color{GWGreen}}%
+  \setlength{\cftbeforesecskip}{6pt}%
+}
+
+% ── Cover ──────────────────────────────────────────────────────
+\newcommand{\gwcover}{%
+  \begin{titlepage}
+  \thispagestyle{empty}
+  \centering
+  \vspace*{1.2in}
+  {\Huge\bfseries\color{GWInk} GhostWire Bible\par}
+  \vspace{0.4cm}
+  {\Large\color{GWGreen} The Comprehensive Guide to Secure, Modular Mesh Networking\par}
+  \vspace{0.8cm}
+  {\color{GWGreen}\rule{3in}{2pt}\par}
+  \vspace{0.6cm}
+  {\large\itshape\color{GWMuted} Communication for everyone, everywhere, every time.\par}
+  \vfill
+  {\small\color{GWMuted}
+    Version 2.1 \textbullet{} September 2026\par
+    Michael Irungu Muriithi \textbullet{} Nairobi, Kenya\par}
+  \vspace{0.4cm}
+  {\footnotesize\color{GWMuted}Capability claims verified against \texttt{rescue/sep-disk-tree} @ \texttt{e4028f2}\par}
+  \end{titlepage}
+}

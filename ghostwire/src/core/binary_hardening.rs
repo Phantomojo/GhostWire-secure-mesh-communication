@@ -92,6 +92,20 @@ impl LockedBuffer {
     }
 }
 
+impl std::ops::Deref for LockedBuffer {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for LockedBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
 impl Drop for LockedBuffer {
     fn drop(&mut self) {
         // Zeroize before unlock

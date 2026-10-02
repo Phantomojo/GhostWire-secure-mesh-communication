@@ -1,5 +1,11 @@
 # Rust build artifacts
+# Unanchored so this matches at any depth. The previously anchored `/target/`
+# only matched a target/ at the repository root, while the actual build output
+# lives at ghostwire/target (75 GB of it) — so `git add -A` walked the whole
+# thing, which is what made committing stall for 8+ minutes and time out.
 /target/
+ghostwire/target/
+**/target/
 *.rs.bk
 
 # Vendored dependencies (downloaded by cargo, not committed)

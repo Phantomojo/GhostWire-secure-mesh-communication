@@ -3,12 +3,13 @@
 ---
 
 ## Table of Contents
+
 1. Welcome & Philosophy
 2. How Anyone Can Contribute
 3. Code Contributions (Technical)
 4. Writing, Design, and Outreach
 5. Community Guidelines & Code of Conduct
-6. First Contribution Stories
+6. Example Contribution Journey
 7. Visuals: Contribution Flow
 8. Best Practices for Contributors
 9. Further Reading & Resources
@@ -17,11 +18,12 @@
 
 ## 1. Welcome & Philosophy
 
-GhostWire is open to everyone—whether you’re a coder, writer, designer, tester, or just curious. Here’s how you can help build the future of secure, decentralized communication.
+GhostWire is open to everyone, whether you are a coder, writer, designer, tester, or just curious. Here is how you can help build the future of secure, decentralized communication.
 
 ---
 
 ## 2. How Anyone Can Contribute
+
 - **Test the app:** Try GhostWire and give feedback.
 - **Report bugs:** Found a problem? Open an issue on GitHub.
 - **Write docs:** Help make guides clearer for everyone.
@@ -32,6 +34,7 @@ GhostWire is open to everyone—whether you’re a coder, writer, designer, test
 ---
 
 ## 3. Code Contributions (Technical)
+
 - **Code style:**
   - Rust: Follow rustfmt and clippy guidelines.
   - JS/TS: Use Prettier and ESLint.
@@ -48,6 +51,7 @@ GhostWire is open to everyone—whether you’re a coder, writer, designer, test
 ---
 
 ## 4. Writing, Design, and Outreach
+
 - **Docs:** Improve guides, add visuals, translate content.
 - **Design:** Create logos, UI mockups, infographics.
 - **Outreach:** Write blog posts, give talks, organize events.
@@ -55,6 +59,7 @@ GhostWire is open to everyone—whether you’re a coder, writer, designer, test
 ---
 
 ## 5. Community Guidelines & Code of Conduct
+
 - **Be respectful:** Treat everyone with kindness and respect.
 - **Be inclusive:** Welcome contributors of all backgrounds and skill levels.
 - **No harassment:** Zero tolerance for abuse or discrimination.
@@ -62,35 +67,38 @@ GhostWire is open to everyone—whether you’re a coder, writer, designer, test
 
 ---
 
-## 6. First Contribution Stories
-- **Story 1:** “I fixed a typo in the docs and learned how to use GitHub!”
-- **Story 2:** “I added a new transport and saw my code help real users.”
-- **Story 3:** “I designed a new logo and it’s now on the project site.”
+## 6. Example Contribution Journey
+
+The following are hypothetical examples showing common paths new contributors take. They are not real stories but illustrate what a typical contribution looks like.
+
+**Example 1: Documentation fix**
+A contributor notices a typo in the FAQ chapter. They fork the repo, edit the markdown file, and submit a pull request. The fix is reviewed and merged within a day. This is a common first contribution because it requires minimal code knowledge.
+
+**Example 2: Transport implementation**
+A developer wants to add a new transport. They implement the `Transport` trait, write unit tests, and register it in the adapter registry. After code review and a few rounds of feedback, the transport is merged. This path requires deeper Rust knowledge.
+
+**Example 3: Design contribution**
+A designer creates a new icon set for the web UI. They submit the assets through a pull request with a preview. The design team reviews the assets for consistency with the project style guide.
 
 ---
 
 ## 7. Visuals: Contribution Flow
-```mermaid
-graph TD;
-  Contributor["You"] --> Fork["Fork Repo"]
-  Fork --> Branch["Create Branch"]
-  Branch --> PR["Submit Pull Request"]
-  PR --> Review["Code Review"]
-  Review --> Merge["Merged!"]
-```
+![contributing](diagrams/08_contributing--1.png)
 
 ---
 
 ## 8. Best Practices for Contributors
+
 - Communicate clearly and kindly.
-- Ask questions if you’re unsure.
+- Ask questions if you are unsure.
 - Test your changes before submitting.
 - Review the documentation and guidelines.
-- Celebrate your contributions!
+- Celebrate your contributions.
 
 ---
 
 ## 9. Further Reading & Resources
+
 - [GhostWire GitHub](https://github.com/phantomojo/GhostWire-secure-mesh-communication)
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [Code of Conduct](../ghostwire/CODE_OF_CONDUCT.md)
@@ -98,4 +106,4 @@ graph TD;
 
 ---
 
-## End of Chapter 
+## End of Chapter

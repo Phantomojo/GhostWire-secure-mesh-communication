@@ -7,6 +7,7 @@
 //! - ✅ Replay protection: Message deduplication integration
 //! - ✅ Timing attacks: Constant-time signature verification
 
+use crate::core::binary_hardening::LockedBuffer;
 use crate::core::crl;
 use crate::core::double_ratchet;
 use crate::core::persistence_manager::PersistenceManager;
@@ -23,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// ✅ NEW: Secure error types (no panic on invalid input)
 #[derive(Debug, thiserror::Error)]
@@ -121,7 +122,7 @@ pub struct EncryptionManager {
     /// Public metadata remains available while the profile is locked.
     key_pair: GhostKeyPair,
     /// Private material is populated only after explicit user-keyed unlock.
-    private_key: Arc<Mutex<Option<Zeroizing<Vec<u8>>>>>,
+    private_key: Arc<Mutex<Option<LockedBuffer>>>,
     peer_keys: Arc<Mutex<HashMap<String, PeerKey>>>,
     rng: SystemRandom,
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
@@ -230,7 +231,7 @@ impl EncryptionManager {
 
     fn from_key_pair(key_pair: GhostKeyPair) -> Self {
         let mut public = key_pair.clone();
-        let private = Zeroizing::new(key_pair.private_key.clone());
+        let private = LockedBuffer::from_bytes(&key_pair.private_key);
         public.private_key.clear();
         EncryptionManager {
             key_pair: public,
@@ -255,12 +256,12 @@ impl EncryptionManager {
         manager
     }
 
-    fn private_key_snapshot(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn private_key_snapshot(&self) -> Result<LockedBuffer, Box<dyn std::error::Error>> {
         self.private_key
             .lock()
             .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))?
             .as_ref()
-            .map(|key| key.to_vec())
+            .map(|key| LockedBuffer::from_bytes(key))
             .ok_or_else(|| "encryption private state is locked".into())
     }
 
@@ -327,7 +328,7 @@ impl EncryptionManager {
             .private_key
             .lock()
             .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? =
-            Some(Zeroizing::new(private));
+            Some(private);
         Ok(())
     }
 
@@ -397,7 +398,7 @@ impl EncryptionManager {
 
     fn persisted_state(&self) -> Result<PersistedEncryption, Box<dyn std::error::Error>> {
         let mut key_pair = self.key_pair.clone();
-        key_pair.private_key = self.private_key_snapshot()?;
+        key_pair.private_key = self.private_key_snapshot()?.to_vec();
         Ok(PersistedEncryption {
             key_pair,
             key_rotation_interval: self.key_rotation_interval,
@@ -1247,7 +1248,7 @@ impl EncryptionManager {
         if self.should_rotate_keys() {
             tracing::info!(msg = "Rotating encryption keys");
             let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
-            let private = Zeroizing::new(new_key_pair.private_key.clone());
+            let private = LockedBuffer::from_bytes(&new_key_pair.private_key);
             self.key_pair = new_key_pair;
             self.key_pair.private_key.clear();
             *self
@@ -1278,7 +1279,7 @@ impl EncryptionManager {
         persistence.ensure_user_unlocked()?;
         tracing::info!(msg = "Rotating user-keyed encryption keys");
         let new_key_pair = Self::generate_hybrid_key_pair(&self.rng)?;
-        let private = Zeroizing::new(new_key_pair.private_key.clone());
+        let private = LockedBuffer::from_bytes(&new_key_pair.private_key);
         self.key_pair = new_key_pair;
         self.key_pair.private_key.clear();
         *self

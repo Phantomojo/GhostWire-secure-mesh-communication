@@ -1416,9 +1416,24 @@ pub async fn supervise_mesh<R, Fut>(
 {
     use std::sync::atomic::Ordering::SeqCst;
 
+    // Check the shutdown flag BEFORE logging severity. A clean stop drives the
+    // driver future to completion, which lands in the `Ok(())` arm below; logging
+    // "exited unexpectedly; the node has no mesh connectivity" at error level for
+    // an intentional shutdown writes an alarming line into every normal stop,
+    // and the very next line says "exited during shutdown; not rebuilding",
+    // contradicting it. Anyone grepping these logs during a real outage would
+    // chase that phantom. Only an unscheduled exit is an error.
+    let intentional = stopping.load(SeqCst);
+
     match futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(driver)).await {
         Ok(()) => {
-            tracing::error!("Mesh driver exited unexpectedly; the node has no mesh connectivity");
+            if intentional {
+                tracing::info!("Mesh driver exited as part of a requested shutdown");
+            } else {
+                tracing::error!(
+                    "Mesh driver exited unexpectedly; the node has no mesh connectivity"
+                );
+            }
         }
         Err(payload) => {
             let detail = payload

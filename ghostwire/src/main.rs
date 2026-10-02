@@ -426,7 +426,11 @@ async fn main() -> Result<()> {
                             println!("   Mesh size: {}", mesh_size);
                         }
                         println!();
-                        daemon::wait_for_ready(args.port, Duration::from_secs(20))?;
+                        daemon::wait_for_ready(
+                            args.port,
+                            &effective_api_host,
+                            Duration::from_secs(20),
+                        )?;
                         println!(
                             "✅ GhostWire is ready on http://{}:{}",
                             effective_api_host, args.port
@@ -517,10 +521,11 @@ async fn main() -> Result<()> {
                         quic_port: 8081,
                         ..Default::default()
                     });
+                    let tui_api_host = extra.api_host.clone();
                     match daemon::start_daemon(Some(port), Some(extra)) {
                         Ok(pid) => {
                             eprintln!("✅ Daemon started (PID {})", pid);
-                            daemon::wait_for_ready(port, Duration::from_secs(20))?;
+                            daemon::wait_for_ready(port, &tui_api_host, Duration::from_secs(20))?;
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to auto-start daemon: {}", e);
@@ -528,7 +533,13 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                daemon::wait_for_ready(port, Duration::from_secs(20))?;
+                // The daemon may have been started earlier with a non-loopback
+                // api-host; probe that address, not a hardcoded 127.0.0.1.
+                let tui_api_host = daemon::load_saved_args()
+                    .map(|a| a.api_host)
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
+                daemon::wait_for_ready(port, &tui_api_host, Duration::from_secs(20))?;
                 eprintln!("🔌 Connecting to daemon on port {}...", port);
                 ghostwire::tui::run_tui(port)
                     .await
