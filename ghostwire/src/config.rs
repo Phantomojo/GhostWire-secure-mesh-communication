@@ -11,6 +11,10 @@ pub struct Config {
     pub network: NetworkConfig,
     pub encryption: EncryptionConfig,
     pub features: FeatureFlags,
+    /// Load provenance so saves write back to the file we loaded from;
+    /// skipped by serde so `save()` output stays pure configuration.
+    #[serde(skip)]
+    pub loaded_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -221,9 +225,10 @@ impl Default for Config {
                 function_gemma_url: "http://localhost:11434".to_string(),
                 // Edge Device Detection
                 auto_detect_device: true,
-                device_class: String::new(), // Auto-detect
+                device_class: String::new(),                 // Auto-detect
                 available_ram_mb: 0,         // Auto-detect
             },
+            loaded_path: None,
         }
     }
 }
@@ -264,7 +269,10 @@ impl Config {
         }
 
         let content = fs::read_to_string(&expanded_path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        // Record the expanded path: save() writes literally and never
+        // expands "~", so the raw path would fail on save.
+        config.loaded_path = Some(std::path::PathBuf::from(&expanded_path));
         Ok(config)
     }
 

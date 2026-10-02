@@ -410,6 +410,9 @@ impl SystemController {
         let mut applied_now: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
         let mut not_applied: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
         let mut ignored: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut persisted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut pending_config: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
 
         let mut nickname: Option<String> = None;
         let mut bio: Option<String> = None;
@@ -440,18 +443,20 @@ impl SystemController {
                         ignored.insert(key.clone(), serde_json::json!("type mismatch: expected string"));
                     }
                 },
-                "listenPort" | "maxPeers" | "keyRotationDays" => {
-                    if value.is_number() {
-                        not_applied.insert(
-                            key.clone(),
-                            serde_json::json!(
-                                "not applied: config-file persistence not implemented; running process unchanged"
-                            ),
-                        );
-                    } else {
+                "listenPort" | "maxPeers" | "keyRotationDays" => match value.as_u64() {
+                    None => {
                         ignored.insert(key.clone(), serde_json::json!("type mismatch: expected number"));
                     }
-                }
+                    Some(n) if key == "listenPort" && n > u16::MAX as u64 => {
+                        ignored.insert(
+                            key.clone(),
+                            serde_json::json!("value out of range: port max 65535"),
+                        );
+                    }
+                    Some(n) => {
+                        pending_config.insert(key.clone(), n);
+                    }
+                },
                 "enableMdns" => {
                     ignored.insert(
                         key.clone(),
@@ -460,6 +465,54 @@ impl SystemController {
                 }
                 _ => {
                     ignored.insert(key.clone(), serde_json::json!("unknown setting"));
+                }
+            }
+        }
+
+        if !pending_config.is_empty() {
+            match state.full_config.loaded_path.clone() {
+                None => {
+                    for key in pending_config.keys() {
+                        not_applied.insert(
+                            key.clone(),
+                            serde_json::json!(
+                                "not applied: no config file path recorded at load; cannot persist; running process unchanged"
+                            ),
+                        );
+                    }
+                }
+                Some(path) => {
+                    let mut cfg = state.full_config.clone();
+                    for (key, value) in &pending_config {
+                        match key.as_str() {
+                            "listenPort" => cfg.server.port = *value as u16,
+                            "maxPeers" => cfg.network.max_peers = *value as usize,
+                            "keyRotationDays" => cfg.security.key_rotation_interval_days = *value,
+                            _ => {}
+                        }
+                    }
+                    match cfg.save(&path.to_string_lossy()) {
+                        Ok(()) => {
+                            for key in pending_config.keys() {
+                                persisted.insert(
+                                    key.clone(),
+                                    serde_json::json!(
+                                        "saved to config file; takes effect after restart; running process unchanged"
+                                    ),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            for key in pending_config.keys() {
+                                not_applied.insert(
+                                    key.clone(),
+                                    serde_json::json!(format!(
+                                        "not applied: failed to write config file: {e}; running process unchanged"
+                                    )),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -477,6 +530,7 @@ impl SystemController {
             "applied_now": applied_now,
             "not_applied": not_applied,
             "ignored": ignored,
+            "persisted": persisted,
         });
         Json(ApiV2Response::success(response))
     }
@@ -602,8 +656,9 @@ mod settings_honesty_tests {
         // No blanket success, no persistence claim without persistence.
         assert_ne!(data.get("status"), Some(&serde_json::json!("settings_updated")));
         assert!(
-            data.get("persisted").is_none(),
-            "persisted claim is forbidden when nothing is written to disk"
+            data["persisted"].as_object().is_some_and(|o| o.is_empty()),
+            "persisted must be present but empty when nothing is written to disk, got: {:?}",
+            data.get("persisted")
         );
 
         // The metadata claim must be true: a follow-up GET shows it applied.
@@ -611,6 +666,56 @@ mod settings_honesty_tests {
         let body = body_json(resp).await;
         assert_eq!(body["data"]["displayName"], "Alice");
         assert_eq!(body["data"]["bio"], "test bio");
+    }
+
+    #[tokio::test]
+    async fn update_settings_persists_config_keys_when_path_is_recorded() {
+        let _home = crate::core::encryption::test_home();
+        let dir = tempfile::tempdir().expect("tempdir for config persistence");
+        let path = dir.path().join("ghostwire.toml");
+        let mut cfg = Config::default();
+        cfg.loaded_path = Some(path.clone());
+        let state = test_state("update_settings_persist", cfg).await;
+
+        let req = serde_json::json!({ "listenPort": 9999u16 });
+        let resp = SystemController::update_settings(State(state.clone()), Json(req))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp).await;
+        let data = &body["data"];
+
+        // The running process is never claimed as reconfigured...
+        assert!(
+            data["applied_now"].get("listenPort").is_none(),
+            "listenPort must not be claimed as applied_now: nothing reconfigures the listener"
+        );
+        // ...the write is reported separately, with its real semantics.
+        assert!(
+            data["not_applied"].get("listenPort").is_none(),
+            "listenPort was persisted, not refused: got not_applied={}",
+            data["not_applied"]
+        );
+        let persisted = data["persisted"]["listenPort"].as_str().unwrap_or("");
+        assert!(
+            persisted.contains("saved to config file"),
+            "persisted must say the file was written, got: {persisted:?}"
+        );
+        assert!(
+            persisted.contains("restart"),
+            "persisted must say a restart is required, got: {persisted:?}"
+        );
+        assert!(
+            persisted.contains("running process unchanged"),
+            "persisted must not imply live reconfiguration, got: {persisted:?}"
+        );
+
+        // The claim must be true on disk: the file actually contains the new port.
+        let text = std::fs::read_to_string(&path).expect("config file must be written");
+        assert!(
+            text.contains("port = 9999"),
+            "saved config must contain the new port, got:\n{text}"
+        );
     }
 
     #[tokio::test]

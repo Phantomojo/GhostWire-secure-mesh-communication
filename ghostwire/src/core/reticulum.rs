@@ -41,290 +41,90 @@ pub struct ReticulumNode {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cross-transport discovery: two phases
+
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// RNS is the cold-start mechanism for libp2p. Two nodes that have never met, on
-// networks with no shared subnet and no bootstrap address, can still find each
-// other because RNS announces are routed across the backbone. Once connected,
-// libp2p carries the real traffic.
-//
-// The phases are deliberately asymmetric, and that is the whole security design:
-//
-//   PHASE 1 — public announce. Identity only: who I am, that I am GhostWire,
-//     and how to reach me over RNS. NO libp2p ADDRESSES. Announce packets are
-//     broadcast to every hop on the backbone, so anything placed here is public.
-//     Publishing the libp2p address would hand every RNS hop a direct route to
-//     the node, letting an observer bypass RNS entirely and attack the libp2p
-//     endpoint directly — which defeats the purpose of discovering over RNS.
-//
-//   PHASE 2 — authenticated exchange. Only after the peer's phase-1 signature
-//     has been verified against its registered key do the libp2p addresses cross,
-//     over the RNS channel that is already encrypted. The addresses never touch
-//     the public backbone.
-//
-// The invariant, stated so it can be checked rather than trusted: an
-// advertisement handed to the mesh for dialing must never carry addresses that
-// arrived via the public announce path. `DiscoveryAnnounce` has no `addresses`
-// field at all, so the unsafe shape cannot be expressed in that type.
+// Cross-transport discovery hand-off
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Public, backbone-visible announcement. Identity only, by construction.
+/// Build the phase-1 public announce for this node.
 ///
-/// Deliberately NOT `WorldDiscoveryAdvertisement`: that struct carries
-/// `addresses`, and using it here would put every node's libp2p endpoints on
-/// every RNS hop. See the phase notes above.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DiscoveryAnnounce {
-    /// Wire-format version, so a future change is rejected rather than misparsed.
-    pub version: u16,
-    /// Scopes the announcement to one GhostWire network, so a node on another
-    /// network cannot inject itself into this one.
-    pub network_id: String,
-    /// Stable libp2p peer id, base58.
-    pub peer_id: String,
-    pub did: String,
-    /// Ed25519 public key that `signature` is verified against.
-    pub public_key: Vec<u8>,
-    pub issued_at: u64,
-    pub expires_at: u64,
-    /// Monotonic counter, so a replayed older announce is distinguishable.
-    pub sequence: u64,
-    pub signature: Vec<u8>,
+/// Identity only. Deliberately returns a `DiscoveryAnnounce`, which has no
+/// `addresses` field: the public RNS backbone broadcasts this to every hop, and
+/// a libp2p address here would let an observer bypass RNS and dial the node's
+/// endpoint directly. The addresses travel later, in `AddressExchange`, over the
+/// authenticated channel. See `core::discovery_bridge` for the full rationale.
+pub fn build_discovery_announce(
+    network_id: &str,
+    peer_id: &str,
+    did: &str,
+    public_key: &[u8; 32],
+    signing_key: &[u8; 32],
+    sequence: u64,
+) -> Result<crate::core::discovery_bridge::DiscoveryAnnounce> {
+    Ok(crate::core::discovery_bridge::DiscoveryAnnounce::new(
+        network_id, peer_id, did, *public_key, sequence,
+    )
+    .sign(signing_key)?)
 }
 
-pub const DISCOVERY_ANNOUNCE_VERSION: u16 = 1;
-
-/// Longest peer id / DID accepted from the network.
-const MAX_ID_LEN: usize = 256;
-/// Bound on signature length, matching world_discovery's own limit.
-const MAX_SIGNATURE_LEN: usize = 128;
-
-/// Liveness window for an announce. Short, because an announce is a routing hint
-/// and a stale one costs nothing but a wasted dial.
-pub const DISCOVERY_ANNOUNCE_TTL_SECS: u64 = 300;
-
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-impl DiscoveryAnnounce {
-    pub fn new(
-        network_id: &str,
-        peer_id: &str,
-        did: &str,
-        public_key: [u8; 32],
-        sequence: u64,
-    ) -> Self {
-        let now = now_unix();
-        Self {
-            version: DISCOVERY_ANNOUNCE_VERSION,
-            network_id: network_id.to_string(),
-            peer_id: peer_id.to_string(),
-            did: did.to_string(),
-            public_key: public_key.to_vec(),
-            issued_at: now,
-            expires_at: now.saturating_add(DISCOVERY_ANNOUNCE_TTL_SECS),
-            sequence,
-            signature: Vec::new(),
-        }
-    }
-
-    /// Canonical bytes to sign: everything except the signature itself.
-    pub fn signing_bytes(&self) -> Result<Vec<u8>> {
-        let mut unsigned = self.clone();
-        unsigned.signature.clear();
-        Ok(bincode::serialize(&unsigned)?)
-    }
-
-    pub fn sign(mut self, secret: &[u8; 32]) -> Result<Self> {
-        let bytes = self.signing_bytes()?;
-        use ed25519_dalek::{Signer, SigningKey};
-        self.signature = SigningKey::from_bytes(secret)
-            .sign(&bytes)
-            .to_bytes()
-            .to_vec();
-        Ok(self)
-    }
-
-    /// Verify structure, network scope, expiry, and signature.
-    ///
-    /// The trusted public key is the caller's out-of-band anchor (the peer's
-    /// registered key). The signature is checked against THAT key, and the
-    /// announce's own `public_key` field must equal it — otherwise a valid
-    /// signature by some other key would authenticate an arbitrary `peer_id`.
-    ///
-    /// Returns the authenticated peer id. Nothing downstream should act on this
-    /// announcement before this returns `Ok`.
-    pub fn verify(
-        &self,
-        expected_network_id: &str,
-        now: u64,
-        trusted_key: &[u8; 32],
-    ) -> Result<String> {
-        if self.version != DISCOVERY_ANNOUNCE_VERSION {
-            anyhow::bail!("unsupported discovery announce version {}", self.version);
-        }
-        if self.network_id != expected_network_id {
-            anyhow::bail!("discovery announce network scope mismatch");
-        }
-        if self.peer_id.is_empty() || self.peer_id.len() > MAX_ID_LEN {
-            anyhow::bail!("invalid discovery announce peer id");
-        }
-        if self.did.is_empty() || self.did.len() > MAX_ID_LEN {
-            anyhow::bail!("invalid discovery announce did");
-        }
-        if self.signature.is_empty() || self.signature.len() > MAX_SIGNATURE_LEN {
-            anyhow::bail!("invalid discovery announce signature");
-        }
-        if self.public_key.as_slice() != trusted_key.as_slice() {
-            anyhow::bail!("discovery announce key does not match the trusted key");
-        }
-        if self.expires_at <= self.issued_at || now >= self.expires_at {
-            anyhow::bail!("discovery announce expired or has a malformed window");
-        }
-
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-        let vk = VerifyingKey::from_bytes(trusted_key)
-            .map_err(|e| anyhow::anyhow!("bad announce key: {e}"))?;
-        let sig_bytes: [u8; 64] = self
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("unexpected signature length {}", self.signature.len()))?;
-        vk.verify(&self.signing_bytes()?, &Signature::from_bytes(&sig_bytes))
-            .map_err(|_| anyhow::anyhow!("discovery announce signature invalid"))?;
-
-        Ok(self.peer_id.clone())
-    }
-}
-
-/// Phase 2: the authenticated address exchange.
+/// Build the phase-2 authenticated exchange carrying this node's libp2p
+/// addresses.
 ///
-/// Sent over the RNS channel only after phase 1 verified the peer. This is the
-/// ONLY type by which a libp2p address may travel between nodes, which is what
-/// makes the two-phase boundary enforceable rather than a convention.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AddressExchange {
-    pub version: u16,
-    pub network_id: String,
-    /// Peer id this exchange is FROM, so the receiver can check both directions.
-    pub peer_id: String,
-    pub did: String,
-    /// libp2p multiaddrs, e.g. /ip4/203.0.113.5/tcp/4001.
-    pub addresses: Vec<String>,
-    pub issued_at: u64,
-    pub expires_at: u64,
-    pub sequence: u64,
-    pub signature: Vec<u8>,
+/// Only ever sent over the encrypted RNS channel, to a peer whose phase-1
+/// signature has already been verified against a trusted key.
+pub fn build_address_exchange(
+    network_id: &str,
+    peer_id: &str,
+    did: &str,
+    addresses: Vec<String>,
+    signing_key: &[u8; 32],
+    sequence: u64,
+) -> Result<crate::core::discovery_bridge::AddressExchange> {
+    Ok(crate::core::discovery_bridge::AddressExchange::new(
+        network_id, peer_id, did, addresses, sequence,
+    )
+    .sign(signing_key)?)
 }
 
-pub const ADDRESS_EXCHANGE_VERSION: u16 = 1;
-/// Bound on addresses accepted from the exchange.
-pub const MAX_EXCHANGE_ADDRESSES: usize = 16;
-/// Exchange entries are used to dial promptly, so they expire sooner.
-pub const ADDRESS_EXCHANGE_TTL_SECS: u64 = 120;
-
-impl AddressExchange {
-    pub fn new(
-        network_id: &str,
-        peer_id: &str,
-        did: &str,
-        addresses: Vec<String>,
-        sequence: u64,
-    ) -> Self {
-        let now = now_unix();
-        Self {
-            version: ADDRESS_EXCHANGE_VERSION,
-            network_id: network_id.to_string(),
-            peer_id: peer_id.to_string(),
-            did: did.to_string(),
-            addresses,
-            issued_at: now,
-            expires_at: now.saturating_add(ADDRESS_EXCHANGE_TTL_SECS),
-            sequence,
-            signature: Vec::new(),
-        }
-    }
-
-    pub fn signing_bytes(&self) -> Result<Vec<u8>> {
-        let mut unsigned = self.clone();
-        unsigned.signature.clear();
-        Ok(bincode::serialize(&unsigned)?)
-    }
-
-    pub fn sign(mut self, secret: &[u8; 32]) -> Result<Self> {
-        let bytes = self.signing_bytes()?;
-        use ed25519_dalek::{Signer, SigningKey};
-        self.signature = SigningKey::from_bytes(secret)
-            .sign(&bytes)
-            .to_bytes()
-            .to_vec();
-        Ok(self)
-    }
-
-    /// Verify, then return ONLY the addresses that are safe to dial.
-    ///
-    /// Each address is validated via `world_discovery::validate_address` with
-    /// `allow_private: false`, so a peer cannot make this node dial loopback,
-    /// multicast, unspecified, or an RFC1918 address it does not control.
-    ///
-    /// Returns `(peer_id, addresses)`. The caller dials exactly these and
-    /// nothing else — this is the single point where an address becomes
-    /// dialable, which is what makes the phase-1/phase-2 boundary enforceable.
-    pub fn verify(
-        &self,
-        expected_network_id: &str,
-        now: u64,
-        trusted_key: &[u8; 32],
-    ) -> Result<(String, Vec<String>)> {
-        if self.version != ADDRESS_EXCHANGE_VERSION {
-            anyhow::bail!("unsupported address exchange version {}", self.version);
-        }
-        if self.network_id != expected_network_id {
-            anyhow::bail!("address exchange network scope mismatch");
-        }
-        if self.peer_id.is_empty() || self.peer_id.len() > MAX_ID_LEN {
-            anyhow::bail!("invalid address exchange peer id");
-        }
-        if self.did.is_empty() || self.did.len() > MAX_ID_LEN {
-            anyhow::bail!("invalid address exchange did");
-        }
-        if self.signature.is_empty() || self.signature.len() > MAX_SIGNATURE_LEN {
-            anyhow::bail!("invalid address exchange signature");
-        }
-        if self.addresses.is_empty() || self.addresses.len() > MAX_EXCHANGE_ADDRESSES {
-            anyhow::bail!("invalid address exchange address count");
-        }
-        if self.expires_at <= self.issued_at || now >= self.expires_at {
-            anyhow::bail!("address exchange expired or has a malformed window");
-        }
-
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-        let vk = VerifyingKey::from_bytes(trusted_key)
-            .map_err(|e| anyhow::anyhow!("bad exchange key: {e}"))?;
-        let sig_bytes: [u8; 64] = self
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("unexpected signature length"))?;
-        vk.verify(&self.signing_bytes()?, &Signature::from_bytes(&sig_bytes))
-            .map_err(|_| anyhow::anyhow!("address exchange signature invalid"))?;
-
-        let accepted: Vec<String> = self
-            .addresses
-            .iter()
-            .filter(|a| crate::core::world_discovery::validate_address(a, false).is_ok())
-            .cloned()
-            .collect();
-        if accepted.is_empty() {
-            anyhow::bail!("address exchange carried no dialable public address");
-        }
-        Ok((self.peer_id.clone(), accepted))
-    }
+/// Turn bytes received from a peer's authenticated RNS channel into the one
+/// value the mesh is allowed to dial.
+///
+/// This is the seam's whole surface. It parses an `AddressExchange`, verifies it
+/// against the caller's out-of-band trusted key, and returns a
+/// `VerifiedPeerAddress` — a type with no public constructor, so it cannot be
+/// built from anything else. A caller cannot dial an unverified or expired
+/// address, and cannot dial one that failed `validate_address(_, false)`, because
+/// such an address never reaches the return value.
+///
+/// The mesh side still must re-check `expires_at` at dial time via
+/// `is_dialable_at`; verify-time and dial-time are different moments.
+///
+/// # Note on provenance
+///
+/// This function accepts ONLY an `AddressExchange`. There is deliberately no
+/// path here that accepts a `DiscoveryAnnounce`, and none should be added: a
+/// public announce cannot express an address, so accepting one could only ever
+/// be a mistake.
+pub fn verify_address_exchange(
+    bytes: &[u8],
+    expected_network_id: &str,
+    now: u64,
+    trusted_key: &[u8; 32],
+) -> Result<crate::core::discovery_bridge::VerifiedPeerAddress> {
+    use bincode::Options;
+    // Bounded decode: an attacker controls these bytes, and an unbounded
+    // `bincode::deserialize` will happily allocate for a fabricated length
+    // prefix. The fixint/limit pairing is deliberate — see the same note in
+    // sphinx.rs and wire_protocol.rs.
+    let opts = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .with_limit(bytes.len() as u64);
+    let exchange: crate::core::discovery_bridge::AddressExchange = opts
+        .deserialize(bytes)
+        .map_err(|e| anyhow::anyhow!("malformed address exchange: {e}"))?;
+    exchange.verify(expected_network_id, now, trusted_key)
 }
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1170,218 +970,6 @@ pub fn compute_reticulum_address(master_seed: &[u8; 32]) -> String {
     let static_secret = x25519_dalek::StaticSecret::from(*master_seed);
     let identity = PrivateIdentity::new(static_secret, sign_key);
     identity.address_hash().to_hex_string()
-}
-
-#[cfg(test)]
-mod discovery_tests {
-    use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
-
-    /// A deterministic keypair for "the peer we trust".
-    fn trusted() -> (SigningKey, [u8; 32]) {
-        let sk = SigningKey::from_bytes(&[7u8; 32]);
-        let pk = sk.verifying_key().to_bytes();
-        (sk, pk)
-    }
-
-    /// A DIFFERENT keypair, standing in for an attacker. Must not collide with
-    /// `trusted()`, or the key-mismatch tests would pass for the wrong reason —
-    /// the same trap opencode hit with a "locked node" test that was green with
-    /// the fix reverted.
-    fn attacker() -> (SigningKey, [u8; 32]) {
-        let sk = SigningKey::from_bytes(&[99u8; 32]);
-        let pk = sk.verifying_key().to_bytes();
-        (sk, pk)
-    }
-
-    // PHASE 1 — the public announce must not be able to carry an address at all.
-    // This is the invariant Michael identified: an address in a public announce
-    // is broadcast to every RNS hop, letting an observer bypass RNS and dial the
-    // libp2p endpoint directly.
-
-    #[test]
-    fn discovery_announce_has_no_address_field() {
-        // Compile-time proof, not a runtime check: if someone adds `addresses`
-        // to DiscoveryAnnounce, this destructuring stops compiling.
-        let (sk, pk) = trusted();
-        let a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1).sign(&sk.to_bytes()).unwrap();
-        let DiscoveryAnnounce {
-            version,
-            network_id,
-            peer_id,
-            did,
-            public_key,
-            issued_at,
-            expires_at,
-            sequence,
-            signature,
-        } = a.clone();
-        assert_eq!(version, DISCOVERY_ANNOUNCE_VERSION);
-        assert_eq!(network_id, "net1");
-        assert_eq!(peer_id, "12D3KooWabc");
-        assert_eq!(did, "did:ghost:x");
-        assert_eq!(public_key, pk.to_vec());
-        assert!(issued_at > 0);
-        assert!(expires_at > issued_at);
-        assert_eq!(sequence, 1);
-        assert!(!signature.is_empty());
-    }
-
-    #[test]
-    fn signed_announce_verifies_against_its_key() {
-        let (sk, pk) = trusted();
-        let a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        let now = now_unix();
-        assert_eq!(a.verify("net1", now, &pk).unwrap(), "12D3KooWabc");
-    }
-
-    #[test]
-    fn announce_from_another_network_is_refused() {
-        let (sk, pk) = trusted();
-        let a = DiscoveryAnnounce::new("attacker-net", "12D3KooWabc", "did:ghost:x", pk, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        // This is what stops a node on another network injecting itself here.
-        assert!(a.verify("our-net", now_unix(), &pk).is_err());
-    }
-
-    #[test]
-    fn announce_signed_by_a_different_key_is_refused() {
-        let (_, pk) = trusted();
-        let (attacker_sk, attacker_pk) = attacker();
-        let a = DiscoveryAnnounce::new("net1", "12D3KooWevil", "did:ghost:evil", attacker_pk, 1)
-            .sign(&attacker_sk.to_bytes())
-            .unwrap();
-        // Trusted key is pk, but the announce claims attacker_pk and is signed by
-        // the attacker. Must be refused.
-        assert!(a.verify("net1", now_unix(), &pk).is_err());
-    }
-
-    #[test]
-    fn expired_announce_is_refused() {
-        let (sk, pk) = trusted();
-        let a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        assert!(a.verify("net1", a.expires_at + 1, &pk).is_err());
-    }
-
-    #[test]
-    fn tampered_announce_is_refused() {
-        let (sk, pk) = trusted();
-        let a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        // Attacker swaps the peer id after signing.
-        let mut bad = a.clone();
-        bad.peer_id = "12D3KooWevil".to_string();
-        assert!(bad.verify("net1", now_unix(), &pk).is_err());
-    }
-
-    // PHASE 2 — the only path by which an address becomes dialable.
-
-    #[test]
-    fn address_exchange_yields_validated_addresses() {
-        let (sk, pk) = trusted();
-        let x = AddressExchange::new(
-            "net1",
-            "12D3KooWabc",
-            "did:ghost:x",
-            vec!["/ip4/203.0.113.5/tcp/4001".to_string()],
-            1,
-        )
-        .sign(&sk.to_bytes())
-        .unwrap();
-        let (peer, addrs) = x.verify("net1", now_unix(), &pk).unwrap();
-        assert_eq!(peer, "12D3KooWabc");
-        assert_eq!(addrs, vec!["/ip4/203.0.113.5/tcp/4001".to_string()]);
-    }
-
-    #[test]
-    fn exchange_cannot_make_us_dial_loopback_or_private_addresses() {
-        let (sk, pk) = trusted();
-        // allow_private: false, so these must all be dropped. If any survive, a
-        // peer could point us at our own host or an internal network.
-        let hostile = vec![
-            "/ip4/127.0.0.1/tcp/4001".to_string(),
-            "/ip4/10.0.0.5/tcp/4001".to_string(),
-            "/ip4/192.168.1.9/tcp/4001".to_string(),
-            "/ip4/172.16.4.4/tcp/4001".to_string(),
-            "/ip4/0.0.0.0/tcp/4001".to_string(),
-            "/ip4/224.0.0.1/tcp/4001".to_string(),
-        ];
-        let x = AddressExchange::new("net1", "12D3KooWabc", "did:ghost:x", hostile, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        // Nothing dialable remains, so verify must fail rather than return empty.
-        assert!(x.verify("net1", now_unix(), &pk).is_err());
-    }
-
-    #[test]
-    fn exchange_with_only_hostile_addresses_is_refused_even_with_a_public_one() {
-        let (sk, pk) = trusted();
-        let mixed = vec![
-            "/ip4/203.0.113.5/tcp/4001".to_string(),
-            "/ip4/127.0.0.1/tcp/4001".to_string(),
-        ];
-        let x = AddressExchange::new("net1", "12D3KooWabc", "did:ghost:x", mixed, 1)
-            .sign(&sk.to_bytes())
-            .unwrap();
-        let (_, addrs) = x.verify("net1", now_unix(), &pk).unwrap();
-        // The good address survives; the loopback one is dropped, not dialled.
-        assert_eq!(addrs, vec!["/ip4/203.0.113.5/tcp/4001".to_string()]);
-        assert!(!addrs.iter().any(|a| a.contains("127.0.0.1")));
-    }
-
-    #[test]
-    fn expired_exchange_is_refused() {
-        let (sk, pk) = trusted();
-        let x = AddressExchange::new(
-            "net1",
-            "12D3KooWabc",
-            "did:ghost:x",
-            vec!["/ip4/203.0.113.5/tcp/4001".to_string()],
-            1,
-        )
-        .sign(&sk.to_bytes())
-        .unwrap();
-        assert!(x.verify("net1", x.expires_at + 1, &pk).is_err());
-    }
-
-    #[test]
-    fn tampered_exchange_address_is_refused() {
-        let (sk, pk) = trusted();
-        let x = AddressExchange::new(
-            "net1",
-            "12D3KooWabc",
-            "did:ghost:x",
-            vec!["/ip4/203.0.113.5/tcp/4001".to_string()],
-            1,
-        )
-        .sign(&sk.to_bytes())
-        .unwrap();
-        // Swap the address after signing: signature must no longer verify.
-        let mut bad = x.clone();
-        bad.addresses = vec!["/ip4/198.51.100.9/tcp/4001".to_string()];
-        assert!(bad.verify("net1", now_unix(), &pk).is_err());
-    }
-
-    #[test]
-    fn exchange_from_another_network_is_refused() {
-        let (sk, pk) = trusted();
-        let x = AddressExchange::new(
-            "other-net",
-            "12D3KooWabc",
-            "did:ghost:x",
-            vec!["/ip4/203.0.113.5/tcp/4001".to_string()],
-            1,
-        )
-        .sign(&sk.to_bytes())
-        .unwrap();
-        assert!(x.verify("net1", now_unix(), &pk).is_err());
-    }
 }
 
 #[cfg(test)]

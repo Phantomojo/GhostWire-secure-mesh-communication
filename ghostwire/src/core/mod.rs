@@ -16,6 +16,7 @@ pub mod db;
 pub mod dht_signatures;
 pub mod disaster;
 pub mod discovery_directory;
+pub mod discovery_bridge;
 pub mod double_ratchet;
 pub mod dtn;
 pub mod encrypted_store;

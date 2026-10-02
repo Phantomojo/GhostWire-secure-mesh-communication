@@ -130,6 +130,14 @@ pub enum MeshCommand {
         address: Multiaddr,
         reply: oneshot::Sender<Result<()>>,
     },
+    /// Dial a peer whose libp2p addresses arrived over the authenticated RNS
+    /// phase-2 channel. `expires_at` is carried so the driver re-checks it at
+    /// dial time; a command can sit in the queue past the window.
+    DialVerifiedPeer {
+        peer_id: PeerId,
+        addresses: Vec<Multiaddr>,
+        expires_at: u64,
+    },
     Shutdown,
 }
 
@@ -1190,6 +1198,54 @@ impl MeshTransport {
         rx.await?
     }
 
+    /// Dial a peer that [`AddressExchange::verify`] has already blessed.
+    ///
+    /// Takes [`VerifiedPeerAddress`], which has no public constructor — it can
+    /// only be obtained from a successful `verify()`. That is what makes "an
+    /// address read off a public announce can never reach a dial" a property of
+    /// the types rather than a review convention. Do not widen this to take a
+    /// peer id and raw addresses; that deletes the only thing making it safe.
+    /// Verification deliberately does not happen here — the caller holds the
+    /// untrusted bytes, we hold the swarm.
+    pub async fn dial_verified_peer(
+        &self,
+        verified: crate::core::discovery_bridge::VerifiedPeerAddress,
+    ) -> Result<()> {
+        if !verified.is_dialable_at(now_secs()) {
+            anyhow::bail!("verified address for {} expired before dial", verified.peer_id);
+        }
+
+        let peer_id: PeerId = verified.peer_id.parse().map_err(|_| {
+            anyhow::anyhow!("verified address names an unparsable peer id: {}", verified.peer_id)
+        })?;
+
+        let addresses = verified
+            .addresses
+            .into_iter()
+            .filter_map(|a| match a.parse::<Multiaddr>() {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    tracing::warn!(%a, error = %e, "dropping unparsable verified address");
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if addresses.is_empty() {
+            anyhow::bail!("verified address yielded no parsable multiaddr");
+        }
+
+        self.command_tx
+            .read()
+            .await
+            .send(MeshCommand::DialVerifiedPeer {
+                peer_id,
+                addresses,
+                expires_at: verified.expires_at,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub fn get_connection_stats(&self) -> ConnectionStats {
         // Return default stats - obfs4 transport doesn't expose separate stats
         // Connection stats are now tracked at the swarm level
@@ -2229,6 +2285,28 @@ impl MeshDriver {
                     .kad
                     .add_address(&peer_id, address);
                 let _ = reply.send(Ok(()));
+            }
+            MeshCommand::DialVerifiedPeer {
+                peer_id,
+                addresses,
+                expires_at,
+            } => {
+                // Re-check expiry HERE, not at receive time. verify() ran before
+                // the command was queued and a queued command can sit past the
+                // window. Dialing an expired hint wastes a connection attempt and
+                // tells a stale peer we are still listening.
+                if now_secs() >= expires_at {
+                    tracing::debug!(%peer_id, "RNS address exchange expired before dial");
+                    return;
+                }
+                // Add every address to the DHT and the address book first: a later
+                // `swarm.dial(peer_id)` by Kademlia only resolves if we know where
+                // the peer is, and the point of phase 2 is that we now do.
+                for address in addresses {
+                    self.swarm.add_peer_address(peer_id, address.clone());
+                    self.swarm.behaviour_mut().kad.add_address(&peer_id, address);
+                }
+                self.dial_peer_if_needed(peer_id, None, "rns_phase2");
             }
             MeshCommand::Shutdown => {
                 tracing::info!("Mesh driver received shutdown command.");
@@ -3647,6 +3725,16 @@ impl MeshManager {
 
     pub async fn add_address(&self, peer_id: PeerId, address: Multiaddr) -> Result<()> {
         self.transport.add_address(peer_id, address).await
+    }
+
+    /// Dial a peer blessed by the RNS phase-2 exchange. See
+    /// [`MeshTransport::dial_verified_peer`] for why the parameter is not
+    /// constructible by the caller.
+    pub async fn dial_verified_peer(
+        &self,
+        verified: crate::core::discovery_bridge::VerifiedPeerAddress,
+    ) -> Result<()> {
+        self.transport.dial_verified_peer(verified).await
     }
 
     pub async fn get_topology(&self) -> MeshTopology {
