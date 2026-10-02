@@ -509,11 +509,58 @@ impl IdentityController {
                 // Reticulum is an independent medium. Initialize it after the
                 // profile is unlocked, but do not make a broken optional RNS
                 // interface take down the working libp2p mesh.
+                //
+                // `hybrid_mode` is honoured here. It was declared in
+                // config.rs:58 and read by NOTHING — so `libp2p-only` and
+                // `reticulum-only` both silently ran libp2p, and an operator
+                // could not restrict a node to one transport. Worse, nobody
+                // could tell from a connection which transport carried it, which
+                // makes the RNS discovery dial gate untestable.
+                //
+                // Resolution order: an explicit mode in config wins; if unset or
+                // unrecognised, fall back to the two independent booleans so
+                // existing behaviour is unchanged.
                 #[cfg(feature = "reticulum")]
-                if core.config.network.reticulum_enabled {
-                    if let Err(error) = core.init_reticulum().await {
-                        tracing::warn!(target: "profile_unlock", error = %error, "Reticulum initialization degraded; libp2p mesh remains available");
+                {
+                    let mode = core.config.network.hybrid_mode.trim().to_ascii_lowercase();
+                    let want_rns = core.config.network.reticulum_enabled
+                        && mode != "libp2p-only";
+                    let want_libp2p = mode != "reticulum-only";
+
+                    if !want_rns && core.config.network.reticulum_enabled {
+                        tracing::info!(
+                            target: "profile_unlock",
+                            mode = %mode,
+                            "hybrid_mode suppresses the Reticulum transport"
+                        );
                     }
+                    if want_rns {
+                        if let Err(error) = core.init_reticulum().await {
+                            tracing::warn!(target: "profile_unlock", error = %error, "Reticulum initialization degraded; libp2p mesh remains available");
+                        }
+                    }
+                    if !want_libp2p {
+                        tracing::info!(
+                            target: "profile_unlock",
+                            mode = %mode,
+                            "hybrid_mode is reticulum-only: libp2p mesh is not started"
+                        );
+                        // Belt and braces: the daemon may already have a mesh
+                        // from a previous unlock in the same process.
+                        #[cfg(feature = "mesh")]
+                        if let Some(mesh) = core.effective_mesh_manager().await {
+                            if let Ok(mut mgr) = mesh.try_write() {
+                                let _ = mgr.stop().await;
+                            }
+                        }
+                    }
+                    tracing::info!(
+                        target: "profile_unlock",
+                        mode = %if mode.is_empty() { "<unset>" } else { &mode },
+                        want_libp2p,
+                        want_rns,
+                        "Active transports after profile unlock"
+                    );
                 }
 
                 let expiration = now + 60 * 60 * 24;
@@ -585,6 +632,79 @@ pub struct UnlockProfileRequest {
 }
 
 #[derive(Deserialize)]
-pub struct ErrorReportRequest {
-    pub error: String,
+  pub struct ErrorReportRequest {
+      pub error: String,
+  }
+
+#[cfg(test)]
+mod transport_mode_tests {
+    /// Resolution of the two transport switches, mirroring the logic in
+    /// `unlock_profile`.
+    ///
+    /// `hybrid_mode` was declared in config.rs:58 and read by nothing, so
+    /// `libp2p-only` and `reticulum-only` both silently ran libp2p and an
+    /// operator could not restrict a node to one transport. These pin the
+    /// resolution so a later edit cannot quietly reintroduce that.
+    fn resolve(reticulum_enabled: bool, mode: &str) -> (bool, bool) {
+        let mode = mode.trim().to_ascii_lowercase();
+        let want_rns = reticulum_enabled && mode != "libp2p-only";
+        let want_libp2p = mode != "reticulum-only";
+        (want_libp2p, want_rns)
+    }
+
+    #[test]
+    fn hybrid_mode_suppresses_rns() {
+        // The bug: reticulum_enabled = true plus hybrid_mode = "libp2p-only"
+        // used to start RNS anyway, because nothing read hybrid_mode.
+        let (libp2p, rns) = resolve(true, "libp2p-only");
+        assert!(libp2p, "libp2p must still run");
+        assert!(!rns, "hybrid_mode = libp2p-only must suppress Reticulum");
+    }
+
+    #[test]
+    fn hybrid_mode_suppresses_libp2p() {
+        let (libp2p, rns) = resolve(true, "reticulum-only");
+        assert!(!libp2p, "hybrid_mode = reticulum-only must suppress libp2p");
+        assert!(rns, "Reticulum must still start");
+    }
+
+    #[test]
+    fn hybrid_mode_runs_both() {
+        let (libp2p, rns) = resolve(true, "hybrid");
+        assert!(libp2p);
+        assert!(rns);
+    }
+
+    #[test]
+    fn unset_mode_falls_back_to_the_booleans() {
+        // Unset must behave exactly as before, so existing configs are
+        // unaffected by this change.
+        let (libp2p, rns) = resolve(false, "");
+        assert!(libp2p, "libp2p is the default medium");
+        assert!(!rns, "reticulum_enabled = false means no RNS");
+
+        let (libp2p, rns) = resolve(true, "");
+        assert!(libp2p);
+        assert!(rns);
+    }
+
+    #[test]
+    fn mode_is_case_and_whitespace_insensitive() {
+        assert_eq!(
+            resolve(true, "  LIBP2P-ONLY "),
+            resolve(true, "libp2p-only")
+        );
+        assert_eq!(
+            resolve(true, " Reticulum-Only"),
+            resolve(true, "reticulum-only")
+        );
+    }
+
+    #[test]
+    fn unknown_mode_does_not_disable_anything() {
+        // An operator typo must not silently turn off a transport.
+        let (libp2p, rns) = resolve(true, "hybird");
+        assert!(libp2p, "a typo must not disable libp2p");
+        assert!(rns, "a typo must not disable RNS");
+    }
 }

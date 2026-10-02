@@ -111,6 +111,12 @@ matrix = []
 matrix-bridge = ["matrix-sdk"]
 meshtastic = ["serialport"]
 reticulum = ["reticulum-rs-transport"]
+# Enables the deliberate compile-failure test in tests/forge_attempt.rs, which
+# proves VerifiedPeerAddress cannot be constructed from outside its module.
+# CI runs `cargo test --features forge-attempt` and REQUIRES it to fail to
+# compile; a success means the security boundary has been broken. Never enable
+# this in a normal build.
+forge-attempt = []
 briar = []
 stealth = []
 bluetooth = []

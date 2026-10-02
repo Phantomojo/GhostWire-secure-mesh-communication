@@ -302,7 +302,15 @@ impl AddressExchange {
 /// nothing else, which is what makes "an address read off a public announce can
 /// never reach a dial" a property of the type system rather than a review
 /// convention.
+///
+/// `#[non_exhaustive]` is load-bearing, not decoration. Without it every field
+/// being `pub` means a struct literal in any other module compiles, which
+/// bypasses the `validate_address(_, false)` filter in `verify()` entirely — a
+/// caller could dial `192.168.1.50` forever. It was found and demonstrated by
+/// opencode, who compiled a forged value from `tests/node_to_node.rs` to prove
+/// it. The docstring above was written before that was true.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VerifiedPeerAddress {
     pub peer_id: String,
     pub did: String,
