@@ -318,6 +318,44 @@ impl EncryptionManager {
         Self::load_or_create()
     }
 
+    /// Construct with an operator-configured key-rotation interval, in days.
+    ///
+    /// `SecurityConfig::key_rotation_interval_days` is documented in
+    /// docs/CONFIGURATION.md and settable in ghostwire.toml, but nothing read it:
+    /// the interval was hardcoded to 7 days in `from_key_pair` and the check in
+    /// `should_rotate_keys` compared against that. An operator setting
+    /// `key_rotation_interval_days = 1` to tighten rotation got 7 days, and a
+    /// config that reads like a compliance control silently did nothing.
+    ///
+    /// Applied at construction rather than via a setter because `Arc<Encryption>`
+    /// has no interior mutability on this field and `should_rotate_keys` takes
+    /// `&self`. A restored profile still wins: `load_from_disk` overwrites the
+    /// interval from `PersistedEncryption` (see `from_persisted`), so an
+    /// existing node keeps the interval it was created with instead of silently
+    /// adopting a new one on upgrade.
+    ///
+    /// A `days` of 0 is rejected in favour of the default: it would make
+    /// `should_rotate_keys` true on every check, which is never the intent.
+    pub fn new_with_rotation_days(days: u64) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut manager = Self::load_or_create()?;
+        if days == 0 {
+            tracing::warn!(
+                target: "encryption",
+                "key_rotation_interval_days = 0 is not a usable interval; keeping the default"
+            );
+        } else {
+            let secs = days.saturating_mul(86_400);
+            tracing::info!(
+                target: "encryption",
+                days,
+                secs,
+                "Applying configured key rotation interval"
+            );
+            manager.key_rotation_interval = secs;
+        }
+        Ok(manager)
+    }
+
     /// Extract the X25519 static secret for Sphinx packet processing.
     /// Returns None if the key pair is too short (legacy format).
     pub fn x25519_secret(&self) -> Option<x25519_dalek::StaticSecret> {
@@ -1876,6 +1914,66 @@ pub(crate) fn test_home() -> TestHome {
     TestHome {
         _guard: guard,
         _dir: dir,
+    }
+}
+
+#[cfg(test)]
+mod rotation_config_tests {
+    use super::*;
+
+    /// A configured rotation interval must actually reach the manager.
+    ///
+    /// Before this, `SecurityConfig::key_rotation_interval_days` was read by
+    /// nothing: `from_key_pair` hardcoded `86400 * 7`, so an operator asking for
+    /// 1 day got 7. This asserts the value survives construction, which is the
+    /// entire point of the setting.
+    #[test]
+    fn configured_rotation_days_reach_the_manager() {
+        // Isolate GHOSTWIRE_HOME. Without this the two managers below share one
+        // key file and the second construction fails to decrypt it — which is a
+        // test artifact, not the behaviour under test.
+        let _home = crate::core::encryption::test_home();
+
+        let mgr = EncryptionManager::new_with_rotation_days(1).expect("construct");
+        assert_eq!(
+            mgr.key_rotation_interval, 86_400,
+            "key_rotation_interval_days = 1 must become 86400s, not the 7-day default"
+        );
+
+        let mgr30 = EncryptionManager::new_with_rotation_days(30).expect("construct");
+        assert_eq!(mgr30.key_rotation_interval, 30 * 86_400);
+    }
+
+    /// Zero is rejected rather than silently meaning "rotate constantly".
+    #[test]
+    fn zero_rotation_days_falls_back_to_default() {
+        let _home = crate::core::encryption::test_home();
+        let mgr = EncryptionManager::new_with_rotation_days(0).expect("construct");
+        assert_eq!(
+            mgr.key_rotation_interval, 86400 * 7,
+            "0 days must not become a zero interval"
+        );
+    }
+
+    /// The operator's security settings must survive the conversion, instead of
+    /// `Core::new` substituting `SecurityConfig::default()` and discarding them.
+    #[test]
+    fn operator_security_config_is_not_replaced_by_defaults() {
+        let mut cfg = crate::config::SecurityConfig::default();
+        cfg.max_messages_per_minute = 3;
+        cfg.blacklist_enabled = true;
+        cfg.threat_detection_enabled = false;
+        cfg.max_connections_per_ip = 2;
+        cfg.allowed_ips = vec!["10.0.0.1".to_string()];
+        cfg.blocked_ips = vec!["10.0.0.2".to_string()];
+
+        let runtime = crate::core::security_v2::SecurityConfig::from(&cfg);
+        assert_eq!(runtime.max_messages_per_minute, 3);
+        assert!(runtime.blacklist_enabled);
+        assert!(!runtime.threat_detection_enabled);
+        assert_eq!(runtime.max_connections_per_ip, 2);
+        assert_eq!(runtime.allowed_ips, vec!["10.0.0.1".to_string()]);
+        assert_eq!(runtime.blocked_ips, vec!["10.0.0.2".to_string()]);
     }
 }
 

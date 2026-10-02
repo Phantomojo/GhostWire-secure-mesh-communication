@@ -47,6 +47,32 @@ pub struct SecurityConfig {
     pub blocked_ips: Vec<String>,
 }
 
+/// Build the runtime security config from the operator's config file.
+///
+/// `Core::new` previously passed `SecurityConfig::default()` here, discarding
+/// everything in `ghostwire.toml`. Every security setting an operator could
+/// reasonably tune — `max_connections_per_ip`, `max_messages_per_minute`,
+/// `blacklist_enabled`, `threat_detection_enabled`, `allowed_ips`,
+/// `blocked_ips` — was unreachable no matter what was configured.
+///
+/// This conversion exists so the two same-named structs cannot be confused
+/// again: `config::SecurityConfig` (the file format, which also carries
+/// `key_rotation_interval_days`) and `security_v2::SecurityConfig` (the runtime
+/// policy) are distinct types, and passing one where the other is expected is a
+/// compile error rather than a silent default.
+impl From<&crate::config::SecurityConfig> for SecurityConfig {
+    fn from(cfg: &crate::config::SecurityConfig) -> Self {
+        Self {
+            max_connections_per_ip: cfg.max_connections_per_ip,
+            max_messages_per_minute: cfg.max_messages_per_minute,
+            blacklist_enabled: cfg.blacklist_enabled,
+            threat_detection_enabled: cfg.threat_detection_enabled,
+            allowed_ips: cfg.allowed_ips.clone(),
+            blocked_ips: cfg.blocked_ips.clone(),
+        }
+    }
+}
+
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {

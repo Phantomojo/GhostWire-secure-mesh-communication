@@ -461,13 +461,24 @@ impl Core {
                 .map_err(|e| anyhow::anyhow!("Identity creation failed: {}", e))?,
         );
         let encryption = Arc::new(
-            Encryption::new().map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
+            Encryption::new_with_rotation_days(
+                config.security.key_rotation_interval_days,
+            )
+            .map_err(|e| anyhow::anyhow!("Encryption creation failed: {}", e))?,
         );
         // Link Armor to Encryption for future internal morphing
         // (Uses interior mutability or we could have passed it to new if we changed the signature further)
         // For now, we'll keep it in Core and use it in orchestration.
 
-        let security_config = SecurityConfig::default();
+        // Use the operator's SecurityConfig, not the defaults.
+        //
+        // This discarded every security setting in ghostwire.toml and substituted
+        // `SecurityConfig::default()`, so `max_messages_per_minute`,
+        // `threat_detection_enabled`, `blacklist_enabled`, `allowed_ips`,
+        // `blocked_ips` and `max_connections_per_ip` were unreachable no matter
+        // what the operator configured.
+        let security_config =
+            crate::core::security_v2::SecurityConfig::from(&config.security);
         let security_manager = Arc::new(SecurityManager::new(security_config));
         let mut registry = TransportRegistry::new();
         let mut active_transport_inner = None; // Set this based on user config or default

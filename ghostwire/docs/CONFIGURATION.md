@@ -85,6 +85,19 @@ cli = true
 api = true
 
 # AI/ML routing
+#
+# WARNING — everything in this block is currently INERT. These keys parse and are
+# stored, but no code reads them. The AI backend is chosen by a hardcoded
+# if/else on `gemma_4b`/`gemma_26b` only, the Ollama endpoint is a literal at
+# src/core/mod.rs ("http://localhost:11434"), and `gemma_2b` is the hardcoded
+# else-branch rather than something you can select. Setting `inference_backend`,
+# `auto_detect_device`, `device_class`, `ollama_url` or any litert_* key changes
+# nothing.
+#
+# Only `gemma_4b` and `gemma_26b` affect behaviour. These keys are documented
+# because they exist in the config struct, not because they work. They are kept
+# here rather than deleted so an existing config keeps parsing; treat every value
+# here as having no effect until the code reads it.
 gemma_2b = true        # Gemma 4 E2B (2.3B params, edge-optimized)
 gemma_4b = false       # Gemma 4 E4B (4B params)
 gemma_26b = false      # Gemma 4 MoE (26B total, 4B active)
@@ -258,15 +271,39 @@ meshtastic_bridge = true   # Requires "meshtastic" Cargo feature
 
 ### AI/ML model selection
 
-GhostWire auto-detects the best model for your device. Override manually if needed:
+**These settings do not currently do anything.** Auto-detection is
+unconditional and its result is discarded, and `inference_backend`,
+`gemma_model_variant`, `auto_detect_device` and `device_class` are all read by
+no code. The model is chosen by a two-branch `if/else` on `gemma_4b` /
+`gemma_26b` in `src/core/mod.rs`, and the Ollama endpoint is a hardcoded
+literal.
+
+The example is kept because these keys are still accepted by the config parser
+and removing them would break existing config files. Do not tune them expecting
+a change — pick `gemma_4b` or `gemma_26b`, which are the only two that affect
+behaviour.
 
 ```toml
 [features]
-gemma_model_variant = "e2b"      # Force E2B for low-RAM devices
-inference_backend = "litert"      # Use LiteRT instead of Ollama
-auto_detect_device = false       # Disable auto-detection
-device_class = "laptop"          # Manual device class
+gemma_model_variant = "e2b"      # INERT — no code reads this
+inference_backend = "litert"      # INERT — no code reads this
+auto_detect_device = false       # INERT — detection is unconditional
+device_class = "laptop"          # INERT — no code reads this
 ```
+
+### Security settings
+
+The keys under `[security]` are honoured. `key_rotation_interval_days` is
+applied when the encryption manager is constructed, and `max_messages_per_minute`,
+`max_connections_per_ip`, `blacklist_enabled`, `threat_detection_enabled`,
+`allowed_ips` and `blocked_ips` are passed through to the runtime security
+manager.
+
+Two caveats worth knowing. An existing profile keeps the rotation interval it
+was created with, because that value is persisted alongside the node's key and
+restored on load — changing the config will not retroactively alter a node that
+already exists. And `key_rotation_interval_days = 0` is ignored in favour of the
+7-day default rather than meaning "rotate constantly".
 
 Available device classes: `phone`, `tablet`, `raspberry_pi`, `laptop`, `server`.
 
