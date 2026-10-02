@@ -404,6 +404,14 @@ async fn main() -> Result<()> {
                 };
                 let extra = daemon::DaemonArgs {
                     api_host: effective_api_host.clone(),
+                    // Forwarded so the child honours them. Previously dropped:
+                    // the child re-executes this binary and rebuilt its own
+                    // argv, so a custom config file was silently ignored and
+                    // `--mesh-size large` printed "large" while gossipsub ran
+                    // with mesh_n=2.
+                    config: args.config.clone(),
+                    profile: args.profile.clone(),
+                    mesh_size: Some(args.mesh_size.clone()),
                     tailscale_bootstrap: tailscale_bootstrap.clone(),
                     bootstrap: bootstrap.clone(),
                     mesh_port: effective_mesh_port,
@@ -517,6 +525,11 @@ async fn main() -> Result<()> {
                 if !daemon::is_daemon_running() {
                     let extra = daemon::load_saved_args().unwrap_or_else(|| daemon::DaemonArgs {
                         api_host: "127.0.0.1".to_string(),
+                        config: args.config.clone(),
+                        profile: args.profile.clone(),
+                        mesh_size: Some(args.mesh_size.clone()),
+                        tailscale_bootstrap: Vec::new(),
+                        bootstrap: Vec::new(),
                         mesh_port: 4001,
                         quic_port: 8081,
                         ..Default::default()

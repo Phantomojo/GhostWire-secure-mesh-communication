@@ -36,6 +36,14 @@ pub struct SavedDaemonArgs {
     pub mesh_port: u16,
     #[serde(default = "default_quic_port")]
     pub quic_port: u16,
+    /// Persisted alongside the rest so `ghostwire tui` can reattach to the
+    /// daemon with the same config it was started with.
+    #[serde(default)]
+    pub config: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub mesh_size: Option<String>,
 }
 
 pub fn save_daemon_args(args: &DaemonArgs, api_port: u16) -> Result<()> {
@@ -46,6 +54,9 @@ pub fn save_daemon_args(args: &DaemonArgs, api_port: u16) -> Result<()> {
         bootstrap: args.bootstrap.clone(),
         mesh_port: args.mesh_port,
         quic_port: args.quic_port,
+        config: args.config.clone(),
+        profile: args.profile.clone(),
+        mesh_size: args.mesh_size.clone(),
     };
     let json = serde_json::to_string_pretty(&saved)?;
     fs::write(daemon_args_path(), json)?;
@@ -60,6 +71,9 @@ pub fn load_saved_args() -> Option<DaemonArgs> {
     let json = fs::read_to_string(&path).ok()?;
     let saved: SavedDaemonArgs = serde_json::from_str(&json).ok()?;
     Some(DaemonArgs {
+        config: saved.config,
+        profile: saved.profile,
+        mesh_size: saved.mesh_size,
         api_host: saved.api_host,
         tailscale_bootstrap: saved.tailscale_bootstrap,
         bootstrap: saved.bootstrap,
@@ -114,6 +128,23 @@ pub fn is_daemon_running() -> bool {
 #[derive(Default)]
 pub struct DaemonArgs {
     pub api_host: String,
+    /// Config file to load, forwarded to the child process.
+    ///
+    /// This was missing: `start_daemon` builds the child's argv explicitly and
+    /// did not include `--config`, so `ghostwire --config /path/to.toml start`
+    /// ran the child against the DEFAULT config. Every setting in that file was
+    /// silently ignored — including `reticulum_enabled` and `hybrid_mode`.
+    /// `None` means "use the default", hence Option rather than String.
+    pub config: Option<String>,
+    /// Named profile, same reasoning: dropped on the daemon path.
+    pub profile: Option<String>,
+    /// Gossipsub mesh size (`small` | `medium` | `large`).
+    ///
+    /// Also missing from the child argv. `main.rs` sets GHOSTWIRE_MESH_SIZE
+    /// before spawning, but the child re-runs that same code path and overwrites
+    /// the inherited value with the clap default "small" — so `--mesh-size
+    /// large` printed "Mesh size: large" while gossipsub ran with mesh_n=2.
+    pub mesh_size: Option<String>,
     pub tailscale_bootstrap: Vec<String>,
     pub bootstrap: Vec<String>,
     pub mesh_port: u16,
@@ -256,6 +287,23 @@ pub fn start_daemon(port: Option<u16>, extra_args: Option<DaemonArgs>) -> Result
         .arg(extra.mesh_port.to_string())
         .arg("--quic-port")
         .arg(extra.quic_port.to_string());
+
+    // Forward the settings that were previously dropped on the daemon path.
+    //
+    // The child re-executes this binary, so anything not repeated here is
+    // silently replaced by that child's own defaults. That is why
+    // `--config custom.toml start` used to ignore custom.toml entirely, and why
+    // `--mesh-size large` left gossipsub at mesh_n=2 while the CLI printed
+    // "Mesh size: large".
+    if let Some(config) = &extra.config {
+        cmd.arg("--config").arg(config);
+    }
+    if let Some(profile) = &extra.profile {
+        cmd.arg("--profile").arg(profile);
+    }
+    if let Some(mesh_size) = &extra.mesh_size {
+        cmd.arg("--mesh-size").arg(mesh_size);
+    }
 
     for ts in &extra.tailscale_bootstrap {
         cmd.arg("--tailscale-bootstrap").arg(ts);
