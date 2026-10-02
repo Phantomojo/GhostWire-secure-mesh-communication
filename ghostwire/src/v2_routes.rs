@@ -50,7 +50,10 @@ pub async fn get_security_dashboard(
         sybil_rejections: 0, // TODO: Track from security manager
         audit_events_24h: stats.total_events,
         identity_locked,
-        encryption_active: true,
+        // Honest value: encryption is active only when the private key material
+        // is loaded in the live EncryptionManager. is_locked() fails CLOSED —
+        // a poisoned mutex reports locked, never unlocked.
+        encryption_active: !core.encryption.is_locked(),
         firewall_active: sec_manager.is_blacklist_enabled().await,
     };
 

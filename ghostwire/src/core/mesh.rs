@@ -799,6 +799,7 @@ impl MeshTransport {
         let driver = MeshDriver {
             presence: self.presence.clone(),
             deferred_announce_at: None,
+        deferred_dms: VecDeque::new(),
             swarm,
             command_rx,
             _node_id: self.node_id.clone(),
@@ -1510,6 +1511,10 @@ struct MeshDriver {
     /// the handler runs on the same loop that must keep servicing the Swarm, so
     /// awaiting there starves connections. See MeshCommand::DeferredAnnounce.
     deferred_announce_at: Option<tokio::time::Instant>,
+    // Direct messages parked because the recipient's handshake key is not
+    // installed yet. ponytail: re-driven from the existing 5s retry tick;
+    // awaiting the key inside the command arm is what froze the swarm for 15s.
+    deferred_dms: VecDeque<(PeerId, Message, tokio::time::Instant, oneshot::Sender<Result<()>>)>,
     pending_get_queries: HashMap<libp2p::kad::QueryId, oneshot::Sender<Result<Vec<u8>>>>,
     message_store: Arc<crate::core::store::SecureMessageStore>,
     core_messages: Arc<RwLock<Vec<Message>>>,
@@ -1610,6 +1615,34 @@ impl MeshDriver {
                     }
                 }
                 _ = retry_interval.tick() => {
+                    // Re-drive DMs parked by MeshCommand::SendMessage (see that arm).
+                    // This runs on the driver loop, so the swarm keeps being polled
+                    // while a handshake key is still in flight.
+                    let queued = std::mem::take(&mut self.deferred_dms);
+                    if !queued.is_empty() {
+                        let now = tokio::time::Instant::now();
+                        for (to, msg, deadline, reply) in queued {
+                            if self.encryption_manager.has_peer_key(&to.to_string()) {
+                                self.handle_command(MeshCommand::SendMessage {
+                                    recipient: to,
+                                    message: msg,
+                                    reply,
+                                })
+                                .await;
+                            } else if now >= deadline {
+                                tracing::warn!(
+                                    recipient = %to,
+                                    "Direct-message encryption key never arrived"
+                                );
+                                let _ = reply.send(Err(anyhow::anyhow!(
+                                    "Recipient encryption key not ready for {}",
+                                    to
+                                )));
+                            } else {
+                                self.deferred_dms.push_back((to, msg, deadline, reply));
+                            }
+                        }
+                    }
                     self.handle_retries().await;
                 }
                 _ = ping_interval.tick() => {
@@ -1977,25 +2010,16 @@ impl MeshDriver {
                     ));
                 message.vector_clock = self.vector_clock.clone();
 
-                // Handshake installation is asynchronous. Do not attempt DM
-                // encryption during the short window between peer discovery
-                // and receipt of the peer's verified public key. Waiting is
-                // bounded and remains fail-closed if the key never arrives.
-                let key_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
-                while !self.encryption_manager.has_peer_key(&recipient.to_string())
-                    && tokio::time::Instant::now() < key_deadline
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                }
+                // Handshake installation is asynchronous. Do NOT await the key here.
+                // This arm runs inside the driver select! that drives the swarm, and
+                // the peer's key arrives AS A SWARM EVENT — waiting here starves the
+                // very event that would unblock it, freezing the node for 15s. Park
+                // the DM instead and let the 5s retry tick re-drive it. Fail-closed
+                // is unchanged: if the key never arrives, the deadline below errors.
                 if !self.encryption_manager.has_peer_key(&recipient.to_string()) {
-                    tracing::warn!(
-                        recipient = %recipient,
-                        "Direct-message encryption key not ready after bounded wait"
-                    );
-                    let _ = reply.send(Err(anyhow::anyhow!(
-                        "Recipient encryption key not ready for {}",
-                        recipient
-                    )));
+                    let deadline =
+                        tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+                    self.deferred_dms.push_back((recipient, message, deadline, reply));
                     return;
                 }
 
@@ -2670,13 +2694,19 @@ impl MeshDriver {
         )) = event
         {
             if message.topic.as_str() == discovery_topic(&self.world_discovery_network_id) {
-                let _ = self
+                if let Err(e) = self
                     .handle_world_discovery_message(propagation_source, message)
-                    .await;
-            } else {
-                let _ = self
-                    .handle_gossipsub_message(propagation_source, message_id, message)
-                    .await;
+                    .await
+                {
+                    tracing::warn!(error = %e, "world discovery message failed");
+                }
+            } else if let Err(e) = self
+                .handle_gossipsub_message(propagation_source, message_id, message)
+                .await
+            {
+                // Logged, never propagated: this runs inside the swarm event
+                // loop, so one malformed message must not kill the driver.
+                tracing::warn!(error = %e, "gossipsub message failed");
             }
             return;
         }
@@ -2973,10 +3003,11 @@ impl MeshDriver {
             return Ok(());
         }
 
-        let is_dm_for_us = topic_str == crate::core::constants::topics::DM;
-        let is_dm_topic = is_dm_for_us;
+        // Topic-level gate only. Whether the message is addressed to US cannot
+        // be known until it is decoded (:3005), so it is decided at :3102.
+        let is_dm_topic = topic_str == crate::core::constants::topics::DM;
 
-        if !is_dm_for_us && !is_dm_topic && topic_str != crate::core::constants::BROADCAST_TOPIC {
+        if !is_dm_topic && topic_str != crate::core::constants::BROADCAST_TOPIC {
             return Ok(());
         }
 
@@ -3051,11 +3082,10 @@ impl MeshDriver {
             debug!("Skipping already-seen message {}", msg.id);
             return Ok(());
         }
-        // Evict oldest entries when at capacity
-        if self.seen_messages.len() >= SEEN_MSGS_MAX {
-            self.seen_messages.drain(..SEEN_MSGS_MAX / 2);
-        }
-        self.seen_messages.push_back(msg.id);
+        // NOTE: msg.id is recorded at the end of this function, not here.
+        // A retransmit reuses the original msg.id, so recording before the
+        // decrypt made every message that arrived before the handshake key
+        // permanently unrecoverable.
 
         if msg.ttl > 0 && msg.timestamp + msg.ttl < crate::core::reliability::current_unix_secs() {
             debug!("Dropping expired message {} (TTL={})", msg.id, msg.ttl);
@@ -3098,6 +3128,13 @@ impl MeshDriver {
                     .publish(relay_topic, frame.to_bytes());
             }
         }
+
+        // The message is decoded, so the addressee is finally knowable. A DM-topic
+        // message addressed to a different peer was already relayed above; it
+        // must NOT be stored or ACKed here. The old code tested only the topic,
+        // so every node stored and acknowledged every DM in the mesh.
+        let is_dm_for_us = is_dm_topic
+            && (msg.is_broadcast() || msg.recipient == self.local_peer_id.to_string());
 
         if !is_dm_for_us && topic_str != crate::core::constants::BROADCAST_TOPIC {
             return Ok(());
@@ -3186,15 +3223,19 @@ impl MeshDriver {
             tracing::trace!("Processed broadcast message from {}", peer_id);
         }
 
+        // ACK only what was actually persisted. A failed decrypt, a failed
+        // save, and a handshake all leave stored_ok false, so the sender keeps
+        // its pending_messages entry and a retransmit can still succeed.
+        let mut stored_ok = false;
         if msg.message_type != "handshake" && !msg.message_type.starts_with("encrypted:") {
-            let _ = self.handle_incoming_message(peer_id, msg.clone()).await;
+            stored_ok = self.handle_incoming_message(peer_id, msg.clone()).await.is_ok();
         }
 
         if msg.message_type == "handshake" {
             self.handle_handshake(peer_id, &msg).await;
         }
 
-        if is_dm_for_us && msg.message_type != "ack" && msg.encryption_status != "decrypt_failed" {
+        if is_dm_for_us && msg.message_type != "ack" && stored_ok {
             let ack_msg = Message::new(
                 self.local_peer_id.to_string(),
                 msg.sender.clone(),
@@ -3213,6 +3254,16 @@ impl MeshDriver {
                     .publish(ack_topic, frame.to_bytes());
                 debug!("Sent ACK for message {} to {}", msg.id, peer_id);
             }
+        }
+
+        // ponytail: one global FIFO dedup list keyed by msg.id, O(1) eviction
+        // by draining half. A DM we could not store is deliberately left
+        // unrecorded so the sender's retransmit is reprocessed, not dropped.
+        if !(is_dm_for_us && !stored_ok) {
+            if self.seen_messages.len() >= SEEN_MSGS_MAX {
+                self.seen_messages.drain(..SEEN_MSGS_MAX / 2);
+            }
+            self.seen_messages.push_back(msg.id);
         }
 
         Ok(())

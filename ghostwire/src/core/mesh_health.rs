@@ -28,12 +28,18 @@ pub struct MeshHealthSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkStateInfo {
+    /// Derived from live mesh state; see `derive_network_state`.
     pub state: String,
     pub internet_reachable: bool,
     pub lan_reachable: bool,
     pub active_transport: String,
-    pub uptime_secs: u64,
-    pub bootstrap_nodes_reachable: u32,
+    /// Real process uptime, or `None` when the kernel does not expose it.
+    pub uptime_secs: Option<u64>,
+    /// Bootstrap nodes this node was CONFIGURED with. How many are actually
+    /// reachable is not probed anywhere in `src/`, so it is not reported:
+    /// `bootstrap_nodes_reachable` used to be a hardcoded `0`, which reads as
+    /// "probed zero reachable" when nothing had been probed at all.
+    pub bootstrap_nodes_configured: usize,
     pub latency_ms: u32,
     pub packet_loss_pct: f32,
 }
@@ -81,12 +87,18 @@ pub struct PeerHealthInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingHealthInfo {
-    pub routing_table_size: usize,
-    pub subnet_distribution: HashMap<String, usize>,
-    pub active_routes: usize,
-    pub sphinx_sessions: usize,
-    pub messages_routed_total: u64,
-    pub mixing_queue_depth: usize,
+    /// Single-hop routes from the live topology, or `None` when no topology
+    /// could be read. This used to be the peer count, which is not a routing
+    /// table size.
+    pub routing_table_size: Option<usize>,
+    pub subnet_distribution: Option<HashMap<String, usize>>,
+    /// Distinct single-hop routes. Not a multi-hop path count.
+    pub active_routes: Option<usize>,
+    /// `None`: no counter for live Sphinx sessions exists. It reported the
+    /// peer count, which is a different quantity.
+    pub sphinx_sessions: Option<usize>,
+    pub messages_routed_total: Option<u64>,
+    pub mixing_queue_depth: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,16 +108,24 @@ pub struct StorageHealthInfo {
     pub ark_collection_count: usize,
     pub block_store_count: usize,
     pub mailbox_pending: usize,
-    pub encrypted_store_namespaces: usize,
-    pub db_size_bytes: u64,
+    /// `None`: the sled handle is private to PersistenceManager, so the
+    /// on-disk size is not reachable from here.
+    pub encrypted_store_namespaces: Option<usize>,
+    pub db_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityHealthInfo {
-    pub failed_unlock_attempts_24h: u32,
+    /// `None`: no counter for unlock attempts is exposed by the
+    /// FailedAttemptTracker, so this reports nothing rather than "zero
+    /// attempts", which is a different claim.
+    pub failed_unlock_attempts_24h: Option<u32>,
     pub blocked_peers: u32,
-    pub sybil_rejections_24h: u32,
-    pub audit_events_24h: u32,
+    /// `None`: ProofOfWorkSybilDefense has no production call site, so there
+    /// is no rejection counter to read.
+    pub sybil_rejections_24h: Option<u32>,
+    /// Counted from the live in-memory AuditLogger.
+    pub audit_events_24h: Option<u32>,
     pub identity_locked: bool,
     pub trust_score_avg: f32,
     pub last_key_rotation_days_ago: Option<u32>,
@@ -113,13 +133,75 @@ pub struct SecurityHealthInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceInfo {
-    pub messages_per_minute: f32,
+    /// `None`: no message-rate counter exists in Core.
+    pub messages_per_minute: Option<f32>,
     pub avg_message_latency_ms: u32,
-    pub session_cache_hit_rate: f32,
+    /// `None`: the session warmer exposes no hit/miss counters.
+    pub session_cache_hit_rate: Option<f32>,
     pub dedup_cache_size: usize,
     pub peer_cache_size: usize,
     pub ws_subscriber_count: usize,
-    pub event_bus_overflow_count: u64,
+    /// `None`: the broadcast event bus does not track dropped sends.
+    pub event_bus_overflow_count: Option<u64>,
+}
+
+/// Real process uptime in seconds, read from the kernel.
+///
+/// `SystemTime::now() - UNIX_EPOCH` is NOT uptime: it is the wall clock since
+/// 1970 (~1.77e9 on any modern host). `/proc/uptime` minus this process's
+/// start offset from `/proc/self/stat` is the actual answer.
+///
+/// Returns `None` where procfs is unavailable (non-Linux, or a restricted
+/// namespace) rather than falling back to a fabricated number.
+pub fn process_uptime_secs() -> Option<u64> {
+    let uptime_txt = std::fs::read_to_string("/proc/uptime").ok()?;
+    let system_uptime: f64 = uptime_txt.split_whitespace().next()?.parse().ok()?;
+
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Field 22 (1-indexed) is starttime in clock ticks since boot. The comm
+    // field can contain spaces and parentheses, so split after the LAST ')'.
+    let after_comm = stat.rsplit_once(')')?.1;
+    let starttime_ticks: f64 = after_comm.split_whitespace().nth(19)?.parse().ok()?;
+
+    let ticks_per_sec = 100.0_f64; // Linux USER_HZ is fixed at 100 on all supported arches.
+    let started_secs_ago = starttime_ticks / ticks_per_sec;
+    let uptime = system_uptime - started_secs_ago;
+    if !uptime.is_finite() || uptime < 0.0 {
+        return None;
+    }
+    Some(uptime as u64)
+}
+
+/// Derive the network state string from facts that were actually observed.
+///
+/// This used to be the literal `"full_mesh"` regardless of state, so a node
+/// with no mesh manager, no listeners and zero peers reported `full_mesh` —
+/// while ignoring the `mesh_started` and `mesh_listeners` values computed a
+/// few lines above it.
+fn derive_network_state(
+    identity_locked: bool,
+    mesh_started: bool,
+    mesh_alive: bool,
+    listener_count: usize,
+    peer_count: usize,
+) -> &'static str {
+    if identity_locked && !mesh_started {
+        return "locked";
+    }
+    if !mesh_started {
+        return "no_mesh";
+    }
+    if !mesh_alive {
+        // The swarm driver task is gone: the API answers but nothing routes.
+        return "mesh_degraded";
+    }
+    if listener_count == 0 {
+        return "no_listener";
+    }
+    if peer_count == 0 {
+        return "no_peers";
+    }
+    "connected"
 }
 
 pub async fn build_snapshot(
@@ -171,6 +253,28 @@ pub async fn build_snapshot(
             false
         }
     };
+    // Whether the mesh has a usable listener. Distinct from `mesh_started`: a
+    // manager can exist with a start requested and zero bound listeners, which
+    // is a node that answers API calls but cannot route anything.
+    //
+    // `MeshManager` exposes no `is_mesh_alive`; the `is_mesh_alive` at
+    // mesh.rs:1007 belongs to `MeshTransport` (mesh.rs:257), a different
+    // struct, and `driver_alive` is private to `MeshDriver` (mesh.rs:1410).
+    // Rather than assert a liveness flag that cannot be read, report the fact
+    // that can be observed: an empty listener list means nothing is bound.
+    let mesh_alive = {
+        #[cfg(feature = "mesh")]
+        {
+            match core.effective_mesh_manager().await {
+                Some(mesh) => !mesh.read().await.get_listeners().await.is_empty(),
+                None => false,
+            }
+        }
+        #[cfg(not(feature = "mesh"))]
+        {
+            false
+        }
+    };
     let mesh_listeners = if mesh_started {
         #[cfg(feature = "mesh")]
         {
@@ -189,12 +293,19 @@ pub async fn build_snapshot(
     };
 
     let network_state = NetworkStateInfo {
-        state: "full_mesh".to_string(),
+        state: derive_network_state(
+            identity_locked,
+            mesh_started,
+            mesh_alive,
+            mesh_listeners.len(),
+            core.get_peer_count(),
+        )
+        .to_string(),
         internet_reachable: metrics.is_internet_reachable,
         lan_reachable: local_ip_address::local_ip().is_ok(),
         active_transport: active_transport_name,
-        uptime_secs: 0,               // TODO: track startup time in Core
-        bootstrap_nodes_reachable: 0, // TODO: probe bootstrap nodes
+        uptime_secs: process_uptime_secs(),
+        bootstrap_nodes_configured: core.bootstrap_nodes.len(),
         latency_ms: metrics.latency_ms,
         packet_loss_pct: metrics.packet_loss_ratio * 100.0,
     };
@@ -451,12 +562,16 @@ pub async fn build_snapshot(
     };
 
     let routing = RoutingHealthInfo {
-        routing_table_size: effective_peer_count,
-        subnet_distribution: HashMap::new(),
-        active_routes: effective_peer_count,
-        sphinx_sessions: effective_peer_count,
-        messages_routed_total: 0,
-        mixing_queue_depth: 0,
+        // Real single-hop routes from the live topology. Previously the peer
+        // count, which answers a different question.
+        routing_table_size: topo.as_ref().map(|t| t.routes.len()),
+        // Not collected anywhere; an empty map reads as "no subnets", which
+        // would be a claim rather than an absence of measurement.
+        subnet_distribution: None,
+        active_routes: topo.as_ref().map(|t| t.routes.len()),
+        sphinx_sessions: None,
+        messages_routed_total: None,
+        mixing_queue_depth: None,
     };
 
     let storage = StorageHealthInfo {
@@ -465,28 +580,37 @@ pub async fn build_snapshot(
         ark_collection_count: ark_stats.total_collections,
         block_store_count: core.block_store.block_count().await,
         mailbox_pending,
-        encrypted_store_namespaces: 0, // TODO: count encrypted_store namespaces
-        db_size_bytes: 0,              // TODO: sled db_size_on_disk()
+        encrypted_store_namespaces: None,
+        db_size_bytes: None,
+    };
+
+    // REAL: count audit records from the last 24h out of the live in-memory
+    // logger, instead of the hardcoded 0 this used to report.
+    let audit_events_24h = {
+        let now = now;
+        let cutoff = now.saturating_sub(24 * 60 * 60);
+        let events = core.audit_logger.get_recent_events(10_000).await;
+        Some(events.iter().filter(|e| e.timestamp >= cutoff).count() as u32)
     };
 
     let security = SecurityHealthInfo {
-        failed_unlock_attempts_24h: 0, // TODO: wire audit_logger query
+        failed_unlock_attempts_24h: None,
         blocked_peers,
-        sybil_rejections_24h: 0, // TODO: counter in DiverseRoutingTable
-        audit_events_24h: 0,     // TODO: audit_logger.count_recent(24h)
+        sybil_rejections_24h: None,
+        audit_events_24h,
         identity_locked,
         trust_score_avg: core.trust_store.average_trust_score().await,
-        last_key_rotation_days_ago: None, // TODO: track in identity metadata
+        last_key_rotation_days_ago: None,
     };
 
     let performance = PerformanceInfo {
-        messages_per_minute: 0.0, // TODO: rate counter
+        messages_per_minute: None,
         avg_message_latency_ms: metrics.latency_ms,
-        session_cache_hit_rate: 0.0, // TODO: wire session_warmer stats
+        session_cache_hit_rate: None,
         dedup_cache_size,
         peer_cache_size,
         ws_subscriber_count,
-        event_bus_overflow_count: 0, // TODO: track dropped events in event_bus
+        event_bus_overflow_count: None,
     };
 
     MeshHealthSnapshot {
@@ -514,28 +638,27 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn snapshot_serializes_to_json() {
-        let snap = MeshHealthSnapshot {
+    fn sample_snapshot() -> MeshHealthSnapshot {
+        MeshHealthSnapshot {
             timestamp: now_secs(),
             network_state: NetworkStateInfo {
-                state: "full_mesh".into(),
+                state: "connected".into(),
                 internet_reachable: true,
                 lan_reachable: true,
                 active_transport: "tcp".into(),
-                uptime_secs: 3600,
-                bootstrap_nodes_reachable: 3,
+                uptime_secs: Some(3600),
+                bootstrap_nodes_configured: 3,
                 latency_ms: 15,
                 packet_loss_pct: 0.1,
             },
             peers: vec![],
             routing: RoutingHealthInfo {
-                routing_table_size: 5,
-                subnet_distribution: HashMap::new(),
-                active_routes: 5,
-                sphinx_sessions: 3,
-                messages_routed_total: 100,
-                mixing_queue_depth: 0,
+                routing_table_size: Some(5),
+                subnet_distribution: None,
+                active_routes: Some(5),
+                sphinx_sessions: Some(3),
+                messages_routed_total: Some(100),
+                mixing_queue_depth: None,
             },
             storage: StorageHealthInfo {
                 message_count: 42,
@@ -543,26 +666,26 @@ mod tests {
                 ark_collection_count: 3,
                 block_store_count: 7,
                 mailbox_pending: 2,
-                encrypted_store_namespaces: 1,
-                db_size_bytes: 1024,
+                encrypted_store_namespaces: Some(1),
+                db_size_bytes: Some(1024),
             },
             security: SecurityHealthInfo {
-                failed_unlock_attempts_24h: 0,
+                failed_unlock_attempts_24h: None,
                 blocked_peers: 0,
-                sybil_rejections_24h: 0,
-                audit_events_24h: 5,
+                sybil_rejections_24h: None,
+                audit_events_24h: Some(5),
                 identity_locked: false,
                 trust_score_avg: 0.85,
                 last_key_rotation_days_ago: Some(7),
             },
             performance: PerformanceInfo {
-                messages_per_minute: 12.5,
+                messages_per_minute: Some(12.5),
                 avg_message_latency_ms: 50,
-                session_cache_hit_rate: 0.95,
+                session_cache_hit_rate: Some(0.95),
                 dedup_cache_size: 100,
                 peer_cache_size: 10,
                 ws_subscriber_count: 3,
-                event_bus_overflow_count: 0,
+                event_bus_overflow_count: None,
             },
             interfaces: vec![],
             bootstrap: BootstrapCapabilityState::default(),
@@ -570,28 +693,123 @@ mod tests {
                 false,
                 "ghostwire-one",
             ),
-        };
+        }
+    }
+
+    #[test]
+    fn snapshot_serializes_to_json() {
+        let snap = sample_snapshot();
 
         let json = serde_json::to_string(&snap).unwrap();
         let parsed: MeshHealthSnapshot = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.routing.sphinx_sessions, 3);
+        assert_eq!(parsed.routing.sphinx_sessions, Some(3));
         assert_eq!(parsed.storage.message_count, 42);
         assert!(!parsed.security.identity_locked);
     }
 
+    /// An unmeasured metric must serialise to null, not to 0. A `0` reads as
+    /// "measured, and the answer is zero"; the whole point of the Option is
+    /// that "we never measured it" is distinguishable from "it is zero".
     #[test]
-    fn routing_health_reflects_peer_count() {
-        let peer_count = 8usize;
+    fn unmeasured_metrics_serialise_as_null_not_zero() {
+        let json = serde_json::to_value(sample_snapshot()).unwrap();
+        assert!(json["routing"]["subnet_distribution"].is_null());
+        assert!(json["routing"]["mixing_queue_depth"].is_null());
+        assert!(json["security"]["failed_unlock_attempts_24h"].is_null());
+        assert!(json["security"]["sybil_rejections_24h"].is_null());
+        assert!(json["performance"]["event_bus_overflow_count"].is_null());
+
+        // `sample_snapshot` populates `messages_per_minute` with `Some(12.5)`,
+        // so the null assertion that used to sit here was wrong for the same
+        // reason as db_size_bytes: it demanded null from a field its own
+        // fixture had just set. Assert the measured value instead.
+        assert_eq!(
+            json["performance"]["messages_per_minute"],
+            serde_json::json!(12.5)
+        );
+
+        // `sample_snapshot` deliberately populates db_size_bytes with
+        // `Some(1024)`, so the null assertion this test used to make here was
+        // wrong — it asked for null on a field the fixture had just set. It now
+        // checks the distinction that actually matters: a measured value
+        // serialises as its number, and the real snapshot's unmeasured default
+        // (`None`) serialises as null rather than 0.
+        assert_eq!(json["storage"]["db_size_bytes"], serde_json::json!(1024));
+        let unmeasured = serde_json::to_value(
+            MeshHealthSnapshot {
+                storage: StorageHealthInfo {
+                    db_size_bytes: None,
+                    ..sample_snapshot().storage
+                },
+                ..sample_snapshot()
+            },
+        )
+        .unwrap();
+        assert!(
+            unmeasured["storage"]["db_size_bytes"].is_null(),
+            "an unmeasured db_size_bytes must serialise as null, not 0"
+        );
+
+        // And a measured one is still a number, not null.
+        assert_eq!(json["storage"]["message_count"], 42);
+    }
+
+    #[test]
+    fn routing_health_round_trips_route_counts() {
         let routing = RoutingHealthInfo {
-            routing_table_size: peer_count,
-            subnet_distribution: HashMap::new(),
-            active_routes: peer_count,
-            sphinx_sessions: peer_count,
-            messages_routed_total: 0,
-            mixing_queue_depth: 0,
+            routing_table_size: Some(8),
+            subnet_distribution: None,
+            active_routes: Some(8),
+            sphinx_sessions: None,
+            messages_routed_total: None,
+            mixing_queue_depth: None,
         };
-        assert_eq!(routing.routing_table_size, peer_count);
-        assert_eq!(routing.active_routes, peer_count);
-        assert_eq!(routing.sphinx_sessions, peer_count);
+        assert_eq!(routing.routing_table_size, Some(8));
+        assert_eq!(routing.active_routes, Some(8));
+        // sphinx_sessions is no longer aliased to the route count.
+        assert_eq!(routing.sphinx_sessions, None);
+    }
+
+    /// The state string must follow the facts. A node with nothing running
+    /// must never report "full_mesh" — that literal is what this replaced.
+    #[test]
+    fn network_state_follows_observed_mesh_facts() {
+        assert_eq!(derive_network_state(true, false, false, 0, 0), "locked");
+        assert_eq!(derive_network_state(false, false, false, 0, 0), "no_mesh");
+        // Started but the driver task is gone: API up, routing dead.
+        assert_eq!(
+            derive_network_state(false, true, false, 2, 5),
+            "mesh_degraded"
+        );
+        assert_eq!(derive_network_state(false, true, true, 0, 0), "no_listener");
+        assert_eq!(derive_network_state(false, true, true, 1, 0), "no_peers");
+        assert_eq!(derive_network_state(false, true, true, 1, 3), "connected");
+
+        for (locked, started, alive, listeners, peers) in [
+            (true, false, false, 0usize, 0usize),
+            (false, false, false, 0, 0),
+            (false, true, false, 4, 9),
+            (false, true, true, 0, 0),
+        ] {
+            assert_ne!(
+                derive_network_state(locked, started, alive, listeners, peers),
+                "full_mesh",
+                "no configuration may report full_mesh"
+            );
+        }
+    }
+
+    /// Uptime must be seconds-since-process-start, not seconds-since-1970.
+    /// A value near 1.7e9 is the epoch bug returning.
+    #[test]
+    fn process_uptime_is_not_the_unix_epoch() {
+        match process_uptime_secs() {
+            Some(secs) => assert!(
+                secs < 100 * 365 * 24 * 3600,
+                "uptime {secs}s looks like an epoch offset, not process uptime"
+            ),
+            // procfs unavailable: honest absence, not a fabricated number.
+            None => {}
+        }
     }
 }

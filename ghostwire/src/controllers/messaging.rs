@@ -70,11 +70,6 @@ impl MessagingController {
         let send_result = state.core.read().await.send_message(&message).await;
 
         let peer_count = state.core.read().await.get_peer_count();
-        let status = if send_result.is_ok() {
-            "BROADCAST_SENT"
-        } else {
-            "BROADCAST_QUEUED"
-        };
 
         #[derive(Serialize)]
         struct BroadcastResult {
@@ -85,21 +80,32 @@ impl MessagingController {
             delivery: String,
         }
 
-        let result = BroadcastResult {
-            message_id: message.id.to_string(),
-            recipients: peer_count,
-            timestamp,
-            status: status.to_string(),
-            delivery: if send_result.is_ok() {
-                "receipt_pending".to_string()
-            } else {
-                "queued".to_string()
-            },
-        };
-
-        tracing::info!("Broadcast message sent to {} peers", peer_count);
-
-        Json(ApiV2Response::success(result)).into_response()
+        // Match on the send result rather than answering success either way:
+        // nothing queues a failed broadcast for later delivery (the mesh
+        // retry loop retransmits only ids inserted into pending_messages,
+        // which only the direct-message path does), so an Err must surface
+        // as an error instead of "BROADCAST_QUEUED".
+        match send_result {
+            Ok(()) => {
+                tracing::info!("Broadcast message sent to {} peers", peer_count);
+                let result = BroadcastResult {
+                    message_id: message.id.to_string(),
+                    recipients: peer_count,
+                    timestamp,
+                    status: "BROADCAST_SENT".to_string(),
+                    delivery: "receipt_pending".to_string(),
+                };
+                Json(ApiV2Response::success(result)).into_response()
+            }
+            Err(e) => {
+                tracing::warn!("Broadcast NOT transmitted and not queued: {e}");
+                ApiV2Response::<serde_json::Value>::error_response(
+                    StandardErrorCode::InternalError.as_str(),
+                    format!("Broadcast was not transmitted: {e}"),
+                )
+                .into_response()
+            }
+        }
     }
 
     pub async fn send_message(
