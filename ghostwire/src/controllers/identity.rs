@@ -144,6 +144,55 @@ impl IdentityController {
 
         tracing::info!(target: "identity_setup", "✅ Identity setup complete for {}", req.nickname);
 
+        // Build and start the mesh, exactly as `unlock_profile` does below.
+        //
+        // A daemon that starts with a user-keyed profile defers MeshManager
+        // construction: `Core::new` sees "Encryption private state is user-keyed
+        // and locked at startup" (encryption.rs:396) and logs "Identity is
+        // locked. Deferring MeshManager initialization" followed by "Failed to
+        // auto-start mesh: Mesh networking not available".
+        //
+        // `unlock_profile` recovers from that by calling
+        // `initialize_mesh_after_unlock()` then `start_mesh()`. This handler did
+        // NOT — so a node created through setup stayed meshless forever: the API
+        // answered, `setup_complete` was true, the UI showed a working node, and
+        // every send failed with "Recipient encryption key not ready" because no
+        // peer could ever connect. Setup is the path a first-time user takes, so
+        // this was the default experience.
+        //
+        // Done before the success response, so "identity_secured" now means the
+        // node is actually usable. `save_to_disk` above persisted the key; this
+        // makes the running process use it.
+        #[cfg(feature = "mesh")]
+        {
+            if let Err(error) = core.initialize_mesh_after_unlock().await {
+                tracing::error!(target: "identity_setup", error = %error, "Failed to initialize mesh after identity setup");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::InternalError.as_str(),
+                        "Identity secured but mesh initialization failed",
+                    )),
+                )
+                    .into_response();
+            }
+
+            let mesh_host = state.config.mesh_host.clone();
+            let mesh_port = state.config.mesh_port;
+            let listen_addr = format!("/ip4/{}/tcp/{}", mesh_host, mesh_port);
+            if let Err(error) = core.start_mesh(&listen_addr).await {
+                tracing::error!(target: "identity_setup", error = %error, "Failed to start mesh listener after identity setup");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiV2Response::<()>::error(
+                        StandardErrorCode::InternalError.as_str(),
+                        "Identity secured but mesh listener failed to start",
+                    )),
+                )
+                    .into_response();
+            }
+        }
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
