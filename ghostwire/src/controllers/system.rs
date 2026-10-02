@@ -139,20 +139,26 @@ impl SystemController {
     }
 
     pub async fn backup_system(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        // Simulate backup process
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        Json(ApiV2Response::success("Backup completed successfully"))
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "Backup is not yet implemented; requires persistence stack integration",
+            )),
+        )
+            .into_response()
     }
 
     pub async fn get_system_logs(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-        let logs = vec![
-            "System started",
-            "Network scan completed",
-            "Peer connected",
-            "Message sent",
-            "Security check passed",
-        ];
-        Json(ApiV2Response::success(logs))
+        // honesty: 501 not implemented — real logs require log aggregation stack
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiV2Response::<()>::error(
+                "NOT_IMPLEMENTED",
+                "System logs are not yet implemented; requires log aggregation stack",
+            )),
+        )
+            .into_response()
     }
 
     pub async fn rotate_keys(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -380,63 +386,255 @@ impl SystemController {
         ))
     }
 
-    /// GET /api/settings - Unified settings aggregation
     pub async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let metadata = state.core.read().await.get_metadata().await;
+        let config = state.full_config.clone();
 
-        // In a real app, we'd load this from a persistent config file.
-        // For now, we'll return defaults combined with metadata.
         let settings = serde_json::json!({
             "username": metadata.nickname.clone(),
             "displayName": metadata.nickname,
             "bio": metadata.bio,
-            "listenPort": 3001,
-            "enableMdns": true,
-            "enableDht": true,
-            "maxPeers": 50,
-            "encryptionLevel": "enhanced",
-            "autoLockMinutes": 15,
-            "keyRotationDays": 30,
-            "stealthMode": false,
-            "trafficMorphing": false,
-            "stripMetadata": true,
-            "soundEnabled": true,
-            "desktopNotifications": true,
-            "messagePreview": true,
-            "debugMode": false,
-            "logLevel": "info"
+            "listenPort": config.server.port,
+            "maxPeers": config.network.max_peers,
+            "keyRotationDays": config.security.key_rotation_interval_days,
         });
 
         Json(ApiV2Response::success(settings))
     }
 
-    /// PUT /api/settings - Update both metadata and config
+    /// PUT /api/settings - Update metadata (applied) and report config keys honestly
     pub async fn update_settings(
         State(state): State<Arc<AppState>>,
         Json(req): Json<serde_json::Value>,
     ) -> impl IntoResponse {
-        let nickname = req
-            .get("displayName")
-            .or_else(|| req.get("username"))
-            .and_then(|v| v.as_str().map(|s| s.to_string()));
-        let bio = req
-            .get("bio")
-            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let mut applied_now: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut not_applied: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        let mut ignored: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
-        // Update Metadata
-        state
-            .core
-            .read()
+        let mut nickname: Option<String> = None;
+        let mut bio: Option<String> = None;
+
+        for (key, value) in req.as_object().into_iter().flatten() {
+            match key.as_str() {
+                "displayName" | "username" => {
+                    if key == "username" && req.get("displayName").is_some() {
+                        ignored.insert(
+                            key.clone(),
+                            serde_json::json!("superseded by displayName"),
+                        );
+                    } else if let Some(s) = value.as_str() {
+                        if nickname.is_none() {
+                            nickname = Some(s.to_string());
+                            applied_now.insert(key.clone(), value.clone());
+                        }
+                    } else {
+                        ignored.insert(key.clone(), serde_json::json!("type mismatch: expected string"));
+                    }
+                }
+                "bio" => match value.as_str() {
+                    Some(s) => {
+                        bio = Some(s.to_string());
+                        applied_now.insert(key.clone(), value.clone());
+                    }
+                    None => {
+                        ignored.insert(key.clone(), serde_json::json!("type mismatch: expected string"));
+                    }
+                },
+                "listenPort" | "maxPeers" | "keyRotationDays" => {
+                    if value.is_number() {
+                        not_applied.insert(
+                            key.clone(),
+                            serde_json::json!(
+                                "not applied: config-file persistence not implemented; running process unchanged"
+                            ),
+                        );
+                    } else {
+                        ignored.insert(key.clone(), serde_json::json!("type mismatch: expected number"));
+                    }
+                }
+                "enableMdns" => {
+                    ignored.insert(
+                        key.clone(),
+                        serde_json::json!("no config mapping: GhostWire config has no mDNS setting"),
+                    );
+                }
+                _ => {
+                    ignored.insert(key.clone(), serde_json::json!("unknown setting"));
+                }
+            }
+        }
+
+        if nickname.is_some() || bio.is_some() {
+            state
+                .core
+                .read()
+                .await
+                .update_metadata(nickname, bio, None, None)
+                .await;
+        }
+
+        let response = serde_json::json!({
+            "applied_now": applied_now,
+            "not_applied": not_applied,
+            "ignored": ignored,
+        });
+        Json(ApiV2Response::success(response))
+    }
+}
+
+#[cfg(test)]
+mod settings_honesty_tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::core::Core;
+    use crate::web::StartupConfig;
+    use std::sync::atomic::AtomicUsize;
+
+    async fn test_state(test_name: &str, full_config: Config) -> Arc<AppState> {
+        let profile = Some(format!("test_{}_{}", test_name, std::process::id()));
+        let core = Core::new(Config::default(), Vec::new(), None, profile)
             .await
-            .update_metadata(nickname, bio, None, None)
-            .await;
+            .expect("Core::new in settings test");
+        Arc::new(AppState {
+            core: Arc::new(tokio::sync::RwLock::new(Arc::new(core))),
+            config: StartupConfig {
+                bootstrap_nodes: vec![],
+                sim_addr: None,
+                mesh_host: "127.0.0.1".to_string(),
+                mesh_port: 8080,
+            },
+            full_config,
+            ws_count: Arc::new(AtomicUsize::new(0)),
+        })
+    }
 
-        // In a more complete implementation, we would also update the system config (ports, security levels, etc.)
-        // and persist it to ghostwire.toml.
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        serde_json::from_slice(&bytes).expect("response is JSON")
+    }
 
-        Json(ApiV2Response::success(serde_json::json!({
-            "status": "settings_updated",
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        })))
+    #[tokio::test]
+    async fn get_settings_returns_only_real_state() {
+        let _home = crate::core::encryption::test_home();
+        let mut cfg = Config::default();
+        cfg.server.port = 4321;
+        cfg.network.max_peers = 77;
+        cfg.security.key_rotation_interval_days = 9;
+        let state = test_state("get_settings", cfg).await;
+        let expected_nick = state.core.read().await.get_metadata().await.nickname;
+
+        let resp = SystemController::get_settings(State(state)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp).await;
+        let data = &body["data"];
+
+        // Real values from full_config / identity metadata — not fabricated.
+        assert_eq!(data["username"], expected_nick, "username must be reported");
+        assert_eq!(data["displayName"], expected_nick);
+        assert_eq!(data["listenPort"], 4321);
+        assert_eq!(data["maxPeers"], 77);
+        assert_eq!(data["keyRotationDays"], 9);
+
+        // Keys with no backing state must be absent, not invented.
+        assert!(
+            data.get("enableMdns").is_none(),
+            "enableMdns has no config backing and must not be fabricated"
+        );
+        assert!(data.get("logLevel").is_none());
+        assert!(data.get("encryptionLevel").is_none());
+        assert!(data.get("autoLockMinutes").is_none());
+    }
+
+    #[tokio::test]
+    async fn update_settings_reports_what_was_and_was_not_applied() {
+        let _home = crate::core::encryption::test_home();
+        let state = test_state("update_settings", Config::default()).await;
+
+        let req = serde_json::json!({
+            "displayName": "Alice",
+            "bio": "test bio",
+            "listenPort": 9999,
+            "maxPeers": "lots",
+            "enableMdns": true,
+            "bogus": 1,
+        });
+        let resp = SystemController::update_settings(State(state.clone()), Json(req))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp).await;
+        let data = &body["data"];
+
+        // Metadata is genuinely applied through update_metadata.
+        assert_eq!(data["applied_now"]["displayName"], "Alice");
+        assert_eq!(data["applied_now"]["bio"], "test bio");
+        // Config-file keys must NOT claim application — the running process
+        // is not reconfigured by this handler.
+        assert!(
+            data["applied_now"].get("listenPort").is_none(),
+            "listenPort must not be claimed as applied: nothing reconfigures the listener"
+        );
+        assert!(data["applied_now"].get("enableMdns").is_none());
+        // ...and must be reported as not applied, with a reason.
+        assert!(
+            data["not_applied"]["listenPort"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not applied"),
+            "listenPort must appear under not_applied with a reason, got: {}",
+            data["not_applied"]
+        );
+        // Bad types / unmappable / unknown keys are ignored, with reasons.
+        assert!(data["ignored"]["maxPeers"]
+            .as_str()
+            .unwrap_or("")
+            .contains("type mismatch"));
+        assert!(data["ignored"]["enableMdns"]
+            .as_str()
+            .unwrap_or("")
+            .contains("mDNS"));
+        assert!(data["ignored"]["bogus"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unknown"));
+        // No blanket success, no persistence claim without persistence.
+        assert_ne!(data.get("status"), Some(&serde_json::json!("settings_updated")));
+        assert!(
+            data.get("persisted").is_none(),
+            "persisted claim is forbidden when nothing is written to disk"
+        );
+
+        // The metadata claim must be true: a follow-up GET shows it applied.
+        let resp = SystemController::get_settings(State(state)).await.into_response();
+        let body = body_json(resp).await;
+        assert_eq!(body["data"]["displayName"], "Alice");
+        assert_eq!(body["data"]["bio"], "test bio");
+    }
+
+    #[tokio::test]
+    async fn unimplemented_endpoints_admit_it() {
+        let _home = crate::core::encryption::test_home();
+        let state = test_state("backup_logs", Config::default()).await;
+
+        let resp = SystemController::backup_system(State(state.clone()))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
+        assert!(
+            body.get("data").is_none(),
+            "no fabricated success payload on an unimplemented endpoint"
+        );
+
+        let resp = SystemController::get_system_logs(State(state))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
+        assert!(body.get("data").is_none());
     }
 }
