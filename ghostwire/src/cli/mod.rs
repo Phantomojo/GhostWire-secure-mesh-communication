@@ -995,34 +995,75 @@ async fn handle_monitor(core: &Arc<Core>, follow: bool) -> Result<()> {
     Ok(())
 }
 
+/// Prepare the GhostWire environment.
+///
+/// This used to be a second, entirely separate `setup` command that made three
+/// directories, checked for `git`/`curl`/`npm`, printed
+/// "Run 'ghostwire manage start' to begin." — and that suggested command does
+/// not exist at the top level, so the instruction could not be followed. It
+/// also hardcoded `~/.ghostwire` while the daemon, identity, vault, and
+/// mailbox all honour `GHOSTWIRE_HOME`, so with that variable set it reported
+/// success on directories no other component used.
+///
+/// `ghostwire setup` (main.rs) is the real identity setup and owns the
+/// first-run flow. This is now only the directory preparation that command also
+/// needs, and it points at the one true setup rather than pretending to be a
+/// second path of its own.
 async fn handle_setup() -> Result<()> {
-    info!("🛠️ Setting up GhostWire environment...");
+    info!("🛠️ Preparing the GhostWire environment...");
 
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-    let gw_dir = home.join(".ghostwire");
-    let vault_dir = gw_dir.join("vault");
-    let logs_dir = gw_dir.join("logs");
+    // Honour GHOSTWIRE_HOME, matching daemon.rs, core_identity.rs,
+    // persistence_manager.rs and core/mod.rs (mailbox). Using ~/.ghostwire here
+    // while everything else uses the env var means setup reports success on
+    // directories the node never reads.
+    let gw_dir = match std::env::var("GHOSTWIRE_HOME") {
+        Ok(h) if !h.is_empty() => std::path::PathBuf::from(h),
+        _ => dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
+            .join(".ghostwire"),
+    };
 
-    for dir in &[&gw_dir, &vault_dir, &logs_dir] {
+    let mut created = Vec::new();
+    for dir in [gw_dir.clone(), gw_dir.join("vault"), gw_dir.join("logs")] {
         if !dir.exists() {
-            println!("📁 Creating directory: {:?}", dir);
-            std::fs::create_dir_all(dir)?;
+            std::fs::create_dir_all(&dir)?;
+            created.push(dir.display().to_string());
         }
     }
 
-    println!("✅ GhostWire directories initialized.");
+    if created.is_empty() {
+        println!("✅ Environment already prepared at {}", gw_dir.display());
+    } else {
+        println!(
+            "✅ Created {} director{}(s):",
+            created.len(),
+            if created.len() == 1 { "y" } else { "ies" }
+        );
+        for d in &created {
+            println!("   {}", d);
+        }
+        println!("   root: {}", gw_dir.display());
+    }
 
-    // Check for common dependencies
-    println!("🔍 Checking dependencies...");
-    let deps = ["git", "curl", "npm"];
-    for dep in &deps {
-        match std::process::Command::new(dep).arg("--version").output() {
-            Ok(_) => println!("  ✅ {} is installed", dep),
-            Err(_) => println!("  ⚠️  {} is missing", dep),
+    // Report what is actually needed. `adb` matters (it backs `deploy`);
+    // git/curl/npm do not, and a successful spawn was previously reported as
+    // "installed" without ever checking the exit status.
+    println!("\nOptional tooling:");
+    for (dep, why) in [("adb", "required by 'ghostwire deploy'")] {
+        let present = std::process::Command::new(dep)
+            .arg("version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if present {
+            println!("  ✅ {dep} — {why}");
+        } else {
+            println!("  ⚠️  {dep} not found — {why}");
         }
     }
 
-    println!("\n✨ Setup complete. Run 'ghostwire manage start' to begin.");
+    // Direct to the single real setup command instead of the nonexistent one.
+    println!("\nNext: run 'ghostwire setup' to create your identity.");
     Ok(())
 }
 

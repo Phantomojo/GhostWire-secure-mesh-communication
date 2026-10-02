@@ -614,7 +614,89 @@ async fn main() -> Result<()> {
                     println!("   API: http://127.0.0.1:{}", args.port);
                     println!("\nRun 'ghostwire start' to begin.");
                 } else {
-                    println!("No identity found. Run 'ghostwire start' to create one.");
+                    // First run: no identity exists yet.
+                    //
+                    // This branch used to print "No identity found. Run
+                    // 'ghostwire start' to create one." and exit — which made
+                    // the interactive setup unreachable in the only situation
+                    // its help text ("Interactive first-run setup") describes,
+                    // while it worked only when an identity already existed
+                    // and setup was unnecessary.
+                    //
+                    // Create it here instead, using the same prompts. Defaults
+                    // are accepted by pressing Enter, so the common case is
+                    // three Enters. `GHOSTWIRE_PASSWORD` is honoured for
+                    // scripted/unattended first runs; it is deliberately NOT a
+                    // flag, because a password on the command line lands in
+                    // shell history and is visible in `ps`.
+                    use std::io::Write;
+                    let ghost_home = std::env::var("GHOSTWIRE_HOME")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|_| {
+                            dirs::home_dir().unwrap_or_default().join(".ghostwire")
+                        });
+                    let _ = std::fs::create_dir_all(&ghost_home);
+
+                    println!("Welcome to GhostWire — first-run setup.");
+                    println!("Press Enter to accept the default in each prompt.\n");
+
+                    print!("Nickname [ghostwire]: ");
+                    std::io::stdout().flush()?;
+                    let mut nickname = String::new();
+                    std::io::stdin().read_line(&mut nickname)?;
+                    let nickname = nickname.trim();
+                    let nickname = if nickname.is_empty() {
+                        "ghostwire".to_string()
+                    } else {
+                        nickname.to_string()
+                    };
+
+                    print!("Bio [anonymous mesh node]: ");
+                    std::io::stdout().flush()?;
+                    let mut bio = String::new();
+                    std::io::stdin().read_line(&mut bio)?;
+                    let bio = bio.trim().to_string();
+
+                    let password = match std::env::var("GHOSTWIRE_PASSWORD") {
+                        Ok(p) if !p.is_empty() => {
+                            println!("(password taken from GHOSTWIRE_PASSWORD)");
+                            p
+                        }
+                        _ => {
+                            print!("Password: ");
+                            std::io::stdout().flush()?;
+                            let mut p = String::new();
+                            std::io::stdin().read_line(&mut p)?;
+                            p.trim().to_string()
+                        }
+                    };
+
+                    // Match the API's own rule (controllers/identity.rs) so the
+                    // CLI cannot create an identity the HTTP API would reject.
+                    if password.as_bytes().len() < 12 {
+                        eprintln!("❌ Password must be at least 12 bytes. Nothing was created.");
+                        return Ok(());
+                    }
+
+                    let identity = Identity::load_or_create(None)
+                        .map_err(|e| anyhow::anyhow!("Failed to create identity: {}", e))?;
+                    identity.update_metadata(
+                        Some(nickname.clone()),
+                        if bio.is_empty() { None } else { Some(bio) },
+                        None,
+                        Some(true),
+                    );
+                    identity
+                        .save_to_disk(&password)
+                        .map_err(|e| anyhow::anyhow!("Failed to save identity: {}", e))?;
+
+                    let _ = std::fs::remove_file(storage_path.with_file_name(".initial-password"));
+
+                    println!("\n✅ Identity created");
+                    println!("   Nickname: {}", nickname);
+                    println!("   DID: {}", identity.did);
+                    println!("   Stored in: {}", ghost_home.display());
+                    println!("\nRun 'ghostwire start' to begin.");
                 }
                 return Ok(());
             }

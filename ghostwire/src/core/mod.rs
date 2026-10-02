@@ -1558,8 +1558,9 @@ impl Core {
         // branch above: a broadcast is public by definition.
         self.message_store.save_message(message).map_err(|e| {
             anyhow::anyhow!(
-                "message NOT persisted (encrypted storage refused it: {e}). \
-                 The message was still transmitted, but no local copy exists."
+                "message NOT persisted and NOT transmitted: encrypted storage refused it: {e}. \
+                 Nothing left this node — the message was never sent, so retrying after \
+                 unlocking the profile is safe."
             )
         })?;
 
@@ -1799,6 +1800,39 @@ impl Core {
             let _ = self.identity.read().await.lock();
             return Err(anyhow::anyhow!(
                 "persistence, mailbox, or encryption migration failed; profile was re-locked: {}",
+                error
+            ));
+        }
+
+        // Activate the encryption private key in THIS process.
+        //
+        // `migrate_to_user_keyed` above persists the user-keyed state to disk,
+        // but `activate_user_keyed` — which loads that state and installs the
+        // private key into the live `EncryptionManager` — had no caller outside
+        // its own definition and a unit test. So after a completely successful
+        // unlock, identity and persistence were usable while the encryption
+        // manager still held no private key, and every message write failed
+        // with "persistence is locked; unlock the profile first".
+        //
+        // That produced the worst possible failure shape: `POST
+        // /api/identity/setup` returned `"status":"identity_secured"` and wrote
+        // a valid 13 KB state file, and the very next `send` returned 503
+        // claiming the profile was locked — while it had just been unlocked.
+        //
+        // Runs AFTER the migration because it reads the state file that
+        // migration writes. If it fails, re-lock everything rather than leaving
+        // a half-unlocked node that reports success.
+        if let Err(error) = self
+            .encryption
+            .activate_user_keyed(&self.persistence)
+            .map_err(|error| anyhow::anyhow!("encryption key activation failed: {}", error))
+        {
+            let _ = self.encryption.lock_private_state();
+            let _ = self.persistence.lock();
+            let _ = self.identity.read().await.lock();
+            return Err(anyhow::anyhow!(
+                "encryption key could not be activated in this process; \
+                 profile was re-locked: {}",
                 error
             ));
         }
