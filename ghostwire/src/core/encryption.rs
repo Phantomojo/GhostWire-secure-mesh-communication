@@ -4,7 +4,11 @@
 //! **Security Fixes Applied:**
 //! - ✅ CVE-2025-11931 class: Input validation on decryption
 //! - ✅ DoS prevention: Result-based error handling (no panic)
-//! - ✅ Replay protection: Message deduplication integration
+//! - ✅ Replay protection: receiver-side replay cache over the AUTHENTICATED
+//!    portion of a frame — see [`ReplayGuard`]. This is a real check on the
+//!    `decrypt_message` / `decrypt_message_ratchet` paths, not the
+//!    `wire_protocol::ReplayWindow`, which guards a different message type
+//!    and is not consulted here.
 //! - ✅ Timing attacks: Constant-time signature verification
 
 use crate::core::binary_hardening::LockedBuffer;
@@ -130,6 +134,9 @@ pub struct EncryptionManager {
     last_key_rotation: u64,
     pub crl: Arc<crl::CrlStore>,
     pub ratchet_sessions: Arc<double_ratchet::RatchetSessionManager>,
+    /// Replay cache. Dropped on lock alongside the private material it
+    /// describes, so a cache cannot outlive the identity that produced it.
+    replay_guard: Arc<Mutex<ReplayGuard>>,
 }
 
 #[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
@@ -138,6 +145,172 @@ pub struct SessionKey {
     pub created_at: u64,
     pub expires_at: u64,
     pub usage_count: usize,
+}
+
+/// How many distinct digests to remember per sender before evicting the oldest.
+const REPLAY_CACHE_PER_SENDER: usize = 256;
+/// How many distinct senders to track. Bounds memory against a peer that
+/// varies `sender_id`, exactly as `add_peer_key` bounds the peer-key map.
+const REPLAY_MAX_SENDERS: usize = 10_000;
+
+/// Receiver-side replay cache for decrypted frames.
+///
+/// # Why a digest and not a counter
+///
+/// `EncryptedMessage` carries a `timestamp` but no sequence number, so a
+/// per-sender monotonic counter cannot be enforced from the wire as it
+/// stands. Rather than trust a counter we do not have, this caches the
+/// digest of each frame we have already accepted and refuses any frame
+/// whose digest is already present.
+///
+/// # Which fields the digest covers, and why exactly those
+///
+/// The digest MUST be computed only over bytes the sender authenticated.
+/// If it covered a field the signature does not cover, an attacker could
+/// take a captured frame, flip that field, and present it as a "new"
+/// message that misses the cache — turning replay protection into a no-op
+/// that costs one bit-flip to bypass.
+///
+/// `sign_message` (encryption.rs) signs the ciphertext and nothing else, and
+/// the AEAD binds nonce + ciphertext. So the authenticated set is:
+///
+///   * `sender_id`  — selects the peer key the signature is verified against,
+///                    so a swapped id verifies against a different key and
+///                    fails. Including it also scopes the cache per sender.
+///   * `version`    — selects the KDF/AEAD path; changing it changes the
+///                    decryption result, so it is implicitly authenticated.
+///   * `nonce`      — bound into the AEAD as the nonce.
+///   * `ciphertext` — signed directly, and AEAD-bound.
+///   * `pq_key`     — the ML-KEM ciphertext / ratchet header. Mixing it
+///                    changes the derived key, so altering it breaks the AEAD
+///                    tag exactly as altering the ciphertext does.
+///
+/// `timestamp` is deliberately EXCLUDED. It is not signed and not AEAD-bound,
+/// so it is attacker-controlled free text; an attacker could rewrite it to
+/// forge a fresh digest. It is instead checked for sanity as a freshness
+/// bound (see [`Self::check`]), which is the only honest use of an
+/// unauthenticated field.
+#[derive(Debug, Default)]
+pub struct ReplayGuard {
+    /// sender_id -> ordered set of digests already accepted from that sender.
+    ///
+    /// A `VecDeque` is used rather than a set so eviction is strictly
+    /// oldest-first; membership is a linear scan, which is bounded by
+    /// `REPLAY_CACHE_PER_SENDER` and therefore not a DoS surface.
+    seen: std::collections::HashMap<String, std::collections::VecDeque<[u8; 32]>>,
+}
+
+impl ReplayGuard {
+    /// Digest the authenticated portion of a frame.
+    ///
+    /// The length prefixes matter: without them, fields could be shifted
+    /// across the boundary (e.g. a `sender_id` one byte longer) and still
+    /// concatenate to the same preimage.
+    pub fn digest(msg: &EncryptedMessage) -> [u8; 32] {
+        use ring::digest;
+        let mut ctx = digest::Context::new(&digest::SHA256);
+        ctx.update(b"GhostWire-Replay-v1");
+
+        // Length-prefix every field. Without it a `sender_id` one byte longer
+        // could shift the remaining fields and still concatenate to the same
+        // preimage, which is exactly the ambiguity a replay digest must not
+        // have.
+        //
+        // Written as a macro rather than a closure: a closure capturing `&mut
+        // ctx` would keep the borrow alive across the whole scope and block the
+        // direct `ctx.update` calls that follow (E0499).
+        macro_rules! field {
+            ($bytes:expr) => {{
+                let b: &[u8] = $bytes;
+                ctx.update(&(b.len() as u64).to_le_bytes());
+                ctx.update(b);
+            }};
+        }
+
+        field!(msg.sender_id.as_bytes());
+        ctx.update(&[msg.version]);
+        field!(&msg.nonce);
+        field!(&msg.ciphertext);
+        match &msg.pq_key {
+            Some(pq) => field!(pq),
+            // Distinguish "no PQ component" from "empty PQ component".
+            None => {
+                ctx.update(&[0u8]);
+            }
+        }
+        let out = ctx.finish();
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(out.as_ref());
+        digest
+    }
+
+    /// Seconds of clock skew tolerated on an unauthenticated timestamp.
+    const MAX_FUTURE_SKEW_SECS: u64 = 300;
+    /// Longest age accepted for a timestamp. Frames older than this are
+    /// refused regardless of whether the digest was cached, which bounds how
+    /// long a capture stays useful even if the cache has been evicted or the
+    /// process restarted (the cache is in-memory only).
+    const MAX_AGE_SECS: u64 = 24 * 60 * 60;
+
+    /// Reject a frame that is a replay, or whose timestamp is implausible.
+    ///
+    /// MUST be called only AFTER signature verification has succeeded. If it
+    /// runs before authentication, an attacker can fill the cache with
+    /// digests of frames that were never valid, evicting genuine entries and
+    /// re-opening the replay window.
+    pub fn check(&mut self, msg: &EncryptedMessage, now: u64) -> Result<(), DecryptionError> {
+        // The timestamp is unauthenticated, so it can only ever be a sanity
+        // bound — never an authenticity signal. Check it first: a frame from
+        // the far future must not advance any state.
+        if msg.timestamp > now.saturating_add(Self::MAX_FUTURE_SKEW_SECS) {
+            return Err(DecryptionError::ReplayDetected);
+        }
+        if msg.timestamp.saturating_add(Self::MAX_AGE_SECS) < now {
+            return Err(DecryptionError::ReplayDetected);
+        }
+
+        let digest = Self::digest(msg);
+        let is_replay = self
+            .seen
+            .get(&msg.sender_id)
+            .is_some_and(|entry| entry.iter().any(|seen| *seen == digest));
+        if is_replay {
+            return Err(DecryptionError::ReplayDetected);
+        }
+
+        // Bound the map against a peer that varies `sender_id`, exactly as
+        // `add_peer_key` bounds the peer-key map. Done BEFORE taking the
+        // mutable borrow below, and only when a genuinely new sender needs an
+        // entry, so a single chatty sender cannot churn the map.
+        if !self.seen.contains_key(&msg.sender_id) && self.seen.len() >= REPLAY_MAX_SENDERS {
+            let oldest = self
+                .seen
+                .iter()
+                .min_by_key(|(_, q)| q.front().copied())
+                .map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                self.seen.remove(&k);
+            }
+        }
+
+        let entry = self.seen.entry(msg.sender_id.clone()).or_default();
+        entry.push_back(digest);
+        while entry.len() > REPLAY_CACHE_PER_SENDER {
+            entry.pop_front();
+        }
+        Ok(())
+    }
+
+    /// Forget every sender. Used when private state is dropped on lock, so a
+    /// stale cache cannot outlive the identity it belonged to.
+    pub fn clear(&mut self) {
+        self.seen.clear();
+    }
+
+    /// Test hook: how many digests are cached for `sender_id`.
+    pub fn cached_for(&self, sender_id: &str) -> usize {
+        self.seen.get(sender_id).map_or(0, |q| q.len())
+    }
 }
 
 impl EncryptionManager {
@@ -246,6 +419,7 @@ impl EncryptionManager {
                 .as_secs(),
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
+            replay_guard: Arc::new(Mutex::new(ReplayGuard::default())),
         }
     }
 
@@ -332,13 +506,101 @@ impl EncryptionManager {
         Ok(())
     }
 
-    /// Drop private encryption material from memory when the profile locks.
+    /// Drop ALL private encryption material from memory when the profile locks.
+    ///
+    /// Locked must mean *no decryption*, not merely "the one obvious key is
+    /// gone". This function previously cleared only `private_key`, which left two
+    /// live bypasses, both of which let a locked node decrypt traffic:
+    ///
+    ///  1. `derive_session_key` returned the CACHED session key before it ever
+    ///     reached its `private_key_snapshot()` check, so a warm cache decrypted
+    ///     v3 traffic indefinitely.
+    ///  2. Ratchet state never referenced `private_key` at all, so v4 traffic
+    ///     decrypted indefinitely.
+    ///
+    /// Both gaps are closed structurally, not just here: `derive_session_key`
+    /// and `decrypt_message_ratchet` now consult `require_unlocked()` before
+    /// doing any work, so clearing the caches below is defence in depth rather
+    /// than the only thing standing between a locked profile and plaintext.
     pub fn lock_private_state(&self) -> Result<(), Box<dyn std::error::Error>> {
         *self
             .private_key
             .lock()
             .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))? = None;
+
+        // Cached session keys are raw ECDH-derived key material. Leaving them
+        // behind is exactly the defect above, so they go with the private key.
+        self.session_keys
+            .lock()
+            .map_err(|_| std::io::Error::other("session key lock poisoned"))?
+            .clear();
+
+        // Ratchet state holds its own chain/root keys and a DH private key, and
+        // is completely independent of `private_key`. It must be dropped too.
+        self.ratchet_sessions.clear_all_sessions();
+
+        // The replay cache describes frames accepted under the identity we just
+        // dropped; it is not secret, but keeping it would let a locked-then-
+        // unlocked profile reject a legitimately re-delivered frame.
+        self.replay_guard
+            .lock()
+            .map_err(|_| std::io::Error::other("replay guard lock poisoned"))?
+            .clear();
         Ok(())
+    }
+
+    /// Authoritative lock predicate: is private material unavailable?
+    ///
+    /// Every path that can produce plaintext MUST gate on this (or on
+    /// `private_key_snapshot`, which fails identically when locked). Presence of
+    /// the flag alone is not sufficient — the ratchet path never touched the
+    /// private key and is exactly why the old lock was ineffective.
+    pub fn is_locked(&self) -> bool {
+        self.private_key
+            .lock()
+            .map(|guard| guard.is_none())
+            .unwrap_or(true)
+    }
+
+    /// Gate for any operation that can derive key material or produce plaintext.
+    ///
+    /// Fails CLOSED: a poisoned mutex is treated as locked, never as unlocked.
+    fn require_unlocked(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let guard = self
+            .private_key
+            .lock()
+            .map_err(|_| std::io::Error::other("private encryption key lock poisoned"))?;
+        if guard.is_none() {
+            return Err("encryption private state is locked".into());
+        }
+        Ok(())
+    }
+
+    /// Reject a frame whose digest we have already accepted.
+    ///
+    /// Called only after signature verification succeeds. See [`ReplayGuard`] for
+    /// why the digest covers only the authenticated fields.
+    fn check_replay(
+        &self,
+        msg: &EncryptedMessage,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.replay_guard
+            .lock()
+            .map_err(|_| std::io::Error::other("replay guard lock poisoned"))?
+            .check(msg, now)?;
+        Ok(())
+    }
+
+    /// Test hook: replay-cache size for a sender.
+    pub fn replay_cache_len_for_test(&self, sender_id: &str) -> usize {
+        self.replay_guard
+            .lock()
+            .map(|guard| guard.cached_for(sender_id))
+            .unwrap_or(0)
     }
 
     fn get_master_key() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -755,6 +1017,10 @@ impl EncryptionManager {
         &self,
         encrypted_msg: &EncryptedMessage,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        // SECURITY: refuse to decrypt at all while locked, before any key
+        // derivation or peer lookup happens.
+        self.require_unlocked()?;
+
         // Reject if sender key is revoked
         if self.crl.is_revoked(&encrypted_msg.sender_id) {
             return Err(format!("Sender key {} is revoked", encrypted_msg.sender_id).into());
@@ -774,6 +1040,15 @@ impl EncryptionManager {
             &encrypted_msg.signature,
             &peer_public_key,
         )?;
+
+        // Replay check, only now that the frame is known to be authentic.
+        //
+        // Ordering is load-bearing: `sign_message` covers the ciphertext
+        // alone, so the header fields above (timestamp, key_id, message_type)
+        // are not authenticated. Running this before signature verification
+        // would let an unauthenticated attacker seed the cache with chosen
+        // digests and evict genuine entries, reopening the replay window.
+        self.check_replay(encrypted_msg)?;
 
         if encrypted_msg.version != 0x03 {
             return Err("Unsupported message version (expected v3 XChaCha20)".into());
@@ -1026,6 +1301,15 @@ impl EncryptionManager {
         peer_id: &str,
         peer_public_key: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        // SECURITY: gate on the lock BEFORE the cache lookup.
+        //
+        // This check used to sit at the private-key extraction further down,
+        // which meant the cached-session-key branch above returned early and
+        // never reached it. A locked node with a warm cache therefore
+        // decrypted v3 traffic normally. A cached key IS private key material,
+        // so serving it while locked defeats the lock entirely.
+        self.require_unlocked()?;
+
         // Check if we have a cached session key
         let mut session_keys = self.session_keys.lock().unwrap();
         if let Some(session_key) = session_keys.get(peer_id) {
@@ -1134,6 +1418,11 @@ impl EncryptionManager {
 
     // ✅ SECURE DECRYPTION: Returns Result instead of panic (DoS prevention)
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+        // This derives a key from the private material, so it must respect the
+        // profile lock like every other decryption path.
+        if self.is_locked() {
+            return Err(DecryptionError::DecryptionFailed);
+        }
         if data.len() < 24 {
             tracing::warn!(
                 actual_len = data.len(),
@@ -1470,6 +1759,11 @@ impl EncryptionManager {
         &self,
         encrypted_msg: &EncryptedMessage,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        // SECURITY: ratchet state is independent of `private_key`, so the
+        // profile lock used to have no effect on this path at all — a locked
+        // node decrypted v4 traffic indefinitely. Gate it explicitly.
+        self.require_unlocked()?;
+
         if self.crl.is_revoked(&encrypted_msg.sender_id) {
             return Err(format!("Sender key {} is revoked", encrypted_msg.sender_id).into());
         }
@@ -1505,6 +1799,18 @@ impl EncryptionManager {
             &encrypted_msg.signature,
             &peer_public_key,
         )?;
+
+        // Replay check. Placed after signature verification (so the cache can
+        // only ever hold authentic frames) but before `ratchet_sessions
+        // .decrypt`, which ADVANCES the chain and consumes a message key.
+        // Checking after would mean a replay had already burned a key.
+        //
+        // The ratchet does consume each message key, so a byte-identical
+        // replay would fail the AEAD check anyway — but that is a side effect
+        // of the ratchet, not a replay check, and it does not stop an
+        // attacker from forcing repeated chain advancement attempts. This is
+        // the explicit defence.
+        self.check_replay(encrypted_msg)?;
 
         let header_json = encrypted_msg
             .pq_key
@@ -1790,6 +2096,122 @@ mod tests {
         let decrypted = bob.decrypt_message(&encrypted).unwrap();
 
         assert_eq!(message, decrypted);
+    }
+
+    /// A byte-identical redelivery of an accepted frame must be refused, and
+    /// the refusal must be the replay check rather than any incidental
+    /// failure. Built from one genuinely valid frame so the first delivery
+    /// proves authenticity, and only the second call isolates the cache.
+    #[test]
+    fn replayed_frame_is_rejected_on_redelivery() {
+        let _home = super::test_home();
+        let alice = EncryptionManager::new().unwrap();
+        let bob = EncryptionManager::new().unwrap();
+
+        alice.add_peer_key(
+            bob.get_key_id(),
+            bob.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+
+        let frame = alice
+            .encrypt_message("first delivery", &bob.get_key_id(), MessageType::Text)
+            .unwrap();
+
+        let first = bob
+            .decrypt_message(&frame)
+            .expect("the authentic first delivery must decrypt");
+        assert_eq!(first, "first delivery");
+
+        let error = bob
+            .decrypt_message(&frame)
+            .expect_err("a byte-identical redelivery must be refused")
+            .to_string();
+        assert!(
+            error.contains("Replay"),
+            "SECURITY REGRESSION: the second delivery of the SAME frame was \
+             accepted, so a captured message replays forever. Got: {error:?}"
+        );
+    }
+
+    /// Locking must stop decryption, including the path the old lock never
+    /// covered: a session key already sitting in the cache. Two frames are
+    /// used deliberately — the first warms the cache, and the second is fresh
+    /// so the replay cache cannot be what rejects it below.
+    #[test]
+    fn locked_profile_cannot_decrypt_even_with_a_warm_session_cache() {
+        let _home = super::test_home();
+        let alice = EncryptionManager::new().unwrap();
+        let bob = EncryptionManager::new().unwrap();
+
+        alice.add_peer_key(
+            bob.get_key_id(),
+            bob.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+        bob.add_peer_key(
+            alice.get_key_id(),
+            alice.get_public_key().to_vec(),
+            KeyType::Hybrid,
+        );
+
+        let warm = alice
+            .encrypt_message("warm the cache", &bob.get_key_id(), MessageType::Text)
+            .unwrap();
+        assert_eq!(
+            bob.decrypt_message(&warm)
+                .expect("the first delivery succeeds and caches a session key"),
+            "warm the cache"
+        );
+
+        let after_lock = alice
+            .encrypt_message("must not decrypt", &bob.get_key_id(), MessageType::Text)
+            .unwrap();
+
+        alice
+            .init_ratchet_session(&bob.get_key_id(), bob.get_public_key())
+            .expect("alice establishes ratchet session");
+        bob.init_ratchet_session_as_bob(&alice.get_key_id(), alice.get_public_key())
+            .expect("bob establishes ratchet session");
+        let warm_ratchet = alice
+            .encrypt_message_ratchet("warm the ratchet", &bob.get_key_id(), MessageType::Text)
+            .expect("alice encrypts via ratchet");
+        assert_eq!(
+            bob.decrypt_message_ratchet(&warm_ratchet)
+                .expect("the first ratchet delivery succeeds"),
+            "warm the ratchet"
+        );
+        let ratchet_after_lock = alice
+            .encrypt_message_ratchet("must not decrypt either", &bob.get_key_id(), MessageType::Text)
+            .expect("alice encrypts a second ratchet frame");
+
+        bob.lock_private_state().expect("locking succeeds");
+        assert!(bob.is_locked(), "the manager reports itself locked");
+
+        let error = bob
+            .decrypt_message(&after_lock)
+            .expect_err("a locked profile must not produce plaintext")
+            .to_string();
+        assert!(
+            error.contains("locked"),
+            "SECURITY REGRESSION: the locked profile produced plaintext. \
+             Got: {error:?}"
+        );
+
+        let ratchet_error = bob
+            .decrypt_message_ratchet(&ratchet_after_lock)
+            .expect_err("a locked profile must not decrypt ratchet traffic")
+            .to_string();
+        assert!(
+            ratchet_error.contains("locked"),
+            "SECURITY REGRESSION: the locked profile decrypted v4 ratchet \
+             traffic, which never touches private_key. Got: {ratchet_error:?}"
+        );
     }
 
     #[test]
