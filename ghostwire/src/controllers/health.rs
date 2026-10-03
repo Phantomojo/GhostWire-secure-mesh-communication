@@ -26,7 +26,19 @@ impl HealthController {
         let core = state.core.read().await;
 
         #[cfg(feature = "mesh")]
-        let (mesh_enabled, mesh_status) = match &core.mesh_manager {
+        // Use the EFFECTIVE mesh manager, not `core.mesh_manager` directly.
+        //
+        // Core carries two slots: `mesh_manager`, populated at startup when the
+        // mesh can be built without an unlocked profile, and
+        // `late_mesh_manager`, populated by unlock. `effective_mesh_manager()`
+        // checks both. Reading only the first reports "not initialized" on any
+        // node whose mesh was installed by unlock — observed live as a node
+        // with its swarm listening on 4201 while health claimed
+        // mesh_enabled=false / "not initialized".
+        //
+        // Anything gating on this (readiness probes, an operator, bootstrap)
+        // was told the node had no mesh when it had one.
+        let (mesh_enabled, mesh_status) = match core.effective_mesh_manager().await {
             Some(_) => (true, "initialized".to_string()),
             None => {
                 let identity_locked = core.identity.read().await.is_locked();
