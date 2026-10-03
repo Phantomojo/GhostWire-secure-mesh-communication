@@ -240,10 +240,16 @@ impl ReticulumTransport {
             None => {
                 // ponytail: persist RNS identity to disk so it survives restarts.
                 // Without this, every restart generates a new random RNS address.
-                let identity_path = dirs::config_dir()
-                    .unwrap_or_default()
-                    .join("ghostwire")
-                    .join("rns_identity.bin");
+                // Resolve the RNS identity path through the canonical GhostWire home.
+                //
+                // This used to use `dirs::config_dir()`, the only such call in
+                // the file. That ignores `GHOSTWIRE_HOME`, so two nodes with
+                // separate homes on one machine shared one `rns_identity.bin`
+                // and presented the SAME RNS identity to the network — which
+                // silently invalidates any multi-node test that isolates homes
+                // to keep its nodes independent.
+                let identity_path =
+                    crate::daemon::ghostwire_home().join("rns_identity.bin");
 
                 match std::fs::read(&identity_path) {
                     Ok(bytes) if bytes.len() == rns_transport::identity::PRIVATE_KEY_LENGTH => {
