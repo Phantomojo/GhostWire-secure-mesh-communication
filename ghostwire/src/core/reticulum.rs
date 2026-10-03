@@ -212,12 +212,69 @@ pub struct ReticulumTransport {
     last_error: Option<String>,
 }
 
-/// How often to re-announce the local destination.
+/// Base interval between re-announces of the local destination.
 ///
-/// RNS announces carry a limited lifetime; nothing rebroadcasts them forever.
-/// 300 s is the interval the original design specified (SYMBIOTIC_P2P_ARCHITECTURE.md
-/// §3.5.3) and is well under the announce expiry on the reference stack.
+/// RNS announces carry a limited lifetime; nothing rebroadcasts them forever,
+/// so a node that never re-announces goes invisible. 300 s is the interval the
+/// original design specified (SYMBIOTIC_P2P_ARCHITECTURE.md §3.5.3) and is well
+/// under the announce expiry on the reference stack.
+///
+/// This is the BASE of a jittered interval, not the interval itself. A fixed
+/// period is a correlatable fingerprint: every announce from every GhostWire
+/// node arrives on an exact multiple of 300 s, so an observer on the public
+/// backbone can group announces by arrival time and count our nodes without
+/// decrypting anything. Randomising the period breaks that grouping.
 const REANNOUNCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Fraction of the base interval used as random jitter, per side.
+///
+/// The next announce is drawn uniformly from
+/// `[base * (1 - JITTER), base * (1 + JITTER)]`, so with 0.25 the period lands
+/// somewhere in 225-375 s.
+///
+/// Bounds chosen deliberately:
+///   * The upper bound stays well under the announce expiry, because an
+///     interval that occasionally exceeds it means the node goes dark.
+///   * The lower bound stays high because RNS enforces a 2% announce rate cap
+///     per destination as a shared, hostile-neighbour surface — a node that
+///     announces aggressively degrades the whole segment. Announcing faster
+///     buys a marginally fresher path table at everyone else's expense.
+const REANNOUNCE_JITTER: f64 = 0.25;
+
+/// Sleep for a randomly jittered interval around [`REANNOUNCE_INTERVAL`].
+///
+/// Drawn uniformly from `[base * (1 - JITTER), base * (1 + JITTER)]`, so
+/// consecutive announces from different nodes interleave instead of arriving in
+/// lockstep.
+async fn sleep_jittered(rng: &mut rand::rngs::StdRng) {
+    let base = REANNOUNCE_INTERVAL.as_secs_f64();
+    let offset = base * REANNOUNCE_JITTER * (rand::Rng::gen_range(rng, -1.0_f64..1.0_f64));
+    let seconds = (base + offset).max(1.0);
+    tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
+}
+
+/// Seed a jitter RNG from OS entropy.
+///
+/// `StdRng::from_entropy` was removed in rand 0.9 (this crate is on rand 0.9)
+/// and `rand::rngs::OsRng` is unavailable here because the `os_rng` feature is
+/// not enabled. `getrandom` is already a direct dependency (used by
+/// `rand_core`'s `getrandom` feature), so it is the portable source of entropy
+/// with no new dependency and no feature change.
+///
+/// Seeding from the OS rather than a constant matters: a fixed seed would make
+/// every GhostWire node announce on the SAME jitter sequence, which is the
+/// fingerprint this change exists to remove — determinism here would defeat the
+/// entire purpose.
+///
+/// On failure the caller falls back to the fixed cadence rather than refusing to
+/// announce, because invisibility is worse than a timing fingerprint.
+fn jitter_rng() -> std::io::Result<rand::rngs::StdRng> {
+    use rand::SeedableRng;
+    let mut seed = [0u8; 32];
+    getrandom::getrandom(&mut seed)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(rand::rngs::StdRng::from_seed(seed))
+}
 
 #[cfg(feature = "reticulum")]
 impl ReticulumTransport {
@@ -425,13 +482,34 @@ impl ReticulumTransport {
                 let transport = transport_handle.clone();
                 let destination = local_dest.clone();
                 Some(tokio::spawn(async move {
-                    let mut ticker =
-                        tokio::time::interval(REANNOUNCE_INTERVAL);
-                    // The first tick fires immediately; skip it because the
-                    // initial announce was already sent above.
-                    ticker.tick().await;
+                    // Jittered sleep, not `tokio::time::interval`. An interval
+                    // ticks at a fixed period, so every announce this node ever
+                    // sends is an exact multiple of REANNOUNCE_INTERVAL — a
+                    // timing fingerprint an observer can group without
+                    // decrypting anything. Each wait below is drawn fresh.
+                    //
+                    // First wait consumes the "initial announce already sent"
+                    // slot, matching the old `ticker.tick()` skip.
+                    let mut rng = match jitter_rng() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "OS RNG unavailable; re-announcing on the fixed \
+                                 interval, which is correlatable timing"
+                            );
+                            // Fall back to the fixed cadence rather than
+                            // refusing to announce: invisibility is a worse
+                            // outcome than a timing fingerprint, and the warning
+                            // says exactly what was lost.
+                            loop {
+                                tokio::time::sleep(REANNOUNCE_INTERVAL).await;
+                                transport.send_announce(&destination, None).await;
+                            }
+                        }
+                    };
+                    sleep_jittered(&mut rng).await;
                     loop {
-                        ticker.tick().await;
                         transport.send_announce(&destination, None).await;
                         tracing::debug!(
                             "Re-announced RNS destination to stay discoverable \
