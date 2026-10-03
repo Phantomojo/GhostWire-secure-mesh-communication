@@ -1902,10 +1902,45 @@ impl MeshDriver {
                 let _ = reply.send(res);
             }
             MeshCommand::ConnectPeer { peer_id, reply } => {
+                // `Swarm::dial` (libp2p-swarm-0.47) returns
+                // `Result<(), DialError>` SYNCHRONOUSLY. `Ok(())` means the
+                // dial was INITIATED — the connection is established later,
+                // asynchronously, as a `ConnectionEstablished` swarm event.
+                //
+                // So answering the caller here cannot confirm a connection,
+                // and the previous version did exactly that:
+                // `POST /api/identity/pair` returned `{"paired": true}` for a
+                // peer that was never reachable, with both nodes reporting
+                // `connected: 0` and `Disconnected` immediately afterwards.
+                //
+                // Two things are done about it:
+                //
+                //  1. A failure to even INITIATE is still an error worth
+                //     reporting — a bad multiaddr or an unknown peer is caught
+                //     here and must not be reported as success.
+                //  2. Success is reported honestly as "dial initiated", and
+                //     the confirmation of an ESTABLISHED connection comes from
+                //     the ConnectionEstablished handler, which is the only
+                //     place it is actually known.
+                //
+                // Note the deliberate asymmetry with the SendMessage arm
+                // below, which must NOT await a peer event: this arm waits for
+                // nothing.
                 let res = self
                     .swarm
                     .dial(peer_id)
-                    .map_err(|e| anyhow::anyhow!("Dial error: {}", e));
+                    .map_err(|e| anyhow::anyhow!("Dial to {peer_id} could not be initiated: {e}"));
+                match &res {
+                    Ok(_) => tracing::info!(
+                        peer = %peer_id,
+                        "Dial initiated; awaiting ConnectionEstablished event"
+                    ),
+                    Err(e) => tracing::warn!(
+                        peer = %peer_id,
+                        error = %e,
+                        "Dial could not be initiated"
+                    ),
+                }
                 let _ = reply.send(res);
             }
             MeshCommand::PingPeer { peer_id, reply } => {
