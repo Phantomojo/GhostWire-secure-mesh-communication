@@ -4,6 +4,7 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 pub mod armor;
+pub mod pairing;
 pub mod deref;
 pub mod chunking;
 pub mod binary_hardening;
@@ -1672,6 +1673,18 @@ impl Core {
         }
 
         Err(anyhow::anyhow!("Mesh network not available"))
+    }
+
+    /// This node's own addresses, for the identity API.
+    ///
+    /// Returns `(did, peer_id)`. The DID is canonical and shareable; the
+    /// PeerId is a delivery detail that is disclosed only at pairing under
+    /// Option B. Returns `None` while the profile is locked, since the keypair
+    /// is only available unlocked.
+    pub async fn local_addresses(&self) -> Option<(String, String)> {
+        let mesh = self.effective_mesh_manager().await?;
+        let mesh = mesh.read().await;
+        mesh.local_addresses()
     }
 
     /// Initialize a default transport for basic functionality
