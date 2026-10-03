@@ -2093,17 +2093,38 @@ impl MeshDriver {
                 .map(|p| String::from_utf8(p).unwrap_or(message.content.clone()))
                 .unwrap_or(message.content.clone());
 
+                // Key the encryption lookup by the RESOLVED PeerId, not by
+                // `message.recipient`.
+                //
+                // `message.recipient` is whatever the caller put in the envelope —
+                // for the DID path that is `did:ghost:…`. But `encrypt_message`
+                // looks the recipient up in `peer_keys`, which is keyed by
+                // PeerId string, so passing the DID yields "Recipient not found".
+                // That is why the first cross-machine DID send failed with
+                // "Encryption failed for DM" even though the DID had resolved
+                // correctly to a live peer two lines above.
+                //
+                // The PeerId is the authority here: it is the value the swarm
+                // will actually dial and the value the key was installed under.
+                // Passing the DID would also be wrong in principle — it would
+                // silently encrypt to whichever key happens to be stored under
+                // that alias, if any.
+                let encrypt_recipient = recipient.to_string();
                 let enc_result: Result<_, anyhow::Error> = if use_ratchet {
                     self.encryption_manager
                         .encrypt_message_ratchet(
                             &padded_content,
-                            &message.recipient,
+                            &encrypt_recipient,
                             EncMessageType::Text,
                         )
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 } else {
                     self.encryption_manager
-                        .encrypt_message(&padded_content, &message.recipient, EncMessageType::Text)
+                        .encrypt_message(
+                            &padded_content,
+                            &encrypt_recipient,
+                            EncMessageType::Text,
+                        )
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 };
                 if let Err(encryption_error) = enc_result.as_ref() {
