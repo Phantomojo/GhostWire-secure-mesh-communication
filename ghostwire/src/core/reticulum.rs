@@ -229,27 +229,39 @@ const REANNOUNCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 /// Fraction of the base interval used as random jitter, per side.
 ///
 /// The next announce is drawn uniformly from
-/// `[base * (1 - JITTER), base * (1 + JITTER)]`, so with 0.25 the period lands
-/// somewhere in 225-375 s.
+/// `[base * (1 - JITTER), base]`.
 ///
-/// Bounds chosen deliberately:
-///   * The upper bound stays well under the announce expiry, because an
-///     interval that occasionally exceeds it means the node goes dark.
-///   * The lower bound stays high because RNS enforces a 2% announce rate cap
-///     per destination as a shared, hostile-neighbour surface — a node that
-///     announces aggressively degrades the whole segment. Announcing faster
-///     buys a marginally fresher path table at everyone else's expense.
+/// ## The window is one-sided, and the first version of this had it wrong
+///
+/// An earlier version used a symmetric +/-25%, i.e. 225-375 s, on the reasoning
+/// that "the upper bound stays under announce expiry". That premise was wrong:
+/// RNS path entries expire on a multi-day horizon, so exceeding 300 s is not
+/// what makes a node go dark. And research established that RNS's 2% announce
+/// cap governs REBROADCAST (`Transport.py:2303-2338`, `announce_rate_target`),
+/// NOT our origin rate — so jitter upward was never constrained by it either.
+///
+/// What the symmetric window did cost was real, though: it drifted the mean
+/// period upward and so added up to 75 s of discovery latency for no privacy
+/// gain. A shorter maximum interval correlates at least as well as a longer one.
+///
+/// So the jitter is biased DOWNWARD: the mean stays at the designed 300 s and
+/// only the period varies. Spread without drift.
 const REANNOUNCE_JITTER: f64 = 0.25;
 
-/// Sleep for a randomly jittered interval around [`REANNOUNCE_INTERVAL`].
+/// Sleep for a randomly jittered interval below [`REANNOUNCE_INTERVAL`].
 ///
-/// Drawn uniformly from `[base * (1 - JITTER), base * (1 + JITTER)]`, so
-/// consecutive announces from different nodes interleave instead of arriving in
-/// lockstep.
+/// Drawn uniformly from `[base * (1 - JITTER), base]` — biased downward, so the
+/// mean period stays at the designed 300 s while consecutive announces from
+/// different nodes interleave instead of arriving in lockstep.
+///
+/// Biased down rather than symmetrically because the symmetric version drifted
+/// the mean upward and cost up to 75 s of extra discovery latency for no
+/// additional privacy: a shorter maximum interval correlates just as well as a
+/// longer one.
 async fn sleep_jittered(rng: &mut rand::rngs::StdRng) {
     let base = REANNOUNCE_INTERVAL.as_secs_f64();
-    let offset = base * REANNOUNCE_JITTER * (rand::Rng::gen_range(rng, -1.0_f64..1.0_f64));
-    let seconds = (base + offset).max(1.0);
+    let factor = 1.0 - REANNOUNCE_JITTER * rand::Rng::gen_range(rng, 0.0_f64..1.0_f64);
+    let seconds = (base * factor).max(1.0);
     tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
 }
 

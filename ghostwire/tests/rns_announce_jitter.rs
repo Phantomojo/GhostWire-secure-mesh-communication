@@ -108,9 +108,10 @@ fn drawn_delays_actually_vary() {
     let mut seen = HashSet::new();
     let mut samples = Vec::with_capacity(200);
 
+    // Mirrors sleep_jittered: one-sided, drawn from [base*(1-J), base].
     for _ in 0..200 {
-        let offset = BASE * JITTER * (rand::Rng::gen_range(&mut rng, -1.0_f64..1.0_f64));
-        let seconds = (BASE + offset).max(1.0);
+        let factor = 1.0 - JITTER * (rand::Rng::gen_range(&mut rng, 0.0_f64..1.0_f64));
+        let seconds = (BASE * factor).max(1.0);
         samples.push(seconds);
         seen.insert(seconds.to_bits());
     }
@@ -124,13 +125,20 @@ fn drawn_delays_actually_vary() {
 
     let min = samples.iter().cloned().fold(f64::MAX, f64::min);
     let max = samples.iter().cloned().fold(f64::MIN, f64::max);
-    assert!(min >= BASE * (1.0 - JITTER) - 1.0, "min {min} below the window");
-    assert!(max <= BASE * (1.0 + JITTER) + 1.0, "max {max} above the window");
 
-    // Every sample must stay inside [225, 375] — the announce-expiry and
-    // rate-cap bounds.
-    assert!(min >= 225.0, "min {min} is below 225 s; risks announce expiry");
-    assert!(max <= 375.0, "max {max} is above 375 s; risks announce expiry");
+    // One-sided window: [base*(1-J), base] = [225, 300].
+    //
+    // The upper bound is exactly `base`, NOT base*(1+J). The earlier symmetric
+    // version allowed 375 s and was corrected: RNS path entries expire on a
+    // multi-day horizon, so exceeding 300 s is not what causes darkness, but
+    // drifting the mean upward costs discovery latency for no privacy gain.
+    assert!(min >= BASE * (1.0 - JITTER) - 1.0, "min {min} below the window");
+    assert!(
+        max <= BASE + 1.0,
+        "max {max} exceeds the base interval — jitter must not drift upward"
+    );
+    assert!(min >= 225.0, "min {min} is below the 225 s floor");
+    assert!(max <= 300.0, "max {max} is above the 300 s base — mean drift");
 }
 
 #[test]
@@ -147,8 +155,8 @@ fn two_nodes_do_not_share_a_jitter_sequence() {
     let seq = |r: &mut rand::rngs::StdRng| -> Vec<f64> {
         (0..20)
             .map(|_| {
-                let o = BASE * JITTER * (rand::Rng::gen_range(r, -1.0_f64..1.0_f64));
-                (BASE + o).max(1.0)
+                let f = 1.0 - JITTER * (rand::Rng::gen_range(r, 0.0_f64..1.0_f64));
+                (BASE * f).max(1.0)
             })
             .collect()
     };
