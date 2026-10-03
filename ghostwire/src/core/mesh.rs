@@ -3652,6 +3652,27 @@ pub struct MeshManager {
 }
 
 impl MeshManager {
+    /// Peer ids this node currently knows, for DID resolution.
+    ///
+    /// `send_direct_message` cannot invert a `did:ghost:…` into a PeerId —
+    /// SHA-256 is one-way — so it verifies the DID against peers already known,
+    /// via `core::deref::peer_id_matches_did`. This accessor enumerates those
+    /// candidates.
+    ///
+    /// Lives on `MeshManager` (not `MeshTransport`) because the send path holds
+    /// a `MeshManager`; an earlier placement on `MeshTransport` compiled as a
+    /// method nobody could call.
+    pub async fn discovered_peer_ids(&self) -> Vec<libp2p::PeerId> {
+        // `peer_health` is an accessor method on MeshManager, not a field —
+        // the Arc<RwLock<...>> lives on the driver.
+        self.peer_health()
+            .known_peer_ids()
+            .await
+            .iter()
+            .filter_map(|id| id.parse::<libp2p::PeerId>().ok())
+            .collect()
+    }
+
     pub async fn new(
         identity: Arc<Identity>,
         encryption_manager: Arc<EncryptionManager>,

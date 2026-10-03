@@ -4,6 +4,7 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 pub mod armor;
+pub mod deref;
 pub mod chunking;
 pub mod binary_hardening;
 pub mod blockstore;
@@ -1624,11 +1625,50 @@ impl Core {
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = self.effective_mesh_manager().await {
             let mut mgr = mesh_manager.write().await;
+
+            // Accept a raw libp2p PeerId — unchanged, and still the fastest
+            // path when the caller already holds one.
             if let Ok(peer_id) = recipient.parse::<libp2p::PeerId>() {
                 return mgr.send_direct_message(peer_id, message.clone()).await;
-            } else {
-                return Err(anyhow::anyhow!("Invalid P2P Recipient ID: {}", recipient));
             }
+
+            // Accept a DID: `did:ghost:<64 hex>`.
+            //
+            // This cannot be a local hash. Both identifiers are functions of the
+            // same ed25519 public key — DID is `SHA256(pubkey.encode_protobuf())`
+            // and PeerId is that key's multihash — but SHA-256 is one-way, so a
+            // DID does not yield a PeerId arithmetically. The reverse is a
+            // VERIFICATION, not an inversion: given a candidate PeerId we can
+            // check whether its key hashes to the DID
+            // (`deref::peer_id_matches_did`).
+            //
+            // So resolving a DID means matching it against peers we already know
+            // — from the unified peer table, or from the discovered set. That is
+            // exactly why Option B works without a directory for verification:
+            // we never need to invert, only to confirm.
+            if crate::core::deref::is_did(&recipient) {
+                let candidates = mgr.discovered_peer_ids().await;
+                for peer_id in candidates {
+                    if crate::core::deref::peer_id_matches_did(&peer_id, &recipient) {
+                        tracing::info!(
+                            target: "send",
+                            "Resolved DID to peer {} via known-peer verification",
+                            peer_id
+                        );
+                        return mgr.send_direct_message(peer_id, message.clone()).await;
+                    }
+                }
+                return Err(anyhow::anyhow!(
+                    "No known peer matches DID {recipient}. Pair in person (QR or \
+                     short code) to exchange addresses first — a DID identifies you \
+                     but does not disclose where to dial."
+                ));
+            }
+
+            return Err(anyhow::anyhow!(
+                "Unrecognised recipient {recipient}. Expected a libp2p PeerId, a \
+                 did:ghost:… DID, or a Reticulum address."
+            ));
         }
 
         Err(anyhow::anyhow!("Mesh network not available"))

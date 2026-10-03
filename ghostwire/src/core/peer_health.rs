@@ -205,6 +205,16 @@ impl PeerHealthTracker {
             .collect()
     }
 
+    /// Every peer id this tracker currently knows about.
+    ///
+    /// Needed by DID resolution: `send_direct_message` cannot invert a
+    /// `did:ghost:…` into a PeerId (SHA-256 is one-way), so it verifies the DID
+    /// against peers already known — see `core::deref::peer_id_matches_did`.
+    /// Without this accessor there is no way to enumerate those candidates.
+    pub async fn known_peer_ids(&self) -> Vec<String> {
+        self.peers.read().await.keys().cloned().collect()
+    }
+
     /// Record any activity from a peer
     pub async fn record_activity(&self, peer_id: &str) {
         let mut map = self.peers.write().await;
