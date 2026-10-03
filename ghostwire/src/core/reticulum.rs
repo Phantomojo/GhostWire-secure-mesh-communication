@@ -191,11 +191,19 @@ impl ReticulumEnvelope {
 // ---------------------------------------------------------------------------
 #[cfg(feature = "reticulum")]
 pub struct ReticulumTransport {
-    transport: Option<Transport>,
+    transport: Option<Arc<Transport>>,
     local_address: String,
     local_address_hash: AddressHash,
     rx: mpsc::Receiver<Message>,
     _rx_task: tokio::task::JoinHandle<()>,
+    /// Periodic re-announcement task.
+    ///
+    /// RNS announces are not durable. A single announce at startup means the
+    /// node becomes invisible to any RNS peer that learns its path later -- the
+    /// defect the design doc names at SYMBIOTIC_P2P_ARCHITECTURE.md:1278. The
+    /// task re-announces every `REANNOUNCE_INTERVAL` so a long-lived node stays
+    /// discoverable. Aborted in `stop`.
+    _announce_task: Option<tokio::task::JoinHandle<()>>,
     interfaces_configured: usize,
     degraded: bool,
     messages_sent: u64,
@@ -203,6 +211,13 @@ pub struct ReticulumTransport {
     send_failures: u64,
     last_error: Option<String>,
 }
+
+/// How often to re-announce the local destination.
+///
+/// RNS announces carry a limited lifetime; nothing rebroadcasts them forever.
+/// 300 s is the interval the original design specified (SYMBIOTIC_P2P_ARCHITECTURE.md
+/// §3.5.3) and is well under the announce expiry on the reference stack.
+const REANNOUNCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[cfg(feature = "reticulum")]
 impl ReticulumTransport {
@@ -314,7 +329,7 @@ impl ReticulumTransport {
         // arithmetically incapable of over-reporting.
         let mut interfaces_configured: usize = 0;
         let mut degraded = false;
-        let (transport, mut rx_data) = match tokio::time::timeout(init_timeout, async {
+        let (transport, mut rx_data, announce_task) = match tokio::time::timeout(init_timeout, async {
             let t = Transport::new(config);
             {
                 let iface_mgr = t.iface_manager();
@@ -381,7 +396,7 @@ impl ReticulumTransport {
 
             let rx_data = t.received_data_events();
 
-            let _local_dest = t
+            let local_dest = t
                 .add_destination(
                     identity.clone(),
                     rns_transport::destination::DestinationName::new(node_name, "mesh"),
@@ -392,9 +407,36 @@ impl ReticulumTransport {
                 "RNS destination registered as \"{}\" (address: {})",
                 node_name, local_address
             );
-            t.send_announce(&_local_dest, None).await;
+            t.send_announce(&local_dest, None).await;
 
-            (t, rx_data)
+            // Keep the node discoverable for as long as it runs.
+            //
+            // The destination handle is `Arc<Mutex<..>>`, and the transport is
+            // now behind an `Arc`, so a detached task can re-announce on a timer
+            // without contending for the manager's write lock.
+            let transport_handle = Arc::new(t);
+            let announce_task = {
+                let transport = transport_handle.clone();
+                let destination = local_dest.clone();
+                Some(tokio::spawn(async move {
+                    let mut ticker =
+                        tokio::time::interval(REANNOUNCE_INTERVAL);
+                    // The first tick fires immediately; skip it because the
+                    // initial announce was already sent above.
+                    ticker.tick().await;
+                    loop {
+                        ticker.tick().await;
+                        transport.send_announce(&destination, None).await;
+                        tracing::debug!(
+                            "Re-announced RNS destination to stay discoverable \
+                             (interval {}s)",
+                            REANNOUNCE_INTERVAL.as_secs()
+                        );
+                    }
+                }))
+            };
+
+            (transport_handle, rx_data, announce_task)
         })
         .await
         {
@@ -414,7 +456,7 @@ impl ReticulumTransport {
                         rns_transport::destination::DestinationName::new("ghostwire", "mesh"),
                     )
                     .await;
-                (t, rx_data)
+                (Arc::new(t), rx_data, None)
             }
         };
         let (tx, rx) = mpsc::channel::<Message>(256);
@@ -443,6 +485,7 @@ impl ReticulumTransport {
 
         Ok(Self {
             transport: Some(transport),
+            _announce_task: announce_task,
             local_address,
             local_address_hash,
             rx,
@@ -617,6 +660,11 @@ impl ReticulumTransport {
 
     pub async fn stop(&mut self) -> Result<()> {
         self._rx_task.abort();
+        // Stop re-announcing before the transport is dropped, so the timer task
+        // never touches a dead transport.
+        if let Some(task) = self._announce_task.take() {
+            task.abort();
+        }
         self.transport.take();
         info!("Reticulum transport stopped and interface tasks released");
         Ok(())
