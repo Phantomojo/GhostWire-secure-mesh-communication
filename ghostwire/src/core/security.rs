@@ -1,5 +1,41 @@
 //! Security module: Sybil defense, quotas, blacklists.
-//! Next: integrate with peer discovery, store, and reputation.
+//!
+//! ## STALE — superseded by `security_v2.rs`. Nothing here is compiled.
+//!
+//! This file is **not declared as a module anywhere** in `core/mod.rs`, so
+//! none of it is type-checked, compiled, or reachable at runtime. It is a
+//! predecessor of `security_v2.rs` and nothing more.
+//!
+//! Why this warning is necessary: every type here (`SecurityManager`,
+//! `SecurityConfig`, `ThreatLevel`, `SecurityStats`, `EntityType`,
+//! `SecurityEvent`, `PersistentBlacklistManager`, `ProofOfWorkSybilDefense`,
+//! `SlidingWindowQuotaEnforcer`) and every method (`block_ip`, `is_ip_allowed`,
+//! `record_message`, `get_config`, `set_lockdown`, …) ALSO exists in
+//! `security_v2.rs` under the same name. So there is no symbol-level signal
+//! that would tell a reader this file is dead — the names all look live.
+//!
+//! If you arrived here looking for the security manager the mesh actually
+//! uses, that is `core::security_v2::SecurityManager`, reached in most call
+//! sites as `crate::core::security::…` because `core/mod.rs` contains:
+//!
+//!     pub use security_v2 as security;
+//!
+//! So `crate::core::security::SecurityManager` is `security_v2`, NOT this file.
+//! Three live call sites rely on that alias — `core/stealth_tcp.rs:2`,
+//! `core/mesh.rs:1183` (`SecurityStats`) and `controllers/system.rs:29`
+//! (`ThreatLevel`).
+//!
+//! Corroborated in Michael's own corpus, four times:
+//!   * `GHOSTWIRE_LEDGER.md:613` — "a STALE PREDECESSOR of the live
+//!     security_v2.rs"
+//!   * `GHOSTWIRE_LEDGER.md:865` (F9) — "a stale uncompiled predecessor
+//!     exposing an API that does not exist at runtime"
+//!   * `GHOSTWIRE_REMEDIATION_PLAN_20261002.md:310` — "reading it sends you
+//!     hunting for methods that don't exist at runtime"
+//!
+//! The old "Next: integrate with peer discovery" note below was actively
+//! misleading: integration happened against `security_v2`, and this file was
+//! left behind. Guarded by `tests/stale_security_module.rs`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
