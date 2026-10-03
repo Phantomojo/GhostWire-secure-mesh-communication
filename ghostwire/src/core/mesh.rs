@@ -3641,8 +3641,24 @@ impl MeshManager {
         reliability: Arc<crate::core::reliability::ReliabilityLayer>,
         discovery_directory: Arc<crate::core::discovery_directory::DiscoveryDirectory>,
         quic_port: u16,
+        // `security_config` is the operator's security policy: rate limits,
+        // per-IP caps, allow/block lists.
+        //
+        // This used to be `SecurityConfig::default()` hardcoded here, which
+        // discarded every value the operator set in `ghostwire.toml` —
+        // `max_messages_per_minute`, `max_connections_per_ip`,
+        // `blacklist_enabled`, `allowed_ips`, `blocked_ips`.
+        //
+        // It was a wiring bug rather than a missing feature: `Core::new`
+        // already translated the config correctly (see
+        // `security_v2::SecurityConfig::from(&config.security)`) and then threw
+        // the result away one layer down. The translation existed; this call
+        // site simply never received it.
+        //
+        // Taken as an explicit parameter rather than read from a global so that
+        // every caller is forced to decide what policy the mesh runs under.
+        security_config: SecurityConfig,
     ) -> Result<Self> {
-        let security_config = SecurityConfig::default();
         let security_manager = Arc::new(SecurityManager::new(security_config));
 
         let transport = MeshTransport::new(

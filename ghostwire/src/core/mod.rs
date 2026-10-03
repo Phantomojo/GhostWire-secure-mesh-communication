@@ -742,6 +742,11 @@ impl Core {
                         reliability.clone(),
                         discovery_directory.clone(),
                         config.server.quic_port,
+                        // Pass the operator's policy through. Previously this
+                        // call site left it to a hardcoded default inside
+                        // MeshManager::new, discarding every security knob the
+                        // operator set. Translated the same way as above.
+                        crate::core::security_v2::SecurityConfig::from(&config.security),
                     )
                     .await?,
                 )))
@@ -2047,6 +2052,7 @@ impl Core {
                     self.reliability.clone(),
                     self.discovery_directory.clone(),
                     self.config.server.quic_port,
+                    crate::core::security_v2::SecurityConfig::from(&self.config.security),
                 )
                 .await?;
                 let mut mesh_manager = mesh_manager;
@@ -2103,6 +2109,7 @@ impl Core {
                 self.reliability.clone(),
                 self.discovery_directory.clone(),
                 self.config.server.quic_port,
+                    crate::core::security_v2::SecurityConfig::from(&self.config.security),
             )
             .await?;
             mesh_manager.set_peer_count_cache(self.mesh_peer_count_cache.clone());

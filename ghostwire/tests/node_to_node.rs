@@ -92,6 +92,10 @@ async fn build_test_mesh_manager(
         Arc::new(ReliabilityLayer::with_defaults()),
         Arc::new(DiscoveryDirectory::new()),
         0, // quic_port: 0 disables the QUIC listener for these tests
+        // Tests use the default security policy. This is now an explicit
+        // argument rather than a hardcoded default inside MeshManager::new,
+        // so every call site states the policy it runs under.
+        ghostwire::core::security_v2::SecurityConfig::default(),
     )
     .await?;
 
