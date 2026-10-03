@@ -4,6 +4,7 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 pub mod armor;
+pub mod chunking;
 pub mod binary_hardening;
 pub mod blockstore;
 pub mod bootstrap;
