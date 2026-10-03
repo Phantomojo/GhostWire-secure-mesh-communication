@@ -4,6 +4,7 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 pub mod armor;
+pub mod rotation;
 pub mod pairing;
 pub mod deref;
 pub mod chunking;
@@ -1685,6 +1686,25 @@ impl Core {
         let mesh = self.effective_mesh_manager().await?;
         let mesh = mesh.read().await;
         mesh.local_addresses()
+    }
+
+    /// Record a paired peer and dial it.
+    ///
+    /// The pairing step for Option B: a user supplies a peer's `peer_id` and a
+    /// reachable multiaddr, learned by meeting them. Both are then usable by DID
+    /// resolution, because the peer is registered as known.
+    pub async fn pair_and_dial(
+        &self,
+        peer_id: libp2p::PeerId,
+        address: libp2p::multiaddr::Multiaddr,
+    ) -> Result<()> {
+        let mesh = self.effective_mesh_manager().await.ok_or_else(|| {
+            anyhow::anyhow!("Mesh is not running, so a peer cannot be paired")
+        })?;
+        // `add_and_dial_peer` needs `&mut` because `MeshManager::connect_peer`
+        // takes `&mut self`.
+        let mut mesh = mesh.write().await;
+        mesh.add_and_dial_peer(peer_id, address).await
     }
 
     /// Initialize a default transport for basic functionality

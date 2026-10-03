@@ -3652,6 +3652,57 @@ pub struct MeshManager {
 }
 
 impl MeshManager {
+    /// This node's own libp2p PeerId, derived from the retained identity.
+    ///
+    /// `MeshManager` keeps `_local_identity`, so the PeerId is recoverable
+    /// whenever it is unlocked — no extra field to keep in sync.
+    ///
+    /// This exists because nothing exposed it. A user could not learn their own
+    /// mesh address from any endpoint, which makes the node unaddressable and
+    /// leaves DID resolution with nothing to present. Computed at construction
+    /// (mesh.rs:340) and then discarded.
+    pub fn local_peer_id(&self) -> Option<libp2p::PeerId> {
+        self._local_identity
+            .keypair()
+            .map(|kp| libp2p::PeerId::from(kp.public()))
+    }
+
+    /// This node's own addresses: DID (canonical) and PeerId (a delivery
+    /// detail under Option B).
+    ///
+    /// The DID is the identity. The PeerId is disclosed only to peers you have
+    /// paired with — publishing it in discovery is the correlation Option B
+    /// exists to prevent. Both are returned here because the owner needs to see
+    /// them in order to pair.
+    pub fn local_addresses(&self) -> Option<(String, String)> {
+        let keypair = self._local_identity.keypair()?;
+        let peer_id = libp2p::PeerId::from(keypair.public());
+        let did = crate::core::deref::did_from_keypair(&keypair);
+        Some((did, peer_id.to_string()))
+    }
+
+    /// Learn a peer's address and dial it, recording it as paired.
+    ///
+    /// This is the HTTP-facing primitive Option B needs: a user who has met
+    /// someone in person learns that peer's `peer_id` and one reachable
+    /// multiaddr, and hands both here. `MeshManager::add_address` and
+    /// `dial_verified_peer` already exist but were unreachable from the API —
+    /// `connect_peer` takes a `node_id` and sends a social-connect REQUEST, so
+    /// it cannot bring two nodes together.
+    ///
+    /// Also registers the peer in the health tracker, which is what makes the
+    /// peer visible to DID resolution: `send_direct_message` verifies a DID
+    /// against known peers, and without this a paired peer is never known.
+    pub async fn add_and_dial_peer(
+        &mut self,
+        peer_id: libp2p::PeerId,
+        address: libp2p::multiaddr::Multiaddr,
+    ) -> Result<()> {
+        self.peer_health().register_peer(peer_id.to_string()).await;
+        self.add_address(peer_id, address).await?;
+        self.connect_peer(peer_id).await
+    }
+
     /// Peer ids this node currently knows, for DID resolution.
     ///
     /// `send_direct_message` cannot invert a `did:ghost:…` into a PeerId —

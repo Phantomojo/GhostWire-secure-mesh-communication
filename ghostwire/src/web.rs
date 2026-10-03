@@ -580,6 +580,11 @@ pub async fn start_web_server(
         .route("/", get(IdentityController::get_profile))
         .route("/status", get(IdentityController::get_profile))
         .route("/setup", post(IdentityController::setup))
+        .route(
+            "/addresses",
+            get(IdentityController::local_addresses)
+        )
+        .route("/pair", post(IdentityController::pair_peer))
         .route("/public-key", get(IdentityController::get_public_key));
 
     let api_routes: Router<Arc<AppState>> = Router::new()

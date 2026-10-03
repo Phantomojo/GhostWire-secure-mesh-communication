@@ -16,7 +16,155 @@ pub struct SetupRequest {
 
 pub struct IdentityController;
 
+/// Body for `POST /api/v2/identity/pair`.
+#[derive(Deserialize)]
+pub struct PairRequestBody {
+    /// The peer's libp2p address, learned by meeting them.
+    pub peer_id: String,
+    /// One reachable address for that peer.
+    pub multiaddr: String,
+    /// Optional DID claim to verify `peer_id` against.
+    #[serde(default)]
+    pub expected_did: Option<String>,
+}
+
 impl IdentityController {
+    /// Pair with a peer you have met, and dial it.
+    ///
+    /// This is the endpoint Option B depends on. `peer_id` + `multiaddr` are the
+    /// two things you learn by meeting someone: their mesh address and one place
+    /// to reach them. Submitting both registers the peer so DID resolution can
+    /// find them, then dials.
+    ///
+    /// There was no HTTP path to this before. `MeshManager::add_address` and
+    /// `dial_verified_peer` existed, and `/api/connect_peer` existed, but the
+    /// last takes a `node_id` and sends a social-connect REQUEST — so two nodes
+    /// had no way to be introduced at all. That is why the loopback DID proof
+    /// ended at "No known peer matches DID", and why cross-machine discovery had
+    /// nothing to test.
+    ///
+    /// `expected_did` is optional but strongly recommended: when supplied, the
+    /// peer_id must actually hash to that DID, or the request is refused. That
+    /// turns pairing into a verified statement of identity rather than a dial.
+    pub async fn pair_peer(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<PairRequestBody>,
+    ) -> impl IntoResponse {
+        let peer_id = match req.peer_id.parse::<libp2p::PeerId>() {
+            Ok(p) => p,
+            Err(_) => {
+                return ApiV2Response::<()>::error_response(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    format!("peer_id is not a valid libp2p PeerId: {}", req.peer_id),
+                )
+                .into_response()
+            }
+        };
+
+        // Identity check, when a DID was supplied. Refuse rather than dial: a
+        // peer_id that does not match the claimed DID is either a mistake or an
+        // attempt to pair the wrong node.
+        if let Some(expected) = &req.expected_did {
+            if !crate::core::deref::peer_id_matches_did(&peer_id, expected) {
+                return ApiV2Response::<()>::error_response(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    format!(
+                        "peer_id does not match the claimed DID {expected}. Refusing                          to pair: either the wrong address was entered, or the                          peer is not who they claim."
+                    ),
+                )
+                .into_response();
+            }
+        }
+
+        let multiaddr = match req.multiaddr.parse::<libp2p::multiaddr::Multiaddr>() {
+            Ok(m) => m,
+            Err(e) => {
+                return ApiV2Response::<()>::error_response(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    format!("multiaddr is not valid: {e}"),
+                )
+                .into_response()
+            }
+        };
+
+        let core = state.core.read().await;
+        match core.pair_and_dial(peer_id, multiaddr).await {
+            Ok(_) => {
+                #[derive(Serialize)]
+                struct PairResponse {
+                    paired: bool,
+                    peer_id: String,
+                    did_verified: bool,
+                }
+                Json(ApiV2Response::success(PairResponse {
+                    paired: true,
+                    peer_id: peer_id.to_string(),
+                    did_verified: req.expected_did.is_some(),
+                }))
+                .into_response()
+            }
+            Err(e) => ApiV2Response::<()>::error_response(
+                StandardErrorCode::InternalError.as_str(),
+                format!("Pairing failed: {e}"),
+            )
+            .into_response(),
+        }
+    }
+
+    /// This node's own addresses.
+    ///
+    /// Returns the DID (canonical, shareable) and the libp2p PeerId (a delivery
+    /// detail under Option B, disclosed only to peers you have paired with).
+    ///
+    /// This endpoint exists because nothing served the operator's own addresses.
+    /// The PeerId was computed at mesh construction (mesh.rs:340) and discarded;
+    /// `get_profile` returns the DID but no mesh address; and no route returned
+    /// it at all. So a user could read their DID from `identity.json` on disk
+    /// but had no way to see, copy, or share their mesh address from the app —
+    /// which makes the node unaddressable and leaves DID resolution with nothing
+    /// to present during pairing.
+    ///
+    /// Requires an unlocked profile: the keypair is only available then.
+    pub async fn local_addresses(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+
+        match core.local_addresses().await {
+            Some((did, peer_id)) => {
+                #[derive(Serialize)]
+                struct AddressesResponse {
+                    /// Canonical identifier. Safe to share publicly.
+                    did: String,
+                    /// Delivery detail. Share only when pairing with someone you
+                    /// have met — publishing it alongside the DID in discovery
+                    /// is the correlation Option B exists to prevent.
+                    peer_id: String,
+                    locked: bool,
+                }
+                Json(ApiV2Response::success(AddressesResponse {
+                    did,
+                    peer_id,
+                    locked: false,
+                }))
+                .into_response()
+            }
+            None => {
+                // Locked, or the mesh is not up. Say which — "no addresses" with
+                // no reason is the kind of unhelpful 200 this codebase has been
+                // removing.
+                let locked = core.identity.read().await.is_locked();
+                ApiV2Response::<serde_json::Value>::error_response(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    if locked {
+                        "Profile is locked — unlock before reading addresses"
+                    } else {
+                        "Mesh is not running, so no libp2p address exists yet"
+                    },
+                )
+                .into_response()
+            }
+        }
+    }
+
     /// GET /api/v2/profile - Full user profile/identity
     pub async fn get_profile(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         #[derive(Serialize)]
