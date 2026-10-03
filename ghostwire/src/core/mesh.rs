@@ -3524,6 +3524,29 @@ impl MeshDriver {
     }
 
     async fn handle_incoming_message(&mut self, _peer_id: PeerId, msg: Message) -> Result<()> {
+        // Deduplication belongs HERE, at the single point every inbound path
+        // converges on — not in one of the callers.
+        //
+        // It used to live in one caller only, so the other two (request-response
+        // at :2803, Sphinx at :3391) reached this function unguarded. This
+        // function then persists the message AND emits CoreEvent::NewMessage,
+        // so a duplicate arriving on a second transport would be stored twice
+        // and shown to the user twice. That made shipping any redundant-send
+        // path a guaranteed duplicate-message bug rather than a resilience
+        // feature.
+        //
+        // `seen_messages` is retained as the bounded FIFO and is still consulted
+        // on the gossipsub path, but this check is the authoritative one: it
+        // covers every path, and it runs before the store write.
+        if self.seen_messages.contains(&msg.id) {
+            tracing::debug!("Skipping duplicate message {}", msg.id);
+            return Ok(());
+        }
+        if self.seen_messages.len() >= SEEN_MSGS_MAX {
+            self.seen_messages.drain(..SEEN_MSGS_MAX / 2);
+        }
+        self.seen_messages.push_back(msg.id);
+
         // Persist to store (skip for broadcast or failed decryption)
         if msg.recipient != "broadcast" && msg.encryption_status != "decrypt_failed" {
             if let Err(e) = self.message_store.save_message(&msg) {
