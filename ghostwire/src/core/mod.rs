@@ -1533,21 +1533,83 @@ impl Core {
         // Broadcast to Event Bus
         let _ = self.event_bus.send(CoreEvent::NewMessage(message.clone()));
 
+        // Transport selection. Previously this was:
+        //
+        //     if let Some(mesh) = self.effective_mesh_manager().await {
+        //         return mgr.send_message(message).await;      // always wins
+        //     }
+        //     if let Some(t) = self.active_transport.read().await.as_ref() {
+        //         return t.send_message(message).await;
+        //     } else {
+        //         tracing::trace!("Message processed locally");
+        //         Ok(())                                        // SILENT NO-OP
+        //     }
+        //
+        // Three problems, all invisible from outside:
+        //
+        //  * Mesh returned unconditionally, so Reticulum was unreachable
+        //    whenever mesh was up. And `active_transport` only ever holds
+        //    StealthTCP — `Core::new` never registers a Reticulum transport — so
+        //    Reticulum was unreachable when mesh was DOWN too. There was no code
+        //    path from here to the Reticulum transport at all.
+        //  * The precedence was never chosen by anyone. It is what falls out of
+        //    writing the mesh branch first with an early return.
+        //  * The `else` returned `Ok(())` after a `trace` log, so a message that
+        //    went nowhere was reported as sent. That is the same defect class as
+        //    gossipsub publishing into a topic with no subscriber and returning
+        //    `accepted`: a local operation succeeding is not delivery.
+        //
+        // Now: try each transport in order of what the recipient actually
+        // supports, and say so plainly when none does.
+        //
+        // Precedence is by REACHABILITY, not transport preference — if the peer
+        // has a Reticulum address and no usable libp2p connection, Reticulum is
+        // the only way the message can arrive, and that outranks a preference for
+        // libp2p.
         #[cfg(feature = "mesh")]
-        if let Some(mesh_manager) = self.effective_mesh_manager().await {
-            let mut mgr = mesh_manager.write().await;
-            return mgr.send_message(message).await;
+        {
+            if let Some(mesh_manager) = self.effective_mesh_manager().await {
+                match mesh_manager.write().await.send_message(message).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        // Do not give up: a libp2p failure may still be
+                        // deliverable over Reticulum, which reaches peers with no
+                        // reachable libp2p endpoint at all.
+                        tracing::warn!(
+                            error = %e,
+                            "libp2p send failed; trying the Reticulum transport"
+                        );
+                    }
+                }
+            }
+        }
+
+        #[cfg(feature = "reticulum")]
+        if let Some(ret) = self.reticulum_manager.read().await.as_ref() {
+            match ret.write().await.send_message(message).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Reticulum send failed");
+                }
+            }
         }
 
         if let Some(transport) = self.active_transport.read().await.as_ref() {
             return transport.send_message(message).await;
-        } else {
-            tracing::trace!(
-                "Message processed locally (no active transport): {}",
-                message.id
-            );
-            Ok(())
         }
+
+        // Nothing could carry this message. Say so.
+        //
+        // Returning `Ok(())` here — which is what this did — reported success for
+        // a message that was never transmitted, and the caller had no way to know
+        // the difference. A message that cannot be sent must be a failure, or the
+        // API will keep telling users their messages went out when they did not.
+        Err(anyhow::anyhow!(
+            "NOT TRANSMITTED: no transport could carry this message. \
+             The message was persisted locally but never left this node. \
+             Possible causes: the mesh is not running, the Reticulum transport is \
+             not enabled or started, and no fallback transport is active."
+        ))
     }
 
     pub async fn send_direct_message(&self, recipient: String, message: &Message) -> Result<()> {
