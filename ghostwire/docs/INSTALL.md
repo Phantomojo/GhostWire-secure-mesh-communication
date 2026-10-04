@@ -66,7 +66,7 @@ Default features: `web`, `cli`, `mesh`, `security`, `stealth`, `qr`.
 | `cli` | CLI subcommands (start, stop, tui, send, etc.) | None |
 | `mesh` | libp2p mesh networking | None |
 | `security` | Encryption, key management, threat detection | None |
-| `stealth` | Obfuscated TCP transport (DPI evasion) | None |
+| ~~`stealth`~~ | **REMOVED** — no longer provides a message transport and never provided DPI evasion. See `REMOVED_STEALTHTCP.md`. |
 | `qr` | QR code generation for peer sharing | `qrcode-generator` |
 | `matrix` | Matrix protocol support (base) | None |
 | `matrix-bridge` | Full Matrix bridge | `matrix-sdk` |
