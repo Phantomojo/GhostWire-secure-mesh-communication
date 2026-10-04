@@ -67,34 +67,100 @@ impl PairingCode {
 
     /// Encode 16 bytes as groups of 4 alphanumeric chars
     fn encode(bytes: &[u8; 16]) -> String {
-        // Use base32-like encoding — no ambiguous chars (0/O, 1/I/l)
-        const ALPHABET: &[u8] = b"ACDEFGHJKLMNPQRTUVWXY34679";
-        let mut chars = Vec::with_capacity(19);
-        for (i, chunk) in bytes.chunks(4).enumerate() {
-            if i > 0 {
-                chars.push(b'-');
-            }
-            for &byte in chunk {
-                chars.push(ALPHABET[(byte as usize) % ALPHABET.len()]);
+        // Base32 (RFC 4648 alphabet, no padding) over the 16 bytes -> 26 chars,
+        // grouped 4-4-4-4-4-4-4.
+        //
+        // THIS USED TO MAP ONE CHARACTER PER BYTE with `% ALPHABET.len()`. That is
+        // not an encoding, it is a lossy cast: only the low 5 bits of each byte
+        // survived, so 128 of the 256 byte values mapped to the same character as
+        // another, and the function was therefore NOT INJECTIVE. No decoder could
+        // exist for it, which is why `from_string` resorted to hashing the display
+        // string and why typed pairing could never complete.
+        //
+        // Base32 keeps every bit of the entropy and is exactly invertible, which
+        // is what a user-typed code requires.
+        const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let mut bits = 0u32;
+        let mut acc: u32 = 0;
+        let mut out = String::with_capacity(26);
+        for &byte in bytes {
+            acc = (acc << 8) | byte as u32;
+            bits += 8;
+            while bits >= 5 {
+                bits -= 5;
+                out.push(ALPHABET[((acc >> bits) & 0x1f) as usize] as char);
             }
         }
-        String::from_utf8(chars).unwrap_or_default()
+        if bits > 0 {
+            out.push(ALPHABET[((acc << (5 - bits)) & 0x1f) as usize] as char);
+        }
+        out.as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c).to_string()).collect::<Vec<_>>().join("-")
+    }
+
+    /// Decode a user-entered code back to the exact bytes it encodes.
+    ///
+    /// This is the true inverse of `encode`. A 16-byte value is 128 bits, which
+    /// base32 renders as ceil(128/5) = 26 characters.
+    fn decode(s: &str, out: &mut [u8; 16]) -> Result<()> {
+        const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let mut acc: u32 = 0;
+        let mut bits = 0u32;
+        let mut written = 0usize;
+        for ch in s.chars() {
+            let up = ch.to_ascii_uppercase() as u8;
+            if up == b'-' {
+                continue;
+            }
+            let v = ALPHABET
+                .iter()
+                .position(|&a| a == up)
+                .ok_or_else(|| anyhow::anyhow!("invalid character '{ch}' in pairing code"))?
+                as u32;
+            acc = (acc << 5) | v;
+            bits += 5;
+            if bits >= 8 {
+                bits -= 8;
+                if written < out.len() {
+                    out[written] = ((acc >> bits) & 0xff) as u8;
+                    written += 1;
+                }
+            }
+        }
+        if written != out.len() {
+            anyhow::bail!(
+                "pairing code decoded to {written} bytes, expected {}",
+                out.len()
+            );
+        }
+        Ok(())
     }
 
     /// Parse a user-entered pairing code
     pub fn from_string(s: &str) -> Result<Self> {
         let cleaned: String = s.chars().filter(|c| c.is_alphanumeric()).collect();
-        if cleaned.len() != 16 {
+        // 16 bytes is 128 bits, which base32 renders as ceil(128/5) = 26 chars.
+        // This used to require 16, which was one character per byte — the lossy
+        // scheme `encode` used before it became real base32.
+        const EXPECTED_CHARS: usize = 26;
+        if cleaned.len() != EXPECTED_CHARS {
             anyhow::bail!(
-                "Invalid pairing code: expected 16 alphanumeric chars, got {}",
+                "Invalid pairing code: expected {EXPECTED_CHARS} alphanumeric chars, got {}",
                 cleaned.len()
             );
         }
-        // Store the original display string exactly as entered — this is the shared secret
-        // Both sides must use the same display string for derive_session_key to match
-        let hash = blake3::hash(cleaned.as_bytes());
+        // DECODE the string back to the bytes it encodes. Do NOT hash it.
+        //
+        // This used to be `blake3::hash(cleaned)[..16]`, which is NOT the inverse
+        // of `encode()`. `generate()` stores 16 random bytes; hashing the display
+        // string reconstructs something else entirely, so the two sides held
+        // DIFFERENT entropy and derived DIFFERENT session keys. The comment here
+        // asserted the invariant it was breaking: "Both sides must use the same
+        // display string for derive_session_key to match."
+        //
+        // Verified before and after by the `typed_pairing_*` tests below, which
+        // failed with safety numbers 579841 vs 677922.
         let mut entropy = [0u8; 16];
-        entropy.copy_from_slice(&hash.as_bytes()[..16]);
+        Self::decode(&cleaned, &mut entropy)?;
 
         Ok(Self {
             entropy,
@@ -472,5 +538,62 @@ mod tests {
         let recovered = ContactCard::from_qr_string(&qr).unwrap();
         assert_eq!(recovered.node_id, "abc123");
         assert_eq!(recovered.nickname, "Michael");
+    }
+
+    // -----------------------------------------------------------------------
+    // TYPED PAIRING: does the code survive being typed into the other side?
+    //
+    // This is the mechanism that removes the need to meet in person, so it is
+    // load-bearing for the whole privacy design. Verified here rather than
+    // trusted, because the comment above `from_string` asserts the property.
+    //
+    // `generate()` fills `entropy` with 16 RANDOM bytes, then encodes them into
+    // `display`. `from_string()` reverses by HASHING the display string:
+    //
+    //     let hash = blake3::hash(cleaned.as_bytes());
+    //     entropy.copy_from_slice(&hash.as_bytes()[..16]);
+    //
+    // That is not the inverse of `encode()`. The initiator therefore holds
+    // `random16` while the responder reconstructs `BLAKE3(display)[..16]`, so the
+    // two sides derive DIFFERENT session keys and their safety numbers can never
+    // match. `derive_session_key` hashes `self.entropy`, so the mismatch reaches
+    // the actual session key, not just a display detail.
+
+    #[test]
+    fn typed_pairing_reconstructs_the_same_entropy() {
+        let generated = PairingCode::generate().expect("generate");
+        let typed = PairingCode::from_string(&generated.display).expect("accept own code");
+
+        assert_eq!(
+            generated.entropy, typed.entropy,
+            "generate() stores 16 random bytes; from_string() derives entropy by              HASHING the display string, which is not the inverse of encode().              The two sides must reconstruct the SAME entropy or pairing cannot              complete at any distance."
+        );
+    }
+
+    #[test]
+    fn typed_pairing_reconstructs_the_same_safety_number() {
+        let generated = PairingCode::generate().expect("generate");
+        let typed = PairingCode::from_string(&generated.display).expect("accept own code");
+
+        assert_eq!(
+            generated.safety_number(),
+            typed.safety_number(),
+            "These six digits are what two users compare aloud or on a video call              to detect a man-in-the-middle. If they can never match, the feature              that makes pairing possible at a distance does not work."
+        );
+    }
+
+    #[test]
+    fn typed_pairing_derives_the_same_session_key() {
+        let generated = PairingCode::generate().expect("generate");
+        let typed = PairingCode::from_string(&generated.display).expect("accept own code");
+
+        // Both sides sort their node IDs, so pass the same pair in both orders.
+        let initiator_key = generated.derive_session_key("node-a", "node-b");
+        let responder_key = typed.derive_session_key("node-a", "node-b");
+
+        assert_eq!(
+            initiator_key, responder_key,
+            "derive_session_key hashes self.entropy. If the two sides hold              different entropy, they derive different session keys and no message              can ever be exchanged over a typed pairing code."
+        );
     }
 }
