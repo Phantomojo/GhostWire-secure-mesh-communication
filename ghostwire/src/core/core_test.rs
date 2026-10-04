@@ -20,21 +20,43 @@ async fn test_core_transport_switching() {
     let core_arc = Arc::new(core);
 
     {
-        // A transport is active at startup, but which one is an implementation
-        // detail rather than a contract. It used to be "quic" purely as a side
-        // effect of the dead registry provider winning the `is_none()` race in
-        // Core::new. What matters here is that init_default_transport installs
-        // the documented StealthTCP default, which is asserted below.
+        // NO transport is active at startup, and that is now the asserted contract
+        // rather than an accident.
+        //
+        // This previously asserted `is_some()` because Core::new installed
+        // StealthTCP as the default. StealthTCP was retired: it sent message
+        // content as bare bincode with no encryption, and because the mesh arm
+        // encrypts only into a CLONE, every mesh failure put the plaintext body on
+        // the wire through this fallback.
+        //
+        // The correct behaviour for a node with no mesh and no Reticulum is to fail
+        // loudly — `send_message` returns "NOT TRANSMITTED: no transport could carry
+        // this message" — rather than to fall back to a transport that leaks.
+        //
+        // Asserting the absence here is deliberate: it makes reintroducing a
+        // plaintext fallback a test failure rather than a security regression found
+        // later.
         let transport = core_arc.active_transport.read().await;
-        assert!(transport.is_some(), "a transport must be active at startup");
+        assert!(
+            transport.is_none(),
+            "no fallback transport must be installed at startup: the previous \
+             default (StealthTCP) sends message content unencrypted"
+        );
     }
 
-    // 2. Initialize default transport
-    core_arc.init_default_transport().await.unwrap();
+    // 2. init_default_transport must NOT resurrect a leaking transport.
+    //    It is still callable for operators who explicitly select one, so this
+    //    asserts what it leaves in place rather than that it errors.
+    core_arc.init_default_transport().await.ok();
     {
         let transport = core_arc.active_transport.read().await;
-        assert!(transport.is_some());
-        assert_eq!(transport.as_ref().unwrap().name(), "stealth_tcp");
+        if let Some(t) = transport.as_ref() {
+            assert_ne!(
+                t.name(),
+                "stealth_tcp",
+                "StealthTCP must never be auto-installed as a message transport"
+            );
+        }
     }
 
     // 3. Register and switch to Dummy transport
@@ -83,13 +105,18 @@ async fn test_core_clone_shares_active_transport() {
     let profile = test_profile("clone_shares");
     let core = Core::new(config, Vec::new(), None, profile).await.unwrap();
 
-    // The startup default is whatever Core::new registered, plus whatever
-    // init_default_transport selects. This used to assert Some("quic"), which
-    // only passed because the structurally dead QuicTransportProvider was
-    // registered in Core::new and won the `is_none()` race. That provider is
-    // gone (it stole the swarm's UDP port and could never address a peer), so
-    // the assertion now checks the real contract: a transport is active, and a
-    // clone observes the same one after an explicit switch.
+    // NO transport is active at startup now, and that is the contract.
+    //
+    // History of this assertion: it once asserted Some("quic"), which only passed
+    // because the structurally dead QuicTransportProvider won an `is_none()` race
+    // in Core::new. Then it asserted `is_some()` because Core::new installed
+    // StealthTCP. Both defaults are gone: QuicTransportProvider stole the swarm's
+    // UDP port and could never address a peer, and StealthTCP sends message
+    // content unencrypted.
+    //
+    // This test previously poisoned a global ENV_LOCK when it failed, cascading
+    // into 20 unrelated encryption failures. Asserting `is_none()` keeps the test
+    // passing for the right reason, so it cannot poison anything again.
     let initial_name = core
         .active_transport
         .read()
@@ -97,8 +124,9 @@ async fn test_core_clone_shares_active_transport() {
         .as_ref()
         .map(|t| t.name().to_string());
     assert!(
-        initial_name.is_some(),
-        "a transport must be active at startup"
+        initial_name.is_none(),
+        "no fallback transport may be installed at startup: every previous \
+         default transmitted message content in the clear"
     );
 
     {

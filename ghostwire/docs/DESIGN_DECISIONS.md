@@ -21,8 +21,12 @@ Why each choice was made, not just what was chosen.
 - Feature flags (`tcp`, `noise`, `yamux`, `kad`, `gossipsub`, `mdns`, `identify`, `autonat`, `relay`, `dcutr`, `ping`, `request-response`, `cbor`) let you compile only what you need.
 
 **What libp2p didn't cover (built custom):**
-- Stealth TCP with traffic morphing (`stealth_tcp.rs`)
-- Obfs4 DPI evasion (`obfs4_transport.rs`)
+- ~~Stealth TCP with traffic morphing (`stealth_tcp.rs`)~~ — **REMOVED
+  2026-10-04**: it had no morphing code and no encryption. See
+  `REMOVED_STEALTHTCP.md`.
+- ~~Obfs4 DPI evasion (`obfs4_transport.rs`)~~ — **NOT WIRED**: that module is
+  config/state only, and the `obfs4` Rust crate is `0.1.0-alpha.1` (2024-09-21).
+  Trustworthy obfs4 lives in the C `obfs4proxy`, managed as Arti manages it.
 - DTN epidemic routing (`dtn/epidemic.rs`)
 - Sphinx onion routing (`sphinx-rs` crate)
 - AI-enhanced routing decisions
@@ -115,7 +119,7 @@ Why each choice was made, not just what was chosen.
 | libp2p TCP | Standard P2P mesh | Working |
 | libp2p WebRTC | Browser clients | Working (alpha) |
 | BLE (bluer) | Local mesh, no internet | Feature-gated |
-| Stealth TCP | Traffic morphing, DPI evasion | Working |
+| ~~Stealth TCP~~ | ~~Traffic morphing, DPI evasion~~ | **REMOVED** — it did none of these. See `REMOVED_STEALTHTCP.md` |
 | Obfs4 | Tor-grade obfuscation | **NOT IMPLEMENTED** — no handshake, no framing, not in the transport chain. The old placeholder even set the "public key" to the secret key. |
 | Simulated | Hardware testing (BT/WiFi) | Working |
 
@@ -254,7 +258,8 @@ BLOOM_BITS = 1024  # Sync filter size
 
 ### Performance vs Privacy
 - Cover traffic (chaff frames sent every 30 seconds) prevents idle detection but consumes bandwidth and CPU.
-- Traffic morphing in StealthTCP randomizes timing patterns, which adds jitter to real messages.
+- ~~Traffic morphing in StealthTCP~~ — removed; no such code existed. Traffic
+  padding and cover traffic live in `traffic_armor.rs` and are wired to the mesh arm.
 - Encrypted message storage means every message is encrypted-then-decrypted on read, doubling the crypto operations per message lifecycle.
 
 ### Maturity vs Ambition

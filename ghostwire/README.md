@@ -75,7 +75,7 @@ Terminal interface with dashboard, peer list, message history, and compose — a
 | AI routing (LightGBM + PRoPHET fallback) | ✅ Working |
 | Terminal UI (Ratatui) | ✅ Working |
 | Web API (Axum + JWT auth) | ✅ Working |
-| Stealth TCP transport | ✅ Working |
+| ~~Stealth TCP transport~~ | **REMOVED** — sent message content unencrypted; never provided traffic morphing or DPI evasion. See `docs/REMOVED_STEALTHTCP.md` |
 | Shamir secret recovery | ✅ Working |
 | Post-quantum key encapsulation (ML-KEM) | ✅ Working |
 | X25519 small-order point defense | ✅ Working |

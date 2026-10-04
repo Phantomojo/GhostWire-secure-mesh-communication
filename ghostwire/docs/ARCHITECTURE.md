@@ -194,7 +194,7 @@ pub struct Core {
 | `identity` | Ed25519 keypairs, identity management | No |
 | `security_v2` | Threat detection, audit, rate limiting | No |
 | `transport` | Pluggable transport abstraction | No |
-| `stealth_tcp` | HTTPS-mimicking transport | No |
+| ~~`stealth_tcp`~~ | REMOVED — see `REMOVED_STEALTHTCP.md`. |sport | No |
 | `obfs4_transport` | Tor pluggable transport | No |
 | `mesh` | GossipSub + Kademlia + health monitoring | `mesh` |
 | `peer_health` | Ping/pong, RTT tracking, liveness detection | No |

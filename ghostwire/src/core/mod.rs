@@ -541,17 +541,40 @@ impl Core {
         // Until then, do not treat this transport as confidential-capable.
         //
         // Simulated mode still wins if it claimed the slot above.
-        if active_transport_inner.is_none() {
-            let stealth = Arc::new(crate::core::stealth_tcp::StealthTCPProvider::new(
-                None,
-                security_manager.clone(),
-                None,
-                true, // Stealth mode, as init_default_transport does
-            ));
-            let stealth_kind = crate::core::transport::TransportKind::StealthTCP(stealth);
-            registry.register(stealth_kind.clone());
-            active_transport_inner = Some(stealth_kind);
-        }
+        //
+        // STEALTHTCP IS REMOVED AS A MESSAGE FALLBACK — DELIBERATELY, AND IT MUST
+        // NOT BE ADDED BACK AS ONE.
+        //
+        // It was retired because it did not do what its name claimed, and was worse
+        // than the alternative in the ways that matter most:
+        //
+        //   * NO ENCRYPTION. `send_message` put `message.content` directly into
+        //     `WireMessage.payload` and encoded it as bare bincode
+        //     (stealth_tcp.rs:484-494). No AEAD, no MAC, no key exchange.
+        //   * NO MORPHING. No padding, no jitter, no burst model existed in the file
+        //     at all; `core_wiring.rs:363` records it removed.
+        //   * IT LEAKED. Every connection opened with `01` + ASCII "GWSTH", so an
+        //     active prober confirmed GhostWire in one round trip.
+        //
+        // The critical path: `Core::send_message` falls through to
+        // `active_transport` when the mesh fails, and the mesh arm writes the
+        // encrypted copy only into a CLONE (`let mut encrypted_msg =
+        // message.clone()`, mesh.rs:2161). `message.content` itself stays
+        // plaintext. So every mesh failure sent the message body in the clear on a
+        // transport the API advertised as providing stealth and DPI evasion.
+        //
+        // A user who selected it was therefore LESS safe than a user on plain TLS:
+        // unauthenticated, unencrypted, and fingerprintable. That is worse than a
+        // missing feature — it corrupts the user's threat model.
+        //
+        // With no fallback installed, a send with neither mesh nor Reticulum returns
+        // "NOT TRANSMITTED: no transport could carry this message" — a loud, honest
+        // failure instead of a silent plaintext leak.
+        //
+        // For obfuscation, use a maintained implementation of a battle-tested
+        // protocol (obfs4), not a bespoke transport. See
+        // `ghostwire/docs/REMOVED_STEALTHTCP.md` — which also exists so website
+        // and documentation agents remove every mention of it.
 
         let registry = Arc::new(RwLock::new(registry));
         let active_transport = Arc::new(RwLock::new(active_transport_inner));
@@ -1788,18 +1811,31 @@ impl Core {
 
     /// Initialize a default transport for basic functionality
     pub async fn init_default_transport(&self) -> Result<()> {
-        let provider = Arc::new(crate::core::stealth_tcp::StealthTCPProvider::new(
-            None,
-            self.security_manager.clone(),
-            None,
-            true, // Enable Stealth Mode by default
-        ));
-
-        let mut active = self.active_transport.write().await;
-        *active = Some(crate::core::transport::TransportKind::StealthTCP(provider));
-        tracing::info!("Initialized StealthTCP transport (Default) 🥷");
-
-        Ok(())
+        // STEALTHTCP IS NOT A MESSAGE TRANSPORT. See docs/REMOVED_STEALTHTCP.md.
+        //
+        // This function used to construct and install it here as well, which was a
+        // SECOND independent path to the plaintext fallback — removing the default
+        // from `Core::new` did not close it, and the test caught exactly that.
+        //
+        // `send_message` falls through to `active_transport` when the mesh fails,
+        // and the mesh arm encrypts only into a CLONE, so anything installed here
+        // receives plaintext message content.
+        //
+        // Refusing loudly is the correct behaviour: a caller that expected a
+        // fallback must learn it no longer exists rather than silently getting a
+        // transport that leaks. Operators who genuinely want obfuscation should use
+        // a maintained obfs4 implementation, not this.
+        Err(anyhow::anyhow!(
+            "init_default_transport is retired. The previous default (StealthTCP) \
+             transmits message content as bare bincode with no encryption, and \
+             because the mesh path encrypts only into a clone, installing it as a \
+             fallback sends plaintext on every mesh failure. \
+             \
+             GhostWire now relies on the libp2p mesh and Reticulum; a send with \
+             neither returns 'NOT TRANSMITTED: no transport could carry this \
+             message' rather than leaking. For censorship obfuscation use a \
+             maintained obfs4 implementation. See docs/REMOVED_STEALTHTCP.md."
+        ))
     }
 
     /// Select an active protocol adapter by name
