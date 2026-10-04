@@ -83,7 +83,17 @@ pub fn load_saved_args() -> Option<DaemonArgs> {
 }
 
 /// Get the GhostWire home directory
-fn ghostwire_home() -> PathBuf {
+/// The canonical GhostWire home directory.
+///
+/// Made public so every component resolves its paths the same way. It was
+/// private to `daemon.rs`, which let `core/reticulum.rs` reach for
+/// `dirs::config_dir()` instead and thereby ignore `GHOSTWIRE_HOME` — meaning
+/// two nodes with separate homes on one machine shared a single
+/// `rns_identity.bin` and presented the same RNS identity to the network.
+///
+/// `GHOSTWIRE_HOME` is what makes isolated multi-node testing possible, so a
+/// component that bypasses it silently invalidates every multi-node result.
+pub fn ghostwire_home() -> PathBuf {
     if let Ok(home) = std::env::var("GHOSTWIRE_HOME") {
         PathBuf::from(home)
     } else {
