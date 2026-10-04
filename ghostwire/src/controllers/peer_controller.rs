@@ -419,11 +419,22 @@ impl PeerController {
         };
 
         // Bounded: a silent peer must not pin an HTTP worker indefinitely.
-        // The guard is bound to a local so it lives across the await; the
-        // transport lock is held only for the duration of the probe.
-        let mut guard = mesh.write().await;
-        let probe = guard.ping_peer(peer_id);
-        match tokio::time::timeout(std::time::Duration::from_secs(10), probe).await {
+        //
+        // Hold a READ guard for the probe; a WRITE guard is what deadlocked.
+        //
+        // The handler held the exclusive lock for the whole 10s probe, so the
+        // driver could neither process the `PingPeer` command nor receive the
+        // peer's `ChatResponse("ACK")` that resolves it — both need to take the
+        // same lock. A read guard does not block the driver's own writes.
+        //
+        // This was a real bug, not a theoretical one: every ping returned
+        // PING_FAILED after a 10s timeout, on a transport that demonstrably
+        // works. The cross-machine run logged a completed 1248-byte handshake in
+        // both directions over that very same request_response protocol.
+        let guard = mesh.read().await;
+        match tokio::time::timeout(std::time::Duration::from_secs(10), guard.ping_peer(peer_id))
+            .await
+        {
             Ok(Ok(rtt_ms)) => Json(ApiV2Response::success(serde_json::json!({
                 "node_id": node_id,
                 // Field name matches what the web UI already declares on
