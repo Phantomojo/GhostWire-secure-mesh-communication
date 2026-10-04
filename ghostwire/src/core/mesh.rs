@@ -2679,7 +2679,27 @@ impl MeshDriver {
                 }
             }
 
-            self.peer_health.remove_peer(&peer_id.to_string()).await;
+            // Do NOT remove the peer here.
+            //
+            // This is the `ConnectionClosed` path, and removing the peer made
+            // transient reachability indistinguishable from identity: a dial
+            // that failed and was closed deleted the entry entirely, so the next
+            // DID lookup found nothing and reported "No known peer matches DID"
+            // for a peer this node had just successfully paired.
+            //
+            // That broke Option B at the worst moment. Pairing is a statement that
+            // persists — "this DID controls this PeerId at this address" — and it
+            // is exactly what makes a DID resolvable without a directory. Losing
+            // it because a TCP connection did not survive is worse than useless:
+            // the identity is still valid, only the current route is not.
+            //
+            // What SHOULD change on close is reachability, not identity. That is
+            // what `mark_reachability(Unreachable)` below records, and it is the
+            // correct signal: the peer is known and trusted, and is presently not
+            // reachable. Removal belongs to explicit unpairing and to peer
+            // expiry, not to a transport event.
+            //
+            // `record_inactivity` above already handles the online/offline flag.
             let _ = self
                 .discovery_directory
                 .mark_reachability(
