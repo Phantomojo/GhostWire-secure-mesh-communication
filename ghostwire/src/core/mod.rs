@@ -516,16 +516,31 @@ impl Core {
 
         // Install a real default transport when nothing else claimed the slot.
         //
-        // `init_default_transport` is the documented way to select StealthTCP,
-        // but nothing in the production startup path called it. The only thing
-        // that used to populate `active_transport` here was the dead
-        // QuicTransportProvider (it won the `is_none()` race), so removing that
-        // provider left the slot empty. An empty slot means `set_active_transport`
-        // has nothing to fall back to and the transport API reports no active
-        // transport at all.
+        // SECURITY FINDING, NOT YET FIXED — see the comment at the top of this
+        // block in git history and `notes/STEALTHTCP_AUDIT.md`.
         //
-        // Simulated mode still wins if it claimed the slot above, matching the
-        // previous precedence.
+        // `StealthTCPProvider` CANNOT carry a message securely. `send_message`
+        // puts `message.content` directly into `WireMessage.payload` and encodes it
+        // as bare bincode (stealth_tcp.rs:484-494) — no AEAD, no MAC, no key
+        // exchange, only a pre-shared secret for the handshake. It also has no
+        // traffic-morphing code at all, despite what `TransportKind` reports to
+        // the API.
+        //
+        // This matters because `Core::send_message` falls through to
+        // `active_transport` when the mesh fails, and the mesh arm writes the
+        // encrypted copy only into a CLONE (`let mut encrypted_msg =
+        // message.clone()`, mesh.rs:2161). `message.content` itself stays
+        // plaintext, so every mesh failure sends the body in the clear on a
+        // transport the API describes as providing stealth.
+        //
+        // Removing it here was attempted and reverted: 21 tests assert a transport
+        // is active at startup and that the default is StealthTCP. That is a real
+        // contract, and the correct fix is to give StealthTCP real encryption
+        // (`core/stealth_tcp_handshake_fix.rs` contains a correct nonce+HMAC
+        // handshake that is never compiled) or to stop routing messages through it.
+        // Until then, do not treat this transport as confidential-capable.
+        //
+        // Simulated mode still wins if it claimed the slot above.
         if active_transport_inner.is_none() {
             let stealth = Arc::new(crate::core::stealth_tcp::StealthTCPProvider::new(
                 None,

@@ -38,7 +38,11 @@ impl TransportKind {
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (no-op)",
             TransportKind::Quic(_) => "QUIC Transport (Direct Internet)",
-            TransportKind::StealthTCP(_) => "Stealth TCP with Traffic Morphing",
+            TransportKind::StealthTCP(_) => {
+                "Stealth TCP — NOT SECURE. Message content is encoded as bare bincode \
+                 with no AEAD and no MAC; there is no traffic morphing in this \
+                 implementation. Do not use for confidential messages."
+            }
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
             TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
