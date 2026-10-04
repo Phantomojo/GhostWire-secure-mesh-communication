@@ -529,10 +529,33 @@ impl MeshTransport {
         )
         .map_err(|e| anyhow::anyhow!(e))?;
 
-        let identify = Identify::new(IdentifyConfig::new(
-            "/ghostwire/mesh/2.0.0".to_string(),
-            local_key.public(),
-        ));
+        // `identify` is a DISCOVERY SOURCE here, not decoration — its Received event
+        // feeds `discovery_directory.observe(.., DiscoverySource::Transport)` with
+        // the peer's listen addresses. Removing it would cost peer discovery, so it
+        // stays.
+        //
+        // What it costs: on every connection it pushes this node's public key, which
+        // is exactly what the DID is derived from
+        // (`SHA256(pubkey.encode_protobuf())`, core/deref.rs). It also pushes the
+        // agent version and protocol list. So one operator running a libp2p node
+        // would learn every GhostWire node's key — and therefore every DID — with no
+        // pairing and no interaction with any user.
+        //
+        // That is Option B's security property not being in force, so it is recorded
+        // rather than quietly configured away. Two honest options, both requiring a
+        // product decision rather than a code tweak:
+        //
+        //   1. Remove `identify` and replace its address-discovery role with the
+        //      transport's own observed addresses. Costs some discovery; preserves
+        //      the privacy property completely.
+        //   2. Keep it and accept that address discovery costs identity privacy.
+        //
+        // The protocol string is set to a generic value either way, because
+        // "/ghostwire/mesh/2.0.0" is a globally unique, greppable fingerprint that
+        // serves no purpose beyond identification — which is what we are removing.
+        let identify = Identify::new(
+            IdentifyConfig::new(String::new(), local_key.public())
+        );
 
         // Recursive DHT: Regional Sharding logic
         // Nodes join a global shard AND a regional shard for high-velocity lookups
@@ -545,11 +568,32 @@ impl MeshTransport {
         // Harden Kademlia: Increase replication and periodic refresh
         kad.set_mode(Some(libp2p::kad::Mode::Server));
 
-        let mdns_enabled = std::env::var_os("GHOSTWIRE_TEST_DISABLE_MDNS").is_none();
+        // mDNS advertises this node's PeerId on the LOCAL NETWORK in the clear, as a
+        // multicast DNS service record. Anyone on the same Wi-Fi — a café, an
+        // office, an airport — can passively enumerate every GhostWire user on that
+        // network. No packet is sent to the target, so it is undetectable and
+        // unconsented.
+        //
+        // It was previously ON in production and OFF only in tests, gated by
+        // `GHOSTWIRE_TEST_DISABLE_MDNS`. That is the inverse of test isolation: the
+        // flag existed to suppress discovery in tests, and production kept the leaky
+        // default. So LAN discovery was chosen over LAN privacy by accident of
+        // naming, not by decision.
+        //
+        // Now: OFF unless explicitly enabled. LAN discovery remains available for
+        // users who want it, and the flag name matches what it does.
+        let mdns_enabled = std::env::var_os("GHOSTWIRE_ENABLE_MDNS").is_some();
         let mdns = if mdns_enabled {
+            tracing::warn!(
+                "mDNS peer discovery is ENABLED: this node's PeerId will be \
+                 broadcast in the clear on every local network it joins"
+            );
             Some(Mdns::new(MdnsConfig::default(), local_peer_id)?)
         } else {
-            tracing::info!("mDNS disabled by explicit test isolation policy");
+            tracing::info!(
+                "mDNS peer discovery disabled by default — it broadcasts the PeerId \
+                 on the LAN. Set GHOSTWIRE_ENABLE_MDNS=1 to opt in."
+            );
             None
         };
 
