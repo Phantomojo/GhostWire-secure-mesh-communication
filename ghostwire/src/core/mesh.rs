@@ -620,14 +620,41 @@ impl MeshTransport {
             relay: relay_client,
             dcutr,
             request_response,
-            // Cap parallel connections per peer. Two, not one: see the
-            // connection_limits doc comment for the request-response debug
-            // assert that a cap of 1 trips. Collapses the observed 3-4
-            // connections to a stable pair. Pending dials are bounded too so
-            // a discovery burst cannot queue unbounded dials.
+            // Cap parallel connections.
+            //
+            // `with_max_established` sets `max_established_TOTAL`, not a
+            // per-peer cap - the per-peer control is `with_max_established_per_peer`
+            // (libp2p-connection-limits-0.6.0/src/lib.rs:217-225). The comment here
+            // used to say "per peer" while setting the total, so the node allowed
+            // TWO connections to the ENTIRE NETWORK.
+            //
+            // That is a functional bug, not merely tight config: the gossipsub
+            // config asks for `mesh_n` peers per topic (`skademlia.rs`, default
+            // "small" = 2, medium = 8, large = 12) and Kademlia runs in
+            // `Mode::Server`. A total cap of 2 cannot satisfy a mesh plus a DHT plus
+            // request/response - the node can never reach a healthy topology, and
+            // every send competes for the same two slots.
+            //
+            // The per-peer control is used where per-peer was intended, and the
+            // total is set generously enough for the topology actually requested.
             connection_limits: libp2p::connection_limits::Behaviour::new(
                 libp2p::connection_limits::ConnectionLimits::default()
-                    .with_max_established(Some(2))
+                    // Per peer: 2 is right. It collapses the observed 3-4
+                    // connections to a stable pair, and a cap of 1 trips the
+                    // request-response debug assert.
+                    .with_max_established_per_peer(Some(2))
+                    // Inbound/outbound split as well: the crate's own docs
+                    // recommend this alongside the total "to prevent possible
+                    // eclipse attacks (all connections being inbound)".
+                    .with_max_established_incoming(Some(64))
+                    .with_max_established_outgoing(Some(64))
+                    // Total bounded. Generous relative to a 2-per-peer cap,
+                    // small enough to bound memory on a hostile network. An
+                    // unspecified limit is `u32::MAX` (same file, line 117), so
+                    // this must be stated explicitly.
+                    .with_max_established(Some(256))
+                    // Pending dials bounded so a discovery burst cannot queue
+                    // unbounded dials.
                     .with_max_pending_incoming(Some(16))
                     .with_max_pending_outgoing(Some(16)),
             ),
