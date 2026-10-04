@@ -403,9 +403,22 @@ impl PeerController {
             }
         }
 
+        // Read the mesh through `effective_mesh_manager()`, not `mesh_manager`.
+        //
+        // There are two fields: `mesh_manager` (set only when the mesh exists at
+        // Core construction) and `late_mesh_manager` (populated later by
+        // `init_mesh`). A daemon that initialises the mesh after construction has
+        // `mesh_manager == None`, so reading it directly yields
+        // MESH_UNAVAILABLE — while the mesh is demonstrably running and carrying
+        // traffic. The cross-machine run had handshakes flowing both directions
+        // and this endpoint reporting no mesh at all.
+        //
+        // Same defect already fixed in `controllers/health.rs`. Two accessors for
+        // one resource is the underlying problem: `effective_mesh_manager()` is
+        // the only correct reader, and reading the field directly is the bug.
         let mesh = {
             let core = state.core.read().await;
-            core.mesh_manager.clone()
+            core.effective_mesh_manager().await
         };
         let Some(mesh) = mesh else {
             return (

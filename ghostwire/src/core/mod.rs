@@ -2639,6 +2639,10 @@ impl Core {
     /// Peer count: from mesh cache when mesh is enabled, else from encryption layer.
     /// The mesh cache is updated whenever get_mesh_stats() is called (e.g. by HUD or CLI).
     pub fn get_peer_count(&self) -> usize {
+        // `mesh_manager` is set only when the mesh exists at construction; a mesh
+        // started later lives in `late_mesh_manager`. Checking both is what this
+        // already did, kept explicit because reading one field is the bug that
+        // broke ping and shutdown.
         #[cfg(feature = "mesh")]
         if self.mesh_manager.is_some()
             || self
@@ -2661,8 +2665,16 @@ impl Core {
         // 2. Stop local BootstrapWorker
         self.stop_bootstrap().await;
         // 3. Stop Mesh
+        //
+        // Read through `effective_mesh_manager()`: a mesh initialised by
+        // `init_mesh` after Core construction lives in `late_mesh_manager`, and
+        // reading only the `mesh_manager` field skipped it entirely — so the
+        // swarm was never stopped on shutdown and the process leaked it. This is
+        // the same two-accessors-one-resource defect that made
+        // `/api/v2/peers/ping` report MESH_UNAVAILABLE while the mesh was
+        // demonstrably running.
         #[cfg(feature = "mesh")]
-        if let Some(mesh_mgr) = &self.mesh_manager {
+        if let Some(mesh_mgr) = self.effective_mesh_manager().await {
             let mgr = mesh_mgr.read().await;
             mgr.stop().await?;
         }
