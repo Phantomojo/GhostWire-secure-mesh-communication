@@ -125,6 +125,9 @@ impl UnifiedPeerTable {
         }
 
         let now = Instant::now();
+        // `address` is moved into `transports` below, and the transport-specific
+        // identifier assignment needs it on both paths, so clone once up front.
+        let address_for_index = address.clone();
         if let Some(peer) = self.peers.get_mut(&identity) {
             // Merge: add/update this transport's address
             peer.transports.insert(
@@ -139,6 +142,38 @@ impl UnifiedPeerTable {
                 },
             );
             peer.last_seen = now;
+
+            // ALSO set the transport-specific identifier on the merge path.
+            //
+            // This was missing, and it is not cosmetic. The identifier assignment
+            // only happened in the new-peer branch below, so a peer discovered
+            // FIRST over libp2p and LATER over Reticulum never had
+            // `reticulum_address` set — the address was in `transports` but not in
+            // the field the router reads.
+            //
+            // `TransportRouter::route` checks `peer.reticulum_address.is_some()`,
+            // so such a peer was reported as having no Reticulum route at all.
+            // That makes dual-routing structurally impossible for the common case
+            // (libp2p first, Reticulum learned later), which is exactly the
+            // topology this project is built around.
+            //
+            // Caught by tests/transport_router_rns.rs:
+            // `critical_messages_dual_route_when_both_transports_exist` returned
+            // LibP2p instead of Dual, and `recording_outcomes_changes_what_the_
+            // router_prefers` could never select Reticulum no matter how many
+            // successes it recorded.
+            match &address_for_index {
+                TransportAddr::LibP2p(addr) => {
+                    peer.libp2p_peer_id = Some(addr.clone());
+                    self.by_libp2p_peer_id
+                        .insert(addr.clone(), identity.clone());
+                }
+                TransportAddr::Reticulum(hash) => {
+                    peer.reticulum_address = Some(*hash);
+                    self.by_reticulum_address
+                        .insert(*hash, identity.clone());
+                }
+            }
         } else {
             // New peer
             let mut peer = UnifiedPeer {
