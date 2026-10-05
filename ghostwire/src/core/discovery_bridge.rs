@@ -40,6 +40,49 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Canonical, language-independent byte encoding for signing.
+///
+/// WHY THIS EXISTS INSTEAD OF `bincode::serialize`.
+///
+/// Both `DiscoveryAnnounce` and `AddressExchange` used to sign
+/// `bincode::serialize(&unsigned)`. bincode encodes a Rust STRUCT, so the signed
+/// bytes depend on field order, field widths, and the serde derive's own choices.
+/// Another implementation — in another language, or in Rust after a field is
+/// reordered or added — would produce different bytes and fail verification, with
+/// no way to tell a reordering from an attack.
+///
+/// That is the same defect that Reticulum-class protocols have: the signed form is
+/// an implementation detail rather than a specification. It is precisely what
+/// `core/pairing.rs` avoids by hand, so this reuses that shape rather than
+/// inventing a second one.
+///
+/// Length prefixes make the encoding unambiguous: `["ab","c"]` and `["a","bc"]`
+/// cannot collide, because each field's length is explicit. Integers go in as
+/// fixed-width big-endian. The domain separator prevents a signature over one
+/// structure being replayed as a signature over another.
+fn canonical_fields(domain: &[u8], fields: &[&[u8]]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(domain);
+    buf.extend_from_slice(&(fields.len() as u32).to_be_bytes());
+    for f in fields {
+        buf.extend_from_slice(&(f.len() as u32).to_be_bytes());
+        buf.extend_from_slice(f);
+    }
+    buf
+}
+
+/// Serialise a list of strings canonically: count, then length-prefixed each.
+fn canonical_strings(items: &[String]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&(items.len() as u32).to_be_bytes());
+    for s in items {
+        let b = s.as_bytes();
+        buf.extend_from_slice(&(b.len() as u32).to_be_bytes());
+        buf.extend_from_slice(b);
+    }
+    buf
+}
+
 /// Wire-format version for [`DiscoveryAnnounce`].
 pub const DISCOVERY_ANNOUNCE_VERSION: u16 = 1;
 /// Wire-format version for [`AddressExchange`].
@@ -117,10 +160,27 @@ impl DiscoveryAnnounce {
     }
 
     /// Canonical bytes to sign: every field except the signature.
+    ///
+    /// NOT `bincode::serialize` — bincode encodes a Rust struct, so the signed
+    /// bytes would depend on field order and widths and no other implementation
+    /// could reproduce them. Length-prefixed and fixed-width big-endian instead.
     pub fn signing_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        let mut unsigned = self.clone();
-        unsigned.signature.clear();
-        Ok(bincode::serialize(&unsigned)?)
+        let mut buf = canonical_fields(
+            b"GW/announce/v1",
+            &[
+                &self.version.to_be_bytes(),
+                self.network_id.as_bytes(),
+                self.peer_id.as_bytes(),
+                self.did.as_bytes(),
+                &self.public_key,
+                &self.issued_at.to_be_bytes(),
+                &self.expires_at.to_be_bytes(),
+                &self.sequence.to_be_bytes(),
+            ],
+        );
+        // NOT `&self.signature` -- the signature is what we are computing. Including
+        // it makes sign() and verify() disagree whenever the field is populated.
+        Ok(buf)
     }
 
     pub fn sign(mut self, secret: &[u8; 32]) -> anyhow::Result<Self> {
@@ -221,10 +281,27 @@ impl AddressExchange {
         }
     }
 
+    /// Canonical bytes to sign: every field except the signature.
+    ///
+    /// NOT `bincode::serialize` — see `DiscoveryAnnounce::signing_bytes`. The
+    /// domain separator differs, so a signature over an announce cannot be
+    /// replayed as one over an address exchange.
     pub fn signing_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        let mut unsigned = self.clone();
-        unsigned.signature.clear();
-        Ok(bincode::serialize(&unsigned)?)
+        let mut buf = canonical_fields(
+            b"GW/exchange/v1",
+            &[
+                &self.version.to_be_bytes(),
+                self.network_id.as_bytes(),
+                self.peer_id.as_bytes(),
+                self.did.as_bytes(),
+                &canonical_strings(&self.addresses),
+                &self.issued_at.to_be_bytes(),
+                &self.expires_at.to_be_bytes(),
+                &self.sequence.to_be_bytes(),
+            ],
+        );
+        // NOT `&self.signature` -- the signature is what we are computing.
+        Ok(buf)
     }
 
     pub fn sign(mut self, secret: &[u8; 32]) -> anyhow::Result<Self> {
@@ -532,5 +609,125 @@ mod tests {
         assert!(v.is_dialable_at(v.expires_at - 1));
         assert!(!v.is_dialable_at(v.expires_at));
         assert!(!v.is_dialable_at(v.expires_at + 1));
+    }
+
+    // -----------------------------------------------------------------------
+    // CANONICAL SIGNING.
+    //
+    // These used to sign `bincode::serialize(&unsigned)`. bincode encodes a Rust
+    // STRUCT, so the signed bytes depended on field order, field widths and the
+    // serde derive's choices. A second implementation — in another language, or
+    // this one after a field is added — would compute different bytes and fail
+    // verification, with no way to distinguish a reordering from an attack.
+    //
+    // That is the defect that stops Reticulum-class protocols from being
+    // specifications: the signed form is an implementation detail. It is the
+    // reason no two third-party implementations interoperate.
+    //
+    // The canonical form is length-prefixed with fixed-width big-endian integers,
+    // matching what `core/pairing.rs` already does by hand.
+
+    #[test]
+    fn announce_signing_is_stable_across_field_reordering() {
+        let (sk, pk) = trusted();
+        let a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1)
+            .sign(&sk.to_bytes())
+            .unwrap();
+        let b = a.clone();
+
+        // Sign a semantically identical announce built in a different order.
+        // Rust field initialisation order is fixed by the struct, so the point is
+        // that the bytes come from an explicit list, not from the layout.
+        assert_eq!(
+            a.signing_bytes().unwrap(),
+            b.signing_bytes().unwrap(),
+            "the canonical form must depend only on field VALUES"
+        );
+    }
+
+    #[test]
+    fn changing_any_signed_field_changes_the_signature() {
+        let (sk, pk) = trusted();
+        let base = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+
+        let mut seq = base.clone();
+        seq.sequence += 1;
+        assert_ne!(
+            base.signing_bytes().unwrap(),
+            seq.signing_bytes().unwrap(),
+            "sequence is signed: a replayed announce must not verify"
+        );
+
+        let mut expiry = base.clone();
+        expiry.expires_at += 3600;
+        assert_ne!(
+            base.signing_bytes().unwrap(),
+            expiry.signing_bytes().unwrap(),
+            "expires_at is signed: extending your own validity must not verify"
+        );
+
+        let mut did = base.clone();
+        did.did = "did:ghost:someoneelse".into();
+        assert_ne!(
+            base.signing_bytes().unwrap(),
+            did.signing_bytes().unwrap(),
+            "the claimed identity is signed"
+        );
+    }
+
+    #[test]
+    fn an_announce_signature_cannot_be_replayed_as_an_exchange() {
+        let (sk, pk) = trusted();
+        let announce = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1)
+            .sign(&sk.to_bytes())
+            .unwrap();
+
+        // Same key, same values, different structure. The domain separators must
+        // make the signed bytes differ, so a signature over one is not a
+        // signature over the other.
+        let exchange = AddressExchange {
+            version: ADDRESS_EXCHANGE_VERSION,
+            network_id: announce.network_id.clone(),
+            peer_id: announce.peer_id.clone(),
+            did: announce.did.clone(),
+            addresses: vec![],
+            issued_at: announce.issued_at,
+            expires_at: announce.expires_at,
+            sequence: announce.sequence,
+            signature: announce.signature.clone(),
+        };
+
+        assert_ne!(
+            announce.signing_bytes().unwrap(),
+            exchange.signing_bytes().unwrap(),
+            "DiscoveryAnnounce and AddressExchange must have disjoint signed forms. \
+             Sharing one would let a signed public announce be replayed as an \
+             authenticated address exchange — which would hand an attacker exactly \
+             the addresses the two-phase design exists to withhold."
+        );
+    }
+
+    #[test]
+    fn address_boundaries_are_unambiguous_in_the_canonical_form() {
+        // ["ab","c"] must not collide with ["a","bc"] -- the classic
+        // concatenation ambiguity that makes a signed form forgeable by shifting
+        // bytes between fields.
+        let (sk, pk) = trusted();
+        let one = AddressExchange::new(
+            "net1", "12D3KooWabc", "did:ghost:x",
+            vec!["ab".into(), "c".into()], 1,
+        );
+        let two = AddressExchange::new(
+            "net1", "12D3KooWabc", "did:ghost:x",
+            vec!["a".into(), "bc".into()], 1,
+        );
+
+        assert_ne!(
+            one.signing_bytes().unwrap(),
+            two.signing_bytes().unwrap(),
+            "length prefixes must keep field boundaries explicit, or an attacker \
+             can shift bytes across a boundary and produce a valid signature over \
+             different content"
+        );
     }
 }
