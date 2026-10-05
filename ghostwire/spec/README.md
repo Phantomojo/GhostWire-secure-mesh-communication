@@ -168,6 +168,13 @@ only structure permitted to carry a libp2p address.
 Fields: `version`, `network_id`, `peer_id`, `did`, `addresses`, `issued_at`,
 `expires_at`, `sequence`, `signature`.
 
+### 4.3 The dial gate
+
+`VerifiedPeerAddress` is `#[non_exhaustive]`, so no code outside the defining
+module can construct one. Dial only what it contains.
+
+---
+
 ### 4.4 Validity windows (normative)
 
 A verifier MUST apply all four checks, in this order:
@@ -190,53 +197,38 @@ checked. It was not. Without (4) an attacker moves `issued_at` into the future a
 a stale capture looks fresh. 60 seconds covers real inter-node drift; a stricter
 bound breaks the mesh, and a looser one forgives forgery.
 
-### 4.3 The dial gate
+### 4.5 What `sequence` means (normative)
 
-`VerifiedPeerAddress` is `#[non_exhaustive]`, so no code outside the defining
-module can construct one. Dial only what it contains.
+`sequence` is an **advisory freshness signal. A verifier MUST NOT refuse a
+structure for having a lower `sequence` than one previously seen from that
+issuer.**
 
----
+This is the opposite of the intuitive rule, and the reason is specific to this
+transport:
 
-## 5. The correlation problem, stated in full
+* GhostWire is a **flooding mesh** — gossipsub plus relay plus DCUtR. A single
+  announce reaches a node by many paths, and reaches it **out of order** as a
+  matter of routine.
+* gossipsub **already deduplicates by message id**, at the transport layer,
+  before any GhostWire code sees the payload.
 
-**This is a known defect, not a solved property.**
+So a "reject if `sequence` decreases" rule would reject correct operation. In a
+growing flood the first announce a node happens to receive is routinely not the
+newest one. Enforcing monotonicity would make the mesh converge more slowly, or
+not at all, and it would punish a peer for our own delivery order.
 
-A libp2p `PeerId` for an Ed25519 key is an **identity multihash**: keys of 42
-bytes or fewer use `Multihash::wrap(0, …)`, so the SHA-256 branch is
-unreachable and the PeerId is the protobuf-encoded public key. Every
-`12D3KooW…` literally contains the key.
+`sequence` remains signed, which is still worth something: it makes the value
+attributable and prevents silent rewriting. It is for a receiver that keeps several
+candidate announces to **break ties in favour of the newer one** — a hint, not an
+admission test.
 
-Therefore:
+Anti-replay is handled where it belongs, by §4.4: a bounded window means a
+captured announce is useless within minutes. `sequence` is not, and was never, an
+anti-replay mechanism.
 
-> **Anyone holding a PeerId can compute the corresponding DID.**
-
-This was verified by decoding a `PeerId` from libp2p's own specification text and
-recovering the key.
-
-Consequence: the PeerId is a **permanent cross-transport correlator**. That is in
-direct tension with "one identity, many transports, addresses unlinkable until
-pairing" — which is this project's central claim.
-
-It is also why `identify` is a problem. It pushes the public key on every
-connection, so one libp2p operator sees every GhostWire node's key — and therefore
-every DID — with no pairing involved.
-
-**Options, none taken unilaterally:**
-
-1. Disable `identify` and replace its address-discovery role. Costs discovery,
-   preserves the property.
-2. Adopt a non-identity multihash. Blocked in practice: `identify` rejects any
-   peer whose key does not derive their claimed ID.
-3. Scope it out: state plainly that libp2p-peer identity is pseudonymous but
-   correlatable, and that unlinkability is claimed only within a transport.
-
-**An implementation MUST NOT claim cross-transport unlinkability while a
-standards-compliant libp2p PeerId is in use.** That is the requirement this
-section exists to state.
-
----
-
-## 6. Pairing
+**Across restarts and key rotation it is undefined.** An issuer SHOULD restart
+its counter after a key rotation, since the new key establishes a new series, and
+MUST NOT rely on monotonicity across a restart for security.
 
 ### 6.1 Records
 
@@ -281,6 +273,48 @@ on — not an implementation detail.
 
 ---
 
+## 5. The correlation problem, stated in full
+
+**This is a known defect, not a solved property.**
+
+A libp2p `PeerId` for an Ed25519 key is an **identity multihash**: keys of 42
+bytes or fewer use `Multihash::wrap(0, …)`, so the SHA-256 branch is
+unreachable and the PeerId is the protobuf-encoded public key. Every
+`12D3KooW…` literally contains the key.
+
+Therefore:
+
+> **Anyone holding a PeerId can compute the corresponding DID.**
+
+This was verified by decoding a `PeerId` from libp2p's own specification text and
+recovering the key.
+
+Consequence: the PeerId is a **permanent cross-transport correlator**. That is in
+direct tension with "one identity, many transports, addresses unlinkable until
+pairing" — which is this project's central claim.
+
+It is also why `identify` is a problem. It pushes the public key on every
+connection, so one libp2p operator sees every GhostWire node's key — and therefore
+every DID — with no pairing involved.
+
+**Options, none taken unilaterally:**
+
+1. Disable `identify` and replace its address-discovery role. Costs discovery,
+   preserves the property.
+2. Adopt a non-identity multihash. Blocked in practice: `identify` rejects any
+   peer whose key does not derive their claimed ID.
+3. Scope it out: state plainly that libp2p-peer identity is pseudonymous but
+   correlatable, and that unlinkability is claimed only within a transport.
+
+**An implementation MUST NOT claim cross-transport unlinkability while a
+standards-compliant libp2p PeerId is in use.** That is the requirement this
+section exists to state.
+
+---
+
+## 6. Pairing
+
+
 ## 7. Versioning and errata
 
 **A change to any encoding in this document is a version bump**, not a refactor.
@@ -323,11 +357,12 @@ currently disagree:
    `issued_at` up to 60 seconds ahead of its own clock, and MUST reject anything
    further ahead. It MUST reject a validity window longer than 900 seconds, and it
    MUST check `issued_at` at all.
-3. **`sequence` semantics.** Monotonic per issuer, across restarts, across key
-   rotation? **STILL UNDEFINED.**
+3. ~~**`sequence` semantics.**~~ **RESOLVED — §4.5.** It is an **advisory
+   freshness signal, not a rejection criterion.** A verifier MUST NOT refuse a
+   structure for having a `sequence` lower than one previously seen.
 4. **`network_id` derivation.** How is a network identified and scoped? Parsed
-   and length-checked, never derived.
+   and length-checked, never derived. **STILL OPEN.**
 5. **Which transport carries which structure.** Phase 2 says "over the
-   authenticated channel", which is not yet a wire format.
+   authenticated channel", which is not yet a wire format. **STILL OPEN.**
 
 These are listed so that nobody mistakes the absence for a decision.
