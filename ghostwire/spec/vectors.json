@@ -1,0 +1,123 @@
+{
+  "note": "Normative encodings only. An implementation MUST reproduce these byte for byte. Changing one is a protocol version bump, not a refactor.",
+  "spec": "GhostWire",
+  "vectors": [
+    {
+      "description": "did:ghost:<lowercase hex SHA-256 of the ed25519 public key's protobuf encoding>. A DID is a VERIFICATION anchor, never something a PeerId can be inverted from.",
+      "inputs": {
+        "public_key_protobuf_hex": "0801122079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+      },
+      "name": "did-from-public-key",
+      "outputs": {
+        "did": "did:ghost:a6c7de50dfb848e1fd4f9aa13c985a523adaba06ab76b7a1447cdbaed1869030",
+        "peer_id": "12D3KooWJ1TsijH7H5F74hfAD5XishQz3sxrmAtVY37GtNd9CqYf"
+      }
+    },
+    {
+      "description": "Length-prefixed canonical form: version byte, then each field prefixed with its u32 big-endian length. Unambiguous under concatenation.",
+      "inputs": {
+        "addresses": [
+          "/ip4/203.0.113.5/tcp/4001"
+        ],
+        "did": "did:ghost:a6c7de50dfb848e1fd4f9aa13c985a523adaba06ab76b7a1447cdbaed1869030",
+        "expires_at": 1800086400,
+        "issued_at": 1800000000,
+        "peer_id": "12D3KooWJ1TsijH7H5F74hfAD5XishQz3sxrmAtVY37GtNd9CqYf",
+        "version": 1
+      },
+      "name": "pairing-record-signing-bytes",
+      "outputs": {
+        "signature_hex": "a3f7f94ce29df85c083de52539ff2a1ea9bf33728bb45b3a7e2a563416b138969e7ce02940de97c334df7155a246446a35ee7b2b0b3033ca99e8eaadd31aa107",
+        "signing_bytes_hex": "010000004a6469643a67686f73743a6136633764653530646662383438653166643466396161313363393835613532336164616261303661623736623761313434376364626165643138363930333000000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e643943715966000000192f6970342f3230332e302e3131332e352f7463702f343030310000000a313830303030303030300000000a31383030303836343030"
+      }
+    },
+    {
+      "description": "Self-signed by the revoked key. Revocations never expire: a key compromised last year is still compromised, and a TTL would let an attacker wait it out.",
+      "inputs": {
+        "did": "did:ghost:a6c7de50dfb848e1fd4f9aa13c985a523adaba06ab76b7a1447cdbaed1869030",
+        "peer_id": "12D3KooWJ1TsijH7H5F74hfAD5XishQz3sxrmAtVY37GtNd9CqYf",
+        "reason": "key compromise",
+        "revoked_at": 1800000000,
+        "version": 1
+      },
+      "name": "revocation-signing-bytes",
+      "outputs": {
+        "signature_hex": "d057a8cbf6627695fd0915236ac5609605ad75f0fbce9d223f0dd160ec048558694924f6cac58223c7c6ec446359bf9abffaa266abc506be07171cc23433bd0f",
+        "signing_bytes_hex": "010000004a6469643a67686f73743a6136633764653530646662383438653166643466396161313363393835613532336164616261303661623736623761313434376364626165643138363930333000000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e6439437159660000000a31383030303030303030"
+      }
+    },
+    {
+      "description": "Domain-separated canonical form. MUST NOT contain any address: a public announce must not be able to express 'dial this endpoint', which is what phase 1 withholds.",
+      "inputs": {
+        "did": "did:ghost:a6c7de50dfb848e1fd4f9aa13c985a523adaba06ab76b7a1447cdbaed1869030",
+        "expires_at": 1800003600,
+        "issued_at": 1800000000,
+        "network_id": "ghostwire-main",
+        "peer_id": "12D3KooWJ1TsijH7H5F74hfAD5XishQz3sxrmAtVY37GtNd9CqYf",
+        "public_key_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+        "sequence": 7,
+        "version": 1
+      },
+      "name": "discovery-announce-signing-bytes",
+      "outputs": {
+        "signature_hex": "e532abdf68c6d2a48008352927f7e47485ca2ff560855331d5ec24079929587d6617508aa87adfa9f613c43b6838d2edd645fbd2e46a87103be70a4948fdd401",
+        "signing_bytes_hex": "47572f616e6e6f756e63652f7631000000080000000200010000000e67686f7374776972652d6d61696e00000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e6439437159660000004a6469643a67686f73743a613663376465353064666238343865316664346639616131336339383561353233616461626130366162373662376131343437636462616564313836393033300000002079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad04966400000008000000006b49d20000000008000000006b49e010000000080000000000000007"
+      }
+    },
+    {
+      "description": "Same canonical shape as the announce but a DIFFERENT domain separator, so a signed public announce cannot be replayed as an authenticated address exchange.",
+      "inputs": {
+        "addresses": [
+          "/ip4/203.0.113.5/tcp/4001"
+        ],
+        "did": "did:ghost:a6c7de50dfb848e1fd4f9aa13c985a523adaba06ab76b7a1447cdbaed1869030",
+        "expires_at": 1800003600,
+        "issued_at": 1800000000,
+        "network_id": "ghostwire-main",
+        "peer_id": "12D3KooWJ1TsijH7H5F74hfAD5XishQz3sxrmAtVY37GtNd9CqYf",
+        "sequence": 9,
+        "version": 1
+      },
+      "name": "address-exchange-signing-bytes",
+      "outputs": {
+        "signature_hex": "73eb1c5c4bf7d22193d227e19d35b37a4c73b98983a44f1d6b86bf4d909df1e8bfc68c78e6a6b8999da0db423f25fbef44624a76a21bc72d38846bd8f8e41903",
+        "signing_bytes_hex": "47572f65786368616e67652f7631000000080000000200010000000e67686f7374776972652d6d61696e00000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e6439437159660000004a6469643a67686f73743a613663376465353064666238343865316664346639616131336339383561353233616461626130366162373662376131343437636462616564313836393033300000002100000001000000192f6970342f3230332e302e3131332e352f7463702f3430303100000008000000006b49d20000000008000000006b49e010000000080000000000000009"
+      }
+    },
+    {
+      "description": "[\"ab\",\"c\"] and [\"a\",\"bc\"] must produce different signing bytes. Without explicit length prefixes these would concatenate identically, and an attacker could shift bytes across a field boundary to sign different content.",
+      "inputs": {
+        "case_a_addresses": [
+          "ab",
+          "c"
+        ],
+        "case_b_addresses": [
+          "a",
+          "bc"
+        ],
+        "expires_at": 1800003600,
+        "issued_at": 1800000000
+      },
+      "name": "address-boundary-unambiguity",
+      "outputs": {
+        "case_a_signing_bytes_hex": "47572f65786368616e67652f7631000000080000000200010000000e67686f7374776972652d6d61696e00000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e6439437159660000004a6469643a67686f73743a613663376465353064666238343865316664346639616131336339383561353233616461626130366162373662376131343437636462616564313836393033300000000f00000002000000026162000000016300000008000000006b49d20000000008000000006b49e01000000008000000000000000b",
+        "case_b_signing_bytes_hex": "47572f65786368616e67652f7631000000080000000200010000000e67686f7374776972652d6d61696e00000034313244334b6f6f574a315473696a48374835463734686641443558697368517a337378726d41745659333747744e6439437159660000004a6469643a67686f73743a613663376465353064666238343865316664346639616131336339383561353233616461626130366162373662376131343437636462616564313836393033300000000f00000002000000016100000002626300000008000000006b49d20000000008000000006b49e01000000008000000000000000b",
+        "distinct": true
+      }
+    },
+    {
+      "description": "16 bytes of entropy -> base32 (RFC 4648 alphabet) -> 26 characters grouped 4-4-4-4-4-4-4. encode() and decode() MUST be inverses, and both sides of a typed pairing MUST derive the same safety number. This is what makes pairing possible without meeting in person.",
+      "inputs": {
+        "entropy_hex": "00112233445566778899aabbccddeeff"
+      },
+      "name": "pairing-code-roundtrip",
+      "outputs": {
+        "display": "AAIS-EM2E-KVTH-PCEZ-VK54-ZXPO-74",
+        "retyped_safety_number": "981103",
+        "round_trip_is_exact": true,
+        "safety_number": "981103"
+      }
+    }
+  ],
+  "version": 1
+}

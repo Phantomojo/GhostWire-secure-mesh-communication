@@ -135,6 +135,16 @@ impl PairingCode {
         Ok(())
     }
 
+    /// Build a code from fixed entropy.
+    ///
+    /// Exists so the conformance vector generator can produce a REPRODUCIBLE
+    /// code. `generate()` uses the system RNG and cannot be used for a published
+    /// test vector — a vector must be regenerable byte for byte on any machine.
+    pub fn from_entropy_for_vectors(entropy: [u8; 16]) -> Self {
+        let display = Self::encode(&entropy);
+        Self { entropy, display }
+    }
+
     /// Parse a user-entered pairing code
     pub fn from_string(s: &str) -> Result<Self> {
         let cleaned: String = s.chars().filter(|c| c.is_alphanumeric()).collect();
