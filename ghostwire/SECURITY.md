@@ -1,287 +1,208 @@
 # Security Policy
 
-## 🔒 Security First
+## Read this first
 
-GhostWire is designed with security as the primary concern. This document outlines our security practices, vulnerability reporting procedures, and security considerations for users and contributors.
+GhostWire is **pre-1.0 and has had no external security review.** Treat every
+security claim in this repository as a design intent, not a verified property.
 
-## 🛡️ Supported Versions
+`spec/README.md` lists what is **not** promised as prominently as what is. Read it
+before relying on anything here.
 
-We provide security updates for the following versions:
+There is **no issue tracker enabled** on this repository. That gap is the entire
+Reticulum lesson, and it is worth stating plainly:
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1.0 | :x:                |
+> Reticulum's author stepped down. Its repository has `has_issues: false`. A
+> critical remote-shell flaw was fixed in 1.3.9 alongside a promised
+> post-mortem that will never arrive, because there was no channel through which
+> anyone could report the *next* one. **A protocol with no errata channel is one
+> where you can never learn that you are insecure.**
 
-## 🚨 Reporting a Vulnerability
+Enabling an issue tracker and publishing a reachable reporting address are the two
+changes that convert this project from a prototype into something a user can
+depend on. Until then, contact the maintainer directly.
 
-### Responsible Disclosure
+## Supported versions
 
-We take security vulnerabilities seriously. If you discover a security issue, please follow these steps:
+| Version | Supported |
+|---|---|
+| `rescue/sep-disk-tree` (current) | yes |
+| Anything older | no — no deployed network exists |
 
-1. **Do NOT create a public GitHub issue** for security vulnerabilities
-2. **Email us directly** at security@ghostwire.dev
-3. **Include detailed information** about the vulnerability
-4. **Allow us time** to investigate and respond
+No released version. Breaking changes to normative encodings cost nothing today
+and are made deliberately (`spec/README.md` §7).
 
-### What to Include in Your Report
+## Reporting a vulnerability
 
-Please provide the following information:
+Contact the maintainer directly. **Do not** rely on an issue tracker existing —
+assume it does not.
 
-- **Description**: Clear description of the vulnerability
-- **Steps to Reproduce**: Detailed steps to reproduce the issue
-- **Impact Assessment**: Potential impact of the vulnerability
-- **Environment**: Operating system, GhostWire version, dependencies
-- **Proof of Concept**: If possible, include a proof of concept
-- **Timeline**: Your preferred disclosure timeline
+Please include: description, steps to reproduce, impact assessment, OS and
+GhostWire version, and a proof of concept if you have one.
 
-### Response Timeline
+Do not test against nodes you are not authorised to test. Do not publicly
+disclose before a fix exists.
 
-- **Initial Response**: Within 48 hours
-- **Status Update**: Within 7 days
-- **Resolution**: Within 30 days (depending on complexity)
-- **Public Disclosure**: After fix is available
-
-## 🔐 Security Features
+## What GhostWire protects
 
-### Cryptographic Security
-
-#### Key Management
-- **Key Generation**: Cryptographically secure random number generation
-- **Key Storage**: Encrypted key storage with hardware security module support
-- **Key Rotation**: Automatic key rotation with configurable intervals
-- **Key Backup**: Secure backup and recovery procedures
+- **Content confidentiality and integrity** between paired peers.
+- **Unlinkability of addresses** until pairing completes, *within* a transport.
+- **Authorisation**: a message from a DID requires a pairing record that verifies
+  against it. Possession of a transport address is not authorisation.
 
-#### Encryption Standards
-- **Symmetric Encryption**: AES-256-GCM for message encryption
-- **Asymmetric Encryption**: X25519 for key exchange, Ed25519 for signatures
-- **Key Derivation**: PBKDF2 with 100,000+ iterations
-- **Perfect Forward Secrecy**: Ephemeral keys for each session
-
-#### Message Security
-- **Message Authentication**: HMAC-SHA256 for integrity verification
-- **Nonce Management**: Unique nonces for each encryption operation
-- **Padding**: Secure padding to prevent timing attacks
-- **Replay Protection**: Timestamp-based replay attack prevention
-
-### Network Security
-
-#### Transport Layer Security
-- **Stealth Handshakes**: Custom handshake protocol to evade detection
-- **Traffic Obfuscation**: Randomization of packet timing and sizes
-- **Connection Anonymization**: IP address obfuscation techniques
-- **Protocol Mimicking**: Traffic pattern mimicry of common protocols
-
-#### Peer-to-Peer Security
-- **Peer Authentication**: Cryptographic peer identity verification
-- **Trust Scoring**: Dynamic trust assessment based on behavior
-- **Blacklisting**: Automatic blocking of malicious peers
-- **Rate Limiting**: Protection against DDoS and spam attacks
-
-### Threat Detection
-
-#### Real-time Monitoring
-- **Behavioral Analysis**: Machine learning-based anomaly detection
-- **Pattern Recognition**: Identification of attack patterns
-- **Threat Intelligence**: Integration with threat intelligence feeds
-- **Incident Response**: Automated response to security incidents
-
-#### Security Metrics
-- **Connection Analysis**: Monitoring of connection patterns
-- **Message Analysis**: Analysis of message content and metadata
-- **Network Analysis**: Monitoring of network topology changes
-- **Performance Impact**: Minimal performance impact of security measures
-
-## 🛠️ Security Best Practices
-
-### For Users
-
-#### Identity Management
-1. **Use Strong Passwords**: Create strong, unique passwords for identity creation
-2. **Regular Key Rotation**: Enable automatic key rotation
-3. **Backup Keys Securely**: Store key backups in secure locations
-4. **Verify Peer Identities**: Always verify peer identities before establishing trust
-
-#### Network Security
-1. **Use VPNs**: Use VPNs for additional network privacy
-2. **Enable Stealth Mode**: Enable stealth mode for enhanced privacy
-3. **Monitor Connections**: Regularly review connection logs
-4. **Update Regularly**: Keep GhostWire and dependencies updated
-
-#### Communication Security
-1. **Verify Recipients**: Double-check recipient addresses before sending
-2. **Use Ephemeral Identities**: Use ephemeral identities for sensitive communications
-3. **Monitor for Anomalies**: Report suspicious activity immediately
-4. **Secure Storage**: Store sensitive messages in encrypted storage
-
-### For Developers
-
-#### Code Security
-1. **Input Validation**: Validate all user inputs thoroughly
-2. **Memory Safety**: Leverage Rust's memory safety guarantees
-3. **Error Handling**: Implement secure error handling without information leakage
-4. **Dependency Management**: Regularly update and audit dependencies
-
-#### Testing Security
-1. **Security Testing**: Include security tests in the test suite
-2. **Fuzzing**: Use fuzzing tools to find edge cases
-3. **Penetration Testing**: Regular penetration testing of the application
-4. **Code Review**: Security-focused code reviews for all changes
-
-#### Deployment Security
-1. **Secure Configuration**: Use secure default configurations
-2. **Environment Variables**: Store sensitive data in environment variables
-3. **Network Security**: Implement proper network security measures
-4. **Monitoring**: Deploy comprehensive security monitoring
-
-## 🔍 Security Audits
-
-### Internal Audits
-- **Code Review**: All code changes undergo security review
-- **Architecture Review**: Regular security architecture reviews
-- **Dependency Audits**: Regular audits of third-party dependencies
-- **Configuration Audits**: Regular audits of security configurations
-
-### External Audits
-- **Third-party Audits**: Regular security audits by independent firms
-- **Bug Bounty Program**: Planned bug bounty program for security researchers
-- **Community Audits**: Encouragement of community security reviews
-- **Academic Review**: Collaboration with academic security researchers
-
-## 📋 Security Checklist
-
-### Before Release
-- [ ] Security code review completed
-- [ ] Dependency vulnerabilities checked
-- [ ] Security tests passing
-- [ ] Configuration security verified
-- [ ] Documentation security reviewed
-
-### After Release
-- [ ] Security monitoring enabled
-- [ ] Vulnerability reporting process active
-- [ ] Security updates planned
-- [ ] Community security feedback collected
-- [ ] Security metrics tracked
-
-## 🚨 Incident Response
-
-### Security Incident Classification
-
-#### Critical (P0)
-- **Data Breach**: Unauthorized access to sensitive data
-- **Cryptographic Failure**: Compromise of encryption or signatures
-- **Network Compromise**: Large-scale network infiltration
-- **Zero-day Exploit**: Active exploitation of unknown vulnerability
-
-#### High (P1)
-- **Authentication Bypass**: Circumvention of authentication mechanisms
-- **Privilege Escalation**: Unauthorized access to elevated privileges
-- **Denial of Service**: Significant service disruption
-- **Data Integrity**: Unauthorized modification of data
-
-#### Medium (P2)
-- **Information Disclosure**: Exposure of non-sensitive information
-- **Performance Impact**: Significant performance degradation
-- **Feature Bypass**: Circumvention of security features
-- **Configuration Error**: Misconfiguration leading to security issues
-
-#### Low (P3)
-- **Minor Vulnerabilities**: Low-impact security issues
-- **Documentation Issues**: Security documentation problems
-- **Cosmetic Issues**: Non-functional security-related issues
-
-### Response Procedures
-
-#### Immediate Response (0-4 hours)
-1. **Acknowledge**: Acknowledge receipt of security report
-2. **Assess**: Assess severity and impact of the issue
-3. **Contain**: Implement immediate containment measures
-4. **Notify**: Notify relevant stakeholders
-
-#### Short-term Response (4-24 hours)
-1. **Investigate**: Conduct thorough investigation
-2. **Plan**: Develop remediation plan
-3. **Communicate**: Communicate with affected users
-4. **Monitor**: Monitor for additional incidents
-
-#### Long-term Response (1-30 days)
-1. **Remediate**: Implement permanent fixes
-2. **Test**: Thoroughly test fixes
-3. **Deploy**: Deploy fixes to all affected systems
-4. **Review**: Conduct post-incident review
-
-## 📞 Contact Information
-
-### Security Team
-- **Email**: security@ghostwire.dev
-- **PGP Key**: [security-pgp-key.asc](https://ghostwire.dev/security-pgp-key.asc)
-- **Response Time**: 48 hours maximum
-
-### Emergency Contacts
-- **Critical Issues**: security-emergency@ghostwire.dev
-- **After Hours**: +1-XXX-XXX-XXXX (for critical issues only)
-
-### Public Communication
-- **Security Advisories**: [GitHub Security Advisories](https://github.com/yourusername/ghostwire/security/advisories)
-- **Security Blog**: [security.ghostwire.dev](https://security.ghostwire.dev)
-- **Security Mailing List**: security-announce@ghostwire.dev
-
-## 📚 Security Resources
-
-### Documentation
-- [Security Architecture](docs/security-architecture.md)
-- [Cryptographic Implementation](docs/crypto-implementation.md)
-- [Network Security](docs/network-security.md)
-- [Threat Model](docs/threat-model.md)
-
-### Tools and Utilities
-- [Security Testing Tools](tools/security/)
-- [Configuration Templates](config/security/)
-- [Monitoring Scripts](scripts/security/)
-
-### Training and Education
-- [Security Training Materials](docs/security-training/)
-- [Best Practices Guide](docs/security-best-practices.md)
-- [Security FAQ](docs/security-faq.md)
-
----
-
-## 🔴 Open Security Findings (2026-07-03 Audit)
-
-### Fixed This Session
-- ✅ **CVE-2024-58262**: curve25519-dalek timing attack — pinned `>=4.1.3`
-- ✅ **CVE-2023-42811**: aes-gcm plaintext exposure — pinned `>=0.10.3`
-- ✅ **CVE-2025-0805**: reqwest HTTP request smuggling — pinned `>=0.11.23`
-- ✅ **CVE-2025-62514**: X25519 small-order point attack — added all-zero DH output check in `encryption.rs:703`
-- ✅ **USBGuard**: CASUE USB KB (2a7a:959f) permanently allowed
-
-### Open: P1 — pqcrypto-mlkem 0.1.1 Unmaintained
-
-**Severity**: P1 (HIGH)
-**Advisory**: RUSTSEC-2026-0161
-**Status**: Open — requires migration
-
-`pqcrypto-mlkem` 0.1.1 depends on PQClean which was archived July 2026. The crate will not receive security patches.
-
-**Remediation**: Migrate to [`ml-kem`](https://crates.io/crates/ml-kem) (maintained successor, ML-KEM-768 compatible API). The change is confined to `encryption.rs` (lines 361-363, 458-476, 538-562) and `pqcrypto-traits` can be removed.
-
-**Risk if deferred**: No immediate CVE, but future PQClean-targeting attacks will go unpatched. Acceptable for development; must fix before production.
-
-### Open: P2 — No CI Dependency Audit
-
-**Severity**: P2 (MEDIUM)
-**Status**: Open — requires CI config
-
-`cargo-audit` is not installed and there is no CI pipeline running automated dependency vulnerability checks. Regressions possible on `cargo update`.
-
-**Remediation**: Add `cargo audit` to CI (GitHub Actions or pre-commit hook). Minimum viable:
-```yaml
-- run: cargo install cargo-audit && cargo audit
+## What GhostWire does NOT protect
+
+The properties a user is most likely to assume, and is wrong about.
+
+### Your IP address
+
+Every libp2p connection exposes both endpoints' IP addresses to each other, to
+their network operators, and to anyone on the path. `DCUtR` actively works
+against address hiding **by design**.
+
+Your network operator can see that you participate and roughly when. Message
+metadata is not protected; padding is per-message, not per-flow, so an idle
+connection is itself a signal.
+
+### Communication patterns
+
+No anonymity against a global passive observer. Content is unlinkable,
+participation is pseudonymous, traffic patterns are neither.
+
+### A compromised key
+
+A `Revocation` is signed by the key being revoked and never expires — a key
+compromised last year is still compromised. But a self-signed revocation **cannot
+stop an attacker who already holds the key** from signing their own statements.
+Revocation buys you this: honest holders of a stale address learn the truth
+without trusting a third party. It does not buy key-theft recovery.
+
+### Reticulum path selection
+
+Path selection is **nearest-wins by construction**, using a timestamp the
+announcing node itself asserts. That is the textbook DTN blackhole shape. Do not
+assume a Reticulum path is an independent witness.
+
+## Known open defects
+
+Security-relevant and user-visible. Stated here rather than only in the spec.
+
+### 1. PeerId → DID is invertible — UNRESOLVED
+
+libp2p uses an **identity multihash** for keys of 42 bytes or fewer, so the
+SHA-256 branch is unreachable and every `12D3KooW…` PeerId **literally contains
+the public key**.
+
+> **Anyone holding a PeerId can compute the corresponding DID.**
+
+Verified by decoding a PeerId from libp2p's own specification text and recovering
+the key.
+
+This makes the PeerId a **permanent cross-transport correlator**, in direct
+tension with "one identity, many transports, addresses unlinkable until
+pairing". The `identify` protocol compounds it by pushing the public key on every
+connection, so one libp2p operator sees every GhostWire node's DID with no pairing
+involved.
+
+Options, none taken unilaterally:
+
+1. Disable `identify` and replace its address-discovery role. Costs discovery,
+   preserves the property.
+2. Adopt a non-identity multihash. Blocked in practice: `identify` rejects any
+   peer whose key does not derive their claimed ID.
+3. Scope it out and state plainly that libp2p peer identity is pseudonymous but
+   **correlatable**.
+
+The specification's requirement stands: *an implementation MUST NOT claim
+cross-transport unlinkability while a standards-compliant libp2p PeerId is in
+use.*
+
+### 2. Typed pairing was broken until `58fa4a5` — FIXED
+
+`encode` used `ALPHABET[(byte as usize) % 32]`, one character per byte, keeping
+only the low 5 bits. Not injective, so no decoder could exist. `from_string`
+therefore hashed the string with blake3 instead of decoding, and the two sides of
+a typed pairing derived **different session keys**.
+
+Every typed pairing produced a safety-number mismatch — `579841` versus `677922`.
+Pairing at any distance did not work. Fixed with real base32 and an exact inverse
+decoder, and pinned by three conformance vectors.
+
+**If you paired against a build before `58fa4a5`, that pairing is untrustworthy.
+Re-pair.**
+
+### 3. Discovery signed a Rust struct layout — FIXED in `0c5c877`
+
+`DiscoveryAnnounce` and `AddressExchange` signed `bincode::serialize(...)`, so
+signed bytes depended on field order and widths. No second implementation could
+have reproduced them. Fixed with a length-prefixed, domain-separated canonical
+form, pinned by `spec/vectors.json`.
+
+### 4. P1 — `pqcrypto-mlkem` 0.1.1 depends on archived PQClean
+
+**Advisory**: RUSTSEC-2026-0161 · **Status**: Open — requires migration
+
+`pqcrypto-mlkem` 0.1.1 depends on PQClean, archived July 2026. It will not
+receive security patches.
+
+**Remediation**: migrate to the maintained [`ml-kem`](https://crates.io/crates/ml-kem)
+crate (ML-KEM-768 compatible API). Confined to `encryption.rs`; `pqcrypto-traits`
+can then be removed.
+
+**Risk if deferred**: no immediate CVE, but future PQClean-targeting attacks go
+unpatched. Acceptable in development; must be fixed before production.
+
+### 5. P2 — no CI dependency audit
+
+`cargo-audit` is not installed and no CI pipeline runs automated dependency
+vulnerability checks. Regressions are possible on `cargo update`.
+
+**Remediation**: add `cargo audit` to CI.
+
+**Risk if deferred**: new dependency CVEs are caught only by sporadic manual
+audit.
+
+## Cryptographic posture
+
+| Concern | Status |
+|---|---|
+| Identity keys | ed25519, verified at pairing |
+| Signed structures | ed25519 over a canonical, length-prefixed encoding |
+| Transport | libp2p Noise (default); QUIC available |
+| Key agreement | ML-KEM-768 hybrid where negotiated |
+| Revocation | self-signed, never expires, **unverified revocations ignored** |
+
+**No primitives are home-rolled.** Each is a vetted library used as documented.
+The one custom construction is the *canonical signing form*
+(`spec/README.md` §3), and its properties — field-boundary unambiguity and domain
+separation — are pinned by vectors rather than asserted.
+
+`is_revoked` ignores revocations that do not verify. Obeying them would let anyone
+revoke anyone by injecting a garbage record — a denial of service on the whole
+network.
+
+## Resolved findings (2026-07-03 audit)
+
+- **CVE-2024-58262** — curve25519-dalek timing attack; pinned `>=4.1.3`
+- **CVE-2023-42811** — aes-gcm plaintext exposure; pinned `>=0.10.3`
+- **CVE-2025-0805** — reqwest HTTP request smuggling; pinned `>=0.11.23`
+- **CVE-2025-62514** — X25519 small-order point attack; all-zero DH output check
+  added in `encryption.rs:703`
+
+## Auditing the claims in this file
+
+Two commands, both cheap:
+
+```
+cargo test --lib --no-fail-fast          # 494 unit tests
+cargo test --test conformance_vectors    # 9 vectors
 ```
 
-**Risk if deferred**: New CVEs in dependencies won't be caught automatically. Manual audits are sporadic.
+The vector executor is deliberately sensitive: changing a normative encoding
+fails with *"this is a PROTOCOL change, not just a refactor"*. That is the point.
+A protocol whose encodings can drift silently is an application wearing a
+protocol's name.
 
----
+## Cryptographic bugs
 
-**Remember**: Security is everyone's responsibility. If you see something, say something!
+For a bug that breaks confidentiality, authenticity, or the canonical encoding,
+contact the maintainer directly and **do not** rely on an issue tracker existing.
