@@ -168,6 +168,28 @@ only structure permitted to carry a libp2p address.
 Fields: `version`, `network_id`, `peer_id`, `did`, `addresses`, `issued_at`,
 `expires_at`, `sequence`, `signature`.
 
+### 4.4 Validity windows (normative)
+
+A verifier MUST apply all four checks, in this order:
+
+```
+1. expires_at >  issued_at          a real window, not zero-length
+2. expires_at - issued_at <= 900s    refuses an over-long window
+3. now <       expires_at            not already dead
+4. issued_at <= now + 60s            not dated in the future
+```
+
+**Why (2) exists.** `expires_at` is attacker-controlled and signed. A valid
+signature over `expires_at = now + 10 years` is not a defence — the window is
+what matters. An announce is a routing hint that goes stale; making one valid
+indefinitely makes a captured one replayable at leisure. The bound is inclusive:
+900 is accepted, 901 is not.
+
+**Why (4) exists.** `issued_at` is signed, so the signature implies it was
+checked. It was not. Without (4) an attacker moves `issued_at` into the future and
+a stale capture looks fresh. 60 seconds covers real inter-node drift; a stricter
+bound breaks the mesh, and a looser one forgives forgery.
+
 ### 4.3 The dial gate
 
 `VerifiedPeerAddress` is `#[non_exhaustive]`, so no code outside the defining
@@ -297,10 +319,12 @@ currently disagree:
 
 1. **Error semantics.** What does a verifier return on expiry versus a bad
    signature? Behaviour is specified; return values are not.
-2. **Clock skew tolerance.** An announce with `expires_at` in the past by one
-   second — accepted or refused? No rule exists.
+2. ~~**Clock skew tolerance.**~~ **RESOLVED — §4.4.** A verifier MUST accept an
+   `issued_at` up to 60 seconds ahead of its own clock, and MUST reject anything
+   further ahead. It MUST reject a validity window longer than 900 seconds, and it
+   MUST check `issued_at` at all.
 3. **`sequence` semantics.** Monotonic per issuer, across restarts, across key
-   rotation? Undefined.
+   rotation? **STILL UNDEFINED.**
 4. **`network_id` derivation.** How is a network identified and scoped? Parsed
    and length-checked, never derived.
 5. **Which transport carries which structure.** Phase 2 says "over the

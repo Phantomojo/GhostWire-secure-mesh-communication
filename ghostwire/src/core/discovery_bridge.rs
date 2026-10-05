@@ -71,6 +71,52 @@ fn canonical_fields(domain: &[u8], fields: &[&[u8]]) -> Vec<u8> {
     buf
 }
 
+/// Validate a signed validity window against the verifier's clock.
+///
+/// One implementation of the rule, called by both verifiers, so an announce and
+/// an exchange cannot drift apart on what "expired" means. The rule is now
+/// normative in `spec/README.md` §9.2 rather than left to each implementation.
+///
+/// Checks, in order:
+///   1. `expires_at > issued_at`      — a real window, not zero-length
+///   2. window `<= max_validity`      — refuses an over-long window
+///   3. `now < expires_at`            — not already dead
+///   4. `issued_at <= now + skew`      — not dated in the future
+///
+/// (4) is why `issued_at` is signed at all: without it an attacker could set
+/// `issued_at` far in the future and make a stale structure look fresh. It was
+/// signed but never checked, which is worse than not signing it, because the
+/// signature implied it had been.
+fn check_window(
+    issued_at: u64,
+    expires_at: u64,
+    now: u64,
+    max_validity: u64,
+    what: &str,
+) -> anyhow::Result<()> {
+    if expires_at <= issued_at {
+        anyhow::bail!("{what} has an empty or inverted validity window");
+    }
+    let window = expires_at - issued_at;
+    if window > max_validity {
+        anyhow::bail!(
+            "{what} claims a {window}s validity window; the maximum is {max_validity}s. \
+             A valid signature is not enough — a routing hint that stays valid \
+             for years is replayable at leisure."
+        );
+    }
+    if now >= expires_at {
+        anyhow::bail!("{what} expired at {expires_at} (now {now})");
+    }
+    if issued_at > now.saturating_add(MAX_CLOCK_SKEW_SECS) {
+        anyhow::bail!(
+            "{what} is dated {issued_at}, more than {MAX_CLOCK_SKEW_SECS}s ahead of \
+             our clock ({now}); refusing a future-dated structure"
+        );
+    }
+    Ok(())
+}
+
 /// Serialise a list of strings canonically: count, then length-prefixed each.
 fn canonical_strings(items: &[String]) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -94,6 +140,30 @@ pub const DISCOVERY_ANNOUNCE_TTL_SECS: u64 = 300;
 
 /// An address exchange is acted on immediately, so it expires sooner.
 pub const ADDRESS_EXCHANGE_TTL_SECS: u64 = 120;
+
+/// Longest validity window a verifier will ACCEPT, regardless of what the signer
+/// claims.
+///
+/// `DISCOVERY_ANNOUNCE_TTL_SECS` and `ADDRESS_EXCHANGE_TTL_SECS` are what honest
+/// nodes *send*. They are not a limit, because `verify()` previously enforced no
+/// upper bound at all: a peer could sign `expires_at = now + 10 years` and it
+/// verified. It does not matter that the signature is valid — the point of a
+/// bound is that a VALID signature over a LONG window is still refused, because
+/// an announce is a routing hint that goes stale and must not be replayable at
+/// leisure.
+///
+/// Two problems solved:
+///   * unbounded validity — a captured announce stayed useful indefinitely
+///   * future `issued_at` — never validated, so a window entirely in the future
+///     passed the `expires_at <= issued_at` sanity check untouched
+pub const MAX_VALIDITY_SECS: u64 = 900;
+
+/// How far ahead of our clock an `issued_at` may be before we refuse it.
+///
+/// A small allowance for clock drift between nodes. Not for tolerance of a
+/// forged timestamp: the window itself is bounded by `MAX_VALIDITY_SECS`, so
+/// this only needs to cover real skew.
+pub const MAX_CLOCK_SKEW_SECS: u64 = 60;
 
 /// Upper bound on addresses accepted in one exchange.
 pub const MAX_EXCHANGE_ADDRESSES: usize = 16;
@@ -225,9 +295,13 @@ impl DiscoveryAnnounce {
         if self.public_key.as_slice() != trusted_key.as_slice() {
             anyhow::bail!("discovery announce key does not match the trusted key");
         }
-        if self.expires_at <= self.issued_at || now >= self.expires_at {
-            anyhow::bail!("discovery announce expired or has a malformed window");
-        }
+        check_window(
+            self.issued_at,
+            self.expires_at,
+            now,
+            MAX_VALIDITY_SECS,
+            "discovery announce",
+        )?;
 
         verify_signature(&self.signing_bytes()?, &self.signature, trusted_key)
             .map_err(|_| anyhow::anyhow!("discovery announce signature invalid"))?;
@@ -344,9 +418,13 @@ impl AddressExchange {
         if self.addresses.is_empty() || self.addresses.len() > MAX_EXCHANGE_ADDRESSES {
             anyhow::bail!("invalid address exchange address count");
         }
-        if self.expires_at <= self.issued_at || now >= self.expires_at {
-            anyhow::bail!("address exchange expired or has a malformed window");
-        }
+        check_window(
+            self.issued_at,
+            self.expires_at,
+            now,
+            MAX_VALIDITY_SECS,
+            "address exchange",
+        )?;
 
         verify_signature(&self.signing_bytes()?, &self.signature, trusted_key)
             .map_err(|_| anyhow::anyhow!("address exchange signature invalid"))?;
@@ -705,6 +783,119 @@ mod tests {
              authenticated address exchange — which would hand an attacker exactly \
              the addresses the two-phase design exists to withhold."
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // VALIDITY WINDOW.
+    //
+    // `verify()` used to check exactly two things: `expires_at > issued_at` and
+    // `now < expires_at`. The TTL constants (300s / 120s) are what honest nodes
+    // SEND - they were never a limit. A peer could sign `expires_at = now + 10
+    // years` with a perfectly valid signature and it verified.
+    //
+    // And `issued_at` was signed but never checked, so a future-dated structure
+    // slipped past. That is worse than not signing it: the signature implied it
+    // had been validated.
+
+    #[test]
+    fn an_over_long_validity_window_is_refused() {
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        a.issued_at = now;
+        a.expires_at = now + 10 * 365 * 24 * 3600; // ten years
+        let a = a.sign(&sk.to_bytes()).unwrap();
+
+        let v = a.verify("net1", now, &pk).expect_err(
+            "a VALID signature over a ten-year window must still be refused: an \
+             announce is a routing hint that goes stale, and a long window makes a \
+             captured one replayable at leisure",
+        );
+        assert!(
+            v.to_string().contains("maximum"),
+            "the error must say the window was too long, got: {v}"
+        );
+    }
+
+    #[test]
+    fn a_future_dated_structure_is_refused() {
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        // Dated an hour ahead. The old check only required
+        // `expires_at > issued_at`, which this satisfies.
+        a.issued_at = now + 3600;
+        a.expires_at = now + 3600 + 300;
+        let a = a.sign(&sk.to_bytes()).unwrap();
+
+        a.verify("net1", now, &pk).expect_err(
+            "a structure dated ahead of our clock must be refused, however valid \
+             its signature: otherwise a stale capture can be made to look fresh by \
+             moving issued_at into the future",
+        );
+    }
+
+    #[test]
+    fn small_clock_skew_is_tolerated() {
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        // 30s ahead: real nodes drift, and refusing this would break the mesh.
+        a.issued_at = now + 30;
+        a.expires_at = now + 30 + 300;
+        let a = a.sign(&sk.to_bytes()).unwrap();
+
+        a.verify("net1", now, &pk).expect(
+            "a structure dated 30s ahead MUST verify - nodes have real clock skew, \
+             and a rule that punishes it is a rule that breaks the network",
+        );
+    }
+
+    #[test]
+    fn a_window_at_exactly_the_maximum_is_accepted() {
+        // The bound must be inclusive, or the boundary is unspecified and two
+        // implementations would disagree on the last valid value.
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        a.issued_at = now;
+        a.expires_at = now + MAX_VALIDITY_SECS;
+        let a = a.sign(&sk.to_bytes()).unwrap();
+        a.verify("net1", now, &pk).expect("window == max must be accepted");
+
+        let mut over = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        over.issued_at = now;
+        over.expires_at = now + MAX_VALIDITY_SECS + 1;
+        let over = over.sign(&sk.to_bytes()).unwrap();
+        over.verify("net1", now, &pk).expect_err("window == max+1 must be refused");
+    }
+
+    #[test]
+    fn the_exchange_enforces_the_same_window_rule_as_the_announce() {
+        // Both call check_window, so they cannot drift apart. If someone later
+        // gives one its own inline check, this fails.
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut e = AddressExchange::new("net1", "12D3KooWabc", "did:ghost:x", vec![], 1);
+        e.issued_at = now;
+        e.expires_at = now + 10 * 365 * 24 * 3600;
+        let e = e.sign(&sk.to_bytes()).unwrap();
+        e.verify("net1", now, &pk).expect_err(
+            "an address exchange must enforce MAX_VALIDITY_SECS exactly as an \
+             announce does; a longer-lived address exchange is worse, because it \
+             hands out addresses",
+        );
+    }
+
+    #[test]
+    fn an_expired_structure_is_refused() {
+        let (sk, pk) = trusted();
+        let now = 1_800_000_000u64;
+        let mut a = DiscoveryAnnounce::new("net1", "12D3KooWabc", "did:ghost:x", pk, 1);
+        a.issued_at = now;
+        a.expires_at = now + 300;
+        let a = a.sign(&sk.to_bytes()).unwrap();
+        a.verify("net1", now + 301, &pk).expect_err("expired must be refused");
     }
 
     #[test]
