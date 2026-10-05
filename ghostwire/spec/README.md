@@ -321,8 +321,12 @@ section exists to state.
 `spec/vectors.json` MUST be updated in the same commit as the change that caused
 the mismatch, so the diff shows intent and effect together.
 
-`SecurityConfiguration`/`SECURITY.md` MUST exist and the issue tracker MUST be
-enabled.
+`SECURITY.md` MUST exist and the issue tracker MUST be enabled.
+
+*Status: satisfied.* `SECURITY.md` exists; `has_issues` is `true` on both
+GitHub (`Phantomojo/GhostWire-secure-mesh-communication`) and Codeberg
+(`PHANTOMOJO/GhostWire-secure-mesh-communication`), verified via API. Both are
+still empty, so the channel is untested in practice.
 
 That last point is the entire Reticulum lesson in two files. Reticulum's author
 stepped down, the repository has `has_issues: false`, and a critical

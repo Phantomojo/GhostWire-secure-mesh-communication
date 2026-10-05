@@ -8,8 +8,15 @@ security claim in this repository as a design intent, not a verified property.
 `spec/README.md` lists what is **not** promised as prominently as what is. Read it
 before relying on anything here.
 
-There is **no issue tracker enabled** on this repository. That gap is the entire
-Reticulum lesson, and it is worth stating plainly:
+Issue trackers are **enabled on both remotes**, verified via API:
+
+| Remote | Repo | `has_issues` |
+|---|---|---|
+| GitHub | `Phantomojo/GhostWire-secure-mesh-communication` | `true` |
+| Codeberg | `PHANTOMOJO/GhostWire-secure-mesh-communication` | `true` |
+
+The errata lesson from Reticulum still applies, and is why those two facts are
+written down instead of assumed:
 
 > Reticulum's author stepped down. Its repository has `has_issues: false`. A
 > critical remote-shell flaw was fixed in 1.3.9 alongside a promised
@@ -17,9 +24,12 @@ Reticulum lesson, and it is worth stating plainly:
 > anyone could report the *next* one. **A protocol with no errata channel is one
 > where you can never learn that you are insecure.**
 
-Enabling an issue tracker and publishing a reachable reporting address are the two
-changes that convert this project from a prototype into something a user can
-depend on. Until then, contact the maintainer directly.
+**Prefer a private report first**, via GitHub Security Advisories on the GitHub
+repo. Do not open a public issue before a fix exists.
+
+Both trackers are currently empty. A report that has never been tested is an
+untested channel — so the first genuine report should be treated as a rehearsal
+of the process, not as a formality.
 
 ## Supported versions
 
