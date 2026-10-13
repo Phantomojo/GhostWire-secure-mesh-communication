@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements-team.txt
 
 # Core ML
-torch>=2.12.1
+torch>=2.14.1
 torch-geometric>=2.8.0.post1
 numpy>=2.5.1
 pandas>=3.0.3
