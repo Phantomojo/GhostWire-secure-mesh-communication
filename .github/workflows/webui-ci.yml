@@ -1,0 +1,46 @@
+name: WebUI CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+    paths:
+      - "webui/**"
+      - ".github/workflows/webui-ci.yml"
+  pull_request:
+    branches: ["main", "master", "develop"]
+    paths:
+      - "webui/**"
+      - ".github/workflows/webui-ci.yml"
+
+jobs:
+  test-and-build:
+    name: WebUI tests and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@10 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

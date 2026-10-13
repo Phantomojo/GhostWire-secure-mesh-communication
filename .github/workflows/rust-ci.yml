@@ -47,7 +47,9 @@ jobs:
       - name: Prepare workspace
         run: mkdir -p webui/dist
       - name: Run tests
-        run: cargo test --lib --tests
+        run: |
+          cargo test --lib --tests
+          cargo test --doc
         working-directory: ghostwire
 
   lint:

@@ -1,0 +1,64 @@
+name: Tauri CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+    paths:
+      - "ghostwire/**"
+      - "src-tauri/**"
+      - "webui/**"
+      - ".github/workflows/tauri-ci.yml"
+  pull_request:
+    branches: ["main", "master", "develop"]
+    paths:
+      - "ghostwire/**"
+      - "src-tauri/**"
+      - "webui/**"
+      - ".github/workflows/tauri-ci.yml"
+
+jobs:
+  smoke-build:
+    name: Tauri smoke build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@10 --activate
+
+      - name: Install web dependencies
+        working-directory: webui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web frontend
+        working-directory: webui
+        run: pnpm build
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Build GhostWire core
+        run: cargo build --manifest-path ghostwire/Cargo.toml
+
+      - name: Stage Tauri external binary
+        run: |
+          mkdir -p src-tauri/binaries
+          target=$(rustc -vV | awk '/^host:/ {print $2}')
+          cp ghostwire/target/debug/ghostwire "src-tauri/binaries/ghostwire-${target}"
+
+      - name: Tauri cargo check
+        working-directory: src-tauri
+        run: cargo check
