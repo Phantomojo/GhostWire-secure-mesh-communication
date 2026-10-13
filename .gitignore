@@ -307,3 +307,31 @@ esp32-firmware-*/
 # Build logs (already covered by *.log, but explicit)
 build.log
 build2.log
+
+# Sanitized publish prep: private/internal/generated artifacts
+.manus-backups/
+.audit-backups/
+ghostwire/.ai/
+*.backup
+*.backup.cors
+src-tauri/gen/
+src-tauri/binaries/
+docs/presentations/puppeteer-config.json
+AUDIT_*.md
+*-deepdive.md
+audit-raw/
+ORIENTATION.md
+ghostwire/AGENTS.md
+ghostwire/docs/*_REPORT.md
+ghostwire/docs/*_HANDOFF*.md
+ghostwire/docs/*_MANIFEST.md
+ghostwire/docs/archive/GEMMA4_INTEGRATION.md
+ghostwire/docs/archive/QWEN*.md
+ghostwire/docs/policy/BOOTSTRAP_ARCHITECTURE_AUDIT.md
+ghostwire/scripts/export_gnn_to_onnx.py
+ghostwire/scripts/train_hrm_routing.py
+scripts/ghostwire_verified_dual_release.sh
+scripts/maintenance/cleanup-*.sh
+scripts/setup-vibe.sh
+
+docs/presentations/render_*.mjs

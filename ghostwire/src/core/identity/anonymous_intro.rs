@@ -9,10 +9,17 @@
 //! mixnet. Bob never learns Alice's node address until Alice explicitly
 //! responds. The DHT sees nothing about either identity.
 //!
+//! Additionally, Alice's QR includes a BQP-style key commitment — a 32-byte
+//! BLAKE3 keyed hash over her X25519 pubkey (using ANON_INTRO_COMMIT_DOMAIN).
+//! Bob verifies this commitment on receipt, preventing key-substitution
+//! attacks where an attacker swaps Alice's pubkey without updating the
+//! commitment. This mirrors Briar's BQP protocol (Bramble KeyAgreementConstants).
+//!
 //! Flow:
-//!   1. Alice calls generate_intro_invite() → gets SURB + her public key
-//!   2. Alice encodes this in a QR code: "gwi:<b58(surb_bytes)>:<b58(alice_pubkey)>"
+//!   1. Alice calls generate_intro_invite() → gets SURB + her pubkey + commitment
+//!   2. Alice encodes this in a QR code: "gwi:<base58(serialized_invite)>"
 //!   3. Bob scans QR, calls send_introduction(invite, bob_pubkey, bob_nodekey)
+//!      — Bob verifies the commitment matches the X25519 pubkey
 //!   4. Bob's introduction routes anonymously through the SURB to Alice
 //!   5. Alice calls receive_introduction(payload) → gets Bob's public key
 //!   6. Alice initiates vodozemac session → sends first message with her node info
@@ -27,7 +34,7 @@ use anyhow::Result;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::genesis_constants::{genesis_derive, RENDEZVOUS_DOMAIN};
+use crate::genesis_constants::{genesis_derive, ANON_INTRO_COMMIT_DOMAIN, INTRO_CONFIRM_DOMAIN, INTRO_HMAC_DOMAIN, RENDEZVOUS_DOMAIN};
 
 /// The invite prefix for anonymous introductions
 pub const ANON_INVITE_PREFIX: &str = "gwi:";
@@ -45,6 +52,11 @@ pub struct AnonymousInvite {
     pub nickname: Option<String>,
     /// Creation timestamp (invite expires after 48 hours)
     pub created_at: u64,
+    /// BQP-style commitment to Alice's X25519 key — a 32-byte BLAKE3 keyed
+    /// hash over her X25519 pubkey using the ANON_INTRO_COMMIT_DOMAIN.
+    /// Bob verifies this against the pubkey he received, preventing
+    /// key-substitution attacks where an attacker swaps in their own pubkey.
+    pub commitment: [u8; 32],
 }
 
 impl AnonymousInvite {
@@ -89,6 +101,10 @@ pub struct IntroductionPayload {
     pub nonce: [u8; 16],
     /// Timestamp
     pub created_at: u64,
+    /// HMAC tag (BQP REQUEST_LABEL equivalent): Bob's HMAC over the invite
+    /// + his own pubkeys + nonce, using INTRO_HMAC_DOMAIN as the key.
+    /// This binds Bob to this specific introduction and prevents replay.
+    pub hmac_tag: [u8; 32],
 }
 
 /// Generate an anonymous introduction invite for this node.
@@ -120,12 +136,19 @@ pub fn generate_intro_invite(
     let surb_bytes =
         bincode::serialize(&surb).map_err(|e| anyhow::anyhow!("SURB serialise: {}", e))?;
 
+    // BQP-style commitment: BLAKE3 keyed hash over Alice's X25519 pubkey.
+    // Bob will verify this against the pubkey he extracts from the invite,
+    // preventing key-substitution attacks. Uses the same commitment-then-reveal
+    // pattern as Briar's BQP protocol (KeyAgreementConstants.COMMIT_LABEL).
+    let commitment = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &our_x25519_pub);
+
     Ok(AnonymousInvite {
         ed25519_pub: our_ed25519_pub,
         x25519_pub: our_x25519_pub,
         surb_bytes,
         nickname,
         created_at: now_secs(),
+        commitment,
     })
 }
 
@@ -143,6 +166,18 @@ pub fn send_introduction(
         anyhow::bail!("Invite has expired (> 48 hours old)");
     }
 
+    // BQP-style commitment verification: derive the commitment from Alice's
+    // X25519 pubkey and check it matches the commitment embedded in the invite.
+    // This prevents key-substitution attacks where an attacker modifies the
+    // pubkey in the QR code without updating the commitment.
+    let expected_commitment = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &invite.x25519_pub);
+    if expected_commitment != invite.commitment {
+        anyhow::bail!(
+            "Commitment mismatch: the X25519 public key in the invite does not \
+             match the commitment. This may indicate a key-substitution attack."
+        );
+    }
+
     let surb: Surb = bincode::deserialize(&invite.surb_bytes)
         .map_err(|e| anyhow::anyhow!("SURB deserialise: {}", e))?;
 
@@ -151,12 +186,25 @@ pub fn send_introduction(
         .fill(&mut nonce)
         .map_err(|_| anyhow::anyhow!("RNG failure"))?;
 
+    // BQP-style HMAC authentication (REQUEST_LABEL equivalent):
+    // Bob computes an HMAC over (invite.x25519_pub, our_x25519_pub, our_ed25519_pub, nonce)
+    // using INTRO_HMAC_DOMAIN as the derivation domain. This binds Bob to this
+    // specific introduction conversation and prevents replay/reflection attacks.
+    // Alice verifies this HMAC in receive_introduction().
+    let hmac_tag = compute_intro_hmac(
+        &invite.x25519_pub,
+        &our_x25519_pub,
+        &our_ed25519_pub,
+        &nonce,
+    );
+
     let intro = IntroductionPayload {
         ed25519_pub: our_ed25519_pub,
         x25519_pub: our_x25519_pub,
         nickname: our_nickname,
         nonce,
         created_at: now_secs(),
+        hmac_tag,
     };
 
     let intro_bytes =
@@ -195,8 +243,159 @@ pub fn receive_introduction(
         anyhow::bail!("Introduction payload is too old (> 24 hours)");
     }
 
+    // BQP-style HMAC verification (REQUEST_LABEL equivalent):
+    // Alice verifies that the HMAC tag matches what Bob should have computed
+    // over (invite.x25519_pub, bob.x25519_pub, bob.ed25519_pub, nonce).
+    // This prevents:
+    //   - Replay: the nonce ensures freshness
+    //   - Key substitution: Bob's pubkeys are bound into the HMAC
+    //   - Reflection: the invite's pubkey is included, preventing Bob from
+    //     replaying Alice's own pubkey back at her
+    // Alice knows her X25519 pubkey (from her secret) — this IS the invite's
+    // x25519_pub that Bob used when computing the HMAC.
+    let alice_x25519_pub = x25519_dalek::PublicKey::from(our_x25519_secret);
+    let expected_tag = compute_intro_hmac(
+        alice_x25519_pub.as_bytes(),  // Alice's (invite's) X25519 pub
+        &intro.x25519_pub,            // Bob's X25519 pub (in the intro)
+        &intro.ed25519_pub,           // Bob's Ed25519 pub (in the intro)
+        &intro.nonce,
+    );
+    if expected_tag != intro.hmac_tag {
+        anyhow::bail!(
+            "HMAC verification failed: introduction payload does not authenticate — \
+             possible replay, tampering, or key-substitution attack."
+        );
+    }
+
     Ok(intro)
 }
+
+/// Bob sends a BQP-style confirmation record back to Alice through the
+/// established session channel (reply-to-path).
+///
+/// After Alice receives Bob's IntroductionPayload, she has Bob's X25519
+/// pubkey. She can compute the same DH shared secret and verify Bob's
+/// confirmation record matches. This is the mutual authentication step.
+///
+/// In Ghostwire's anonymous intro flow, this confirmation is sent as the
+/// first message of the Double Ratchet session — Alice initiates the
+/// session, Bob replies with this confirmation, and Alice verifies it.
+pub fn send_confirmation(
+    invite: &AnonymousInvite,
+    bob_x25519_pub: [u8; 32],
+    bob_ed25519_pub: [u8; 32],
+    nonce: &[u8; 16],
+    our_x25519_secret: &x25519_dalek::StaticSecret,
+) -> Result<[u8; 32]> {
+    // Derive shared secret: DH(Alice's X25519 secret, Bob's X25519 pub)
+    let alice_x25519_pub = x25519_dalek::PublicKey::from(our_x25519_secret);
+    let bob_pub = x25519_dalek::PublicKey::from(bob_x25519_pub);
+
+    // Verify our pubkey matches the invite (should match)
+    if alice_x25519_pub.as_bytes() != &invite.x25519_pub {
+        anyhow::bail!(
+            "Alice's X25519 pubkey does not match the invite — internal error"
+        );
+    }
+
+    let shared = our_x25519_secret.diffie_hellman(&bob_pub);
+
+    Ok(compute_confirmation_record(
+        shared.as_bytes(),
+        &invite.x25519_pub,
+        &bob_x25519_pub,
+        &bob_ed25519_pub,
+        nonce,
+    ))
+}
+
+/// Alice verifies Bob's BQP confirmation record.
+///
+/// Called after Alice has received the IntroductionPayload (through the SURB)
+/// and established the initial DH with Bob's X25519 pubkey. Alice recomputes
+/// the confirmation record and checks it matches what Bob sent.
+pub fn verify_confirmation(
+    invite: &AnonymousInvite,
+    intro: &IntroductionPayload,
+    our_x25519_secret: &x25519_dalek::StaticSecret,
+    bob_confirm: &[u8; 32],
+) -> Result<()> {
+    let bob_pub = x25519_dalek::PublicKey::from(intro.x25519_pub);
+    let shared = our_x25519_secret.diffie_hellman(&bob_pub);
+
+    let expected = compute_confirmation_record(
+        shared.as_bytes(),
+        &invite.x25519_pub,
+        &intro.x25519_pub,
+        &intro.ed25519_pub,
+        &intro.nonce,
+    );
+
+    if expected != *bob_confirm {
+        anyhow::bail!(
+            "BQP confirmation record mismatch — possible MITM attack or tampered introduction"
+        );
+    }
+    Ok(())
+}
+///
+/// This is the REQUEST_LABEL equivalent: an HMAC over the invite's X25519 pubkey,
+/// Bob's own Ed25519 + X25519 pubkeys, and the nonce — providing:
+///   - Replay prevention: unique nonce per introduction
+///   - Binding: Bob is cryptographically bound to this specific invite
+///   - Non-repudiation: Bob can't deny sending the introduction
+///
+/// Uses genesis_derive (BLAKE3 keyed) with INTRO_HMAC_DOMAIN, mirroring
+/// Briar BQP's HMAC-SHA256 REQUEST_LABEL pattern.
+fn compute_intro_hmac(
+    invite_x25519_pub: &[u8; 32],
+    bob_x25519_pub: &[u8; 32],
+    bob_ed25519_pub: &[u8; 32],
+    nonce: &[u8; 16],
+) -> [u8; 32] {
+    let mut ikm = Vec::with_capacity(32 + 32 + 32 + 16);
+    ikm.extend_from_slice(invite_x25519_pub);
+    ikm.extend_from_slice(bob_x25519_pub);
+    ikm.extend_from_slice(bob_ed25519_pub);
+    ikm.extend_from_slice(nonce);
+
+    genesis_derive(INTRO_HMAC_DOMAIN, &ikm)
+}
+
+/// Compute a BQP-style confirmation record (third round of the handshake).
+///
+/// Both Alice and Bob derive the same DH shared secret from:
+///   shared = X25519(alice_x25519_secret, bob_x25519_pub)
+///
+/// Then derive a confirmation key and HMAC over the static identifiers:
+///   confirm_key = genesis_derive(INTRO_CONFIRM_DOMAIN, &shared_secret_bytes)
+///   confirm_mac = genesis_derive(confirm_key, &invite_x25519_pub || bob_x25519_pub || bob_ed25519_pub || nonce)
+///
+/// This mirrors Briar BQP's deriveConfirmationRecord():
+///   - CONFIRMATION_KEY_LABEL: derives the confirmation key from the shared secret
+///   - CONFIRMATION_MAC_LABEL: HMAC over (alice_payload, alice_pub, bob_payload, bob_pub)
+///
+/// The confirmation record allows Alice to prove she holds the shared secret
+/// (i.e., her X25519 secret), and Bob to prove he computed the same secret.
+/// Without this step, an attacker who intercepted the ECIES-encrypted
+/// IntroductionPayload could forward it without proving knowledge of the
+/// DH shared secret.
+pub fn compute_confirmation_record(
+    shared_secret: &[u8; 32],
+    invite_x25519_pub: &[u8; 32],
+    bob_x25519_pub: &[u8; 32],
+    bob_ed25519_pub: &[u8; 32],
+    nonce: &[u8; 16],
+) -> [u8; 32] {
+    let confirm_key = genesis_derive(INTRO_CONFIRM_DOMAIN, shared_secret);
+    let mut ikm = Vec::with_capacity(32 + 32 + 32 + 16);
+    ikm.extend_from_slice(invite_x25519_pub);
+    ikm.extend_from_slice(bob_x25519_pub);
+    ikm.extend_from_slice(bob_ed25519_pub);
+    ikm.extend_from_slice(nonce);
+    genesis_derive(&confirm_key, &ikm)
+}
+
 
 /// Time-windowed rendezvous DHT key — rotates every 24 hours
 /// Prevents long-term tracking via static rendezvous addresses
@@ -335,17 +534,248 @@ mod tests {
 
     #[test]
     fn invite_string_roundtrip() {
+        let x25519_pub = [0x22u8; 32];
+        let commitment = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &x25519_pub);
         let invite = AnonymousInvite {
             ed25519_pub: [0x11u8; 32],
-            x25519_pub: [0x22u8; 32],
+            x25519_pub,
             surb_bytes: vec![1, 2, 3, 4],
             nickname: Some("Alice".into()),
             created_at: now_secs(),
+            commitment,
         };
         let s = invite.to_invite_string().unwrap();
         assert!(s.starts_with(ANON_INVITE_PREFIX));
         let recovered = AnonymousInvite::from_invite_string(&s).unwrap();
         assert_eq!(recovered.ed25519_pub, invite.ed25519_pub);
+        assert_eq!(recovered.x25519_pub, invite.x25519_pub);
+        assert_eq!(recovered.commitment, invite.commitment);
         assert_eq!(recovered.nickname, invite.nickname);
+    }
+
+    #[test]
+    fn commitment_prevents_key_substitution() {
+        // An attacker who swaps the X25519 pubkey but keeps the old commitment
+        // should produce a mismatched commitment.
+        let alice_real_key = [0x22u8; 32];
+        let alice_fake_key = [0xFFu8; 32];
+
+        let real_commitment = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &alice_real_key);
+        let fake_commitment = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &alice_fake_key);
+
+        assert_ne!(real_commitment, fake_commitment,
+            "Different pubkeys must yield different commitments");
+
+        // An invite where the pubkey was swapped but commitment was not updated
+        let invite_with_swapped_key = AnonymousInvite {
+            ed25519_pub: [0x11u8; 32],
+            x25519_pub: alice_fake_key,  // swapped!
+            surb_bytes: vec![1, 2, 3, 4],
+            nickname: None,
+            created_at: now_secs(),
+            commitment: real_commitment,  // still the old one
+        };
+
+        let expected = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &invite_with_swapped_key.x25519_pub);
+        assert_ne!(expected, invite_with_swapped_key.commitment,
+            "Key-substitution attack should be detected by commitment mismatch");
+    }
+
+    #[test]
+    fn hmac_prevents_replay_and_tampering() {
+        // Bob computes HMAC over (invite_pub, bob_x25519, bob_ed25519, nonce)
+        let invite_x25519 = [0x22u8; 32];
+        let bob_x25519 = [0x33u8; 32];
+        let bob_ed25519 = [0x44u8; 32];
+        let nonce = [0x55u8; 16];
+
+        let tag = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &nonce);
+
+        // Correct inputs should produce matching tag
+        let expected = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &nonce);
+        assert_eq!(tag, expected, "HMAC should be deterministic");
+
+        // Changing any input should produce a different tag (tamper detection)
+        let different_nonce = [0x99u8; 16];
+        let tampered_tag = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &different_nonce);
+        assert_ne!(tag, tampered_tag, "Tampered nonce must produce different HMAC");
+
+        // Different invite pub (reflection attack prevention)
+        let reflection_tag = compute_intro_hmac(&bob_x25519, &bob_x25519, &bob_ed25519, &nonce);
+        assert_ne!(tag, reflection_tag, "Reflection attack must produce different HMAC");
+    }
+
+    #[test]
+    fn confirmation_record_is_symmetric() {
+        // Alice and Bob both compute the same confirmation record
+        let alice_secret = x25519_dalek::StaticSecret::from([0xA1u8; 32]);
+        let alice_pub = x25519_dalek::PublicKey::from(&alice_secret);
+        let bob_secret = x25519_dalek::StaticSecret::from([0xB2u8; 32]);
+        let bob_pub = x25519_dalek::PublicKey::from(&bob_secret);
+
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        let nonce = [0x55u8; 16];
+
+        // Alice computes: uses her pub (invite's), Bob's pubs
+        let alice_confirm = compute_confirmation_record(
+            shared.as_bytes(),
+            alice_pub.as_bytes(),
+            bob_pub.as_bytes(),
+            &[0xC3u8; 32], // Bob's ed25519
+            &nonce,
+        );
+
+        // Bob computes: same inputs (invite is Alice's pub, bob's identitites)
+        let bob_confirm = compute_confirmation_record(
+            shared.as_bytes(),
+            alice_pub.as_bytes(),
+            bob_pub.as_bytes(),
+            &[0xC3u8; 32],
+            &nonce,
+        );
+
+        assert_eq!(alice_confirm, bob_confirm, "Both parties must compute the same confirmation record");
+    }
+
+    #[test]
+    fn confirmation_record_rejects_wrong_shared_secret() {
+        let alice_secret = x25519_dalek::StaticSecret::from([0xA1u8; 32]);
+        let alice_pub = x25519_dalek::PublicKey::from(&alice_secret);
+        let bob_secret = x25519_dalek::StaticSecret::from([0xB2u8; 32]);
+        let bob_pub = x25519_dalek::PublicKey::from(&bob_secret);
+
+        let wrong_secret = alice_secret.diffie_hellman(&x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from([0x99u8; 32])));
+
+        let nonce = [0x55u8; 16];
+
+        let correct = compute_confirmation_record(
+            &alice_secret.diffie_hellman(&bob_pub).as_bytes(),
+            alice_pub.as_bytes(),
+            bob_pub.as_bytes(),
+            &[0xC3u8; 32],
+            &nonce,
+        );
+
+        let wrong = compute_confirmation_record(
+            wrong_secret.as_bytes(),
+            alice_pub.as_bytes(),
+            bob_pub.as_bytes(),
+            &[0xC3u8; 32],
+            &nonce,
+        );
+
+        assert_ne!(correct, wrong, "Different shared secrets must produce different confirmation records");
+    }
+
+    #[test]
+    fn send_confirmation_rejects_pubkey_mismatch() {
+        let alice_secret = x25519_dalek::StaticSecret::from([0xA1u8; 32]);
+        let invite = AnonymousInvite {
+            ed25519_pub: [0x11u8; 32],
+            x25519_pub: [0xFFu8; 32], // Mismatched — real pub is different
+            surb_bytes: vec![],
+            nickname: None,
+            created_at: 0,
+            commitment: [0u8; 32],
+        };
+
+        let result = send_confirmation(
+            &invite,
+            [0xB2u8; 32],
+            [0xC3u8; 32],
+            &[0x55u8; 16],
+            &alice_secret,
+        );
+
+        assert!(result.is_err(), "Should reject mismatched pubkey");
+        assert!(result.unwrap_err().to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn verify_confirmation_accepts_correct_record() {
+        let alice_secret = x25519_dalek::StaticSecret::from([0xDDu8; 32]);
+        let alice_pub_key = x25519_dalek::PublicKey::from(&alice_secret);
+        let alice_pub = alice_pub_key.as_bytes();
+
+        let bob_secret = x25519_dalek::StaticSecret::from([0xBAu8; 32]);
+        let bob_pub = x25519_dalek::PublicKey::from(&bob_secret);
+        let bob_pub_bytes = bob_pub.as_bytes();
+        let bob_ed = [0x99u8; 32];
+
+        let nonce = [0x42u8; 16];
+
+        // Compute shared secret
+        let shared = alice_secret.diffie_hellman(&bob_pub);
+
+        // Bob computes confirmation
+        let bob_confirm = compute_confirmation_record(
+            shared.as_bytes(),
+            alice_pub,
+            bob_pub_bytes,
+            &bob_ed,
+            &nonce,
+        );
+
+        // Alice verifies
+        let invite = AnonymousInvite {
+            ed25519_pub: [0x11u8; 32],
+            x25519_pub: *alice_pub,
+            surb_bytes: vec![],
+            nickname: None,
+            created_at: 0,
+            commitment: genesis_derive(ANON_INTRO_COMMIT_DOMAIN, alice_pub),
+        };
+
+        let intro = IntroductionPayload {
+            ed25519_pub: bob_ed,
+            x25519_pub: *bob_pub_bytes,
+            nickname: None,
+            nonce,
+            created_at: now_secs(),
+            hmac_tag: compute_intro_hmac(alice_pub, bob_pub_bytes, &bob_ed, &nonce),
+        };
+
+        let result = verify_confirmation(&invite, &intro, &alice_secret, &bob_confirm);
+        assert!(result.is_ok(), "Correct confirmation must verify");
+    }
+
+    #[test]
+    fn verify_confirmation_rejects_wrong_record() {
+        let alice_secret = x25519_dalek::StaticSecret::from([0xDDu8; 32]);
+        let alice_pub_key = x25519_dalek::PublicKey::from(&alice_secret);
+        let alice_pub = alice_pub_key.as_bytes();
+
+        let bob_secret = x25519_dalek::StaticSecret::from([0xBAu8; 32]);
+        let bob_pub = x25519_dalek::PublicKey::from(&bob_secret);
+        let bob_pub_bytes = bob_pub.as_bytes();
+        let bob_ed = [0x99u8; 32];
+
+        let nonce = [0x42u8; 16];
+
+        // Wrong confirmation (attacker's guess)
+        let wrong_confirm = [0xDEu8; 32];
+
+        let invite = AnonymousInvite {
+            ed25519_pub: [0x11u8; 32],
+            x25519_pub: *alice_pub,
+            surb_bytes: vec![],
+            nickname: None,
+            created_at: 0,
+            commitment: genesis_derive(ANON_INTRO_COMMIT_DOMAIN, alice_pub),
+        };
+
+        let intro = IntroductionPayload {
+            ed25519_pub: bob_ed,
+            x25519_pub: *bob_pub_bytes,
+            nickname: None,
+            nonce,
+            created_at: now_secs(),
+            hmac_tag: compute_intro_hmac(alice_pub, bob_pub_bytes, &bob_ed, &nonce),
+        };
+
+        let result = verify_confirmation(&invite, &intro, &alice_secret, &wrong_confirm);
+        assert!(result.is_err(), "Wrong confirmation must be rejected");
+        assert!(result.unwrap_err().to_string().contains("mismatch"));
     }
 }

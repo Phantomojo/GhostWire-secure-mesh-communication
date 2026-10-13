@@ -432,8 +432,472 @@ pub struct WirePong {
     pub seq: u32,
 }
 
+// ─── BTP-Style Frame Encryption (Briar Bramble Transport Protocol v4) ─────────
+//
+// Implements the deterministic nonce scheme from Briar's FrameEncoder:
+//   nonce = frame_number (8 bytes LE) || header_flag_byte || [padding zeros]
+//
+// The header flag bit (0x80 on byte 0) distinguishes header encryption
+// nonces from payload encryption nonces, so the same frame key never
+// produces the same nonce for both.
+//
+// Each frame is: [encrypted_header (4 bytes + 16-byte MAC)] [encrypted_payload + padding + 16-byte MAC]
+// The header plaintext is: [payload_length (2 bytes)] [padding_length (2 bytes)] with bit 0x80 on byte 0 if final frame
+//
+// This prevents nonce reuse within a stream: the frame_number is the nonce,
+// and the header/payload flag differentiates the two AEAD calls per frame.
+
+/// BTP frame nonce length (24 bytes for XChaCha20-Poly1305)
+pub const BTP_FRAME_NONCE_LENGTH: usize = 24;
+/// BTP frame header plaintext length (payload_len + padding_len = 4 bytes)
+pub const BTP_FRAME_HEADER_PLAINTEXT_LENGTH: usize = 4;
+/// BTP MAC length (16 bytes for Poly1305/GCM)
+pub const BTP_MAC_LENGTH: usize = 16;
+/// BTP encrypted frame header length (plaintext + MAC)
+pub const BTP_FRAME_HEADER_LENGTH: usize = BTP_FRAME_HEADER_PLAINTEXT_LENGTH + BTP_MAC_LENGTH;
+/// BTP maximum payload length per frame (1024 - header - mac - mac = 976 bytes)
+pub const BTP_MAX_PAYLOAD_LENGTH: usize = 1024 - BTP_FRAME_HEADER_LENGTH - BTP_MAC_LENGTH;
+
+/// Encode a BTP-style frame nonce from a frame number and header flag.
+///
+/// Mirrors Briar's `FrameEncoder.encodeNonce`:
+///   - Writes frame_number as u64 BIG-endian in bytes [0..8] (MSB first)
+///   - Sets bit 0x80 on byte 0 if encrypting the frame header
+///   - Since byte 0 is the most-significant byte of the frame number,
+///     for normal stream lengths (0..2^63-1) byte 0 is 0, so the 0x80
+///     header flag creates a clean separation with no nonce collisions.
+pub fn encode_btp_nonce(frame_number: u64, is_header: bool) -> [u8; BTP_FRAME_NONCE_LENGTH] {
+    let mut nonce = [0u8; BTP_FRAME_NONCE_LENGTH];
+    // Write frame number as big-endian u64 (MSB first — byte 0 is high byte)
+    nonce[0..8].copy_from_slice(&frame_number.to_be_bytes());
+    if is_header {
+        nonce[0] |= 0x80; // Set header flag bit on MSB
+    }
+    // Remaining bytes are already zero
+    nonce
+}
+
+/// Encode a BTP frame header plaintext.
+///
+/// Layout: [payload_length (2 bytes BE)] [padding_length (2 bytes BE)]
+/// Bit 0x80 on byte 0 is set if this is the final frame.
+pub fn encode_btp_header(
+    payload_length: usize,
+    padding_length: usize,
+    is_final: bool,
+) -> Result<[u8; BTP_FRAME_HEADER_PLAINTEXT_LENGTH]> {
+    if payload_length > 0x7FFF || padding_length > 0x7FFF {
+        anyhow::bail!("BTP payload+padding exceeds 16-bit limit");
+    }
+    let mut header = [0u8; BTP_FRAME_HEADER_PLAINTEXT_LENGTH];
+    let payload_len = if is_final { payload_length | 0x8000 } else { payload_length };
+    header[0..2].copy_from_slice(&(payload_len as u16).to_be_bytes());
+    header[2..4].copy_from_slice(&(padding_length as u16).to_be_bytes());
+    Ok(header)
+}
+
+/// Decode the payload length from a BTP frame header.
+pub fn decode_btp_payload_length(header: &[u8]) -> usize {
+    let val = u16::from_be_bytes([header[0], header[1]]);
+    (val & 0x7FFF) as usize
+}
+
+/// Check if this is the final frame in a BTP stream.
+pub fn decode_btp_is_final(header: &[u8]) -> bool {
+    (header[0] & 0x80) != 0
+}
+
+/// Decode the padding length from a BTP frame header.
+pub fn decode_btp_padding_length(header: &[u8]) -> usize {
+    u16::from_be_bytes([header[2], header[3]]) as usize
+}
+
+/// Encrypt a BTP frame using XChaCha20-Poly1305 (or ChaCha20-Poly1305).
+///
+/// Returns: [encrypted_header (20 bytes)] [encrypted_payload + padding (encrypted_payload_len + 16 bytes MAC)]
+///
+/// This mirrors Briar's StreamEncrypterImpl.writeFrame:
+/// 1. Encrypt the 4-byte header with nonce(frame_number, header=true)
+/// 2. Encrypt the payload + padding with nonce(frame_number, header=false)
+pub fn encrypt_btp_frame(
+    frame_key: &[u8; 32],
+    frame_number: u64,
+    payload: &[u8],
+    padding_length: usize,
+    is_final: bool,
+) -> Result<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
+
+    if payload.len() + padding_length > BTP_MAX_PAYLOAD_LENGTH {
+        anyhow::bail!(
+            "Payload + padding ({} bytes) exceeds BTP max ({} bytes)",
+            payload.len() + padding_length,
+            BTP_MAX_PAYLOAD_LENGTH
+        );
+    }
+
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(frame_key));
+
+    // 1. Encrypt the frame header
+    let header_plaintext = encode_btp_header(payload.len(), padding_length, is_final)?;
+    let header_nonce = XNonce::from(encode_btp_nonce(frame_number, true));
+    let header_ciphertext = cipher
+        .encrypt(&header_nonce, &header_plaintext[..])
+        .map_err(|e| anyhow::anyhow!("BTP header encryption failed: {}", e))?;
+
+    // 2. Encrypt payload + padding
+    let mut payload_plaintext = payload.to_vec();
+    payload_plaintext.extend(std::iter::repeat(0u8).take(padding_length));
+    let payload_nonce = XNonce::from(encode_btp_nonce(frame_number, false));
+    let payload_ciphertext = cipher
+        .encrypt(&payload_nonce, &payload_plaintext[..])
+        .map_err(|e| anyhow::anyhow!("BTP payload encryption failed: {}", e))?;
+
+    // 3. Combine: header_ciphertext (20 bytes) + payload_ciphertext
+    let mut frame = Vec::with_capacity(header_ciphertext.len() + payload_ciphertext.len());
+    frame.extend_from_slice(&header_ciphertext);
+    frame.extend_from_slice(&payload_ciphertext);
+    Ok(frame)
+}
+
+/// Decrypt a BTP frame and return (payload, padding_length, is_final).
+///
+/// Mirrors Briar's StreamDecrypterImpl.readFrame:
+/// 1. Decrypt the header to get payload_length, padding_length, is_final
+/// 2. Decrypt the payload + padding
+/// 3. Verify padding is all zeros
+pub fn decrypt_btp_frame(
+    frame_key: &[u8; 32],
+    frame_number: u64,
+    frame_bytes: &[u8],
+) -> Result<(Vec<u8>, usize, bool)> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
+
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(frame_key));
+
+    // 1. Decrypt header
+    let header_nonce = XNonce::from(encode_btp_nonce(frame_number, true));
+    let header_plaintext = cipher
+        .decrypt(&header_nonce, &frame_bytes[..BTP_FRAME_HEADER_LENGTH])
+        .map_err(|e| anyhow::anyhow!("BTP header decryption failed: {}", e))?;
+
+    if header_plaintext.len() != BTP_FRAME_HEADER_PLAINTEXT_LENGTH {
+        anyhow::bail!("BTP header plaintext wrong length");
+    }
+
+    let payload_length = decode_btp_payload_length(&header_plaintext);
+    let padding_length = decode_btp_padding_length(&header_plaintext);
+    let is_final = decode_btp_is_final(&header_plaintext);
+
+    if payload_length + padding_length > BTP_MAX_PAYLOAD_LENGTH {
+        anyhow::bail!("BTP payload+padding exceeds max");
+    }
+
+    // 2. Decrypt payload + padding
+    let expected_payload_len = payload_length + padding_length + BTP_MAC_LENGTH;
+    let payload_offset = BTP_FRAME_HEADER_LENGTH;
+    if frame_bytes.len() < payload_offset + expected_payload_len {
+        anyhow::bail!(
+            "BTP frame too short: {} < {}",
+            frame_bytes.len(),
+            payload_offset + expected_payload_len
+        );
+    }
+
+    let payload_nonce = XNonce::from(encode_btp_nonce(frame_number, false));
+    let payload_plaintext = cipher
+        .decrypt(
+            &payload_nonce,
+            &frame_bytes[payload_offset..payload_offset + expected_payload_len],
+        )
+        .map_err(|e| anyhow::anyhow!("BTP payload decryption failed: {}", e))?;
+
+    // 3. Verify padding is all zeros
+    let padding_start = payload_length;
+    for i in padding_start..(payload_length + padding_length) {
+        if payload_plaintext[i] != 0 {
+            anyhow::bail!("BTP padding is not zero at byte {}", i);
+        }
+    }
+
+    let payload = payload_plaintext[..payload_length].to_vec();
+    Ok((payload, padding_length, is_final))
+}
+
+/// Stream encrypter for BTP-style frame streams.
+///
+/// Maintains a frame counter and encrypts payloads into BTP frames,
+/// writing them to an output sink via a callback.
+pub struct BtpStreamEncrypter {
+    frame_key: [u8; 32],
+    frame_number: u64,
+}
+
+impl BtpStreamEncrypter {
+    pub fn new(frame_key: [u8; 32]) -> Self {
+        Self {
+            frame_key,
+            frame_number: 0,
+        }
+    }
+
+    /// Encrypt a payload into one or more BTP frames, calling `write_frame`
+    /// for each frame. Handles chunking into MAX_PAYLOAD_LENGTH blocks.
+    pub fn write_payload<F: FnMut(&[u8]) -> Result<()>>(
+        &mut self,
+        payload: &[u8],
+        write_frame: &mut F,
+    ) -> Result<()> {
+        let chunks = split_into_chunks(payload, BTP_MAX_PAYLOAD_LENGTH);
+        let total = chunks.len();
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let is_final = i == total - 1;
+            // Add padding to fill the frame (optional, 0 padding for now)
+            let padding = 0;
+            let frame = encrypt_btp_frame(
+                &self.frame_key,
+                self.frame_number,
+                chunk,
+                padding,
+                is_final,
+            )?;
+            write_frame(&frame)?;
+            self.frame_number = self.frame_number.checked_add(1).ok_or_else(|| {
+                anyhow::anyhow!("BTP frame number overflow — stream too long")
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Send end-of-stream (final empty frame)
+    pub fn send_eos<F: FnMut(&[u8]) -> Result<()>>(
+        &mut self,
+        write_frame: &mut F,
+    ) -> Result<()> {
+        let frame = encrypt_btp_frame(&self.frame_key, self.frame_number, &[], 0, true)?;
+        write_frame(&frame)?;
+        self.frame_number += 1;
+        Ok(())
+    }
+}
+
+/// Stream decrypter for BTP-style frame streams.
+pub struct BtpStreamDecrypter {
+    frame_key: [u8; 32],
+    frame_number: u64,
+    /// Buffer for reassembled payload across frames
+    buffer: Vec<u8>,
+}
+
+impl BtpStreamDecrypter {
+    pub fn new(frame_key: [u8; 32]) -> Self {
+        Self {
+            frame_key,
+            frame_number: 0,
+            buffer: Vec::new(),
+        }
+    }
+
+    /// Process a single BTP frame, returning decoded payload bytes if
+    /// a complete message has been assembled.
+    pub fn read_frame(&mut self, frame_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
+        let (payload, _padding, is_final) = decrypt_btp_frame(&self.frame_key, self.frame_number, frame_bytes)?;
+        self.frame_number += 1;
+        self.buffer.extend_from_slice(&payload);
+
+        if is_final {
+            let result = std::mem::take(&mut self.buffer);
+            Ok(Some(result))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Split data into chunks of at most `chunk_size` bytes.
+fn split_into_chunks(data: &[u8], chunk_size: usize) -> Vec<&[u8]> {
+    if data.is_empty() {
+        return vec![&[]];
+    }
+    data.chunks(chunk_size).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn nonce_encodes_frame_number_with_header_flag() {
+        let nonce_payload = encode_btp_nonce(42, false);
+        let nonce_header = encode_btp_nonce(42, true);
+
+        // Frame number in bytes [7] (big-endian, MSB is byte 0 so byte 7 = LSB)
+        // For 42, only the last byte of the u64 is nonzero
+        assert_eq!(nonce_payload[7], 42);
+        assert_eq!(nonce_payload[0..7], [0u8; 7]); // high bytes zero
+
+        // Header nonce has bit 0x80 set on byte 0 (MSB)
+        assert_eq!(nonce_header[0], 0x80);
+        assert_eq!(nonce_header[7], 42);
+        assert_ne!(nonce_payload, nonce_header, "Header and payload nonces must differ");
+
+        // Different frame numbers produce different nonces
+        let nonce_0 = encode_btp_nonce(0, false);
+        let nonce_1 = encode_btp_nonce(1, false);
+        assert_ne!(nonce_0, nonce_1);
+    }
+
+    #[test]
+    fn nonce_nonces_differ_by_frame_number() {
+        // Verify no nonce reuse across frames and header/payload flag
+        // With big-endian, byte 0 is the MSB — for frame numbers 0..512
+        // byte 0 stays 0 for payload, and 0x80 for header, no collision.
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..512u64 {
+            let nonce_payload = encode_btp_nonce(i, false);
+            let nonce_header = encode_btp_nonce(i, true);
+            assert!(seen.insert(nonce_payload), "Payload nonce reused at frame {}", i);
+            assert!(seen.insert(nonce_header), "Header nonce reused at frame {}", i);
+            assert_ne!(nonce_payload, nonce_header, "Header/payload nonce collision at frame {}", i);
+        }
+    }
+
+    #[test]
+    fn header_encoding_is_reversible() {
+        let (payload_len, padding_len, is_final) = (100, 50, true);
+        let header = encode_btp_header(payload_len, padding_len, is_final).unwrap();
+        assert_eq!(decode_btp_payload_length(&header), payload_len);
+        assert_eq!(decode_btp_padding_length(&header), padding_len);
+        assert!(decode_btp_is_final(&header));
+
+        let header2 = encode_btp_header(200, 0, false).unwrap();
+        assert_eq!(decode_btp_payload_length(&header2), 200);
+        assert_eq!(decode_btp_padding_length(&header2), 0);
+        assert!(!decode_btp_is_final(&header2));
+    }
+
+    #[test]
+    fn btp_frame_roundtrip() {
+        let frame_key = [0xABu8; 32];
+        let payload = b"Hello, BTP world!";
+        let frame_number = 0;
+
+        // Encrypt
+        let frame = encrypt_btp_frame(&frame_key, frame_number, payload, 0, true)
+            .expect("encrypt should succeed");
+
+        // Decrypt
+        let (decrypted, padding_len, is_final) = decrypt_btp_frame(&frame_key, frame_number, &frame)
+            .expect("decrypt should succeed");
+
+        assert_eq!(decrypted, payload, "Decrypted payload must match original");
+        assert_eq!(padding_len, 0);
+        assert!(is_final);
+    }
+
+    #[test]
+    fn btp_frame_rejects_wrong_key() {
+        let frame_key = [0xABu8; 32];
+        let wrong_key = [0xCDu8; 32];
+        let payload = b"Secret message";
+
+        let frame = encrypt_btp_frame(&frame_key, 0, payload, 0, true)
+            .expect("encrypt should succeed");
+
+        let result = decrypt_btp_frame(&wrong_key, 0, &frame);
+        assert!(result.is_err(), "Decryption with wrong key must fail");
+    }
+
+    #[test]
+    fn btp_stream_encrypt_decrypt_roundtrip() {
+        let frame_key = [0x99u8; 32];
+        let payload = b"This is a longer message that spans multiple frames for the BTP stream encryptor test";
+
+        // Encrypt into frames
+        let mut encrypter = BtpStreamEncrypter::new(frame_key);
+        let mut frames = Vec::new();
+        encrypter.write_payload(payload, &mut |frame_bytes| {
+            frames.push(frame_bytes.to_vec());
+            Ok(())
+        }).expect("encryption should succeed");
+
+        // Decrypt — last frame has is_final=true, so the last read_frame returns Some
+        let mut decrypter = BtpStreamDecrypter::new(frame_key);
+        let mut result: Option<Vec<u8>> = None;
+        for frame_bytes in &frames {
+            result = decrypter.read_frame(frame_bytes).expect("decryption should succeed");
+        }
+
+        assert!(result.is_some(), "Must have assembled complete payload");
+        assert_eq!(result.unwrap(), payload, "Reassembled payload must match");
+    }
+
+    #[test]
+    fn btp_stream_encrypt_decrypt_multiframe() {
+        let frame_key = [0x99u8; 32];
+        // Create a payload larger than BTP_MAX_PAYLOAD_LENGTH (976 bytes)
+        let payload: Vec<u8> = (0..2000).map(|i| (i % 256) as u8).collect();
+
+        let mut encrypter = BtpStreamEncrypter::new(frame_key);
+        let mut frames = Vec::new();
+        encrypter.write_payload(&payload, &mut |frame_bytes| {
+            frames.push(frame_bytes.to_vec());
+            Ok(())
+        }).expect("encryption should succeed");
+
+        let mut decrypter = BtpStreamDecrypter::new(frame_key);
+        let mut result: Option<Vec<u8>> = None;
+        for frame_bytes in &frames {
+            result = decrypter.read_frame(frame_bytes).expect("decryption should succeed");
+        }
+
+        assert!(result.is_some(), "Must have assembled complete payload");
+        assert_eq!(result.unwrap(), payload, "Multi-frame reassembled payload must match");
+    }
+
+    #[test]
+    fn btp_stream_detects_wrong_key() {
+        let frame_key = [0x11u8; 32];
+        let wrong_key = [0x22u8; 32];
+        let payload = b"Some payload";
+
+        let mut encrypter = BtpStreamEncrypter::new(frame_key);
+        let mut frames = Vec::new();
+        encrypter.write_payload(payload, &mut |frame_bytes| {
+            frames.push(frame_bytes.to_vec());
+            Ok(())
+        }).expect("encryption should succeed");
+
+        let mut decrypter = BtpStreamDecrypter::new(wrong_key);
+        for frame_bytes in &frames {
+            let result = decrypter.read_frame(frame_bytes);
+            assert!(result.is_err(), "Wrong key must cause decryption failure");
+        }
+    }
+
+    #[test]
+    fn btp_frame_rejects_tampered_payload() {
+        let frame_key = [0x33u8; 32];
+        let payload = b"Original payload that must not be tampered";
+
+        let mut frame = encrypt_btp_frame(&frame_key, 0, payload, 0, true)
+            .expect("encrypt should succeed");
+
+        // Tamper with a byte in the payload ciphertext area (after header)
+        if frame.len() > BTP_FRAME_HEADER_LENGTH + 5 {
+            frame[BTP_FRAME_HEADER_LENGTH + 5] ^= 0xFF;
+        }
+
+        let result = decrypt_btp_frame(&frame_key, 0, &frame);
+        assert!(result.is_err(), "Tampered frame must fail decryption");
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
     use super::*;
 
     #[test]

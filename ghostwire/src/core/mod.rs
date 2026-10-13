@@ -39,6 +39,7 @@ pub mod obfs4_transport;
 pub mod oem_battery_guide;
 pub mod passphrase_keyslot;
 pub mod peer_health;
+pub mod sync_protocol;
 pub mod persistence_manager;
 pub mod recovery_shamir;
 pub mod reliability;

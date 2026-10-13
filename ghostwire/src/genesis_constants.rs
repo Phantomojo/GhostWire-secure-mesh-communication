@@ -149,6 +149,64 @@ pub const RENDEZVOUS_DOMAIN: &[u8; 32] = &[
     0x9c, 0xe7, 0x28, 0x05, 0x63, 0x1a, 0x4f, 0xb8, 0x97, 0xd2, 0x50, 0xac, 0x03, 0x8e, 0x6b, 0x41,
 ];
 
+/// Anonymous introduction key commitment domain — used to derive a
+/// commitment to the inviter's X25519 public key, preventing
+/// key-substitution attacks during anonymous contact establishment.
+pub const ANON_INTRO_COMMIT_DOMAIN: &[u8; 32] = &[
+    0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18, 0x29, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f, 0x90,
+    0x01, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19, 0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80,
+];
+
+/// Transport key derivation domains for overlapping key rotation (BQP/BTP-style).
+/// These label-separated derivations partition the identity key's X25519 secret
+/// into per-period transport keys, so that prev/curr/next periods can all be
+/// active simultaneously without key reuse across contexts.
+///
+/// Layout mirrors Briar BTP's TransportCryptoImpl:
+///   - ING/IN_HEADER: keys for decrypting incoming streams
+///   - OUT/OUT_HEADER: keys for encrypting outgoing streams
+///   - ROTATE: key rotation stepping (HKDF over time period)
+pub const TRANSPORT_KEY_ROTATE_DOMAIN: &[u8; 32] = &[
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+    0x0f, 0x1e, 0x2d, 0x3c, 0x4b, 0x5a, 0x69, 0x78, 0x87, 0x96, 0xa5, 0xb4, 0xc3, 0xd2, 0xe1, 0xf0,
+];
+
+/// HMAC domain for anonymous introduction authentication labels (BQP-style).
+///
+/// Mirrors Briar BQP's `REQUEST_LABEL` / `ACCEPT_LABEL` / `AUTH_LABEL` split:
+///   - REQUEST_LABEL: Bob's HMAC over invite fields, binds Bob to the conversation
+///   - ACCEPT_LABEL: Alice's HMAC over (request, Bob's pubkey), enables mutual auth
+///   - AUTH_LABEL: HMAC over the final shared secret to authenticate the session
+///
+/// These labels prevent replay, reflection, and key-substitution attacks during
+/// the anonymous introduction handshake.
+pub const INTRO_HMAC_DOMAIN: &[u8; 32] = &[
+    0xb1, 0xc2, 0xd3, 0xe4, 0xf5, 0x06, 0x17, 0x28, 0x39, 0x4a, 0x5b, 0x6c, 0x7d, 0x8e, 0x9f, 0xa0,
+    0x01, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18, 0x29, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f, 0x90,
+];
+
+/// Domain constant for BQP-style confirmation record derivation.
+///
+/// Mirrors Briar BQP's CONFIRMATION_KEY_LABEL + CONFIRMATION_MAC_LABEL:
+/// derives a confirmation key from the DH shared secret, then computes
+/// an HMAC over both parties' public keys and payloads. This enables
+/// the third round of the anonymous introduction handshake: mutual
+/// confirmation that both parties derived the same shared secret.
+/// The confirmation record binds (invite_x25519_pub || bob_x25519_pub ||
+/// bob_ed25519_pub || nonce) to the shared secret, preventing MITM
+/// attacks even if the ECIES sealed payload is intercepted.
+pub const INTRO_CONFIRM_DOMAIN: &[u8; 32] = &[
+    0xd3, 0xe4, 0xf5, 0x06, 0x17, 0x28, 0x39, 0x4a, 0x5b, 0x6c, 0x7d, 0x8e, 0x9f, 0xa0, 0xb1, 0xc2,
+    0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18, 0x29, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f, 0x90,
+];
+
+/// Domain constant for sync protocol HMAC — ensures sync-frame HMACs
+/// are domain-separated from transport key derivation, anonymous intro, etc.
+pub const SYNC_HMAC_DOMAIN: &[u8; 32] = &[
+    0xc1, 0xd2, 0xe3, 0xf4, 0x05, 0x16, 0x27, 0x38, 0x49, 0x5a, 0x6b, 0x7c, 0x8d, 0x9e, 0xaf, 0xb0,
+    0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+];
+
 // ── Helper: genesis-keyed BLAKE3 derive ──────────────────────────────────────
 //
 // All KDF calls in the protocol that previously passed a string label to
@@ -213,6 +271,11 @@ mod tests {
             ONION_HOP_DOMAIN,
             PAIRING_SESSION_DOMAIN,
             RENDEZVOUS_DOMAIN,
+            ANON_INTRO_COMMIT_DOMAIN,
+            TRANSPORT_KEY_ROTATE_DOMAIN,
+            INTRO_HMAC_DOMAIN,
+            SYNC_HMAC_DOMAIN,
+            INTRO_CONFIRM_DOMAIN,
         ];
         for i in 0..domains.len() {
             for j in (i + 1)..domains.len() {
@@ -277,6 +340,11 @@ mod tests {
         //   ONION_HOP_DOMAIN     → private_routing.rs
         //   PAIRING_SESSION_DOMAIN → device_pairing.rs
         //   RENDEZVOUS_DOMAIN    → device_pairing.rs, anonymous_intro.rs
+        //   ANON_INTRO_COMMIT_DOMAIN → anonymous_intro.rs (commitment derivation)
+        //   TRANSPORT_KEY_ROTATE_DOMAIN → encryption.rs (overlapping key rotation)
+        //   INTRO_HMAC_DOMAIN → anonymous_intro.rs (HMAC auth tag)
+        //   SYNC_HMAC_DOMAIN → sync_protocol.rs (sync frame HMAC)
+        //   INTRO_CONFIRM_DOMAIN → anonymous_intro.rs (BQP confirmation record)
         //
         // If you add a new domain above, add it to this list with its consumer.
         // If you find a domain with no consumer, either activate it or remove it.
@@ -299,6 +367,11 @@ mod tests {
             ("ONION_HOP_DOMAIN", ONION_HOP_DOMAIN),
             ("PAIRING_SESSION_DOMAIN", PAIRING_SESSION_DOMAIN),
             ("RENDEZVOUS_DOMAIN", RENDEZVOUS_DOMAIN),
+            ("ANON_INTRO_COMMIT_DOMAIN", ANON_INTRO_COMMIT_DOMAIN),
+            ("TRANSPORT_KEY_ROTATE_DOMAIN", TRANSPORT_KEY_ROTATE_DOMAIN),
+            ("INTRO_HMAC_DOMAIN", INTRO_HMAC_DOMAIN),
+            ("SYNC_HMAC_DOMAIN", SYNC_HMAC_DOMAIN),
+            ("INTRO_CONFIRM_DOMAIN", INTRO_CONFIRM_DOMAIN),
         ] {
             assert!(
                 domain.iter().any(|&b| b != 0),

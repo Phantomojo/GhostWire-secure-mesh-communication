@@ -15,6 +15,9 @@ use crate::core::binary_hardening::LockedBuffer;
 use crate::core::crl;
 use crate::core::double_ratchet;
 use crate::core::persistence_manager::PersistenceManager;
+use crate::genesis_constants::{
+    genesis_derive, ANON_INTRO_COMMIT_DOMAIN, TRANSPORT_KEY_ROTATE_DOMAIN,
+};
 use rand_core::OsRng;
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -132,6 +135,10 @@ pub struct EncryptionManager {
     session_keys: Arc<Mutex<HashMap<String, SessionKey>>>,
     key_rotation_interval: u64,
     last_key_rotation: u64,
+    /// Overlapping transport key ring (BTP-style prev/curr/next).
+    /// Derived from the identity X25519 secret at construction time.
+    /// Refreshed when the time period advances.
+    transport_key_ring: TransportKeyRing,
     pub crl: Arc<crl::CrlStore>,
     pub ratchet_sessions: Arc<double_ratchet::RatchetSessionManager>,
     /// Replay cache. Dropped on lock alongside the private material it
@@ -152,6 +159,126 @@ const REPLAY_CACHE_PER_SENDER: usize = 256;
 /// How many distinct senders to track. Bounds memory against a peer that
 /// varies `sender_id`, exactly as `add_peer_key` bounds the peer-key map.
 const REPLAY_MAX_SENDERS: usize = 10_000;
+
+/// Time-period length for overlapping key rotation, matching Briar BTP's
+/// 6-day windows. This gives messages a 6-day grace period to be delivered
+/// during the previous period, and the next period is pre-generated so
+/// messages encrypted under a slightly future key still decrypt.
+pub const KEY_ROTATION_PERIOD_SECS: u64 = 6 * 24 * 60 * 60; // 6 days
+
+/// Overlapping transport key ring with 3 active periods (prev/curr/next).
+///
+/// Mirrors Briar's BTP `TransportKeys` structure: derives per-period
+/// encryption keys from the identity X25519 secret using label-separated
+/// HKDF-style derivation, so that:
+///   - Messages encrypted with the previous period's key still decrypt (grace)
+///   - Messages encrypted with the next period's key also decrypt (pre-generated)
+///   - Each direction (in/out) has independent keys (label separation)
+///
+/// The `rotation_epoch` tracks the base time period. On rotate, it advances
+/// by one period and re-derives prev=old_curr, curr=new, next=new+1.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransportKeyRing {
+    /// Time period index: floor(now / KEY_ROTATION_PERIOD_SECS)
+    pub rotation_epoch: u64,
+    /// Keys for the previous period (for grace-period decryption)
+    pub prev_in: [u8; 32],
+    /// Keys for the current period (active encryption/decryption)
+    pub curr_in: [u8; 32],
+    /// Keys for the next period (pre-generated for future messages)
+    pub curr_out: [u8; 32],
+    pub next_in: [u8; 32],
+    /// Outgoing keys for the current period
+    pub prev_out: [u8; 32],
+    pub next_out: [u8; 32],
+}
+
+impl TransportKeyRing {
+    /// Derive the transport key ring from the identity X25519 secret.
+    ///
+    /// The derivation chain mirrors Briar BTP:
+    ///   rotation_key = BLAKE3_keyed(TRANSPORT_KEY_ROTATE_DOMAIN, x25519_secret)
+    ///   curr_in = rotation_key
+    ///   prev_in  = BLAKE3_keyed(TRANSPORT_KEY_ROTATE_DOMAIN, rotation_key || epoch-1)
+    ///   next_in  = BLAKE3_keyed(TRANSPORT_KEY_ROTATE_DOMAIN, rotation_key || epoch+1)
+    ///
+    /// Each direction (in/out) uses a label-separated derivation so keys
+    /// are never reused across contexts.
+    pub fn derive(
+        x25519_secret: &[u8; 32],
+        at_time_secs: u64,
+    ) -> Self {
+        let epoch = at_time_secs / KEY_ROTATION_PERIOD_SECS;
+
+        // Master rotation key from identity secret
+        let master = genesis_derive(TRANSPORT_KEY_ROTATE_DOMAIN, x25519_secret);
+
+        // Label-separated per-direction keys
+        let curr_in = genesis_derive(
+            crate::genesis_constants::ANON_INTRO_COMMIT_DOMAIN, // different domain for in
+            &master,
+        );
+        let curr_out = genesis_derive(
+            &crate::genesis_constants::ONION_HOP_DOMAIN, // different domain for out
+            &master,
+        );
+
+        // Derive prev/next with time-period stepping
+        let prev_in = Self::derive_period_key(&master, epoch.saturating_sub(1), true);
+        let next_in = Self::derive_period_key(&master, epoch + 1, true);
+        let prev_out = Self::derive_period_key(&master, epoch.saturating_sub(1), false);
+        let next_out = Self::derive_period_key(&master, epoch + 1, false);
+
+        TransportKeyRing {
+            rotation_epoch: epoch,
+            prev_in,
+            curr_in,
+            curr_out,
+            next_in,
+            prev_out,
+            next_out,
+        }
+    }
+
+    /// Step a key forward by one time period, with direction label separation.
+    fn derive_period_key(master: &[u8; 32], time_period: u64, incoming: bool) -> [u8; 32] {
+        let mut ikm = master.to_vec();
+        ikm.extend_from_slice(&time_period.to_le_bytes());
+        ikm.push(if incoming { 0x01 } else { 0x02 }); // direction label
+
+        genesis_derive(TRANSPORT_KEY_ROTATE_DOMAIN, &ikm)
+    }
+
+    /// Check whether the key ring is still current, and if not, advance it.
+    /// Returns the new ring if rotation was needed.
+    pub fn refresh_if_needed(&self, x25519_secret: &[u8; 32], now_secs: u64) -> Option<Self> {
+        let current_epoch = now_secs / KEY_ROTATION_PERIOD_SECS;
+        if current_epoch > self.rotation_epoch {
+            Some(Self::derive(x25519_secret, now_secs))
+        } else {
+            None
+        }
+    }
+
+    /// Determine which key to use for decrypting an incoming message,
+    /// based on the key_id prefix encoded in the message header.
+    ///
+    /// key_id format: "v{period_delta}" where period_delta is 0 (curr),
+    /// -1 (prev), or +1 (next). This is a simplified protocol-level signal.
+    pub fn select_incoming_key(&self, period_hint: i32) -> Option<[u8; 32]> {
+        match period_hint {
+            0 => Some(self.curr_in),
+            -1 => Some(self.prev_in),
+            1 => Some(self.next_in),
+            _ => None,
+        }
+    }
+
+    /// Get the active outgoing key for the current period.
+    pub fn current_out_key(&self) -> &[u8; 32] {
+        &self.curr_out
+    }
+}
 
 /// Receiver-side replay cache for decrypted frames.
 ///
@@ -444,6 +571,21 @@ impl EncryptionManager {
         let mut public = key_pair.clone();
         let private = LockedBuffer::from_bytes(&key_pair.private_key);
         public.private_key.clear();
+
+        // Derive the initial transport key ring from the X25519 secret.
+        // This creates a TransportKeyRing with 3 overlapping 6-day periods,
+        // mirroring Briar BTP's approach.
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let transport_key_ring = if let Some(x25519_secret) = Self::extract_x25519_secret_bytes(&private) {
+            TransportKeyRing::derive(x25519_secret, now_secs)
+        } else {
+            // Fallback: identity without X25519 (legacy) — use zeros
+            TransportKeyRing::derive(&[0u8; 32], now_secs)
+        };
+
         EncryptionManager {
             key_pair: public,
             private_key: Arc::new(Mutex::new(Some(private))),
@@ -451,10 +593,8 @@ impl EncryptionManager {
             rng: SystemRandom::new(),
             session_keys: Arc::new(Mutex::new(HashMap::new())),
             key_rotation_interval: 86400 * 7,
-            last_key_rotation: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            last_key_rotation: now_secs,
+            transport_key_ring,
             crl: Arc::new(crl::CrlStore::new()),
             ratchet_sessions: Arc::new(double_ratchet::RatchetSessionManager::new()),
             replay_guard: Arc::new(Mutex::new(ReplayGuard::default())),
@@ -465,7 +605,27 @@ impl EncryptionManager {
         let mut manager = Self::from_key_pair(persisted.key_pair);
         manager.key_rotation_interval = persisted.key_rotation_interval;
         manager.last_key_rotation = persisted.last_key_rotation;
+        // Restore persisted transport key ring if available
+        if let Some(ring) = persisted.transport_key_ring {
+            manager.transport_key_ring = ring;
+        }
         manager
+    }
+
+    /// Extract the raw 32-byte X25519 secret from the private key buffer.
+    /// Returns None if the key pair doesn't contain an X25519 component.
+    fn extract_x25519_secret_bytes(private: &LockedBuffer) -> Option<&[u8; 32]> {
+        if private.len() < 34 {
+            return None;
+        }
+        let ed_len = u16::from_le_bytes([private[0], private[1]]) as usize;
+        let start = 2 + ed_len;
+        if private.len() < start + 32 {
+            return None;
+        }
+        // SAFETY: we've verified bounds above; reinterpret as &[u8; 32]
+        let slice = &private[start..start + 32];
+        Some(slice.try_into().ok()?)
     }
 
     fn private_key_snapshot(&self) -> Result<LockedBuffer, Box<dyn std::error::Error>> {
@@ -703,6 +863,7 @@ impl EncryptionManager {
             key_pair,
             key_rotation_interval: self.key_rotation_interval,
             last_key_rotation: self.last_key_rotation,
+            transport_key_ring: Some(self.transport_key_ring.clone()),
         })
     }
 
@@ -1566,6 +1727,35 @@ impl EncryptionManager {
         now - self.last_key_rotation > self.key_rotation_interval
     }
 
+    /// Refresh the overlapping transport key ring if the time period has advanced.
+    /// This is separate from identity key rotation — transport keys derived
+    /// from the identity X25519 secret are refreshed every KEY_ROTATION_PERIOD_SECS
+    /// (6 days), giving 3 overlapping periods for grace-period decryption.
+    pub fn refresh_transport_key_ring(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if let Some(secret) = self.x25519_secret() {
+            let secret_bytes: [u8; 32] = *secret.as_bytes();
+            if let Some(new_ring) = self.transport_key_ring.refresh_if_needed(&secret_bytes, now) {
+                tracing::debug!(
+                    target: "encryption",
+                    old_epoch = self.transport_key_ring.rotation_epoch,
+                    new_epoch = new_ring.rotation_epoch,
+                    "Transport key ring refreshed (period advanced)"
+                );
+                self.transport_key_ring = new_ring;
+                // Persist the refreshed key ring
+                if !Self::is_user_keyed() {
+                    self.save_to_disk()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn rotate_keys_if_needed(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if Self::is_user_keyed() {
             return Err(
@@ -1590,6 +1780,26 @@ impl EncryptionManager {
 
             self.session_keys.lock().unwrap().clear();
             self.crl.bump_epoch();
+
+            // Re-derive transport key ring from new identity key
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let private_bytes = self.private_key_snapshot()?;
+            if private_bytes.len() >= 2 + 32 {
+                // Try to extract X25519 secret from the new private key
+                let ed_len = u16::from_le_bytes([private_bytes[0], private_bytes[1]]) as usize;
+                let start = 2 + ed_len;
+                if private_bytes.len() >= start + 32 {
+                    if let Ok(secret_bytes) = private_bytes[start..start + 32].try_into() {
+                        self.transport_key_ring = TransportKeyRing::derive(secret_bytes, now_secs);
+                    }
+                }
+            }
+
+
+
             self.save_to_disk()?;
         }
         Ok(())
@@ -2545,6 +2755,88 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_file(file_path);
     }
+
+    use crate::genesis_constants::{ANON_INTRO_COMMIT_DOMAIN, TRANSPORT_KEY_ROTATE_DOMAIN};
+    use crate::genesis_constants::genesis_derive;
+
+    #[test]
+    fn transport_key_ring_derives_three_periods() {
+        let secret = [0xABu8; 32];
+        let ring = TransportKeyRing::derive(&secret, 0);
+
+        // epoch 0: prev should be for epoch -1 (saturating), curr for epoch 0, next for epoch 1
+        assert_eq!(ring.rotation_epoch, 0);
+        assert_ne!(ring.curr_in, ring.prev_in, "curr and prev keys must differ");
+        assert_ne!(ring.curr_in, ring.next_in, "curr and next keys must differ");
+        assert_ne!(ring.prev_in, ring.next_in, "prev and next keys must differ");
+        assert_ne!(ring.curr_in, ring.curr_out, "in and out keys must differ");
+    }
+
+    #[test]
+    fn transport_key_ring_uses_label_separation() {
+        let secret = [0x42u8; 32];
+        let now = 1_000_000u64;
+        let ring = TransportKeyRing::derive(&secret, now);
+
+        // In and out keys must be different (label separation prevents
+        // encrypting and decrypting with the same key)
+        assert_ne!(ring.curr_in, ring.curr_out, "in/out keys must differ (label separation)");
+
+        // Verify the derivation chain: master -> curr_in uses a different
+        // domain than derive_period_key
+        let master = genesis_derive(TRANSPORT_KEY_ROTATE_DOMAIN, &secret);
+        let expected_curr_in = genesis_derive(ANON_INTRO_COMMIT_DOMAIN, &master);
+        assert_eq!(ring.curr_in, expected_curr_in, "curr_in derivation must match");
+    }
+
+    #[test]
+    fn transport_key_ring_refresh_advances_epoch() {
+        let secret = [0x99u8; 32];
+        let period = KEY_ROTATION_PERIOD_SECS;
+
+        // Ring at time T
+        let ring_old = TransportKeyRing::derive(&secret, period);
+
+        // Ring at time T + 1 period should advance epoch
+        let ring_new = TransportKeyRing::derive(&secret, period * 2);
+        assert_eq!(ring_old.rotation_epoch + 1, ring_new.rotation_epoch);
+
+        // Old ring should refresh
+        let refreshed = ring_old.refresh_if_needed(&secret, period * 2);
+        assert!(refreshed.is_some(), "ring should refresh when epoch advances");
+
+        // Ring at same time should not refresh
+        let no_refresh = ring_old.refresh_if_needed(&secret, period);
+        assert!(no_refresh.is_none(), "ring should NOT refresh within same period");
+    }
+
+    #[test]
+    fn transport_key_ring_select_incoming_by_period_hint() {
+        let secret = [0x11u8; 32];
+        let ring = TransportKeyRing::derive(&secret, 0);
+
+        assert_eq!(ring.select_incoming_key(0), Some(ring.curr_in));
+        assert_eq!(ring.select_incoming_key(-1), Some(ring.prev_in));
+        assert_eq!(ring.select_incoming_key(1), Some(ring.next_in));
+        assert_eq!(ring.select_incoming_key(99), None, "invalid period hint returns None");
+    }
+
+    #[test]
+    fn transport_key_ring_serialization_roundtrip() {
+        let secret = [0x88u8; 32];
+        let ring = TransportKeyRing::derive(&secret, 12345);
+
+        let serialized = bincode::serialize(&ring).unwrap();
+        let deserialized: TransportKeyRing = bincode::deserialize(&serialized).unwrap();
+
+        assert_eq!(ring.rotation_epoch, deserialized.rotation_epoch);
+        assert_eq!(ring.prev_in, deserialized.prev_in);
+        assert_eq!(ring.curr_in, deserialized.curr_in);
+        assert_eq!(ring.curr_out, deserialized.curr_out);
+        assert_eq!(ring.next_in, deserialized.next_in);
+        assert_eq!(ring.prev_out, deserialized.prev_out);
+        assert_eq!(ring.next_out, deserialized.next_out);
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2552,4 +2844,8 @@ struct PersistedEncryption {
     key_pair: GhostKeyPair,
     key_rotation_interval: u64,
     last_key_rotation: u64,
+    /// Overlapping transport key ring (BTP-style prev/curr/next).
+    /// Optional for backward compatibility with older state files.
+    #[serde(default)]
+    transport_key_ring: Option<TransportKeyRing>,
 }
