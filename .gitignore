@@ -335,3 +335,11 @@ scripts/maintenance/cleanup-*.sh
 scripts/setup-vibe.sh
 
 docs/presentations/render_*.mjs
+
+# generated/local artifacts
+/404
+/429
+/audio.mp3
+ghostwire/coverage-report.txt
+docs/build/
+docs/presentations/*.pdf
