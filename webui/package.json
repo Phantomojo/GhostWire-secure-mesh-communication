@@ -19,7 +19,7 @@
     "@types/node": "^24.0.7",
     "@vitejs/plugin-react": "^5.1.4",
     "@vitest/ui": "^4.0.18",
-    "autoprefixer": "^10.4.21",
+    "autoprefixer": "^10.6.1",
     "jsdom": "^28.1.0",
     "playwright-core": "^1.58.2",
     "postcss": "^8.5.6",
