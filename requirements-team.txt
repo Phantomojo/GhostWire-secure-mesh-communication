@@ -2,14 +2,14 @@
 # Install with: pip install -r requirements-team.txt
 
 # Core ML
-torch>=2.12.1
+torch>=2.14.1
 torch-geometric>=2.8.0.post1
 numpy>=2.5.1
 pandas>=3.0.3
-scikit-learn>=1.9.0
+scikit-learn>=1.9.1
 
 # Model inference
-onnxruntime>=1.28.0
+onnxruntime>=1.31.0
 joblib>=1.5.3
 
 # Graph processing
@@ -20,7 +20,7 @@ matplotlib>=3.11.1
 seaborn>=0.13.2
 
 # Data processing
-pyarrow>=24.0.0  # For parquet files
+pyarrow>=26.0.0  # For parquet files
 
 # Optional but useful
 jupyter>=1.1.1  # For notebooks
