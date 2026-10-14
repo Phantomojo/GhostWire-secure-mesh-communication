@@ -32,6 +32,7 @@
 use anyhow::Result;
 
 use ring::rand::{SecureRandom, SystemRandom};
+use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 use crate::genesis_constants::{genesis_derive, ANON_INTRO_COMMIT_DOMAIN, INTRO_CONFIRM_DOMAIN, INTRO_HMAC_DOMAIN, RENDEZVOUS_DOMAIN};
@@ -101,10 +102,11 @@ pub struct IntroductionPayload {
     pub nonce: [u8; 16],
     /// Timestamp
     pub created_at: u64,
-    /// HMAC tag (BQP REQUEST_LABEL equivalent): Bob's HMAC over the invite
-    /// + his own pubkeys + nonce, using INTRO_HMAC_DOMAIN as the key.
-    /// This binds Bob to this specific introduction and prevents replay.
-    pub hmac_tag: [u8; 32],
+    /// Ed25519 signature over the canonical anonymous introduction payload.
+    /// This lets Alice verify that Bob controls the ed25519 public key he
+    /// claims and binds his introduction to the invite, pubkeys, nonce, and
+    /// timestamp. The legacy 32-byte digest is intentionally not retained.
+    pub signature: Vec<u8>,
 }
 
 /// Generate an anonymous introduction invite for this node.
@@ -157,6 +159,7 @@ pub fn generate_intro_invite(
 pub fn send_introduction(
     invite: &AnonymousInvite,
     our_ed25519_pub: [u8; 32],
+    our_ed25519_secret: &[u8; 32],
     our_x25519_pub: [u8; 32],
     our_nickname: Option<String>,
 ) -> Result<(Vec<u8>, String)> {
@@ -186,25 +189,27 @@ pub fn send_introduction(
         .fill(&mut nonce)
         .map_err(|_| anyhow::anyhow!("RNG failure"))?;
 
-    // BQP-style HMAC authentication (REQUEST_LABEL equivalent):
-    // Bob computes an HMAC over (invite.x25519_pub, our_x25519_pub, our_ed25519_pub, nonce)
-    // using INTRO_HMAC_DOMAIN as the derivation domain. This binds Bob to this
-    // specific introduction conversation and prevents replay/reflection attacks.
-    // Alice verifies this HMAC in receive_introduction().
-    let hmac_tag = compute_intro_hmac(
-        &invite.x25519_pub,
-        &our_x25519_pub,
-        &our_ed25519_pub,
-        &nonce,
-    );
+    let created_at = now_secs();
+
+    // Alice's Ed25519 key is not assumed to bind Bob before this point. Bob
+    // signs the introduction payload with his Ed25519 key so Alice can later
+    // verify that Bob controls the claimed key.
+    let signing_key = SigningKey::from_bytes(our_ed25519_secret);
+    let mut signature_bytes = Vec::with_capacity(32 + 32 + 32 + 16 + 8);
+    signature_bytes.extend_from_slice(&invite.x25519_pub);
+    signature_bytes.extend_from_slice(&our_x25519_pub);
+    signature_bytes.extend_from_slice(&our_ed25519_pub);
+    signature_bytes.extend_from_slice(&nonce);
+    signature_bytes.extend_from_slice(&created_at.to_le_bytes());
+    let signature = signing_key.sign(&signature_bytes).to_bytes().to_vec();
 
     let intro = IntroductionPayload {
         ed25519_pub: our_ed25519_pub,
         x25519_pub: our_x25519_pub,
         nickname: our_nickname,
         nonce,
-        created_at: now_secs(),
-        hmac_tag,
+        created_at,
+        signature,
     };
 
     let intro_bytes =
@@ -243,26 +248,32 @@ pub fn receive_introduction(
         anyhow::bail!("Introduction payload is too old (> 24 hours)");
     }
 
-    // BQP-style HMAC verification (REQUEST_LABEL equivalent):
-    // Alice verifies that the HMAC tag matches what Bob should have computed
-    // over (invite.x25519_pub, bob.x25519_pub, bob.ed25519_pub, nonce).
-    // This prevents:
-    //   - Replay: the nonce ensures freshness
-    //   - Key substitution: Bob's pubkeys are bound into the HMAC
-    //   - Reflection: the invite's pubkey is included, preventing Bob from
-    //     replaying Alice's own pubkey back at her
-    // Alice knows her X25519 pubkey (from her secret) — this IS the invite's
-    // x25519_pub that Bob used when computing the HMAC.
     let alice_x25519_pub = x25519_dalek::PublicKey::from(our_x25519_secret);
-    let expected_tag = compute_intro_hmac(
-        alice_x25519_pub.as_bytes(),  // Alice's (invite's) X25519 pub
-        &intro.x25519_pub,            // Bob's X25519 pub (in the intro)
-        &intro.ed25519_pub,           // Bob's Ed25519 pub (in the intro)
-        &intro.nonce,
-    );
-    if expected_tag != intro.hmac_tag {
+
+    let introduced_pubkey = match VerifyingKey::from_bytes(&intro.ed25519_pub).ok() {
+        Some(key) => key,
+        None => anyhow::bail!("invalid Bob Ed25519 public key"),
+    };
+
+    let mut signed_bytes = Vec::with_capacity(32 + 32 + 32 + 16 + 8);
+    signed_bytes.extend_from_slice(alice_x25519_pub.as_bytes());
+    signed_bytes.extend_from_slice(&intro.x25519_pub);
+    signed_bytes.extend_from_slice(&intro.ed25519_pub);
+    signed_bytes.extend_from_slice(&intro.nonce);
+    signed_bytes.extend_from_slice(&intro.created_at.to_le_bytes());
+
+    let signature: ed25519_dalek::Signature = if intro.signature.len() == 64 {
+        match ed25519_dalek::Signature::from_slice(&intro.signature) {
+            Ok(value) => value,
+            Err(_) => anyhow::bail!("invalid Ed25519 signature"),
+        }
+    } else {
+        anyhow::bail!("invalid Ed25519 signature length");
+    };
+
+    if introduced_pubkey.verify(&signed_bytes, &signature).is_err() {
         anyhow::bail!(
-            "HMAC verification failed: introduction payload does not authenticate — \
+            "signature verification failed: introduction payload does not authenticate — \
              possible replay, tampering, or key-substitution attack."
         );
     }
@@ -582,30 +593,6 @@ mod tests {
     }
 
     #[test]
-    fn hmac_prevents_replay_and_tampering() {
-        // Bob computes HMAC over (invite_pub, bob_x25519, bob_ed25519, nonce)
-        let invite_x25519 = [0x22u8; 32];
-        let bob_x25519 = [0x33u8; 32];
-        let bob_ed25519 = [0x44u8; 32];
-        let nonce = [0x55u8; 16];
-
-        let tag = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &nonce);
-
-        // Correct inputs should produce matching tag
-        let expected = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &nonce);
-        assert_eq!(tag, expected, "HMAC should be deterministic");
-
-        // Changing any input should produce a different tag (tamper detection)
-        let different_nonce = [0x99u8; 16];
-        let tampered_tag = compute_intro_hmac(&invite_x25519, &bob_x25519, &bob_ed25519, &different_nonce);
-        assert_ne!(tag, tampered_tag, "Tampered nonce must produce different HMAC");
-
-        // Different invite pub (reflection attack prevention)
-        let reflection_tag = compute_intro_hmac(&bob_x25519, &bob_x25519, &bob_ed25519, &nonce);
-        assert_ne!(tag, reflection_tag, "Reflection attack must produce different HMAC");
-    }
-
-    #[test]
     fn confirmation_record_is_symmetric() {
         // Alice and Bob both compute the same confirmation record
         let alice_secret = x25519_dalek::StaticSecret::from([0xA1u8; 32]);
@@ -733,7 +720,7 @@ mod tests {
             nickname: None,
             nonce,
             created_at: now_secs(),
-            hmac_tag: compute_intro_hmac(alice_pub, bob_pub_bytes, &bob_ed, &nonce),
+            signature: vec![],
         };
 
         let result = verify_confirmation(&invite, &intro, &alice_secret, &bob_confirm);
@@ -771,7 +758,7 @@ mod tests {
             nickname: None,
             nonce,
             created_at: now_secs(),
-            hmac_tag: compute_intro_hmac(alice_pub, bob_pub_bytes, &bob_ed, &nonce),
+            signature: vec![],
         };
 
         let result = verify_confirmation(&invite, &intro, &alice_secret, &wrong_confirm);
