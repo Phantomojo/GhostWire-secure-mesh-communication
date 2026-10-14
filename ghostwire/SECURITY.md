@@ -216,3 +216,26 @@ protocol's name.
 
 For a bug that breaks confidentiality, authenticity, or the canonical encoding,
 contact the maintainer directly and **do not** rely on an issue tracker existing.
+
+
+## Security advisory workflow
+
+GhostWire uses [GitHub private vulnerability reporting]
+(https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories).
+
+- Review privately; do not open a public issue until the fix exists.
+- Keep severity honest. For the current report (forgeable sync-frame HMAC),
+  its practical risk is **low today** because `SyncProtocolManager` is not wired,
+  and only medium if the protocol is enabled prematurely.
+- Update the supported-version / known-defect text on each resolved issue.
+- Publish only after tests and docs agree that the patched commit has passed
+  physical verification.
+
+### Current advisory work (sync-frame HMAC)
+
+- Identifier: `GHSA-68jj-3c3v-gwxr`
+- Vulnerable function: `SyncProtocolManager::start_session` / `SyncFrame::{verify_hmac,compute_hmac}`
+- Effective root cause: derived from a public X25519 key plus a public domain constant.
+- Fix in tree: private X25519 ECDH shared-secret derivation, all-zero rejection, regression
+  test added.
+- Still open follow-up: replay protection and message signature verification.

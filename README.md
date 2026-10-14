@@ -349,8 +349,11 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 - 🔔 **Watch** for major updates
 
 ### Security
-- 🔒 **Security Policy:** [docs/SECURITY.md](docs/SECURITY.md)
-- 🚨 **Report Vulnerability:** [Codeberg Security Advisories](https://codeberg.org/PHANTOMOJO/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc
+- 🔒 **Security documentation:** [ghostwire/SECURITY.md](ghostwire/SECURITY.md) — authoritative for the protocol crate, supported pre-1.0 releases, and private-reporting process
+- 🚨 **Report a vulnerability privately first:** use [GitHub private vulnerability reporting](https://github.com/Phantomojo/GhostWire-secure-mesh-communication/security/advisories) or security@ghostwire.cc, including description, reproduction, impact, version, and a PoC when available.
+- ⚠️ **Important:** GhostWire is pre-1.0, has had no external security review, and every security claim is design intent. The supported-version line is the current rescue lineage only. Do not use it for production security decisions without your own review.
+
+This README keeps that same posture plainly, because hidden optimistic language makes public claims weaker.
 
 ---
 

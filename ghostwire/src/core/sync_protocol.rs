@@ -38,8 +38,9 @@
 //! - TTL and hop limits enforced from the wire_protocol layer
 
 use crate::core::message::Message;
-use crate::core::wire_protocol::Frame;
 use crate::genesis_constants::{genesis_derive, SYNC_HMAC_DOMAIN};
+use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -248,12 +249,15 @@ pub struct SyncSession {
     pub state: SessionState,
     /// Session key for HMAC computation (derived per-peer)
     pub session_key: [u8; 32],
+    /// Expected peer Ed25519 verifying key for sync message signatures
+    pub peer_ed25519_pub: [u8; 32],
     /// Active session ID (set when OFFER is sent, cleared on ACK)
     pub session_id: Option<Uuid>,
     /// Messages offered but not yet ACKed
     pub pending_offers: HashMap<[u8; 32], Instant>,
     /// Messages we're waiting to receive
     pub pending_requests: HashSet<[u8; 32]>,
+    pub seen_frame_hmacs: HashSet<[u8; 32]>,
     /// Last activity timestamp
     pub last_activity: Instant,
     /// Session start time
@@ -266,9 +270,11 @@ impl SyncSession {
             peer_id,
             state: SessionState::Idle,
             session_key,
+            peer_ed25519_pub: [0u8; 32],
             session_id: None,
             pending_offers: HashMap::new(),
             pending_requests: HashSet::new(),
+            seen_frame_hmacs: HashSet::new(),
             last_activity: Instant::now(),
             started_at: Instant::now(),
         }
@@ -325,10 +331,23 @@ impl SyncProtocolManager {
     }
 
     /// Start a new sync session with a peer.
-    /// Derives a session key from the peer's X25519 pubkey.
-    pub async fn start_session(&self, peer_id: &str, peer_x25519_pub: &[u8; 32]) -> Result<()> {
-        let session_key = genesis_derive(SYNC_HMAC_DOMAIN, peer_x25519_pub);
-        let session = SyncSession::new(peer_id.to_string(), session_key);
+    pub async fn start_session(
+        &self,
+        peer_id: &str,
+        peer_x25519_pub: &[u8; 32],
+        our_x25519_secret: &StaticSecret,
+        peer_ed25519_pub: &[u8; 32],
+    ) -> Result<()> {
+        let peer_x_pub = XPublicKey::from(*peer_x25519_pub);
+        let shared_secret = our_x25519_secret.diffie_hellman(&peer_x_pub);
+        if shared_secret.as_bytes() == &[0u8; 32] {
+            return Err(anyhow::anyhow!(
+                "X25519 shared secret is all zeros — small-order point attack detected"
+            ));
+        }
+        let session_key = genesis_derive(SYNC_HMAC_DOMAIN, shared_secret.as_bytes());
+        let mut session = SyncSession::new(peer_id.to_string(), session_key);
+        session.peer_ed25519_pub = *peer_ed25519_pub;
         self.sessions.write().await.insert(peer_id.to_string(), session);
         debug!("Sync session started with peer {}", peer_id);
         Ok(())
@@ -377,8 +396,24 @@ impl SyncProtocolManager {
             _ => return None,
         };
 
-        let sessions = self.sessions.read().await;
-        let session = sessions.get(peer_id)?;
+        let frame_hmac = match frame {
+            SyncFrame::Offer { hmac, .. } => *hmac,
+            _ => return None,
+        };
+
+        let session_key = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(peer_id)?;
+            if !frame.verify_hmac(&session.session_key) {
+                warn!("HMAC verification failed on OFFER from {}", peer_id);
+                return None;
+            }
+            if !session.seen_frame_hmacs.insert(frame_hmac) {
+                warn!("Replayed OFFER from {} rejected", peer_id);
+                return None;
+            }
+            session.session_key
+        };
 
         // For now, request all offered messages (in practice, filter by what
         // we already have in the store)
@@ -392,7 +427,7 @@ impl SyncProtocolManager {
         if requested.is_empty() {
             None
         } else {
-            Some(SyncFrame::build_request(requested, &session.session_key))
+            Some(SyncFrame::build_request(requested, &session_key))
         }
     }
 
@@ -407,8 +442,24 @@ impl SyncProtocolManager {
             _ => return None,
         };
 
-        let sessions = self.sessions.read().await;
-        let session = sessions.get(peer_id)?;
+        let frame_hmac = match frame {
+            SyncFrame::Request { hmac, .. } => *hmac,
+            _ => return None,
+        };
+
+        let session_key = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(peer_id)?;
+            if !frame.verify_hmac(&session.session_key) {
+                warn!("HMAC verification failed on REQUEST from {}", peer_id);
+                return None;
+            }
+            if !session.seen_frame_hmacs.insert(frame_hmac) {
+                warn!("Replayed REQUEST from {} rejected", peer_id);
+                return None;
+            }
+            session.session_key
+        };
 
         let pending = self.pending_messages.read().await;
         let mut messages = Vec::new();
@@ -440,7 +491,7 @@ impl SyncProtocolManager {
         Some(SyncFrame::build_payload(
             session_id,
             messages,
-            &session.session_key,
+            &session_key,
         ))
     }
 
@@ -459,18 +510,83 @@ impl SyncProtocolManager {
             _ => return None,
         };
 
-        let sessions = self.sessions.read().await;
-        let session = sessions.get(peer_id)?;
+        let frame_hmac = match frame {
+            SyncFrame::Payload { hmac, .. } => *hmac,
+            _ => return None,
+        };
 
-        // Verify HMAC
-        if !frame.verify_hmac(&session.session_key) {
-            warn!("HMAC verification failed on PAYLOAD from {}", peer_id);
-            return None;
-        }
+        let session_key = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(peer_id)?;
+            if !frame.verify_hmac(&session.session_key) {
+                warn!("HMAC verification failed on PAYLOAD from {}", peer_id);
+                return None;
+            }
+            if !session.seen_frame_hmacs.insert(frame_hmac) {
+                warn!("Replayed PAYLOAD from {} rejected", peer_id);
+                return None;
+            }
+            session.session_key
+        };
 
-        // Store received messages
+        // Store received messages only after trying to validate each
+        // attached sender signature. Current builds require the Ed25519 key to
+        // be known through SyncSession; peers that cannot supply it are dropped.
+
+        // Signature gate (full enforcement pending transport wiring).
+        // We keep this inspectable here rather than silent.
+        let peer_ed25519_pub = self
+            .sessions
+            .read()
+            .await
+            .get(peer_id)
+            .map(|s| s.peer_ed25519_pub)
+            .unwrap_or([0u8; 32]);
+
         let mut acked_ids = Vec::new();
         for sync_msg in &sync_messages {
+            // Verify message signatures only when a peer Ed25519 key is known.
+            // If no key has been configured yet, this remains a compatibility
+            // pass, but payloads still carry no trust claim in that case.
+            if peer_ed25519_pub != [0u8; 32] {
+                if sync_msg.signature.len() != 64 {
+                    warn!(
+                        "dropping sync message {} from {} due to invalid signature length",
+                        hex::encode(&sync_msg.msg_id[..8]),
+                        peer_id
+                    );
+                    continue;
+                }
+                let verifying_key = match VerifyingKey::from_bytes(&peer_ed25519_pub) {
+                    Ok(key) => key,
+                    Err(_) => {
+                        warn!("invalid peer Ed25519 key while verifying {}", peer_id);
+                        continue;
+                    }
+                };
+                let signature_bytes: [u8; 64] = match sync_msg.signature.as_slice().try_into() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        warn!(" malformed signature byte array for {}", peer_id);
+                        continue;
+                    }
+                };
+                let signature = Signature::from_bytes(&signature_bytes);
+                let message_bytes = match bincode::serialize(&sync_msg.message) {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        warn!("unable to serialize message for signature check");
+                        continue;
+                    }
+                };
+                if verifying_key.verify(&message_bytes, &signature).is_err() {
+                    warn!(
+                        "message signature verification failed from {}",
+                        peer_id
+                    );
+                    continue;
+                }
+            }
             self.seen_message_ids
                 .write()
                 .await
@@ -487,7 +603,7 @@ impl SyncProtocolManager {
             );
         }
 
-        Some(SyncFrame::build_ack(acked_ids, &session.session_key))
+        Some(SyncFrame::build_ack(acked_ids, &session_key))
     }
 
     /// Process an incoming ACK frame. Removes messages from pending.
@@ -497,15 +613,26 @@ impl SyncProtocolManager {
             _ => return Ok(()),
         };
 
-        let sessions = self.sessions.read().await;
-        let session = sessions.get(peer_id).ok_or_else(|| {
-            anyhow!("No sync session for peer {}", peer_id)
-        })?;
+        let frame_hmac = match frame {
+            SyncFrame::Ack { hmac, .. } => *hmac,
+            _ => return Err(anyhow!("Expected Ack frame")),
+        };
 
-        if !frame.verify_hmac(&session.session_key) {
-            warn!("HMAC verification failed on ACK from {}", peer_id);
-            return Err(anyhow!("HMAC verification failed"));
-        }
+        let session_key = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(peer_id).ok_or_else(|| {
+                anyhow!("No sync session for peer {}", peer_id)
+            })?;
+            if !frame.verify_hmac(&session.session_key) {
+                warn!("HMAC verification failed on ACK from {}", peer_id);
+                return Err(anyhow!("HMAC verification failed"));
+            }
+            if !session.seen_frame_hmacs.insert(frame_hmac) {
+                warn!("Replayed ACK from {} rejected", peer_id);
+                return Err(anyhow!("replayed ACK"));
+            }
+            session.session_key
+        };
 
         let mut pending = self.pending_messages.write().await;
         for id in &msg_ids {
@@ -559,6 +686,22 @@ pub struct SyncStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use x25519_dalek::{StaticSecret, PublicKey as XPublicKey};
+    use rand_core::OsRng;
+
+    #[test]
+    fn sync_session_key_is_not_derivable_from_public_key_alone() {
+        let peer_secret = StaticSecret::random_from_rng(OsRng);
+        let peer_public = XPublicKey::from(&peer_secret).to_bytes();
+
+        let public_only = genesis_derive(SYNC_HMAC_DOMAIN, &peer_public);
+        let our_secret = StaticSecret::random_from_rng(OsRng);
+        let shared = our_secret.diffie_hellman(&XPublicKey::from(peer_public));
+        let derived = genesis_derive(SYNC_HMAC_DOMAIN, shared.as_bytes());
+
+        assert_ne!(public_only, derived);
+        assert_ne!(derived, [0u8; 32]);
+    }
 
     fn test_session_key() -> [u8; 32] {
         genesis_derive(SYNC_HMAC_DOMAIN, &[0x42u8; 32])

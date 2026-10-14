@@ -1,54 +1,31 @@
 # Security Policy
 
-## Supported Versions
+Canonical policy: [`ghostwire/SECURITY.md`](../ghostwire/SECURITY.md). This file exists so GitHub's security tab
+has a supported entry point; it does not replace that document's details.
 
-| Version | Supported |
-|---------|-----------|
-| 0.2.x   | ✅        |
+## Supported Versions
+The only currently supported development lineage is the repo's current rescue
+lineage. All previously shipped or public artefacts are unsupported and should be
+replaced.
 
 ## Reporting a Vulnerability
+1. Prefer GitHub private vulnerability reporting or email `security@ghostwire.cc`.
+2. Do not open a public issue and wait for a fix.
+3. Include description, reproduction, impact, OS/GhostWire version, PoC, and
+   disclosure timeline.
 
-We take the security of GhostWire seriously. If you believe you have found a security vulnerability, please report it responsibly:
+## Security Reality
+- GhostWire is pre-1.0 and has had no external security review.
+- Treat claims in this project as design intent, not verified properties.
+- The current codebase is experimental. There is no deployed network or released
+  security-supported product here.
 
-1. **Email**: security@ghostwire.cc
-2. **PGP Key**: Request via email
-3. **Response time**: Within 48 hours
+## Response Expectations
+- Acknowledgement: within 48 hours
+- Assessment: within 7 days
+- Low: next release; medium: 30 days; high: 14 days; critical: 7 days
+- Do not create a public issue before a fix exists.
 
-### What to Include
-
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-### What to Expect
-
-- **Acknowledgment**: Within 48 hours
-- **Assessment**: Within 7 days
-- **Fix timeline**: Depends on severity
-  - Critical: 7 days
-  - High: 14 days
-  - Medium: 30 days
-  - Low: Next release
-
-### Scope
-
-- Cryptographic implementations (Sphinx, DTN encryption)
-- CI/CD pipeline security
-- Crate publishing integrity
-- Secret management
-- Dependency supply chain
-
-### Out of Scope
-
-- Issues in dependencies (report to upstream maintainers)
-- Social engineering attacks
-- Physical security
-
-## Security Best Practices
-
-- All actions in CI/CD are SHA-pinned
-- Branch protection enabled on `main`
-- Least-privilege workflow permissions
-- Egress monitoring via `step-security/harden-runner`
-- No self-hosted runners (GitHub-hosted only)
+## Advisories
+We aim to request a CVE through private GitHub advisories only when a fix is
+available and described accurately.
