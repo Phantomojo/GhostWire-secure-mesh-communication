@@ -11,6 +11,7 @@ keywords = ["mesh", "networking", "security", "privacy", "p2p"]
 categories = ["network-programming", "security", "asynchronous"]
 
 [dependencies]
+matrix-sdk = { version = "0.16", optional = true }
 tokio = { version = "1.51", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 tower = { version = "0.5" }
@@ -19,8 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 serde_bytes = "0.11"
 toml = { version = "0.9" }
-jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
-libp2p = { version = "0.56", features = ["tokio", "macros", "tcp", "dns", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor", "memory-connection-limits", "websocket", "quic"] }
+jsonwebtoken = { version = "=10.3.0", features = ["aws_lc_rs"] }
+libp2p = { version = "0.56", features = ["dns", "tokio", "macros", "tcp", "noise", "yamux", "kad", "gossipsub", "mdns", "identify", "autonat", "relay", "dcutr", "ping", "request-response", "cbor", "memory-connection-limits", "websocket", "quic"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 quinn = "0.11"
 quinn-proto = "0.11"
@@ -40,7 +41,6 @@ pqcrypto-traits = { version = "0.3" }
 blake2b_simd = "1.0"
 blake3 = "1.5.0"
 blake2 = "0.10"
-pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
 getrandom = "0.2"
 shamir_secret_sharing = "0.1.1"
@@ -57,8 +57,6 @@ dashmap = "5.5"
 
 # AI/ML - ONNX Runtime for model inference
 ort = { version = "2.0.0-rc.4", features = ["download-binaries", "tls-rustls", "std"], default-features = false }
-ndarray = "0.15"
-ndarray-stats = "0.5"
 half = { version = "2.4", features = ["num-traits"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 hkdf = "0.12"
@@ -84,18 +82,15 @@ sled = "0.34"
 dirs = "6.0.0"
 # Bluetooth: bluer supports both central AND peripheral roles via BlueZ D-Bus
 # Works with ANY Bluetooth adapter that BlueZ supports (built-in, USB dongles, etc.)
-bluer = { version = "0.17", features = ["bluetoothd"] }
 qrcode-generator = "5.0"
 async-trait = { version = "0.1" }
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3" }
-matrix-sdk = { version = "0.16", optional = true }
 serialport = { version = "4.3", optional = true }
 obfstr = "0.4"              # compile-time string encryption
 secrecy = "0.8"             # sensitive type wrappers (no accidental logging of keys)
 rand_core = { version = "0.6", features = ["getrandom"] }
 time = "0.3.47"             # Required for jsonwebtoken 9.2.0
-proc-macro2 = "1.0"         # Edition 2024 support for time crate
 num-bigint = "0.4"          # Required for shamir_secret_sharing
 ratatui = "0.29"            # Terminal UI framework
 crossterm = "0.29"          # Terminal manipulation (used by ratatui)
