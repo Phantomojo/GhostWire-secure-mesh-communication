@@ -182,7 +182,7 @@ hlc-rs = "0.1"              # Hybrid Logical Clocks
 trust-store = "0.1"         # Web of Trust + TOFU key verification
 
 # Compression — Meshtastic-proven: zstd+dict for structured, lz4 for speed
-zstd = { version = "0.13", default-features = false, features = ["arrays", "legacy"] }
+zstd = { version = "0.14", default-features = false, features = ["arrays", "legacy"] }
 lz4_flex = { version = "0.11", default-features = false }
 
 # WebRTC media — voice/video calls over mesh
