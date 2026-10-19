@@ -10,7 +10,7 @@ scikit-learn>=1.9.1
 
 # Model inference
 onnxruntime>=1.31.0
-joblib>=1.5.3
+joblib>=1.6.0
 
 # Graph processing
 networkx>=3.6.1
