@@ -12,7 +12,7 @@
     "test:ui": "vitest --ui"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "@tauri-apps/cli": "^2.12.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
