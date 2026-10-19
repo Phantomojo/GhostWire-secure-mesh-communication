@@ -3,7 +3,7 @@
 
 # Core ML
 torch>=2.14.1
-torch-geometric>=2.8.0.post1
+torch-geometric>=2.8.1
 numpy>=2.5.1
 pandas>=3.0.3
 scikit-learn>=1.9.1
