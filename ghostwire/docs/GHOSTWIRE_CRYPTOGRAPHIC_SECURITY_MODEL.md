@@ -20,7 +20,7 @@ The newest checkout contains a vodozemac-oriented `crypto_machine.rs` prototype 
 
 Transport selection and cryptographic selection are separate. A transport may constrain frame size, ordering, fragmentation, retry, or store-and-forward behavior, but it must not choose a weaker key exchange, authentication scheme, KDF, or AEAD merely because it is convenient. The negotiated profile is authenticated in the handshake transcript and bound into application-envelope associated data.
 
-The first profile is `GW0-SESSION-1`, with classical X25519 plus authenticated Ed25519 identity binding, a domain-separated KDF, an audited ChaCha20-family AEAD, counter-based nonce discipline, and explicit replay windows. PQ hybrid support remains a future profile until ML-KEM is integrated, tested, and interoperable.
+The first profile is `GW0-SESSION-1`, with classical X25519 plus authenticated Ed25519 identity binding, a domain-separated KDF, an audited ChaCha20-family AEAD, counter-based nonce discipline, and explicit replay windows. ML-KEM-768 (pqcrypto-mlkem) IS now integrated in encryption.rs with HKDF-SHA256 mixing and downgrade prevention (pq_key included in signature). The hybrid (X25519 + ML-KEM-768) path is active in encrypt/decrypt. What remains: formal audit, cross-implementation interoperability testing, and PQ profile selection for at-rest state.
 
 ## Binary and release integrity
 

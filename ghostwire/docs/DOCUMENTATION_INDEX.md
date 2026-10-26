@@ -60,7 +60,7 @@
 
 | Document | Priority | Description |
 |----------|----------|-------------|
-| **Wire Protocol Spec** | HIGH | Message framing, byte layout, version negotiation |
+| **Wire Protocol Spec** | HIGH | Message framing, byte layout, version negotiation. NOTE: wire_protocol.rs exists with full binary frame format (magic, kind, payload_len, bincode, BTP stream encryption, replay protection, cover traffic). No standalone spec document yet — implementation is the spec. |
 | **LINDDUN Privacy Analysis** | MEDIUM | STRIDE + LINDDUN privacy threat extension |
 | **Formal Verification** | LOW | Tamarin prover specs for crypto protocols |
 | **SDK Reference** | LOW | Auto-generated API reference via rustdoc |
