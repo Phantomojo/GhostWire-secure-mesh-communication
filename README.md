@@ -24,7 +24,7 @@
 
 GhostWire is a **decentralized networking protocol** — not an app. It provides the cryptographic, routing, and transport layers that developers can build communication tools on top of.
 
-The reference implementation is written in **Rust** and includes a working mesh node with encrypted messaging, AI-powered routing, post-quantum cryptography, and delay-tolerant networking.
+The reference implementation is written in **Rust** and includes a working mesh node with encrypted messaging, hybrid (X25519 + ML-KEM-768) cryptography in code, and delay-tolerant networking. Post-quantum interoperability and formal audit are pending.
 
 **Built for:** Disaster responders, rural communities, privacy advocates, researchers, and anyone who needs communication that works regardless of the odds.
 
@@ -71,7 +71,7 @@ The reference implementation is written in **Rust** and includes a working mesh 
 | **🚨 Coercion Resistance** | Duress PIN, panic wipe, dead man's switch — protection against physical coercion |
 | **🧠 Web of Trust** | TOFU key pinning with signed attestations and computed trust scores |
 | **📚 Knowledge Ark** | Decentralized knowledge commons — share code, docs, datasets across the mesh |
-| **🔗 Protocol Bridges** | Interoperability with Matrix, Meshtastic, Briar, Reticulum networks |
+| **🔗 Protocol Bridges** | Adapter framework exists for Matrix, Meshtastic, Briar, Reticulum — Briar bridge uses demo keys; not production-tested |
 
 ---
 
@@ -379,7 +379,7 @@ This README keeps that same posture plainly, because hidden optimistic language 
 - [ ] Full Double Ratchet with DH steps
 - [ ] GNN routing optimization (target: 85%+ accuracy)
 - [ ] Mobile clients (Tauri Android/iOS)
-- [ ] Reticulum (RNS) transport integration — core bridge complete, hybrid symbiosis in progress
+- [ ] Reticulum (RNS) transport integration — core bridge complete, RNS initialized (post-2026-10-26), hybrid symbiosis in progress, does not carry traffic yet
 
 ### 📋 Planned
 - [ ] Voice over mesh (VoIP)

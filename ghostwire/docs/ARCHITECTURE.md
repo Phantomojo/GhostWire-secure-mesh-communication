@@ -236,7 +236,7 @@ Cover Traffic Padding (512B blocks)
     ↓
 Transport Selection:
   ├── libp2p TCP + Noise + yamux (primary)
-  ├── Reticulum RNS (AutoInterface / TCP targets) — WORKING
+  ├── Reticulum RNS (AutoInterface / TCP targets) — INITIALIZED (post-2026-10-26), standby; does not carry traffic yet (libp2p is primary)
   ├── Circuit Relay v2 (fallback)
   ├── Bluetooth BLE (local mesh) — NOT IMPLEMENTED
   ├── Obfs4 (censorship circumvention) — NOT IMPLEMENTED
