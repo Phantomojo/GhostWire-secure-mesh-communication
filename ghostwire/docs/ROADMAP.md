@@ -54,3 +54,19 @@ Store-and-forward (Layer 2) — closest to working. Mailbox purge wired, reconne
 - Starting new features before wiring the previous one
 - Claiming features in README/truth ledger that aren't tested end-to-end
 - Research subagent → design doc → module → move on (produces scaffolding, not software)
+
+## Standing Constraint (every stage)
+
+At EVERY stage — design, research, wiring, testing — evaluate:
+- **Security**: Does this change introduce a new attack surface? Does it weaken existing guarantees? Are inputs validated? Are keys handled safely?
+- **Privacy**: Does this change leak metadata (sender, recipient, timestamp, size)? Does it expose peer relationships? Does it create correlation opportunities?
+- **Anonymity**: Does this change link a DID to a PeerId? Does it expose network topology? Does it enable traffic analysis?
+
+No feature is "done" without passing this evaluation. This is not a phase — it is a lens applied to every change, at every layer.
+
+### Specific concerns per layer
+- **Transport**: BLE/WiFi discovery leaks proximity. RNS announces leak network topology. mDNS leaks presence on LAN.
+- **Routing**: Sphinx hop IDs are real PeerIds (privacy leak). Cross-transport discovery links RNS address to PeerId. DTN bundles expose destination hashes.
+- **Privacy**: Sealed sender must hide sender identity. Metadata (sender/recipient/timestamp/size) visible on shared DM topic. DID-PeerId correlation is a known defect.
+- **UX**: Message read receipts leak activity patterns. Typing indicators leak presence. Unread counts leak communication frequency.
+- **Quality**: Unwrap/panic can crash daemon and expose state. Unbounded collections enable DoS. Error messages leak internal details.
