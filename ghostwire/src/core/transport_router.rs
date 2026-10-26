@@ -73,7 +73,7 @@ impl TransportRouter {
         if has_libp2p && !has_rns {
             if let Some(ref pid) = peer.libp2p_peer_id {
                 // Find the best libp2p transport address
-                for kind in &[TransportKind::Quic, TransportKind::StealthTcp] {
+                for kind in &[TransportKind::Mesh] {
                     if let Some(addr) = peer.transports.get(kind) {
                         if let crate::core::peer_table::TransportAddr::LibP2p(multiaddr) =
                             &addr.address
@@ -107,9 +107,9 @@ impl TransportRouter {
         }
 
         match best_kind {
-            Some(TransportKind::Quic) | Some(TransportKind::StealthTcp) => {
+            Some(TransportKind::Mesh) => {
                 if let Some(ref pid) = peer.libp2p_peer_id {
-                    if let Some(addr) = peer.transports.get(&best_kind.unwrap_or(TransportKind::Quic)) {
+                    if let Some(addr) = peer.transports.get(&best_kind.unwrap_or(TransportKind::Mesh)) {
                         if let crate::core::peer_table::TransportAddr::LibP2p(multiaddr) =
                             &addr.address
                         {

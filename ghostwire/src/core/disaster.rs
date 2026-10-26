@@ -58,8 +58,6 @@ pub enum DisasterLevel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TransportType {
     Mesh,
-    Quic,
-    StealthTcp,
     WiFi,
     Bluetooth,
     LoRa,
@@ -70,8 +68,6 @@ impl TransportType {
     pub fn name(&self) -> &'static str {
         match self {
             TransportType::Mesh => "mesh",
-            TransportType::Quic => "quic",
-            TransportType::StealthTcp => "stealth_tcp",
             TransportType::WiFi => "wifi",
             TransportType::Bluetooth => "bluetooth",
             TransportType::LoRa => "lora",
@@ -81,8 +77,6 @@ impl TransportType {
 
     pub fn capability_flag(&self) -> u16 {
         match self {
-            TransportType::StealthTcp => CAPABILITY_TCP,
-            TransportType::Quic => CAPABILITY_QUIC,
             TransportType::Mesh => CAPABILITY_MESH,
             TransportType::WiFi => CAPABILITY_WIFI,
             TransportType::Bluetooth => CAPABILITY_BLUETOOTH,
@@ -94,8 +88,6 @@ impl TransportType {
     pub fn supports(remote_capabilities: u16) -> Vec<TransportType> {
         let mut supported = Vec::new();
         let flags = [
-            (CAPABILITY_TCP, TransportType::StealthTcp),
-            (CAPABILITY_QUIC, TransportType::Quic),
             (CAPABILITY_MESH, TransportType::Mesh),
             (CAPABILITY_WIFI, TransportType::WiFi),
             (CAPABILITY_BLUETOOTH, TransportType::Bluetooth),
@@ -201,11 +193,7 @@ pub struct DisasterPolicy {
 impl Default for DisasterPolicy {
     fn default() -> Self {
         Self {
-            normal_priority: vec![
-                TransportType::Quic,
-                TransportType::StealthTcp,
-                TransportType::Mesh,
-            ],
+            normal_priority: vec![TransportType::Mesh],
             congested_priority: vec![TransportType::Mesh, TransportType::WiFi],
             isolation_priority: vec![TransportType::WiFi, TransportType::Bluetooth],
             blackout_priority: vec![TransportType::LoRa],

@@ -47,7 +47,9 @@ export default function CommunicationPanel() {
 
   useEffect(() => {
     const relevant = state.messages.filter(m =>
-      recipient === 'broadcast' || m.sender === recipient || m.recipient === recipient || m.sender === myId
+      recipient === 'broadcast'
+        ? m.recipient === 'broadcast'
+        : (m.recipient !== 'broadcast' && (m.sender === recipient || m.recipient === recipient || m.sender === myId))
     );
     if (relevant.length > 0) {
       setLocalMsgs(prev => {
@@ -128,9 +130,12 @@ export default function CommunicationPanel() {
                   <div style={{ display:'flex',gap:6,alignItems:'center',marginTop:4,justifyContent:'flex-end' }}>
                     {m.encrypted && <span className="ops-tag ops-tag-sig" style={{ fontSize:8,padding:'1px 4px' }}>⬢ E2E</span>}
                     <span style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t3)' }}>{m.timestamp?fmt(m.timestamp):''}</span>
+                    {isMe && <span style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t3)' }}>
+                      {m.delivery_status === 'read' ? '✓✓' : m.delivery_status === 'delivered' ? '✓✓' : m.delivery_status === 'sent' ? '✓' : '○'}
+                    </span>}
                   </div>
                 </div>
-                {!isMe && <div style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t4)',margin:'2px 4px' }}>{m.sender?.slice(0,10)}</div>}
+                {!isMe && <div style={{ fontFamily:'var(--mono)',fontSize:9,color:'var(--t4)',margin:'2px 4px' }}>{(() => { const p = state.peers.find(x => x.id === m.sender || x.node_id === m.sender); return p?.nickname || p?.username || m.sender?.slice(0,10); })()}</div>}
               </div>
             );
           })}

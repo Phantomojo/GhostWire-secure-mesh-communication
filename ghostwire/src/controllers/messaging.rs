@@ -59,7 +59,7 @@ impl MessagingController {
             .expect("Time went backwards")
             .as_secs();
 
-        let sender_id = state.core.read().await.get_identity_id().await;
+        let sender_id = state.core.read().await.get_local_peer_id().await;
         let message = crate::core::message::Message::new(
             sender_id,
             "broadcast".to_string(),
@@ -139,7 +139,7 @@ impl MessagingController {
             .into_response();
         }
 
-        let sender_id = state.core.read().await.get_identity_id().await;
+        let sender_id = state.core.read().await.get_local_peer_id().await;
 
         let recipient = if payload.recipient == "broadcast" || payload.recipient.is_empty() {
             "broadcast".to_string()

@@ -472,6 +472,22 @@ impl ProfilesController {
         State(state): State<Arc<AppState>>,
         axum::extract::Path(name): axum::extract::Path<String>,
     ) -> impl IntoResponse {
+        // Validate profile name to prevent path traversal
+        if name != "default"
+            && (!name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                || name.is_empty()
+                || name.len() > 64)
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error(
+                    StandardErrorCode::InvalidInput.as_str(),
+                    "Invalid profile name. Use only alphanumeric characters, underscores, and hyphens.",
+                )),
+            )
+                .into_response();
+        }
+
         // Cannot delete active profile ("default" when profile is None)
         let current = {
             let core = state.core.read().await;

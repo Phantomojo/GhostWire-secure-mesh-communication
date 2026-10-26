@@ -62,8 +62,6 @@ impl Default for WebRtcTransportConfig {
 /// Transport mode tier — determined by auto-detection
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransportTier {
-    /// Tier 1: stealth TCP (traffic looks like TLS but not any known protocol)
-    StealthTcp,
     /// Tier 2: WebRTC data channel (traffic looks like video calls)
     WebRtcDataChannel,
     /// Tier 3: WebRTC video steganography (traffic IS a video call, data hidden in VP8)
@@ -78,7 +76,6 @@ impl TransportTier {
     /// Human-readable description for status bar display
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::StealthTcp => "Stealth",
             Self::WebRtcDataChannel => "WebRTC",
             Self::WebRtcStego => "Covert",
             Self::HttpsFronting => "Fronted",
@@ -89,7 +86,6 @@ impl TransportTier {
     /// Color for the UI status indicator
     pub fn status_color(&self) -> &'static str {
         match self {
-            Self::StealthTcp => "green",
             Self::WebRtcDataChannel => "teal",
             Self::WebRtcStego => "purple",
             Self::HttpsFronting => "amber",
@@ -101,13 +97,6 @@ impl TransportTier {
 /// Probes connectivity to determine which tier to use.
 /// Called by AutoTransportSwitcher every 10 minutes and on connection failure.
 pub async fn probe_and_select_tier(target_peers: &[String]) -> TransportTier {
-    // Probe tier 1: stealth TCP
-    if probe_stealth_tcp(target_peers).await {
-        tracing::debug!("Transport probe: Tier 1 (stealth TCP) available");
-        return TransportTier::StealthTcp;
-    }
-    tracing::info!("Transport probe: Tier 1 blocked, escalating to Tier 2 (WebRTC)");
-
     // Probe tier 2: WebRTC
     if probe_webrtc_data_channel().await {
         tracing::info!("Transport probe: Tier 2 (WebRTC) available");
@@ -126,26 +115,6 @@ pub async fn probe_and_select_tier(target_peers: &[String]) -> TransportTier {
     // Last resort: offline only
     tracing::error!("Transport probe: All internet tiers blocked — offline mode");
     TransportTier::OfflineOnly
-}
-
-async fn probe_stealth_tcp(peers: &[String]) -> bool {
-    // Attempt a stealth TCP connection to any known peer
-    // In production: try connecting to bootstrap nodes via stealth TCP
-    // For now: check if we can open a TCP connection at all
-    for peer in peers.iter().take(3) {
-        let addr = format!("{}:8080", peer);
-        if tokio::time::timeout(
-            Duration::from_secs(5),
-            tokio::net::TcpStream::connect(&addr),
-        )
-        .await
-        .is_ok()
-        {
-            return true;
-        }
-    }
-    // Default to true if no peers to probe — assume stealth TCP works
-    peers.is_empty()
 }
 
 async fn probe_webrtc_data_channel() -> bool {
@@ -518,6 +487,6 @@ mod tests {
     #[test]
     fn transport_tier_display() {
         assert_eq!(TransportTier::WebRtcDataChannel.display_name(), "WebRTC");
-        assert_eq!(TransportTier::StealthTcp.status_color(), "green");
+        assert_eq!(TransportTier::OfflineOnly.status_color(), "gray");
     }
 }

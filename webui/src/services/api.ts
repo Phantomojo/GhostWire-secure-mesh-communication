@@ -77,6 +77,9 @@ export interface MessageV2 {
   timestamp: number;
   encrypted: boolean;
   message_type: string;
+  encryption_status?: string;
+  delivery_status?: string;
+  read?: boolean;
 }
 
 export interface SecurityDashboardV2 {
@@ -607,6 +610,8 @@ function normaliseWsEvent(raw: unknown): WsEvent | null {
     if (p.PeerConnected)    return { type: 'peer_connected',     payload: { peer_id: p.PeerConnected as string } };
     if (p.PeerDisconnected) return { type: 'peer_disconnected',  payload: { peer_id: p.PeerDisconnected as string } };
     if (p.NetworkUpdate)    return { type: 'network_update',     payload: p.NetworkUpdate as { active_peers: number; latency_ms: number } };
+    if (p.DtnBundle)        return { type: 'dtn_bundle',         payload: p.DtnBundle as { cid: string; from: string } };
+    if (p.ChannelMessage)   return { type: 'channel_message',    payload: p.ChannelMessage as { channel_id: string; text: string } };
   }
   if (r.type === 'message' && r.message) {
     return { type: 'message', payload: r.message as MessageV2 };

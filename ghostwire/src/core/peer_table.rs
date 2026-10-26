@@ -26,8 +26,6 @@ impl IdentityId {
 /// Transport kind — matches the existing TransportType enum
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum TransportKind {
-    Quic,
-    StealthTcp,
     Mesh,
     Bluetooth,
     WiFi,

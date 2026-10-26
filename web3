@@ -1,53 +1,299 @@
-# 👻 GhostWire: The Web3 / Crypto Roadmap
+# GhostWire Web3 Decentralization Technology Roadmap
 
-This document outlines how Web3 and Cryptographic primitives can evolve GhostWire into a truly uncensorable, decentralized, and economically sustainable emergency communication infrastructure.
+> **Scope correction (2026-10):** Web3 here means **decentralization technology** —
+> architectural patterns, protocols, and mechanisms that make systems resilient,
+> censorship-resistant, and decentralized. Token economics, DeFi yields, trading,
+> NFTs, money flows, incentive tokens, and payment settlement are explicitly out
+> of scope. GhostWire is an anonymous mesh network; the value of Web3 to it is in
+> *how* decentralized systems are built.
 
----
-
-## 🏛️ 1. The Phantom Registry (Identity Concierge)
-**Problem**: How to have human-friendly IDs (@RescueTeam) without a central "Switchboard" or internet connection.
-**Solution**: Use a **Distributed Hash Table (DHT)** where every node in the mesh holds a piece of the "Phonebook."
-- **Handle Mapping**: Hashing human names to Public Keys (ED25519) across the mesh segments.
-- **Concierge Nodes**: Specific high-repute nodes that volunteer to index handles and announce them via the mesh-whisper protocol.
-
-## 🔒 2. Stealth Identities (Zero-Knowledge)
-**Problem**: Keeping metadata private while using a public identity.
-**Solution**: **ZK-Proofs and Stealth Addresses.**
-- Users prove they own a handle or have the right to use the mesh without revealing their transaction/chat history on any public ledger.
-- Audio and text content remains End-to-End Encrypted (E2EE) and never touches a blockchain.
-
-## 🚀 3. Emergency Priority (The Security Lane)
-**Problem**: Balancing civilian use with critical security/rescue traffic during a crisis.
-**Solution**: **Priority Tokens.**
-- Specialized tokens (issued to verified emergency services) allow their packets to "Jump the Queue" in the mesh routing layer.
-- **Status Tiers**: Civilian (standard), Security (Fast), Emergency (Instant).
-
-## 🔋 4. DePIN Incentive Layer (The Mining of Bandwidth)
-**Problem**: Why should users keep their gear running 24/7?
-**Solution**: **Proof of Service.**
-- Nodes are rewarded for the bytes they route, the uptime they provide, and the "Concierge" services they perform.
-- **$GHOST Tokens**: Earned for supporting the mesh; can be used to request higher-priority storage or data retrieval.
-
-## 📦 5. Store-and-Forward ("Carrier Pigeons")
-**Problem**: Fragmented mesh segments (e.g., Westlands and CBD are disconnected).
-**Solution**: **Encrypted Buffer Nodes.**
-- Messages are stored at the edge of a segment and "forwarded" when a mobile node (like a Matatu or an Emergency Vehicle) moves from one segment to another.
-
-## 💳 6. Offline-Settlement (Mesh IOUs)
-**Problem**: How to use "Crypto" when there is no internet?
-**Solution**: **State-Channel IOUs.**
-- Nodes sign cryptographic "I Owe You" notes for routing services. 
-- These are settled on a Layer 2 (L2) blockchain automatically when the node eventually finds a WiFi or 4G signal.
-- **Research Finding**: State channels enable infinite off-chain transactions between opening/closing, ideal for mesh scenarios
-- **Comparable Projects**: Study Helium Mobile (earning MOBILE tokens, 89-418Mbps benchmarks) and Pollen community bandwidth sharing
+GhostWire already ships several of these primitives in `ghostwire-libs/crates/`
+(`ghostwire-dtn`, `hlc-rs`, `sphinx-rs`, `trust-store`). This document maps the
+remaining decentralization techniques to concrete GhostWire applications.
 
 ---
 
-### **Engineering Goals (Research-Validated)**
-- [ ] Implement **Kademlia DHT** for handle lookup (performs well in mobile/mesh with tuned churn handling)
-- [ ] Replace OIDC with **Local Public-Key Identity** (Ed25519 + X25519)
-- [ ] Add **Priority-Queuing** logic with QoS tiers (Civilian/Security/Emergency)
-- [ ] Implement **Gossipsub mesh pruning** and score-based peer selection to resist Sybil attacks
-- [ ] Create **State Channel IOU system** with cryptographic signing for offline payment settlement
-- [ ] Deploy **ONNX Runtime Micro** for on-device anomaly detection (MobileNetV3 INT8 quantized)
-- [ ] Design **Kiwix chunking strategy** for distributing 40-50GB Wikipedia across constrained storage nodes
+## 1. Decentralized Identity (DIDs, VCs, SSI)
+
+**Core mechanism.** A Decentralized Identifier (DID) is a globally unique
+identifier (`did:<method>:<id>`) resolved to a DID Document containing public
+keys, authentication methods, and service endpoints — with no central registry.
+Verifiable Credentials (VCs) are cryptographically signed attestations issued by
+one party, held by a subject, and verified by any third party against the
+issuer's public key. Self-Sovereign Identity (SSI) puts key control in the
+owner's hands; the verifier needs no central authority, only the issuer's public
+key.
+
+**Examples.** W3C DID/VC specs; Sovrin/Hyperledger Indy adapted to IoT mesh
+(Schnorr signatures, simplex/broadcast connections); libp2p peer IDs as implicit
+DIDs.
+
+**GhostWire lesson.** Replace OIDC-style central auth with **local Ed25519 +
+X25519 keypairs as node DIDs** (already planned). Node handle → pubkey mapping
+lives in the Kademlia DHT (§4), not a server. VCs can attest roles ("verified
+rescue team", "trusted relay") so peers grant priority without a CA. Keep DIDs
+offline-resolvable: cache DID documents in the mesh so identity works with no
+internet.
+
+## 2. Content-Addressed Storage (IPFS, Merkle DAGs)
+
+**Core mechanism.** Content is identified by a cryptographic hash of its bytes
+(CID), not by location. A Merkle DAG links immutable blocks via hashes; any
+tampering changes the root hash, so integrity is verifiable by anyone holding
+the hash. Data is replicated across peers; availability degrades gracefully.
+
+**Examples.** IPFS (CID + BitSwap block exchange + Merkle DAG), Git object
+model.
+
+**GhostWire lesson.** Address mesh messages, files, and channel state by
+**content hash (CID-style)** rather than sender-assigned IDs. This gives
+tamper-evident messages, automatic deduplication, and the ability to fetch a
+block from any peer that has it — ideal for fragmented mesh segments.
+Store-and-forward (§6) becomes "replicate blocks by hash."
+
+## 3. Consensus Without Central Coordination (CRDTs, Gossip, Vector Clocks)
+
+**Core mechanism.** CRDTs are data structures whose merge function is a bounded
+join-semilattice (commutative, associative, idempotent), so concurrent updates
+converge deterministically with no coordinator. Vector clocks track causality
+(`(node, counter)` pairs) and detect conflicts; hybrid logical clocks (HLC)
+combine physical time + logical counters for total order without synced clocks.
+Gossip epidemically disseminates state in O(k log n) messages.
+
+**Examples.** Amazon Dynamo (vector clocks), Riak (CRDTs), Cassandra gossip,
+`hlc-rs` (already in GhostWire).
+
+**GhostWire lesson.** Model mutable shared state (channel membership, presence,
+routing tables) as **CRDTs merged via gossip**, ordered by the existing
+`hlc-rs`. This eliminates central coordination for state agreement and tolerates
+partitions. Keep conflict resolution at the data-structure level (commutative
+ops), not application-level last-write-wins, to avoid silent data loss.
+
+## 4. Routing Resilience (DHTs, MANET Routing, Epidemic Routing)
+
+**Core mechanism.** Kademlia uses XOR-distance metric + k-buckets + parallel
+(α=3) asynchronous lookups, giving O(log n) hops and fast failure tolerance.
+Chord (ring + finger tables) and Pastry (prefix routing) are alternatives;
+S-Kademlia adds trust/reputation against Sybil. For wireless mesh, BATMAN/OLSR
+provide link-state routing; epidemic/Spray-and-Wait routing handles intermittent
+connectivity.
+
+**Examples.** Kademlia (BitTorrent, IPFS, Ethereum), BATMAN-adv, OLSR,
+Spray-and-Wait, PRoPHET (already in `ghostwire-dtn`).
+
+**GhostWire lesson.** Implement **Kademlia DHT for handle/peer lookup** (already
+in engineering goals) with S-Kademlia-style reputation to resist Sybil in a
+permissionless mesh. Combine with epidemic Spray-and-Wait + PRoPHET (already
+shipped) for DTN segments. Use parallel lookups so a single dead node doesn't
+block resolution.
+
+## 5. Privacy-Preserving Communication (Onion Routing, Mixnets, Noise, PFS)
+
+**Core mechanism.** Onion routing wraps messages in layered encryption; each hop
+peels one layer, knowing only predecessor/successor. Mixnets add shuffling +
+delays for stronger metadata (unlinkability) protection at latency cost. The
+Noise protocol framework provides authenticated key exchange with forward
+secrecy; perfect forward secrecy (PFS) ensures past sessions stay secret even if
+keys leak later. Cover traffic (dummy messages) hides traffic patterns.
+
+**Examples.** Tor (onion routing), Sphinx (already in `sphinx-rs`), Noise
+(libp2p, WireGuard), Nym (mixnet).
+
+**GhostWire lesson.** GhostWire already has `sphinx-rs` (bitwise-unlinkable
+onion routing with SURBs) — **make it the default transport for sensitive
+traffic**, not an option. Add Noise-based handshakes with PFS for all peer
+links, and optional cover traffic on high-risk links. Keep onion routing's
+latency tradeoff explicit: onion for anonymity-critical, direct Noise for
+latency-critical.
+
+## 6. Offline-First Protocols (DTN, Bundle Protocol, Store-and-Forward)
+
+**Core mechanism.** DTN adds a bundle layer (RFC 9171) over transports:
+messages are self-contained bundles with source/dest EIDs, lifetime, and
+custody transfer. Intermediate nodes store bundles until a contact opportunity,
+then forward; custody transfer shifts delivery responsibility. Convergence Layer
+Adapters (CLAs) map bundles onto any underlying link.
+
+**Examples.** NASA DTN, Bundle Protocol v7, Reticulum (already working in
+GhostWire).
+
+**GhostWire lesson.** GhostWire's Reticulum transport + `ghostwire-dtn` already
+implement this. Formalize **bundle lifetimes + custody transfer** as
+first-class in the transport manager so messages survive partitions with
+explicit expiry and accountability. Add CLA abstraction so the same bundle layer
+runs over BLE, WiFi Direct, LoRa, etc.
+
+## 7. Key Management and Trust (Threshold Sigs, MPC, Social Recovery)
+
+**Core mechanism.** Threshold signatures (t-of-n) require a subset to sign; the
+private key is never materialized. MPC splits keys into shares across nodes;
+DKG generates shares without a trusted dealer. Social recovery splits a root
+secret via Shamir into shares held by trusted contacts. TEEs protect shares in
+hardware.
+
+**Examples.** MuSig/Schnorr threshold, DFNS MPC, Sui multisig, Shamir secret
+sharing.
+
+**GhostWire lesson.** For high-value node identities (rescue team keys, relay
+authority), use **threshold signatures (t-of-n) across multiple devices** so no
+single compromised device can impersonate. For ordinary users, keep simple
+single-key Ed25519 but add **social recovery** (Shamir shares to trusted
+contacts) to avoid lockout. Never store full keys in software; prefer OS
+keystore/TEE.
+
+## 8. Self-Healing and Fault Tolerance (Gossip Failure Detection)
+
+**Core mechanism.** SWIM replaces O(n²) heartbeating with: ping one random
+peer per round; on timeout, ask k peers to indirectly probe; mark suspect →
+(after timeout without refutation) failed. Suspicion piggybacks on gossip.
+Phi-accrual outputs a continuous suspicion score adapting to latency variance.
+Lifeguard adds self-reporting degraded nodes.
+
+**Examples.** HashiCorp memberlist (SWIM), Cassandra (phi-accrual + gossip),
+Consul.
+
+**GhostWire lesson.** Add **SWIM-style membership + failure detection** to the
+mesh layer: O(1) per-node load, indirect probing to avoid false positives on
+asymmetric partitions (common in wireless), suspicion piggybacked on existing
+gossip. Use phi-accrual thresholds tuned per link type (BLE vs WiFi). This
+directly improves the "2/12 transports working" reliability story.
+
+## 9. Decentralized Naming and Discovery (ENS, mDNS, DNS-SD, Rendezvous)
+
+**Core mechanism.** mDNS/DNS-SD uses IP multicast DNS records for zero-config
+local discovery (`_p2p._udp.local`). libp2p rendezvous lets peers exchange
+multiaddresses securely via a rendezvous point. DHT-based naming (ENS-style)
+maps human names to keys without a central DNS.
+
+**Examples.** libp2p mDNS, DNS-SD, libp2p rendezvous, ENS.
+
+**GhostWire lesson.** Use **mDNS/DNS-SD for zero-config LAN discovery** (already
+natural for libp2p), **libp2p rendezvous for cross-network peer introduction**,
+and the **Kademlia DHT for human-readable handles → pubkey**. No DNS, no
+registrar, works offline on local links.
+
+## 10. Zero-Knowledge Proofs and Selective Disclosure
+
+**Core mechanism.** ZK proofs let a prover convince a verifier a statement is
+true without revealing the underlying data. Selective disclosure (ZK over VCs)
+proves predicates (age>18, role=rescue) without revealing identity attributes.
+Client-side proving keeps raw data on device.
+
+**Examples.** zk-SNARKs (Zcash, Aztec), W3C VC + ZK extension, Midnight's
+programmable privacy.
+
+**GhostWire lesson.** For anonymous mesh, ZK allows **proving membership/role
+without revealing identity** — e.g., prove "I am a verified rescue responder"
+without exposing which responder. Apply to priority queuing (QoS tiers) so
+emergency traffic gets precedence without deanonymizing the sender. Keep proofs
+client-side; never transmit raw attributes.
+
+---
+
+## Prioritized Top 5 Most Impactful Lessons for GhostWire
+
+1. **Sphinx onion routing as default for sensitive traffic** (§5) — already
+   implemented in `sphinx-rs`; wiring it into the transport manager gives real
+   anonymity, the project's core promise. Highest impact per effort.
+2. **Kademlia DHT + S-Kademlia reputation for handle/peer discovery** (§4, §9)
+   — unblocks decentralized identity (§1) and naming; removes reliance on any
+   bootstrap server; directly in engineering goals.
+3. **CRDT state + HLC ordering via gossip** (§3) — turns fragmented mesh state
+   (channels, presence, routing) into self-converging data with no coordinator;
+   builds on existing `hlc-rs`.
+4. **DTN bundle lifetimes + custody transfer formalized in transport manager**
+   (§6) — makes store-and-forward (already in Reticulum/DTN) reliable and
+   accountable across all transports via CLA abstraction.
+5. **SWIM failure detection + phi-accrual** (§8) — fixes mesh reliability and
+   false positives on wireless links; O(1) per-node load; prerequisite for
+   trusting the mesh as it scales.
+
+### Secondary (high value, lower urgency)
+- Threshold signatures / social recovery for rescue-team keys (§7)
+- ZK selective disclosure for anonymous role proofs (§10)
+- Content-addressed message blocks (§2)
+- mDNS/DNS-SD zero-config LAN discovery (§9)
+
+### Superseded sections (from prior money-focused roadmap)
+The prior roadmap's "Priority Tokens", "$GHOST Tokens", "DePIN Incentive Layer",
+and "Offline-Settlement / Mesh IOUs" (token economics) are superseded by this
+document and are out of scope. Non-token items retained: Kademlia DHT handle
+lookup, local public-key identity (Ed25519 + X25519), QoS priority tiers
+(Civilian/Security/Emergency, now via VCs/ZK rather than tokens), Gossipsub
+mesh pruning + score-based peer selection, ONNX anomaly detection, Kiwix
+chunking.
+
+---
+
+## 11. Autonomous Research: Unrelated Technologies Applicable to GhostWire
+
+### 11.1 Mesh Routing: Babel (RFC 8966) over BATMAN/OLSR
+**Finding:** Babel (RFC 8966) outperformed both OLSR and BATMAN in real UAV
+mesh tests — it is mobility-designed, link-agnostic, and IETF-standardized.
+BATMAN-adv has slow convergence (~10s for link quality updates) and poor
+mobility. OLSR is good for dense networks but its MPR flooding is suboptimal
+for sparse topologies.
+
+**GhostWire lesson:** For IP-layer mesh routing over WiFi/BLE links, consider
+**Babel** as the primary routing protocol with OLSRv2 as fallback for dense
+deployments. Babel runs over any link (IBSS, 802.11s, wired), decoupling
+routing from chipset mesh-mode quirks. This is directly applicable to GhostWire's
+WiFi Direct and ManagedWiFi transports.
+
+### 11.2 Offline-First State Sync: Automerge CRDTs
+**Finding:** Automerge 2.0 rewrote its core in Rust (compiled to WASM), cutting
+memory usage ~10x. It provides CRDT-backed JSON documents with efficient sync
+(bloom filter → delta exchange). Yjs uses YATA algorithm for text/sequences.
+Electric SQL brings CRDT-style sync to PostgreSQL.
+
+**GhostWire lesson:** Use Automerge's Rust core for **offline-first channel state,
+presence, and routing table sync** across mesh nodes. Automerge works over any
+transport (including one-way channels), making it ideal for DTN segments where
+connectivity is intermittent. This complements the existing CRDT+HLC plan (§3).
+
+### 11.3 DTN: IBR-DTN
+**Finding:** IBR-DTN is a reference DTN implementation with bundle protocol v7
+support, convergence layer adapters, and custody transfer. It has been deployed
+in challenged networks (rural, disaster, space).
+
+**GhostWire lesson:** GhostWire already has Reticulum (which implements DTN
+concepts). Formalize the **CLA (Convergence Layer Adapter) abstraction** so the
+same bundle layer runs over BLE, WiFi Direct, LoRa, etc. — exactly as IBR-DTN
+does. This is already in the plan (§6).
+
+### 11.4 P2P Discovery: libp2p Rendezvous
+**Finding:** libp2p rendezvous protocol allows peers to register and discover
+each other through a rendezvous point, without a central server. It supports
+namespace-based discovery and authenticated registration.
+
+**GhostWire lesson:** Use **libp2p rendezvous** (already available in the
+libp2p crate) for cross-network peer introduction when mDNS is unavailable
+(internet-connected but no LAN). This complements mDNS (LAN) and Kademlia DHT
+(global).
+
+### 11.5 Privacy: Nym Mixnet
+**Finding:** Nym is a mixnet (not onion routing) that provides stronger
+metadata protection than Tor by adding timing obfuscation and cover traffic.
+It has higher latency (~100-500ms) but is more resistant to traffic analysis.
+
+**GhostWire lesson:** For **ultra-sensitive traffic** (whistleblower, journalist),
+consider Nym-style mixnet as an additional anonymity layer beyond Sphinx.
+The latency tradeoff is acceptable for non-real-time communication. Keep Sphinx
+for real-time, Nym for store-and-forward.
+
+### 11.6 Local-First Databases: SQLite + CRDT
+**Finding:** SQLite with CRDT extensions (e.g., cr-sqlite) enables local-first
+databases that sync automatically. Electric SQL syncs Postgres to local SQLite.
+
+**GhostWire lesson:** Use **cr-sqlite** for local-first persistence of mesh
+state (routing tables, channel membership, presence). Changes sync automatically
+via CRDT merge when peers reconnect. This is simpler than building custom sync
+and leverages SQLite's reliability.
+
+### Prioritized Addition to Top 5
+6. **Babel routing for WiFi/BLE mesh links** (§11.1) — mobility-designed,
+   standardized, outperforms BATMAN in real tests.
+7. **Automerge Rust core for offline state sync** (§11.2) — 10x memory
+   improvement, works over any transport including DTN.
+8. **cr-sqlite for local-first persistence** (§11.6) — automatic CRDT sync
+   via SQLite, simpler than custom sync.

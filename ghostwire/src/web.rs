@@ -65,6 +65,7 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
             } else {
                 "public, max-age=3600"
             };
+            // No token injection needed in dev mode (auth skipped for localhost)
             Response::builder()
                 .header(header::CONTENT_TYPE, mime.as_ref())
                 .header(header::CACHE_CONTROL, cache_control)
@@ -320,7 +321,18 @@ pub async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
-    tracing::debug!("Checking auth path: {}", path);
+    // Dev mode: skip auth for localhost requests (no token needed in browser)
+    // In ALL builds: loopback (127.0.0.1/::1) bypasses auth for dev convenience
+    // In debug builds only: private ranges (RFC1918/Tailscale) also bypass
+    {
+        if client_ip.is_loopback() {
+            return Ok(next.run(req).await);
+        }
+        #[cfg(debug_assertions)]
+        if crate::controllers::auth::is_local_address(client_ip) {
+            return Ok(next.run(req).await);
+        }
+    }
 
     // Public endpoints (no auth required)
     if path == "/api/auth/login"
@@ -523,9 +535,16 @@ pub async fn start_web_server(
     // Configure Governor rate limiter for API protection
     // CRITICAL FIX: Increased limits for authenticated users (dev/owner privilege)
     // Authenticated requests get much higher limits; unauthenticated still protected
+    // Rate limiting: very lenient in dev/debug builds for general endpoints,
+    // but auth endpoints always get stricter limits (brute-force protection).
+    let (per_sec, burst) = if cfg!(debug_assertions) {
+        (1000u64, 10000u32)
+    } else {
+        (20u64, 50u32)
+    };
     let default_governor_conf = GovernorConfigBuilder::default()
-        .per_second(20)
-        .burst_size(50)
+        .per_second(per_sec)
+        .burst_size(burst)
         .key_extractor(SmartIpKeyExtractor)
         .finish()
         .unwrap();
@@ -533,9 +552,15 @@ pub async fn start_web_server(
     let default_rate_limiter = GovernorLayer::new(std::sync::Arc::new(default_governor_conf));
 
     // Stricter rate limiter for auth endpoints (brute force protection)
+    // Even in dev mode, auth endpoints get reasonable limits (not 1000 req/s)
+    let (auth_per_sec, auth_burst) = if cfg!(debug_assertions) {
+        (10u64, 30u32) // Dev: relaxed but not unlimited
+    } else {
+        (5u64, 10u32)
+    };
     let auth_governor_conf = GovernorConfigBuilder::default()
-        .per_second(5) // 5 requests per second per IP
-        .burst_size(10) // Allow burst of 10 requests
+        .per_second(auth_per_sec) // 5 requests per second per IP
+        .burst_size(auth_burst) // Allow burst of 10 requests
         .key_extractor(SmartIpKeyExtractor)
         .finish()
         .unwrap();

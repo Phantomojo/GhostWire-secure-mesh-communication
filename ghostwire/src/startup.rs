@@ -290,20 +290,6 @@ impl StartupSequence {
         };
         self.check("transport mode", CheckStatus::Pass, Some(result.transport_mode.clone()));
 
-        // Check if obfs4 is requested but known non-functional
-        if config.obfs4_enabled {
-            // Not "alpha". GhostWire has no obfs4 implementation: no
-            // handshake, no framing, no socket wrapper, and it is not wired
-            // into the libp2p transport chain. TCP traffic is NOT obfuscated.
-            // Cover traffic is gossipsub padding, which is not the same thing
-            // and does not survive an active prober.
-            self.warn(
-                "obfs4 is NOT IMPLEMENTED -- no handshake, no framing, not wired into the \
-                 transport stack. TCP traffic is un-obfuscated; treat this node as having NO \
-                 transport obfuscation.",
-            );
-        }
-
         self.emit(BootEvent::PhaseComplete {
             phase: 3,
             duration_ms: t.elapsed().as_millis() as u64,
@@ -397,7 +383,6 @@ pub struct NetworkBootConfig {
     pub bootstrap_nodes: Vec<String>,
     pub websocket_mode: bool,
     pub shadowsocks_mode: bool,
-    pub obfs4_enabled: bool,
 }
 
 impl Default for NetworkBootConfig {
@@ -407,7 +392,6 @@ impl Default for NetworkBootConfig {
             bootstrap_nodes: vec![],
             websocket_mode: false,
             shadowsocks_mode: false,
-            obfs4_enabled: false,
         }
     }
 }

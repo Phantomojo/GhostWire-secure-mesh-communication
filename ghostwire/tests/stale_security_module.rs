@@ -21,8 +21,7 @@
 //! Three live files reference `crate::core::security::SecurityManager`,
 //! `::SecurityStats` and `::ThreatLevel`:
 //!
-//!   * `core/stealth_tcp.rs:2`   `use crate::core::security::SecurityManager;`
-//!   * `core/mesh.rs:1183`       `-> crate::core::security::SecurityStats`
+//!   * `core/mesh.rs:1235`     `-> crate::core::security::SecurityStats`
 //!   * `controllers/system.rs:29` `threat_level: crate::core::security::ThreatLevel`
 //!
 //! So `security.rs` looks very much alive, and a name-level grep cannot decide

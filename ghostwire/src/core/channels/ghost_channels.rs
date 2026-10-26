@@ -13,7 +13,28 @@ use crate::genesis_constants::{derive_with_domain, CHANNEL_INVITE_PREFIX, CHANNE
 use anyhow::Result;
 use lru::LruCache;
 use ring::rand::{SecureRandom, SystemRandom};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, Deserializer};
+
+fn serialize_topic_id_hex<S>(topic_id: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&hex::encode(topic_id))
+}
+
+fn deserialize_topic_id_hex<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let bytes = hex::decode(&s).map_err(serde::de::Error::custom)?;
+    if bytes.len() != 32 {
+        return Err(serde::de::Error::custom("expected 32 bytes"));
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    Ok(arr)
+}
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -27,6 +48,7 @@ const SEEN_ID_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct GhostChannel {
+    #[serde(serialize_with = "serialize_topic_id_hex", deserialize_with = "deserialize_topic_id_hex")]
     pub topic_id: [u8; 32],
     pub local_name: Option<String>,
     pub description: Option<String>,

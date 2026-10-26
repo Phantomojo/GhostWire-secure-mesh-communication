@@ -2,7 +2,7 @@ use crate::core::encryption::{EncryptionManager, MessageType as EncMessageType};
 use crate::core::identity::Identity;
 use crate::core::message::Message;
 use crate::core::security::{SecurityConfig, SecurityManager, SecurityStats, ThreatLevel};
-use crate::core::stealth_tcp::{ConnectionStats, StealthTCPProvider};
+
 use crate::core::traffic_armor;
 use anyhow::Result;
 // use async_trait::async_trait;
@@ -53,6 +53,21 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// Truncate an identifier for logging to avoid metadata leaks.
+/// Returns first 8 characters + "..." if longer than 8 chars.
+fn truncate_id(id: &str) -> String {
+    if id.len() <= 8 {
+        id.to_string()
+    } else {
+        format!("{}...", &id[..8])
+    }
+}
+
+/// Truncate a PeerId for logging.
+fn truncate_peer_id(peer_id: &libp2p::PeerId) -> String {
+    truncate_id(&peer_id.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -161,6 +176,9 @@ pub struct MeshNode {
     pub connection_quality: f32,
     pub is_online: bool,
     pub threat_level: ThreatLevel,
+    /// Reticulum (RNS) address exchanged during handshake (cross-transport discovery).
+    #[serde(default)]
+    pub reticulum_address: Option<String>,
 }
 
 /// Mesh network topology
@@ -226,22 +244,7 @@ pub struct MeshBehaviour {
     pub connection_limits: libp2p::connection_limits::Behaviour,
 }
 
-/// A libp2p transport that wraps TCP in a Stealth Handshake
-pub struct StealthTransport {
-    _provider: Arc<StealthTCPProvider>,
-    _inner: libp2p::tcp::tokio::Transport,
-}
 
-impl StealthTransport {
-    pub fn new(provider: Arc<StealthTCPProvider>) -> Self {
-        Self {
-            _provider: provider,
-            _inner: libp2p::tcp::tokio::Transport::new(
-                libp2p::tcp::Config::default().nodelay(true),
-            ),
-        }
-    }
-}
 
 /// Everything `MeshManager::new` needs, captured so a panicked driver can be
 /// rebuilt. All fields are cheap to clone (Arcs and owned config).
@@ -288,6 +291,8 @@ pub struct MeshTransport {
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
     mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
+    /// RNS local address for cross-transport discovery.
+    rns_local_address: Arc<RwLock<String>>,
     reliability: Arc<crate::core::reliability::ReliabilityLayer>,
     peer_health: Arc<crate::core::peer_health::PeerHealthTracker>,
     _pending_pings: tokio::sync::Mutex<crate::core::peer_health::PendingPings>,
@@ -348,8 +353,6 @@ impl MeshTransport {
         // Use PeerId string as node_id (stable, unique, matches network identity)
         let node_id = local_peer_id.to_string();
 
-        // Initialize obfs4 for DPI evasion (always-on by default)
-        // Note: Actual obfuscation integrated in transport stack in future releases
 
         // Create base TCP transport
         let tcp_transport =
@@ -456,7 +459,6 @@ impl MeshTransport {
 
         // Build the transport stack:
         // TCP → Noise (encryption) → Yamux (multiplexing)
-        // obfs4 obfuscation is applied at the connection layer
         // Fallback to relay, WebSocket, QUIC and WebRTC for NAT traversal
         //
         // The base stack is boxed before QUIC and WebRTC are added. Boxing
@@ -702,6 +704,7 @@ impl MeshTransport {
             peer_count_cache: None,
             dtn_store: None,
             mailbox_store: None,
+            rns_local_address: Arc::new(RwLock::new(String::new())),
             reliability,
             peer_health: Arc::new(crate::core::peer_health::PeerHealthTracker::new(
                 std::time::Duration::from_secs(15),
@@ -896,6 +899,7 @@ impl MeshTransport {
             peer_count_cache: self.peer_count_cache.clone(),
             dtn_store: self.dtn_store.clone(),
             mailbox_store: self.mailbox_store.clone(),
+            rns_local_address: self.rns_local_address.clone(),
             completed_handshakes: std::collections::HashSet::new(),
             pending_dials: std::collections::HashSet::new(),
             reliability: self.reliability.clone(),
@@ -1317,11 +1321,6 @@ impl MeshTransport {
         Ok(())
     }
 
-    pub fn get_connection_stats(&self) -> ConnectionStats {
-        // Return default stats - obfs4 transport doesn't expose separate stats
-        // Connection stats are now tracked at the swarm level
-        ConnectionStats::default()
-    }
 
     pub async fn set_shard(&mut self, shard: &str) -> Result<()> {
         self.current_shard = shard.to_string();
@@ -1650,6 +1649,7 @@ struct MeshDriver {
     peer_count_cache: Option<Arc<AtomicUsize>>,
     dtn_store: Option<Arc<crate::core::dtn::epidemic::DtnStore>>,
     mailbox_store: Option<Arc<crate::core::mailbox::MailboxStore>>,
+    rns_local_address: Arc<RwLock<String>>,
     completed_handshakes: std::collections::HashSet<PeerId>,
     /// PeerIDs with a dial currently in flight; owned by the mesh event loop.
     pending_dials: std::collections::HashSet<PeerId>,
@@ -1709,6 +1709,8 @@ impl MeshDriver {
         // ponytail: DTN housekeeping — purge expired bundles every 60s
         let mut dtn_purge_interval = tokio::time::interval(std::time::Duration::from_secs(60));
         dtn_purge_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut mailbox_purge_interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        mailbox_purge_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut key_rotation_interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         key_rotation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut world_discovery_interval =
@@ -1794,6 +1796,20 @@ impl MeshDriver {
                                         msgs.drain(..IN_MEMORY_MSGS_MAX / 2);
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                _ = mailbox_purge_interval.tick() => {
+                    if let Some(ref mailbox) = self.mailbox_store {
+                        match mailbox.purge_expired(12 * 3600) {
+                            Ok(removed) => {
+                                if removed > 0 {
+                                    tracing::info!("Mailbox: purged {} expired messages (>12h)", removed);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!("Mailbox purge failed: {}", e);
                             }
                         }
                     }
@@ -2234,7 +2250,11 @@ impl MeshDriver {
                         .map_err(|e| anyhow::anyhow!("{}", e))
                 };
                 if let Err(encryption_error) = enc_result.as_ref() {
-                    tracing::warn!(recipient = %recipient, error = %encryption_error, "Direct-message encryption failed before transport");
+                    tracing::warn!(
+                        recipient = %truncate_peer_id(&recipient),
+                        error = %encryption_error,
+                        "Direct-message encryption failed before transport"
+                    );
                 }
 
                 if let Ok(encrypted_content) = enc_result {
@@ -2261,7 +2281,10 @@ impl MeshDriver {
                         format!("encrypted:{}{}:{}", version_prefix, nonce_b64, sig_b64)
                     };
                 } else {
-                    tracing::warn!("Failed to encrypt DM to {}, dropping message", recipient);
+                    tracing::warn!(
+                        "Failed to encrypt DM to {}, dropping message",
+                        truncate_peer_id(&recipient)
+                    );
                     let _ = reply.send(Err(anyhow::anyhow!(
                         "Encryption failed for DM to {}",
                         recipient
@@ -2277,7 +2300,11 @@ impl MeshDriver {
                 let frame = match Frame::encode(FrameKind::Message, &encrypted_msg) {
                     Ok(f) => f,
                     Err(e) => {
-                        tracing::warn!("Failed to encode frame for {}: {}", recipient, e);
+                        tracing::warn!(
+                        "Failed to encode frame for {}: {}",
+                        truncate_peer_id(&recipient),
+                        e
+                    );
                         let _ = reply.send(Err(e));
                         return;
                     }
@@ -2290,7 +2317,11 @@ impl MeshDriver {
                         &encrypted_msg.id.to_string(),
                         &data,
                     ) {
-                        tracing::warn!("Failed to queue delivery for {}: {}", recipient, e);
+                        tracing::warn!(
+                        "Failed to queue delivery for {}: {}",
+                        truncate_peer_id(&recipient),
+                        e
+                    );
                     }
                 }
 
@@ -2484,7 +2515,7 @@ impl MeshDriver {
                 .fetch_add(peers.len(), Ordering::Relaxed);
             self.mdns_last_event.store(now_secs(), Ordering::Relaxed);
             for (peer_id, addr) in peers {
-                tracing::info!(peer_id = %peer_id, address = %addr, "mDNS discovered peer");
+                tracing::info!(peer_id = %truncate_id(&peer_id.to_string()), address = %addr, "mDNS discovered peer");
                 self.discovery_directory
                     .observe(
                         peer_id.to_string(),
@@ -2515,7 +2546,7 @@ impl MeshDriver {
             self.mdns_expired.fetch_add(peers.len(), Ordering::Relaxed);
             self.mdns_last_event.store(now_secs(), Ordering::Relaxed);
             for (peer_id, _addr) in peers {
-                tracing::info!(peer_id = %peer_id, "mDNS peer expired");
+                tracing::info!(peer_id = %truncate_id(&peer_id.to_string()), "mDNS peer expired");
                 let _ = self
                     .discovery_directory
                     .mark_reachability(
@@ -2575,10 +2606,18 @@ impl MeshDriver {
                     crate::core::discovery_directory::ReachabilityState::Reachable,
                 )
                 .await;
-            let my_id = self._identity.id.clone();
+            let my_id = self.local_peer_id.to_string();
             let my_pubkey = base64::engine::general_purpose::STANDARD
                 .encode(self.encryption_manager.get_public_key());
-            let mut handshake = Message::new(my_id, peer_id.to_string(), my_pubkey);
+            // Include RNS address and nickname in handshake for cross-transport discovery and peer naming.
+            let rns_addr = String::new();
+            let rns_field = if rns_addr.is_empty() { "null".to_string() } else { format!("\"{}\"", rns_addr) };
+            let my_nickname = self._identity.get_metadata().nickname;
+            let handshake_content = format!(
+                "{{\"pk\":\"{}\",\"rns\":{},\"name\":\"{}\"}}",
+                my_pubkey, rns_field, my_nickname
+            );
+            let mut handshake = Message::new(my_id, peer_id.to_string(), handshake_content);
             handshake.message_type = "handshake".to_string();
             self.swarm
                 .behaviour_mut()
@@ -2606,6 +2645,7 @@ impl MeshDriver {
                         connection_quality: 1.0,
                         is_online: true,
                         threat_level: ThreatLevel::Low,
+                        reticulum_address: None,
                     })
                     .is_online = true;
                 if let Some(node) = topo.get_mut(&peer_id.to_string()) {
@@ -2829,9 +2869,13 @@ impl MeshDriver {
                 connection_quality: 1.0,
                 is_online: true,
                 threat_level: ThreatLevel::Low,
+                reticulum_address: None,
             });
             entry.last_seen_addresses = info.listen_addrs.clone();
-            entry.username = info.agent_version.clone();
+            // Only set username from identify if not already set by handshake
+            if entry.username.is_empty() {
+                entry.username = info.agent_version.clone();
+            }
             entry.last_seen = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -3434,7 +3478,7 @@ impl MeshDriver {
                             msg.message_type = "text".to_string();
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to decrypt message from {}: {}", msg.sender, e);
+                            tracing::warn!("Failed to decrypt message from {}: {}", truncate_id(&msg.sender), e);
                             msg.encryption_status = "decrypt_failed".to_string();
                         }
                     }
@@ -3613,7 +3657,23 @@ impl MeshDriver {
             peer_id,
             msg.sender
         );
-        if let Ok(pub_key_bytes) = base64::engine::general_purpose::STANDARD.decode(&msg.content) {
+        // Parse handshake content: either JSON {"pk":"...","rns":"..."} or
+        // legacy base64 public key (backward compat).
+        let (pub_key_b64, rns_addr, peer_name) = if msg.content.starts_with('{') {
+            // Try to parse as JSON
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg.content) {
+                let pk = v.get("pk").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let rns = v.get("rns").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let name = v.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
+                (pk, rns, name)
+            } else {
+                (msg.content.clone(), None, None)
+            }
+        } else {
+            (msg.content.clone(), None, None)
+        };
+
+        if let Ok(pub_key_bytes) = base64::engine::general_purpose::STANDARD.decode(&pub_key_b64) {
             let key_len = pub_key_bytes.len();
             let key_type = if key_len >= 1248 {
                 crate::core::encryption::KeyType::Ultimate
@@ -3625,16 +3685,34 @@ impl MeshDriver {
                 pub_key_bytes.clone(),
                 key_type.clone(),
             );
-            self.encryption_manager.add_peer_key(
-                msg.sender.clone(),
-                pub_key_bytes.clone(),
-                key_type,
-            );
+            // Also store under the sender's identity ID so decryption can find it
+            if !msg.sender.is_empty() && msg.sender != peer_id.to_string() {
+                self.encryption_manager.add_peer_key(
+                    msg.sender.clone(),
+                    pub_key_bytes.clone(),
+                    key_type.clone(),
+                );
+            }
+            // SECURITY: Only store key under the transport-authenticated PeerId.
+            // Do NOT store under msg.sender (free-text, attacker-controlled).
+            // The caller's identity is the libp2p PeerId, not the self-reported sender.
             // Make authenticated key readiness observable in the topology projection.
             // Discovery/reachability alone must not imply trust, but a completed
             // handshake should be reflected as verified peer metadata.
             if let Some(node) = self.topology.write().await.get_mut(&peer_id.to_string()) {
                 node.public_key = pub_key_bytes.clone();
+                // Store RNS address for cross-transport discovery.
+                if let Some(addr) = rns_addr {
+                    if !addr.is_empty() {
+                        node.reticulum_address = Some(addr);
+                    }
+                }
+                // Store peer nickname from handshake.
+                if let Some(name) = peer_name {
+                    if !name.is_empty() {
+                        node.username = name;
+                    }
+                }
             }
             tracing::info!(
                 "✅ Stored encryption key for peer {} (key: {} bytes, type: {:?})",
@@ -3649,7 +3727,25 @@ impl MeshDriver {
 
             if !self.completed_handshakes.contains(&peer_id) {
                 self.completed_handshakes.insert(peer_id);
-                let my_id = self._identity.id.clone();
+                // Re-drive any deferred DMs for this peer now that the key is ready
+                let queued = std::mem::take(&mut self.deferred_dms);
+                let mut still_deferred = VecDeque::new();
+                for (to, msg, deadline, reply) in queued {
+                    if to == peer_id && self.encryption_manager.has_peer_key(&to.to_string()) {
+                        // Re-inject the SendMessage command
+                        self.handle_command(MeshCommand::SendMessage {
+                            recipient: to,
+                            message: msg,
+                            reply,
+                        }).await;
+                    } else if to == peer_id {
+                        still_deferred.push_back((to, msg, deadline, reply));
+                    } else {
+                        still_deferred.push_back((to, msg, deadline, reply));
+                    }
+                }
+                self.deferred_dms = still_deferred;
+                let my_id = self.local_peer_id.to_string();
                 let my_pubkey = base64::engine::general_purpose::STANDARD
                     .encode(self.encryption_manager.get_public_key());
                 let mut reply = Message::new(my_id, peer_id.to_string(), my_pubkey);
@@ -3666,7 +3762,7 @@ impl MeshDriver {
                 );
             }
         } else {
-            tracing::warn!("⚠️ Failed to decode Handshake key from {}", msg.sender);
+            tracing::warn!("⚠️ Failed to decode Handshake key from {}", truncate_id(&msg.sender));
         }
     }
 
@@ -3739,9 +3835,13 @@ impl MeshDriver {
                         .gossipsub
                         .publish(topic, frame.to_bytes())
                     {
-                        tracing::warn!("Retry publish to {} failed: {}", recipient, e);
+                        tracing::warn!(
+                        "Retry publish to {} failed: {}",
+                        truncate_id(&recipient),
+                        e
+                    );
                     } else {
-                        tracing::info!("Retransmitted message {} to {}", msg_id, recipient);
+                        tracing::info!("Retransmitted message {} to {}", msg_id, truncate_id(&recipient));
                         self.reliability.on_message_sent(msg_id);
                     }
                 } else {
@@ -3953,8 +4053,7 @@ impl MeshManager {
         self.transport.set_shard(shard).await
     }
 
-    pub async fn get_stats(&self) -> MeshStats {
-        let connection_stats = self.transport.get_connection_stats();
+pub async fn get_stats(&self) -> MeshStats {
         let security_stats = self.transport.get_security_stats().await;
         let topology = self.transport.get_topology().await;
 
@@ -3963,7 +4062,7 @@ impl MeshManager {
             online_nodes: topology.nodes.values().filter(|n| n.is_online).count(),
             local_node_id: topology.local_node_id,
             routes_count: topology.routes.len(),
-            connection_stats,
+            connection_stats: ConnectionStats::default(),
             security_stats,
         }
     }
@@ -4084,6 +4183,16 @@ impl MeshManager {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConnectionStats {
+    pub total_connections: u64,
+    pub active_connections: u64,
+    pub failed_connections: u64,
+    pub blocked_connections: u64,
+    pub avg_connection_time: f64,
+    pub last_connection_time: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MeshStats {
     pub total_nodes: usize,
@@ -4118,6 +4227,7 @@ mod tests {
             connection_quality: 0.9,
             is_online: true,
             threat_level: ThreatLevel::Low,
+            reticulum_address: None,
         };
 
         let serialized = serde_json::to_string(&node).unwrap();

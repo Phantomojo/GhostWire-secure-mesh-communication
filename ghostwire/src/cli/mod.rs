@@ -137,7 +137,9 @@ pub async fn list_peers_from_daemon(port: u16) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Malformed peer list from daemon: {}", e))?;
 
     let peers = value
-        .get("peers")
+        .get("data")
+        .and_then(|d| d.get("peers"))
+        .or_else(|| value.get("peers"))
         .and_then(|p| p.as_array())
         .cloned()
         .unwrap_or_default();

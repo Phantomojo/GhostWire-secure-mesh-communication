@@ -8,8 +8,6 @@ pub enum TransportKind {
     #[cfg(feature = "mesh")]
     Mesh(Arc<tokio::sync::RwLock<crate::core::MeshManager>>),
     Dummy,
-    Quic(Arc<crate::core::quic_transport::QuicTransportProvider>),
-    StealthTCP(Arc<crate::core::stealth_tcp::StealthTCPProvider>),
     #[cfg(feature = "bluetooth")]
     Bluetooth(Arc<tokio::sync::RwLock<crate::core::bluetooth::BluetoothTransport>>),
     Simulated(Arc<tokio::sync::RwLock<crate::core::sim_transport::SimTransport>>),
@@ -23,8 +21,6 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => "mesh",
             TransportKind::Dummy => "dummy",
-            TransportKind::Quic(_) => "quic",
-            TransportKind::StealthTCP(_) => "stealth_tcp",
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "bluetooth",
             TransportKind::Simulated(_) => "simulated",
@@ -37,12 +33,6 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => "Libp2p-based Mesh Network",
             TransportKind::Dummy => "Dummy transport (no-op)",
-            TransportKind::Quic(_) => "QUIC Transport (Direct Internet)",
-            TransportKind::StealthTCP(_) => {
-                "Stealth TCP — NOT SECURE. Message content is encoded as bare bincode \
-                 with no AEAD and no MAC; there is no traffic morphing in this \
-                 implementation. Do not use for confidential messages."
-            }
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => "Bluetooth Low Energy Mesh",
             TransportKind::Simulated(_) => "Simulated Hardware (BT/WiFi)",
@@ -61,8 +51,6 @@ impl TransportKind {
                 tracing::trace!("Dummy transport sending message to {}", message.recipient);
                 Ok(())
             }
-            TransportKind::StealthTCP(provider) => provider.send_message(message).await,
-            TransportKind::Quic(provider) => provider.send_message(message).await,
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(transport) => {
                 let transport = transport.read().await;
@@ -92,11 +80,6 @@ impl TransportKind {
             #[cfg(feature = "mesh")]
             TransportKind::Mesh(_) => Ok(None), // Gossipsub handles receive via events
             TransportKind::Dummy => Ok(None),
-            TransportKind::StealthTCP(provider) => match provider.poll_receive().await {
-                Some((_addr, msg)) => Ok(Some(msg)),
-                None => Ok(None),
-            },
-            TransportKind::Quic(_) => Ok(None),
             #[cfg(feature = "bluetooth")]
             TransportKind::Bluetooth(_) => Ok(None),
             TransportKind::Simulated(transport) => {
@@ -180,8 +163,6 @@ impl TransportRegistry {
             .into_iter()
             .filter_map(|name| match name.as_str() {
                 "mesh" => Some(crate::core::disaster::TransportType::Mesh),
-                "quic" => Some(crate::core::disaster::TransportType::Quic),
-                "stealth_tcp" => Some(crate::core::disaster::TransportType::StealthTcp),
                 "bluetooth" => Some(crate::core::disaster::TransportType::Bluetooth),
                 "reticulum" => Some(crate::core::disaster::TransportType::Reticulum),
                 _ => None,
@@ -197,7 +178,7 @@ impl TransportRegistry {
             .map(|transport| {
                 let name = transport.name().to_string();
                 let (implementation, controls) = match name.as_str() {
-                    "mesh" | "quic" => (
+                    "mesh" => (
                         "compiled_and_registered".to_string(),
                         vec!["observe".to_string()],
                     ),
@@ -236,9 +217,6 @@ impl TransportRegistry {
 // Example usage (in main or core):
 // #[cfg(feature = "mesh-transport")]
 // registry.register(MeshTransport::new(...));
-// #[cfg(feature = "stealth-tcp-transport")]
-// registry.register(StealthTCPProvider::new(...));
-
 // Future: refactor transport implementations to use this registry and trait interface.
 
 #[cfg(test)]

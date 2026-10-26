@@ -354,7 +354,7 @@ pub fn hardened_gossipsub_config_with_size(size: &str) -> libp2p::gossipsub::Con
     let (mesh_n, mesh_n_low, mesh_n_high, mesh_outbound_min) = match size {
         "large" => (12, 8, 20, 4),
         "medium" => (8, 4, 12, 3),
-        _ => (2, 1, 4, 1),
+        _ => (6, 1, 12, 2),
     };
 
     ConfigBuilder::default()

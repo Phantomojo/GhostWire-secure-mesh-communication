@@ -62,12 +62,8 @@ key_rotation_interval_days = 7
 mesh_enabled = true
 reticulum_enabled = false
 briar_enabled = false
-stealth_tcp_enabled = false
 max_peers = 50
 connection_timeout_secs = 30
-obfs4_enabled = true
-# stealth_handshake_secret and obfs4_secret_key are excluded from file output
-# Set via GHOSTWIRE_STEALTH_SECRET and GHOSTWIRE_OBFS4_SECRET env vars instead
 
 [encryption]
 algorithm = "AES-256-GCM"
@@ -234,9 +230,6 @@ The `web` subcommand uses slightly different defaults than the daemon:
 | Variable | Default | Description |
 |---|---|---|
 | `GHOSTWIRE_MAX_CONNECTIONS_PER_IP` | `10` | Max simultaneous connections from one IP |
-| `GHOSTWIRE_STEALTH_SECRET` | none | Stealth handshake secret key |
-| `GHOSTWIRE_OBFS4_ENABLED` | `true` | **NO EFFECT.** Obfs4 is not implemented; this flag is read only by a startup warning. |
-| `GHOSTWIRE_OBFS4_SECRET` | none | **NO EFFECT** today. Unused until obfs4 exists. |
 
 ### Bridges
 
@@ -308,19 +301,6 @@ already exists. And `key_rotation_interval_days = 0` is ignored in favour of the
 Available device classes: `phone`, `tablet`, `raspberry_pi`, `laptop`, `server`.
 
 Available model variants: `e2b` (2.3B), `e4b` (4B), `26b` (26B MoE), `31b` (31B Dense).
-
-### Stealth and obfuscation
-
-Stealth secrets and obfs4 keys are intentionally excluded from TOML file serialization (marked `#[serde(skip)]`). Set them via environment variables:
-
-```bash
-export GHOSTWIRE_STEALTH_SECRET="your-handshake-secret"
-export GHOSTWIRE_OBFS4_SECRET="hex-encoded-obfs4-key"
-```
-
-> **Currently inert.** Obfs4 is not implemented, so this variable has no effect on
-> traffic. It is retained so the config surface and the startup warning keep
-> working. Do not rely on it for obfuscation.
 
 ## Config Precedence in Practice
 

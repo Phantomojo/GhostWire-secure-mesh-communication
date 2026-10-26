@@ -30,7 +30,7 @@ export default function Sidebar() {
       label: 'Operate',
       items: [
         { id: 'dashboard', label: 'Command', code: '01', hint: 'Node overview' },
-        { id: 'communication', label: 'Messages', code: '02', hint: 'Encrypted conversations', count: state.messages.length },
+        { id: 'communication', label: 'Messages', code: '02', hint: 'Encrypted conversations', count: state.messages.filter(m => m.recipient === 'broadcast').length },
         { id: 'channels', label: 'Channels', code: '03', hint: 'Broadcast surfaces' },
       ],
     },

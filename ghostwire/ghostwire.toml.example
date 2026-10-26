@@ -20,7 +20,6 @@ key_rotation_interval_days = 7
 mesh_enabled = true
 reticulum_enabled = false
 briar_enabled = false
-stealth_tcp_enabled = false
 max_peers = 50
 connection_timeout_secs = 30
 

@@ -483,8 +483,6 @@ impl TransportSelector {
         let mut weight_profiles = HashMap::new();
         weight_profiles.insert(TransportType::Bluetooth, WeightProfile::ble());
         weight_profiles.insert(TransportType::WiFi, WeightProfile::wifi());
-        weight_profiles.insert(TransportType::Quic, WeightProfile::tcp());
-        weight_profiles.insert(TransportType::StealthTcp, WeightProfile::tcp());
         weight_profiles.insert(TransportType::Mesh, WeightProfile::mesh());
         weight_profiles.insert(TransportType::LoRa, WeightProfile::lora());
         weight_profiles.insert(TransportType::Reticulum, WeightProfile::reticulum());
@@ -493,8 +491,6 @@ impl TransportSelector {
         for transport in &[
             TransportType::Bluetooth,
             TransportType::WiFi,
-            TransportType::Quic,
-            TransportType::StealthTcp,
             TransportType::Mesh,
             TransportType::LoRa,
             TransportType::Reticulum,
@@ -515,7 +511,7 @@ impl TransportSelector {
             bandit: HashMap::new(),
             blackholes,
             hysteresis: HysteresisState::new(
-                TransportType::StealthTcp,
+                TransportType::Mesh,
                 cooldown,
                 min_delta,
                 window_size,
@@ -617,7 +613,7 @@ impl TransportSelector {
             return available
                 .first()
                 .copied()
-                .unwrap_or(TransportType::StealthTcp);
+                .unwrap_or(TransportType::Mesh);
         }
 
         // Score each candidate
@@ -801,7 +797,7 @@ mod tests {
 
     #[test]
     fn test_hysteresis_cooldown() {
-        let mut hyst = HysteresisState::new(TransportType::Quic, Duration::from_secs(30), 0.1, 10);
+        let mut hyst = HysteresisState::new(TransportType::Mesh, Duration::from_secs(30), 0.1, 10);
 
         // Should not switch immediately (cooldown)
         assert!(
@@ -813,7 +809,7 @@ mod tests {
     #[test]
     fn test_hysteresis_min_delta() {
         let mut hyst = HysteresisState::new(
-            TransportType::Quic,
+            TransportType::Mesh,
             Duration::from_millis(0), // No cooldown for test
             0.2,                      // Require 0.2 delta
             10,

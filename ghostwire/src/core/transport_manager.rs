@@ -20,7 +20,7 @@ impl AutoTransportSwitcher {
             disaster_manager,
             policy,
             current_level: DisasterLevel::Normal,
-            current_transport: TransportType::StealthTcp,
+            current_transport: TransportType::Mesh,
             selector: TransportSelector::new(TransportSelectorConfig::default()),
         }
     }
@@ -71,8 +71,6 @@ impl AutoTransportSwitcher {
     fn available_transports(&self, eligible: &[TransportType]) -> Vec<TransportType> {
         let candidates = match self.current_level {
             DisasterLevel::Normal => vec![
-                TransportType::Quic,
-                TransportType::StealthTcp,
                 TransportType::Mesh,
                 TransportType::WiFi,
                 TransportType::Reticulum,
@@ -80,7 +78,6 @@ impl AutoTransportSwitcher {
             DisasterLevel::Congested => vec![
                 TransportType::Mesh,
                 TransportType::WiFi,
-                TransportType::StealthTcp,
                 TransportType::Reticulum,
             ],
             DisasterLevel::Isolation => vec![

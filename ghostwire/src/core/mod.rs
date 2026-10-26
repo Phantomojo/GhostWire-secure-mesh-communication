@@ -4,6 +4,8 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 pub mod armor;
+pub mod power;
+pub mod sealed_sender;
 pub mod rotation;
 pub mod pairing;
 pub mod deref;
@@ -35,7 +37,6 @@ pub mod message;
 pub mod micro_optimizations;
 pub mod monitor;
 pub mod network;
-pub mod obfs4_transport;
 pub mod oem_battery_guide;
 pub mod passphrase_keyslot;
 pub mod peer_health;
@@ -45,12 +46,12 @@ pub mod recovery_shamir;
 pub mod reliability;
 pub mod reputation;
 pub mod routing;
+pub mod babel_routing;
 pub mod secure_wipe;
 pub mod security_v2;
 pub mod social;
 pub mod traffic_armor;
 pub mod transport_ext;
-pub mod transport_pluggable;
 pub mod typed_crypto;
 pub mod updater_fixed;
 pub mod vector_clock;
@@ -76,11 +77,9 @@ pub mod briar;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 pub mod qr;
-pub mod quic_transport;
 #[cfg(feature = "reticulum")]
 pub mod reticulum;
 pub mod sim_transport;
-pub mod stealth_tcp;
 
 #[cfg(feature = "matrix-bridge")]
 use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
@@ -101,8 +100,7 @@ pub use mesh::{MeshManager, MeshNode, MeshStats, MeshTopology};
 
 #[cfg(feature = "reticulum")]
 pub use reticulum::{ReticulumManager, ReticulumStats, ReticulumTopology};
-#[cfg(feature = "stealth")]
-pub use stealth_tcp::{ConnectionStats, StealthTCPProvider};
+
 
 use anyhow::Result;
 use libp2p::Multiaddr;
@@ -419,6 +417,8 @@ pub struct Core {
     pub pairing_manager: Arc<crate::core::identity_pairing::device_pairing::PairingManager>,
     // P0: Reliability layer (ACK/retry/TTL)
     pub reliability: Arc<reliability::ReliabilityLayer>,
+    // Power management (battery-aware operation)
+    pub power_manager: Arc<crate::core::power::PowerManager>,
 
     // AI/ML Components (Gemma 4 + ONNX)
     pub gemma_client: Arc<OnceLock<Arc<ai::GemmaClient>>>,
@@ -746,22 +746,10 @@ impl Core {
         let (event_bus, _) = broadcast::channel(1024); // Large buffer for high traffic
 
         // Parse handshake secret from config if available
-        let handshake_secret = config
-            .network
-            .stealth_handshake_secret
-            .as_ref()
-            .and_then(|s| {
-                if let Ok(bytes) = hex::decode(s) {
-                    Some(bytes)
-                } else {
-                    tracing::warn!(
-                        "Failed to decode stealth_handshake_secret from config (expected hex)"
-                    );
-                    None
-                }
-            });
+        let handshake_secret: Option<Vec<u8>> = None;
 
         let reliability = Arc::new(crate::core::reliability::ReliabilityLayer::with_defaults());
+        let power_manager = Arc::new(crate::core::power::PowerManager::new());
         let discovery_directory =
             Arc::new(crate::core::discovery_directory::DiscoveryDirectory::new());
 
@@ -807,7 +795,8 @@ impl Core {
         #[cfg(feature = "mesh")]
         if let Some(mesh_manager) = mesh_manager_inner.clone() {
             let mesh_kind = crate::core::transport::TransportKind::Mesh(mesh_manager);
-            registry.write().await.register(mesh_kind);
+            registry.write().await.register(mesh_kind.clone());
+            active_transport_inner = Some(mesh_kind);
             tracing::info!("libp2p mesh transport registered");
         }
 
@@ -991,6 +980,7 @@ impl Core {
             // Feature extractor for L1 anomaly detection
             feature_extractor: Arc::new(RwLock::new(ai::FeatureExtractor::new())),
             reliability,
+            power_manager,
         };
 
         Ok(core)
@@ -1734,6 +1724,42 @@ impl Core {
             // Accept a raw libp2p PeerId — unchanged, and still the fastest
             // path when the caller already holds one.
             if let Ok(peer_id) = recipient.parse::<libp2p::PeerId>() {
+                // Cross-transport discovery: if we know this peer's RNS address
+                // from handshake, try RNS transport first (lower latency, no
+                // relay needed). Fall back to libp2p if RNS fails.
+                #[cfg(feature = "reticulum")]
+                {
+                    let topology = mgr.get_topology().await;
+                    if let Some(node) = topology.nodes.get(&peer_id.to_string()) {
+                        if let Some(rns_addr) = &node.reticulum_address {
+                            if !rns_addr.is_empty() {
+                                if let Some(mgr) = self.reticulum_manager.read().await.as_ref() {
+                                    let mgr = mgr.read().await;
+                                    if mgr.is_alive().await {
+                                        let mut outbound = message.clone();
+                                        outbound.recipient = rns_addr.clone();
+                                        tracing::info!(
+                                            target: "send",
+                                            "Cross-transport: trying RNS for peer {} ({})",
+                                            peer_id, rns_addr
+                                        );
+                                        match mgr.send_message(&outbound).await {
+                                            Ok(()) => return Ok(()),
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    target: "send",
+                                                    "RNS send failed, falling back to libp2p: {}",
+                                                    e
+                                                );
+                                                // Fall through to libp2p
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 return mgr.send_direct_message(peer_id, message.clone()).await;
             }
 
@@ -1873,7 +1899,14 @@ impl Core {
         let mut messages: Vec<Message> = {
             let mem = self.messages.read().await;
             mem.iter()
-                .filter(|m| m.recipient == peer_id || m.sender == peer_id || peer_id == "all")
+                .filter(|m| {
+                    if peer_id == "all" || peer_id == "broadcast" {
+                        // "All Nodes" shows only broadcasts, not private DMs
+                        m.recipient == "broadcast"
+                    } else {
+                        m.recipient == peer_id || m.sender == peer_id
+                    }
+                })
                 .cloned()
                 .collect()
         };
@@ -1881,7 +1914,12 @@ impl Core {
         // Also load from encrypted store
         if let Ok(store_messages) = self.message_store.load() {
             for m in store_messages {
-                if m.recipient == peer_id || m.sender == peer_id || peer_id == "all" {
+                let include = if peer_id == "all" || peer_id == "broadcast" {
+                    m.recipient == "broadcast"
+                } else {
+                    m.recipient == peer_id || m.sender == peer_id
+                };
+                if include {
                     // Avoid duplicates — check if already in memory list
                     if !messages.iter().any(|existing| existing.id == m.id) {
                         messages.push(m);
@@ -1890,15 +1928,32 @@ impl Core {
             }
         }
 
-        // Sort by timestamp (newest first) and limit
-        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        messages.truncate(limit);
+        // Sort by timestamp (oldest first for chat display) and limit to most recent
+        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        if messages.len() > limit {
+            let start = messages.len() - limit;
+            messages = messages[start..].to_vec();
+        }
         messages
     }
 
     /// Get the identity ID
+    /// Get the identity ID
     pub async fn get_identity_id(&self) -> String {
         self.identity.read().await.id.clone()
+    }
+
+    /// Get the local libp2p PeerId (used as the canonical sender identifier
+    /// in mesh messages, so the UI can match messages to peers by PeerId).
+    pub async fn get_local_peer_id(&self) -> String {
+        if let Some(mgr) = self.effective_mesh_manager().await {
+            let mgr = mgr.read().await;
+            if let Some(pid) = mgr.local_peer_id() {
+                return pid.to_string();
+            }
+        }
+        // Fallback to identity id if mesh not available
+        self.get_identity_id().await
     }
 
     /// Check if a display name profile has been set
@@ -2311,8 +2366,19 @@ impl Core {
                 .write()
                 .await
                 .register(crate::core::transport::TransportKind::Mesh(handle.clone()));
+            // Set active transport to mesh
+            {
+                let mut active = self.active_transport.write().await;
+                *active = Some(crate::core::transport::TransportKind::Mesh(handle.clone()));
+            }
             *slot = Some(handle);
             tracing::info!("Mesh network initialized after profile unlock");
+
+            // Initialize Reticulum (RNS) transport for hybrid routing.
+            // Without this, RNS stays in standby (0 peers) and all traffic
+            // goes through libp2p only. RNS provides store-and-forward,
+            // encrypted announces, and cross-transport discovery.
+            let _ = self.init_reticulum().await;
         }
         #[cfg(not(feature = "mesh"))]
         {

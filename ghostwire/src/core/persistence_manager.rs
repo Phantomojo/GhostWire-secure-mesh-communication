@@ -162,7 +162,7 @@ impl PersistenceManager {
                 KeySource::Machine
             }
         });
-        let legacy_machine_key = if !user_mode {
+        let legacy_machine_key = if !user_mode && !EncryptionManager::is_user_keyed() {
             Some(Zeroizing::new(
                 EncryptionManager::machine_master_key()
                     .map_err(|e| anyhow!("machine key initialization failed: {e}"))?,

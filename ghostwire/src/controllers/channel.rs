@@ -26,14 +26,34 @@ impl ChannelController {
         Json(req): Json<serde_json::Value>,
     ) -> impl IntoResponse {
         let name = req["name"].as_str().map(|s| s.to_string());
+        // Validate channel name
+        if let Some(ref n) = name {
+            if n.is_empty() || n.len() > 64 || !n.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ' ') {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiV2Response::<()>::error(
+                        "INVALID_NAME",
+                        "Channel name must be 1-64 characters, alphanumeric/spaces/hyphens/underscores only.",
+                    )),
+                )
+                    .into_response();
+            }
+        }
         let core = state.core.read().await;
         match core.ghost_channels.create(name).await {
-            Ok(ch) => Json(ApiV2Response::success(serde_json::json!({
-                "channel": ch,
-                "invite": ch.invite_string(),
-                "topic": ch.gossipsub_topic(),
-            })))
-            .into_response(),
+            Ok(ch) => {
+                let invite = ch.invite_string();
+                let topic = ch.gossipsub_topic();
+                Json(ApiV2Response::success(serde_json::json!({
+                    "topic_id": ch.topic_id,
+                    "local_name": ch.local_name,
+                    "description": ch.description,
+                    "created_at": ch.created_at,
+                    "invite": invite,
+                    "topic": topic,
+                })))
+                .into_response()
+            }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiV2Response::<()>::error("CHANNEL_ERROR", e.to_string())),
@@ -56,11 +76,17 @@ impl ChannelController {
         }
         let core = state.core.read().await;
         match core.ghost_channels.join(invite).await {
-            Ok(ch) => Json(ApiV2Response::success(serde_json::json!({
-                "channel": ch,
-                "topic": ch.gossipsub_topic(),
-            })))
-            .into_response(),
+            Ok(ch) => {
+                let topic = ch.gossipsub_topic();
+                Json(ApiV2Response::success(serde_json::json!({
+                    "topic_id": ch.topic_id,
+                    "local_name": ch.local_name,
+                    "description": ch.description,
+                    "created_at": ch.created_at,
+                    "topic": topic,
+                })))
+                .into_response()
+            }
             Err(e) => (
                 StatusCode::BAD_REQUEST,
                 Json(ApiV2Response::<()>::error("JOIN_ERROR", e.to_string())),
@@ -99,7 +125,14 @@ impl ChannelController {
         if text.is_empty() {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(ApiV2Response::<()>::error("EMPTY", "text is required")),
+                Json(ApiV2Response::<()>::error("INVALID_MESSAGE", "Message text required")),
+            )
+                .into_response();
+        }
+        if text.len() > 10000 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("MESSAGE_TOO_LONG", "Channel message exceeds 10000 character limit")),
             )
                 .into_response();
         }

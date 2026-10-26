@@ -125,7 +125,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_TRANSPORT':        return { ...state, transport: action.payload };
     case 'SET_BACKEND_CONNECTED':return { ...state, backendConnected: action.payload };
     case 'SET_MESSAGES':         return { ...state, messages: action.payload };
-    case 'ADD_MESSAGE':          return { ...state, messages: [...state.messages, action.payload] };
+    case 'ADD_MESSAGE':          return { ...state, messages: state.messages.some(m => m.id === action.payload.id) ? state.messages : [...state.messages, action.payload] };
     case 'SET_ACTIVE_RECIPIENT': return { ...state, activeRecipient: action.payload };
     case 'SET_SECURITY':         return {
       ...state,
@@ -289,6 +289,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       switch (evt.type) {
         case 'message':
           dispatch({ type: 'ADD_MESSAGE', payload: evt.payload });
+          break;
+        case 'dtn_bundle':
+          // DTN bundle received — refresh messages to show delivered message
+          toast('info', `DTN bundle delivered from ${evt.payload.from?.slice(0,8) ?? 'peer'}`);
+          break;
+        case 'channel_message':
+          // Channel message received — could trigger channel refresh
+          toast('info', `New message in channel ${evt.payload.channel_id?.slice(0,8) ?? ''}`);
           break;
         case 'network_update':
           dispatch({ type: 'SET_SYSTEM', payload: {

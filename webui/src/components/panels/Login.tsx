@@ -55,8 +55,15 @@ export default function Login() {
     setLoading(true); setErr('');
     try {
       await finishUnlock(password);
-    } catch {
-      setErr('Incorrect passphrase or profile could not be unlocked');
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Unknown error';
+      if (msg.includes('password') || msg.includes('passphrase') || msg.includes('unlock')) {
+        setErr('Incorrect passphrase. Please try again.');
+      } else if (msg.includes('locked')) {
+        setErr('Profile is locked. Enter passphrase to unlock.');
+      } else {
+        setErr(msg);
+      }
       sessionStorage.removeItem('gw_token');
     } finally { setLoading(false); setPassword(''); }
   };

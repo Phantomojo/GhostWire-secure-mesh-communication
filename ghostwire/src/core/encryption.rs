@@ -1190,8 +1190,17 @@ impl EncryptionManager {
         // Encrypt the message using XChaCha20-Poly1305 with the hardened key
         let encrypted_data = Self::encrypt_with_xchacha20(message.as_bytes(), &final_key)?;
 
-        // Sign the encrypted message
-        let signature = self.sign_message(&encrypted_data.ciphertext)?;
+        // Sign over ciphertext + pq_key to prevent PQC downgrade attacks.
+        // If pq_key is stripped by an attacker, the signature will no longer
+        // verify because the signed payload includes the pq_key length prefix.
+        let mut signed_payload = encrypted_data.ciphertext.clone();
+        if let Some(pq) = &pq_key_out {
+            signed_payload.extend_from_slice(&(pq.len() as u32).to_le_bytes());
+            signed_payload.extend_from_slice(pq);
+        } else {
+            signed_payload.extend_from_slice(&0u32.to_le_bytes());
+        }
+        let signature = self.sign_message(&signed_payload)?;
 
         // Update usage count
         self.increment_key_usage();
@@ -1233,9 +1242,17 @@ impl EncryptionManager {
         let peer_public_key = peer_key.public_key.clone();
         drop(peer_keys); // Release lock
 
-        // Verify signature first
+        // Verify signature first — must cover ciphertext + pq_key to prevent
+        // PQC downgrade (attacker stripping pq_key breaks the signature).
+        let mut signed_payload = encrypted_msg.ciphertext.clone();
+        if let Some(pq) = &encrypted_msg.pq_key {
+            signed_payload.extend_from_slice(&(pq.len() as u32).to_le_bytes());
+            signed_payload.extend_from_slice(pq);
+        } else {
+            signed_payload.extend_from_slice(&0u32.to_le_bytes());
+        }
         self.verify_signature(
-            &encrypted_msg.ciphertext,
+            &signed_payload,
             &encrypted_msg.signature,
             &peer_public_key,
         )?;
@@ -1258,32 +1275,47 @@ impl EncryptionManager {
         let mut final_key = session_key.clone();
 
         // PQC Hardening: Kyber Decapsulation
+        // SECURITY: If the peer's public key supports PQC (>= 64+1184 bytes)
+        // but pq_key is missing, this is a downgrade attack — reject.
+        let peer_supports_pqc = peer_public_key.len() >= 64 + 1184;
+        if peer_supports_pqc && encrypted_msg.pq_key.is_none() {
+            return Err("PQC downgrade detected: peer supports PQC but pq_key is missing".into());
+        }
         if let Some(pq_ciphertext) = &encrypted_msg.pq_key {
             use pqcrypto_mlkem::mlkem768;
             use pqcrypto_traits::kem::{Ciphertext as _, SecretKey as _};
 
             // Extract our Kyber Secret Key from private key blob
             let priv_key_bytes = self.private_key_snapshot()?;
-            let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
-            let pq_sk_bytes = &priv_key_bytes[2 + ed_len + 32..];
-
-            if let (Ok(pq_sk), Ok(pq_ct)) = (
-                mlkem768::SecretKey::from_bytes(pq_sk_bytes),
-                mlkem768::Ciphertext::from_bytes(pq_ciphertext),
-            ) {
-                let shared_secret = mlkem768::decapsulate(&pq_ct, &pq_sk);
-
-                use pqcrypto_traits::kem::SharedSecret;
-                // Mix keys: HKDF(ECDH_key, Kyber_secret)
-                let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &session_key);
-                let prk = salt.extract(shared_secret.as_bytes());
-                let okm = prk
-                    .expand(&[b"GhostWire-PQC-Mix"], hkdf::HKDF_SHA256)
-                    .map_err(|_| "PQC mix failed")?;
-                let mut mixed = [0u8; 32];
-                okm.fill(&mut mixed).map_err(|_| "PQC fill failed")?;
-                final_key = mixed.to_vec();
+            // Bounds check to prevent panic on malformed key
+            if priv_key_bytes.len() < 2 {
+                return Err("Invalid private key length".into());
             }
+            let ed_len = u16::from_le_bytes([priv_key_bytes[0], priv_key_bytes[1]]) as usize;
+            let pq_sk_offset = 2 + ed_len + 32;
+            if priv_key_bytes.len() < pq_sk_offset {
+                return Err("Corrupted private key: too short for PQC".into());
+            }
+            let pq_sk_bytes = &priv_key_bytes[pq_sk_offset..];
+
+            let (pq_sk, pq_ct) = (
+                mlkem768::SecretKey::from_bytes(pq_sk_bytes)
+                    .map_err(|_| "Invalid PQC secret key")?,
+                mlkem768::Ciphertext::from_bytes(pq_ciphertext)
+                    .map_err(|_| "Invalid PQC ciphertext")?,
+            );
+            let shared_secret = mlkem768::decapsulate(&pq_ct, &pq_sk);
+
+            use pqcrypto_traits::kem::SharedSecret;
+            // Mix keys: HKDF(ECDH_key, Kyber_secret)
+            let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &session_key);
+            let prk = salt.extract(shared_secret.as_bytes());
+            let okm = prk
+                .expand(&[b"GhostWire-PQC-Mix"], hkdf::HKDF_SHA256)
+                .map_err(|_| "PQC mix failed")?;
+            let mut mixed = [0u8; 32];
+            okm.fill(&mut mixed).map_err(|_| "PQC fill failed")?;
+            final_key = mixed.to_vec();
         }
 
         // Decrypt using XChaCha20-Poly1305

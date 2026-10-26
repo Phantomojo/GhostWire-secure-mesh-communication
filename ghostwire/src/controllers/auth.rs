@@ -22,23 +22,27 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// tokens. This is the same class of bug fixed in
 /// `web.rs::allowed_network_host`; both are now range-checked.
 pub(crate) fn is_local_address(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_loopback()
-                // 172.16.0.0/12 - the Docker/Podman default bridge lives here
-                || (o[0] == 172 && (16..=31).contains(&o[1]))
-                // 192.168.0.0/16
-                || (o[0] == 192 && o[1] == 168)
-                // 100.64.0.0/10 - Tailscale CGNAT
-                || (o[0] == 100 && (64..=127).contains(&o[1]))
-        }
-        std::net::IpAddr::V6(v6) => {
-            v6.is_loopback()
-                // fc00::/7 unique-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                // fe80::/10 link-local
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
+    // In release builds, only loopback is trusted (no auth bypass).
+    // In debug builds, allow private ranges for dev convenience.
+    #[cfg(not(debug_assertions))]
+    {
+        ip.is_loopback()
+    }
+    #[cfg(debug_assertions)]
+    {
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                let o = v4.octets();
+                v4.is_loopback()
+                    || (o[0] == 172 && (16..=31).contains(&o[1]))
+                    || (o[0] == 192 && o[1] == 168)
+                    || (o[0] == 100 && (64..=127).contains(&o[1]))
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
         }
     }
 }

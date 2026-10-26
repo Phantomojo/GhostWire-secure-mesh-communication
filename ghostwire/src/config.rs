@@ -48,15 +48,8 @@ pub struct NetworkConfig {
     #[serde(default = "default_reticulum_interfaces")]
     pub reticulum_interfaces: String,
     pub briar_enabled: bool,
-    pub stealth_tcp_enabled: bool,
     pub max_peers: usize,
     pub connection_timeout_secs: u64,
-    #[serde(skip)]
-    pub stealth_handshake_secret: Option<String>,
-    /// Obfs4 obfuscation settings for DPI evasion
-    pub obfs4_enabled: bool,
-    /// Obfs4 secret key (hex-encoded, if not provided a random key is generated)
-    pub obfs4_secret_key: Option<String>,
     /// Hybrid mode: "hybrid", "libp2p-only", "reticulum-only"
     #[serde(default = "default_hybrid_mode")]
     pub hybrid_mode: String,
@@ -75,18 +68,8 @@ impl std::fmt::Debug for NetworkConfig {
             .field("reticulum_enabled", &self.reticulum_enabled)
             .field("reticulum_interfaces", &"[redacted]")
             .field("briar_enabled", &self.briar_enabled)
-            .field("stealth_tcp_enabled", &self.stealth_tcp_enabled)
             .field("max_peers", &self.max_peers)
             .field("connection_timeout_secs", &self.connection_timeout_secs)
-            .field(
-                "stealth_handshake_secret",
-                &self.stealth_handshake_secret.as_ref().map(|_| "********"),
-            )
-            .field("obfs4_enabled", &self.obfs4_enabled)
-            .field(
-                "obfs4_secret_key",
-                &self.obfs4_secret_key.as_ref().map(|_| "********"),
-            )
             .field("hybrid_mode", &self.hybrid_mode)
             .field("discovery_interval", &self.discovery_interval)
             .field("rns_announce_interval", &self.rns_announce_interval)
@@ -177,18 +160,8 @@ impl Default for Config {
                 reticulum_enabled: true,
                 reticulum_interfaces: default_reticulum_interfaces(),
                 briar_enabled: false,
-                stealth_tcp_enabled: false,
                 max_peers: 50,
                 connection_timeout_secs: 30,
-                stealth_handshake_secret: None,
-                // This flag is READ ONLY by the startup warning in startup.rs.
-                // Nothing in the transport stack consults it: there is no obfs4
-                // handshake, framing or socket wrapper, so setting it (or leaving
-                // it true) does NOT obfuscate any traffic. It is retained so the
-                // existing config surface and the warning keep working, not because
-                // it enables anything. Do not read this as "obfuscation is on".
-                obfs4_enabled: true,
-                obfs4_secret_key: None, // Generated randomly if not provided
                 hybrid_mode: default_hybrid_mode(),
                 discovery_interval: default_discovery_interval(),
                 rns_announce_interval: default_rns_announce_interval(),
@@ -303,19 +276,6 @@ impl Config {
         // Auto-update from environment
         if let Ok(val) = env::var("GHOSTWIRE_AUTO_UPDATE") {
             config.server.auto_update = val.to_lowercase() == "true" || val == "1";
-        }
-
-        // Stealth handshake secret from environment
-        if let Ok(secret) = env::var("GHOSTWIRE_STEALTH_SECRET") {
-            config.network.stealth_handshake_secret = Some(secret);
-        }
-
-        // Obfs4 configuration from environment
-        if let Ok(val) = env::var("GHOSTWIRE_OBFS4_ENABLED") {
-            config.network.obfs4_enabled = val.to_lowercase() == "true" || val == "1";
-        }
-        if let Ok(secret) = env::var("GHOSTWIRE_OBFS4_SECRET") {
-            config.network.obfs4_secret_key = Some(secret);
         }
 
         config

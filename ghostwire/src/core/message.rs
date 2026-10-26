@@ -71,6 +71,10 @@ use uuid::Uuid;
 
 pub const MAX_INLINE_BYTES: usize = 64 * 1024;
 
+fn default_delivery_status() -> String {
+    "pending".to_string()
+}
+
 /// Type of message being sent
 ///
 /// **Security Note:** Message type is visible in plaintext for routing purposes.
@@ -195,6 +199,10 @@ pub struct Message {
     pub encrypted: bool,
     pub message_type: String,
     pub encryption_status: String,
+    #[serde(default = "default_delivery_status")]
+    pub delivery_status: String,
+    #[serde(default)]
+    pub read: bool,
     pub hops: u8,
     pub ttl: u64,
     pub vector_clock: crate::core::vector_clock::VectorClock,
@@ -259,6 +267,8 @@ impl Message {
             encrypted: false,
             message_type: "text".to_string(),
             encryption_status: "none".to_string(),
+            delivery_status: "pending".to_string(),
+            read: false,
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
@@ -315,6 +325,8 @@ impl Message {
             encrypted: false,
             message_type: format!("{:?}", message_type),
             encryption_status: "none".to_string(),
+            delivery_status: "pending".to_string(),
+            read: false,
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
