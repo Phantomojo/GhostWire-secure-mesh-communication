@@ -641,6 +641,21 @@ impl IdentityController {
                     let mesh_host = state.config.mesh_host.clone();
                     let mesh_port = state.config.mesh_port;
                     let listen_addr = format!("/ip4/{}/tcp/{}", mesh_host, mesh_port);
+
+                    // Initialize Reticulum BEFORE starting mesh so the RNS
+                    // local address is populated when the handshake is sent.
+                    #[cfg(feature = "reticulum")]
+                    {
+                        let mode = core.config.network.hybrid_mode.trim().to_ascii_lowercase();
+                        let want_rns = core.config.network.reticulum_enabled
+                            && mode != "libp2p-only";
+                        if want_rns {
+                            if let Err(error) = core.init_reticulum().await {
+                                tracing::warn!(target: "profile_unlock", error = %error, "Reticulum init failed (non-fatal)");
+                            }
+                        }
+                    }
+
                     if let Err(error) = core.start_mesh(&listen_addr).await {
                         tracing::error!(target: "profile_unlock", error = %error, "Failed to start mesh listener after profile unlock");
                         return (
