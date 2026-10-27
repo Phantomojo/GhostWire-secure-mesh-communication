@@ -474,7 +474,7 @@ impl ReticulumTransport {
             let local_dest = t
                 .add_destination(
                     identity.clone(),
-                    rns_transport::destination::DestinationName::new(node_name, "mesh"),
+                    rns_transport::destination::DestinationName::new(node_name, "ghostwire.mesh"),
                 )
                 .await;
 

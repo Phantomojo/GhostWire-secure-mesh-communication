@@ -119,10 +119,16 @@ pub struct FeatureFlags {
 }
 
 fn default_reticulum_interfaces() -> String {
-    // GhostWire-only default: enable local Reticulum discovery without
-    // contacting an external public RNS peer implicitly. WAN interfaces must
-    // be explicitly configured by the operator through an authenticated path.
-    "[interfaces]\ninterface 0 = AutoInterface".to_string()
+    // GhostWire private RNS overlay (ghRNS).
+    //
+    // Uses Interface Access Codes (IFAC) so only GhostWire nodes can
+    // participate. The network_name + passphrase derive a shared Ed25519
+    // signing identity; packets without a valid IFAC signature are dropped
+    // at the interface level. Public RNS nodes cannot see or join.
+    //
+    // AutoInterface provides local multicast discovery (LAN).
+    // TCP backbone must be explicitly configured by the operator for WAN.
+    "[interfaces]\ninterface 0 = AutoInterface\n  network_name = ghostwire-mesh-v1\n  passphrase = ghostwire-default-ifac\n  ifac_size = 16".to_string()
 }
 
 fn default_hybrid_mode() -> String {
