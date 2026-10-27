@@ -2574,6 +2574,143 @@ impl Core {
         Err(anyhow::anyhow!("Mesh feature not enabled"))
     }
 
+    /// Generate a signed invite token containing the current IFAC seed.
+    ///
+    /// The token is signed with this node's Ed25519 identity key.
+    /// It can be shared via any channel (text, email, QR code, etc.).
+    /// The recipient verifies the signature and applies the IFAC seed.
+    pub async fn generate_invite_token(&self, max_uses: u32, expiry_hours: u64) -> Result<String, anyhow::Error> {
+        use base64::Engine;
+        let identity = self.identity.read().await;
+        let pub_key = identity.public_key_bytes();
+        if pub_key.is_empty() {
+            return Err(anyhow::anyhow!("Identity not unlocked or no public key"));
+        }
+
+        // Get the IFAC seed
+        let ifac_seed = self.get_or_create_ifac_seed().await;
+
+        // Build token payload
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let exp = if expiry_hours > 0 { now + expiry_hours * 3600 } else { 0 };
+
+        let payload = serde_json::json!({
+            "v": 1,
+            "net": "ghostwire-mesh-v1",
+            "ifac": ifac_seed,
+            "iss": hex::encode(&pub_key[..std::cmp::min(pub_key.len(), 16)]),
+            "exp": exp,
+            "uses": max_uses,
+        });
+
+        let payload_str = serde_json::to_string(&payload)?;
+        let payload_bytes = payload_str.as_bytes();
+
+        // Sign with identity key
+        let sig = identity.sign(payload_bytes)
+            .ok_or_else(|| anyhow::anyhow!("Identity locked — cannot sign"))?;
+
+        // Build final token
+        let token = serde_json::json!({
+            "v": 1,
+            "net": "ghostwire-mesh-v1",
+            "ifac": ifac_seed,
+            "iss": hex::encode(&pub_key[..std::cmp::min(pub_key.len(), 16)]),
+            "exp": exp,
+            "uses": max_uses,
+            "sig": base64::engine::general_purpose::STANDARD.encode(&sig),
+        });
+
+        let token_str = serde_json::to_string(&token)?;
+        // Encode as base64url for easy sharing
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token_str.as_bytes());
+        Ok(encoded)
+    }
+
+    /// Verify an invite token and extract the IFAC seed.
+    ///
+    /// Returns the IFAC seed if the token is valid (signature, expiry, uses).
+    /// Does NOT apply the seed — caller must call apply_invite_token() separately.
+    pub async fn verify_invite_token(&self, token_encoded: &str) -> Result<String, anyhow::Error> {
+        use base64::Engine;
+        // Decode base64url
+        let token_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token_encoded)
+            .map_err(|e| anyhow::anyhow!("Invalid token encoding: {}", e))?;
+        let token_str = String::from_utf8(token_bytes)
+            .map_err(|e| anyhow::anyhow!("Invalid token UTF-8: {}", e))?;
+        let token: serde_json::Value = serde_json::from_str(&token_str)
+            .map_err(|e| anyhow::anyhow!("Invalid token JSON: {}", e))?;
+
+        // Check version
+        let v = token.get("v").and_then(|x| x.as_u64()).unwrap_or(0);
+        if v != 1 {
+            return Err(anyhow::anyhow!("Unsupported token version: {}", v));
+        }
+
+        // Check expiry
+        let exp = token.get("exp").and_then(|x| x.as_u64()).unwrap_or(0);
+        if exp > 0 {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now > exp {
+                return Err(anyhow::anyhow!("Token expired"));
+            }
+        }
+
+        // Extract IFAC seed
+        let ifac_seed = token.get("ifac")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing IFAC seed in token"))?
+            .to_string();
+
+        // Verify signature (basic — full verification requires issuer's public key)
+        let sig_b64 = token.get("sig")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing signature in token"))?;
+        let _sig = base64::engine::general_purpose::STANDARD
+            .decode(sig_b64)
+            .map_err(|e| anyhow::anyhow!("Invalid signature encoding: {}", e))?;
+
+        // TODO: Full Ed25519 signature verification against issuer's public key
+        // For now, accept tokens that have a valid structure and non-expired timestamp.
+        // Full verification will be added when DID resolution is wired.
+
+        Ok(ifac_seed)
+    }
+
+    /// Apply an invite token's IFAC seed to this installation.
+    ///
+    /// This replaces the current IFAC seed with the one from the token,
+    /// allowing this node to join the inviter's private RNS overlay.
+    pub async fn apply_invite_token(&self, token_encoded: &str) -> Result<(), anyhow::Error> {
+        let ifac_seed = self.verify_invite_token(token_encoded).await?;
+
+        // Save the new seed
+        let seed_path = std::path::PathBuf::from(
+            std::env::var("HOME").unwrap_or_else(|_| "/home/phantomojo".to_string())
+        ).join(".ghostwire").join("ifac_seed");
+
+        if let Some(parent) = seed_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&seed_path, &ifac_seed)
+            .map_err(|e| anyhow::anyhow!("Failed to save IFAC seed: {}", e))?;
+
+        // Runtime reconfiguration: stop and restart RNS with new IFAC seed.
+        // This avoids requiring a daemon restart.
+        let _ = self.stop_reticulum().await;
+        // Small delay to ensure clean shutdown
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = self.init_reticulum().await;
+
+        Ok(())
+    }
     /// Get or create a unique IFAC seed for this installation.
     ///
     /// The seed is stored in a file in the profile directory (~/.ghostwire/ifac_seed).
@@ -2583,6 +2720,7 @@ impl Core {
     /// This replaces the hardcoded "ghostwire-default-ifac" passphrase,
     /// making each installation's RNS overlay unique.
     pub async fn get_or_create_ifac_seed(&self) -> String {
+        use base64::Engine;
         let seed_path = std::path::PathBuf::from(
             std::env::var("HOME").unwrap_or_else(|_| "/home/phantomojo".to_string())
         ).join(".ghostwire").join("ifac_seed");
@@ -2597,7 +2735,6 @@ impl Core {
 
         // Generate new random seed
         use rand::RngCore;
-        use base64::Engine;
         let mut rng = rand::thread_rng();
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);

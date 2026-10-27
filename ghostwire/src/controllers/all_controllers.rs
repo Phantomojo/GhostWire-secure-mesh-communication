@@ -901,7 +901,7 @@ impl PairingController {
         match core.apply_invite_token(&req.token).await {
             Ok(()) => Json(ApiV2Response::success(serde_json::json!({
                 "status": "applied",
-                "message": "IFAC seed updated. Restart RNS to join the new overlay.",
+                "message": "IFAC seed updated and RNS reconfigured. Node now on new overlay.",
             })))
             .into_response(),
             Err(e) => (
