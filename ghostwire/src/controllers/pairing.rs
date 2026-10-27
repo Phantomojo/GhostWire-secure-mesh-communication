@@ -13,9 +13,49 @@ use axum::{
 };
 use std::sync::Arc;
 
-pub struct PairingController;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct ApplyInviteRequest {
+    pub token: String,
+}
 
 impl PairingController {
+    pub async fn generate_invite(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.generate_invite_token(1, 24).await {
+            Ok(token) => Json(ApiV2Response::success(serde_json::json!({
+                "token": token,
+                "expires_in_hours": 24,
+                "max_uses": 1,
+            })))
+            .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiV2Response::<()>::error("INVITE_ERROR", e.to_string())),
+            )
+                .into_response(),
+        }
+    }
+
+    pub async fn apply_invite(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<ApplyInviteRequest>,
+    ) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.apply_invite_token(&req.token).await {
+            Ok(()) => Json(ApiV2Response::success(serde_json::json!({
+                "status": "applied",
+                "message": "IFAC seed updated. Restart RNS to join the new overlay.",
+            })))
+            .into_response(),
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("INVITE_INVALID", e.to_string())),
+            )
+                .into_response(),
+        }
+    }
     pub async fn generate_code(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let core = state.core.read().await;
         match core.pairing_manager.initiate_pairing().await {
