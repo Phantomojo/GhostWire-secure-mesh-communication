@@ -2610,7 +2610,7 @@ impl MeshDriver {
             let my_pubkey = base64::engine::general_purpose::STANDARD
                 .encode(self.encryption_manager.get_public_key());
             // Include RNS address and nickname in handshake for cross-transport discovery and peer naming.
-            let rns_addr = String::new();
+            let rns_addr = self.rns_local_address.read().await.clone();
             let rns_field = if rns_addr.is_empty() { "null".to_string() } else { format!("\"{}\"", rns_addr) };
             let my_nickname = self._identity.get_metadata().nickname;
             let handshake_content = format!(
@@ -3899,8 +3899,15 @@ pub struct MeshManager {
 }
 
 impl MeshManager {
+    /// Set the RNS local address for cross-transport discovery.
+    /// Called by Core after init_reticulum() to populate the address
+    /// that will be exchanged in handshakes.
+    pub async fn set_rns_local_address(&self, addr: String) {
+        *self.transport.rns_local_address.write().await = addr;
+    }
+
     /// This node's own libp2p PeerId, derived from the retained identity.
-    ///
+    /// 
     /// `MeshManager` keeps `_local_identity`, so the PeerId is recoverable
     /// whenever it is unlocked — no extra field to keep in sync.
     ///

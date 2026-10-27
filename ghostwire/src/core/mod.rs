@@ -2585,6 +2585,7 @@ impl Core {
                 let interfaces_ini = self.config.network.reticulum_interfaces.clone();
                 let reticulum_manager =
                     ReticulumManager::new(identity, &interfaces_ini, &node_id).await?;
+                let rns_addr = reticulum_manager.local_address().await;
                 let reticulum_transport = reticulum_manager.transport_arc();
                 let reticulum_handle = Arc::new(RwLock::new(reticulum_manager));
                 self.transport_registry.write().await.register(
@@ -2640,6 +2641,14 @@ impl Core {
                 if let Ok(mut slot) = self.rns_rx_pump.lock() {
                     *slot = Some(handle);
                 }
+
+                // Set the RNS local address on the mesh transport so it can be
+                // exchanged in the handshake for cross-transport discovery.
+                if let Some(mesh_mgr) = self.mesh_manager.as_ref() {
+                    let _ = mesh_mgr.write().await.set_rns_local_address(rns_addr.clone());
+                    tracing::info!("RNS local address set for cross-transport discovery: {}", rns_addr);
+                }
+
                 tracing::info!("Reticulum network initialized and registered");
             }
         }
