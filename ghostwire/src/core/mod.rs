@@ -2574,7 +2574,44 @@ impl Core {
         Err(anyhow::anyhow!("Mesh feature not enabled"))
     }
 
-    /// Initialize Reticulum network
+    /// Get or create a unique IFAC seed for this installation.
+    ///
+    /// The seed is stored in a file in the profile directory (~/.ghostwire/ifac_seed).
+    /// On first run, a random 32-byte seed is generated and saved.
+    /// On subsequent runs, the stored seed is loaded.
+    ///
+    /// This replaces the hardcoded "ghostwire-default-ifac" passphrase,
+    /// making each installation's RNS overlay unique.
+    pub async fn get_or_create_ifac_seed(&self) -> String {
+        let seed_path = std::path::PathBuf::from(
+            std::env::var("HOME").unwrap_or_else(|_| "/home/phantomojo".to_string())
+        ).join(".ghostwire").join("ifac_seed");
+
+        // Try to read existing seed
+        if let Ok(seed) = std::fs::read_to_string(&seed_path) {
+            let seed = seed.trim().to_string();
+            if !seed.is_empty() {
+                return seed;
+            }
+        }
+
+        // Generate new random seed
+        use rand::RngCore;
+        use base64::Engine;
+        let mut rng = rand::thread_rng();
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        let seed = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        // Save to file (best effort)
+        if let Some(parent) = seed_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&seed_path, &seed);
+
+        seed
+    }
+
     pub async fn init_reticulum(&self) -> Result<()> {
         #[cfg(feature = "reticulum")]
         {
@@ -2582,7 +2619,24 @@ impl Core {
             if slot.is_none() {
                 let identity = self.identity.read().await.clone();
                 let node_id = identity.id.clone();
-                let interfaces_ini = self.config.network.reticulum_interfaces.clone();
+                // Generate or load IFAC seed for private RNS overlay.
+                // Each installation gets a unique random seed on first run.
+                // The seed is stored in the profile directory for persistence.
+                let ifac_seed = self.get_or_create_ifac_seed().await;
+                let mut interfaces_ini = self.config.network.reticulum_interfaces.clone();
+                // Replace hardcoded passphrase with the generated seed
+                if interfaces_ini.contains("passphrase = ghostwire-default-ifac") {
+                    interfaces_ini = interfaces_ini.replace(
+                        "passphrase = ghostwire-default-ifac",
+                        &format!("passphrase = {}", ifac_seed),
+                    );
+                } else if !interfaces_ini.contains("passphrase =") {
+                    // Add passphrase if missing
+                    interfaces_ini = interfaces_ini.replace(
+                        "interface 0 = AutoInterface",
+                        &format!("interface 0 = AutoInterface\n  network_name = ghostwire-mesh-v1\n  passphrase = {}", ifac_seed),
+                    );
+                }
                 let reticulum_manager =
                     ReticulumManager::new(identity, &interfaces_ini, &node_id).await?;
                 let rns_addr = reticulum_manager.local_address().await;
