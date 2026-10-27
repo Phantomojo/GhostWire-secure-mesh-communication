@@ -2597,11 +2597,14 @@ impl Core {
             .as_secs();
         let exp = if expiry_hours > 0 { now + expiry_hours * 3600 } else { 0 };
 
+        // Store full public key in iss (hex-encoded)
+        let iss_hex = hex::encode(&pub_key);
+
         let payload = serde_json::json!({
             "v": 1,
             "net": "ghostwire-mesh-v1",
             "ifac": ifac_seed,
-            "iss": hex::encode(&pub_key[..std::cmp::min(pub_key.len(), 16)]),
+            "iss": iss_hex,
             "exp": exp,
             "uses": max_uses,
         });
@@ -2618,7 +2621,7 @@ impl Core {
             "v": 1,
             "net": "ghostwire-mesh-v1",
             "ifac": ifac_seed,
-            "iss": hex::encode(&pub_key[..std::cmp::min(pub_key.len(), 16)]),
+            "iss": iss_hex,
             "exp": exp,
             "uses": max_uses,
             "sig": base64::engine::general_purpose::STANDARD.encode(&sig),
@@ -2669,17 +2672,53 @@ impl Core {
             .ok_or_else(|| anyhow::anyhow!("Missing IFAC seed in token"))?
             .to_string();
 
-        // Verify signature (basic — full verification requires issuer's public key)
+        // Extract issuer public key
+        let iss_hex = token.get("iss")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing issuer in token"))?;
+        let iss_bytes = hex::decode(iss_hex)
+            .map_err(|e| anyhow::anyhow!("Invalid issuer hex: {}", e))?;
+
+        // Extract signature
         let sig_b64 = token.get("sig")
             .and_then(|x| x.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing signature in token"))?;
-        let _sig = base64::engine::general_purpose::STANDARD
+        let sig_bytes = base64::engine::general_purpose::STANDARD
             .decode(sig_b64)
             .map_err(|e| anyhow::anyhow!("Invalid signature encoding: {}", e))?;
 
-        // TODO: Full Ed25519 signature verification against issuer's public key
-        // For now, accept tokens that have a valid structure and non-expired timestamp.
-        // Full verification will be added when DID resolution is wired.
+        // Reconstruct payload (must match generation order)
+        let v = token.get("v").and_then(|x| x.as_u64()).unwrap_or(1);
+        let net = token.get("net").and_then(|x| x.as_str()).unwrap_or("ghostwire-mesh-v1");
+        let exp = token.get("exp").and_then(|x| x.as_u64()).unwrap_or(0);
+        let uses = token.get("uses").and_then(|x| x.as_u64()).unwrap_or(1);
+        let payload = serde_json::json!({
+            "v": v,
+            "net": net,
+            "ifac": ifac_seed,
+            "iss": iss_hex,
+            "exp": exp,
+            "uses": uses,
+        });
+        let payload_str = serde_json::to_string(&payload)?;
+        let payload_bytes = payload_str.as_bytes();
+
+        // Verify Ed25519 signature
+        use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+        if iss_bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Invalid issuer public key length: {}", iss_bytes.len()));
+        }
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&iss_bytes);
+        let verifying_key = VerifyingKey::from_bytes(&pk_bytes)
+            .map_err(|e| anyhow::anyhow!("Invalid issuer public key: {}", e))?;
+
+        let sig_array: [u8; 64] = sig_bytes.as_slice().try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid signature length: expected 64, got {}", sig_bytes.len()))?;
+        let signature = Signature::from_bytes(&sig_array);
+
+        verifying_key.verify(payload_bytes, &signature)
+            .map_err(|e| anyhow::anyhow!("Signature verification failed: {}", e))?;
 
         Ok(ifac_seed)
     }
