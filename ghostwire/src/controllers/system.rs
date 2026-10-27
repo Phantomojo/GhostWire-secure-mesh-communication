@@ -9,6 +9,33 @@ pub struct SystemController;
 
 impl SystemController {
     /// GET /api/status - Basic system health and identification
+    pub async fn rns_topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        match core.get_rns_topology().await {
+            Some(topo) => Json(ApiV2Response::success(serde_json::json!({
+                "node_count": topo.nodes.len(),
+                "nodes": topo.nodes.iter().map(|(id, node)| serde_json::json!({
+                    "id": id,
+                    "address": node.address,
+                    "last_seen": node.last_seen,
+                    "quality": node.connection_quality,
+                    "online": node.is_online,
+                })).collect::<Vec<_>>(),
+                "route_count": topo.routes.len(),
+            }))).into_response(),
+            None => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiV2Response::<()>::error("RNS_UNAVAILABLE", "Reticulum not initialized")),
+            ).into_response(),
+        }
+    }
+
+    pub async fn all_peers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        let peers = core.get_all_peers().await;
+        Json(ApiV2Response::success(peers))
+    }
+
     pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let uptime = SystemTime::now()
             .duration_since(UNIX_EPOCH)

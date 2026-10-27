@@ -863,8 +863,8 @@ pub async fn start_web_server(
             post(crate::controllers::NetworkController::discovery_scan),
         )
         .route(
-            "/v2/system/transports",
-            get(crate::controllers::NetworkController::transport_health),
+            "/v2/system/rns-topology",
+            get(crate::controllers::SystemController::rns_topology),
         )
         .route(
             "/v2/system/transports/{transport}/action",
@@ -899,6 +899,10 @@ pub async fn start_web_server(
         .route(
             "/v2/pair/invite/apply",
             post(crate::controllers::PairingController::apply_invite),
+        )
+        .route(
+            "/v2/system/all-peers",
+            get(crate::controllers::SystemController::all_peers),
         );
 
     async fn node_info_page() -> impl IntoResponse {

@@ -2750,9 +2750,62 @@ impl Core {
 
         Ok(())
     }
+    /// Get all peers (libp2p + RNS) as a combined list.
+    /// This makes RNS-discovered peers visible alongside libp2p peers.
+    pub async fn get_all_peers(&self) -> serde_json::Value {
+        let mut peers = Vec::new();
+
+        // Libp2p peers from mesh topology
+        #[cfg(feature = "mesh")]
+        if let Some(mesh_mgr) = self.effective_mesh_manager().await {
+            let mgr = mesh_mgr.read().await;
+            let topology = mgr.get_topology().await;
+            for (id, node) in &topology.nodes {
+                peers.push(serde_json::json!({
+                    "id": id,
+                    "transport": "libp2p",
+                    "nickname": node.username,
+                    "rns_address": node.reticulum_address,
+                    "online": true,
+                }));
+            }
+        }
+
+        // RNS peers from Reticulum topology
+        #[cfg(feature = "reticulum")]
+        if let Some(rns_topo) = self.get_rns_topology().await {
+            for (id, node) in &rns_topo.nodes {
+                // Only add if not already in libp2p topology
+                let already_listed = peers.iter().any(|p| p.get("rns_address").and_then(|v| v.as_str()) == Some(&node.address));
+                if !already_listed {
+                    peers.push(serde_json::json!({
+                        "id": format!("rns:{}", id),
+                        "transport": "rns",
+                        "nickname": format!("rns-peer-{}", &id[..8]),
+                        "rns_address": node.address,
+                        "online": node.is_online,
+                        "quality": node.connection_quality,
+                    }));
+                }
+            }
+        }
+
+        serde_json::json!({
+            "total": peers.len(),
+            "peers": peers,
+        })
+    }
+    pub async fn get_rns_topology(&self) -> Option<crate::core::reticulum::ReticulumTopology> {
+        #[cfg(feature = "reticulum")]
+        {
+            if let Some(mgr) = self.reticulum_manager.read().await.as_ref() {
+                let mgr = mgr.read().await;
+                return Some(mgr.get_topology().await);
+            }
+        }
+        None
+    }
     /// Get or create a unique IFAC seed for this installation.
-    ///
-    /// The seed is stored in a file in the profile directory (~/.ghostwire/ifac_seed).
     /// On first run, a random 32-byte seed is generated and saved.
     /// On subsequent runs, the stored seed is loaded.
     ///
