@@ -891,6 +891,14 @@ pub async fn start_web_server(
         .route(
             "/v2/pair/rendezvous",
             get(crate::controllers::PairingController::get_rendezvous_address),
+        )
+        .route(
+            "/v2/pair/invite/generate",
+            post(crate::controllers::PairingController::generate_invite),
+        )
+        .route(
+            "/v2/pair/invite/apply",
+            post(crate::controllers::PairingController::apply_invite),
         );
 
     async fn node_info_page() -> impl IntoResponse {
