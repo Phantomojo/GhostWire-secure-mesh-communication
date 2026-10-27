@@ -2820,7 +2820,6 @@ impl Core {
         *self.transport_mode.write().await = mode.to_string();
     }
     /// Get or create a unique IFAC seed for this installation.
-    /// On first run, a random 32-byte seed is generated and saved.
     /// On subsequent runs, the stored seed is loaded.
     ///
     /// This replaces the hardcoded "ghostwire-default-ifac" passphrase,
@@ -2853,6 +2852,16 @@ impl Core {
         let _ = std::fs::write(&seed_path, &seed);
 
         seed
+    }
+
+    /// Get a short fingerprint of the IFAC seed for handshake comparison.
+    pub async fn get_ifac_fingerprint(&self) -> String {
+        let seed = self.get_or_create_ifac_seed().await;
+        if seed.is_empty() {
+            String::new()
+        } else {
+            seed.chars().take(12).collect()
+        }
     }
 
     pub async fn init_reticulum(&self) -> Result<()> {
@@ -2941,7 +2950,14 @@ impl Core {
 
                 // Set the RNS local address on the mesh transport so it can be
                 // exchanged in the handshake for cross-transport discovery.
-                if let Some(mesh_mgr) = self.mesh_manager.as_ref() {
+                // For user-keyed profiles, mesh_manager is None and the manager
+                // lives in late_mesh_manager — check both.
+                let mesh_mgr = if let Some(mgr) = self.mesh_manager.as_ref() {
+                    Some(mgr.clone())
+                } else {
+                    self.late_mesh_manager.read().await.clone()
+                };
+                if let Some(mesh_mgr) = mesh_mgr.as_ref() {
                     let _ = mesh_mgr.write().await.set_rns_local_address(rns_addr.clone());
                     tracing::info!("RNS local address set for cross-transport discovery: {}", rns_addr);
                 }
