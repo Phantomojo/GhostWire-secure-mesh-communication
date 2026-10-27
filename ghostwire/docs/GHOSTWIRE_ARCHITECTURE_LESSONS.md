@@ -12,8 +12,25 @@ At every stage — design, research, wiring, testing — evaluate:
 - **Security**: new attack surfaces, weakened guarantees, input validation, key handling
 - **Privacy**: metadata leaks (sender, recipient, timestamp, size), peer relationship exposure, correlation
 - **Anonymity**: DID-PeerId linking, network topology exposure, traffic analysis
+- **Anti-censorship**: can this be blocked/filtered by an authority? Multiple paths, obfuscation, decentralization, store-and-forward
 
 Not a phase. A lens. Every change, every layer, every time.
+
+## Anti-Censorship as a Core Goal
+
+GhostWire is anti-censorship. This means:
+- Multiple transport paths (so if one is blocked, another works)
+- Traffic obfuscation (so censors can't identify GhostWire traffic)
+- Decentralized discovery (no central point to block)
+- Store-and-forward (so messages survive intermittent connectivity)
+- Cover traffic (to hide usage patterns)
+- Stealth mode (to avoid detection)
+
+Compensating controls for anti-censorship:
+- mDNS discovery (weak: detectable) → covered by RNS encrypted announces
+- RNS transport (weak: identifiable) → covered by cover traffic + obfuscation
+- Store-and-forward (weak: intermediate nodes see metadata) → covered by sealed sender + padding
+- Single transport path (weak: blockable) → covered by multi-transport fallback
 
 ## Key Architectural Insights
 
@@ -53,8 +70,8 @@ The truth ledger honestly tracks what's real vs claimed. It downgrades marketing
 ### 9. Security/privacy/anonymity per feature
 Every feature has a strength and a weakness. Document both. Don't claim a feature is strong in all dimensions. Build compensating controls for the weaknesses. The system becomes strong by combining features whose weaknesses are covered.
 
-### 10. Resilience > speed
-When IPs are down, "slow RNS" vs "no connection" is not a real choice. The tradeoff isn't "slow vs fast" — it's "slow vs silence." RNS over radio works when everything else fails. That's the mission.
+### 10. Resilience vs speed is dynamic, not absolute
+When IPs are down, "slow RNS" vs "no connection" is not a real choice. The tradeoff isn't "slow vs fast" — it's "slow vs silence." But when internet is up and no censorship, speed matters too. The balance depends on environmental state (internet available, latency, censorship detected) AND user preference. The algorithm weighs both. RNS over radio works when everything else fails. That's the mission.
 
 ## Specific Concerns Per Layer
 
