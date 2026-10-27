@@ -346,6 +346,8 @@ impl MeshtasticAdapter {
 #[derive(Clone)]
 pub struct Core {
     pub config: crate::config::Config,
+    /// Runtime transport mode override (interior mutability for Arc<Core>).
+    pub transport_mode: Arc<RwLock<String>>,
     pub identity: Arc<RwLock<Arc<Identity>>>,
     pub encryption: Arc<Encryption>,
     #[cfg(feature = "mesh")]
@@ -815,7 +817,9 @@ impl Core {
         let bootstrap_worker = Arc::new(RwLock::new(bootstrap::BootstrapWorker::new(
             bootstrap::BootstrapPolicy::default(),
         )));
+        let transport_mode_init = config.network.hybrid_mode.clone();
         let core = Self {
+            transport_mode: Arc::new(RwLock::new(transport_mode_init)),
             config,
             identity: Arc::new(RwLock::new(identity)),
             encryption,
@@ -2804,6 +2808,16 @@ impl Core {
             }
         }
         None
+    }
+
+    /// Get the current transport/hybrid mode preference.
+    pub async fn get_transport_mode(&self) -> String {
+        self.transport_mode.read().await.clone()
+    }
+
+    /// Set the transport/hybrid mode preference at runtime.
+    pub async fn set_transport_mode(&self, mode: &str) {
+        *self.transport_mode.write().await = mode.to_string();
     }
     /// Get or create a unique IFAC seed for this installation.
     /// On first run, a random 32-byte seed is generated and saved.

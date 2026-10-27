@@ -903,6 +903,11 @@ pub async fn start_web_server(
         .route(
             "/v2/system/all-peers",
             get(crate::controllers::SystemController::all_peers),
+        )
+        .route(
+            "/v2/system/transport-mode",
+            get(crate::controllers::SystemController::transport_mode_get)
+                .post(crate::controllers::SystemController::transport_mode_set),
         );
 
     async fn node_info_page() -> impl IntoResponse {

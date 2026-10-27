@@ -36,6 +36,34 @@ impl SystemController {
         Json(ApiV2Response::success(peers))
     }
 
+    pub async fn transport_mode_get(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+        let core = state.core.read().await;
+        Json(ApiV2Response::success(serde_json::json!({
+            "mode": core.get_transport_mode().await,
+            "options": ["auto", "libp2p-only", "reticulum-only", "hybrid"],
+        })))
+    }
+
+    pub async fn transport_mode_set(
+        State(state): State<Arc<AppState>>,
+        Json(req): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        let mode = req.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
+        let valid = ["auto", "libp2p-only", "reticulum-only", "hybrid"];
+        if !valid.contains(&mode) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiV2Response::<()>::error("INVALID_MODE", "Mode must be one of: auto, libp2p-only, reticulum-only, hybrid")),
+            ).into_response();
+        }
+        let mut core = state.core.write().await;
+        core.set_transport_mode(mode).await;
+        Json(ApiV2Response::success(serde_json::json!({
+            "mode": mode,
+            "message": format!("Transport mode set to '{}'. Normal users: 'auto' lets the algorithm decide.", mode),
+        }))).into_response()
+    }
+
     pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let uptime = SystemTime::now()
             .duration_since(UNIX_EPOCH)
