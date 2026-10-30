@@ -176,4 +176,16 @@ mod tests {
         assert!(PowerMode::PowerSaver.cover_traffic_enabled());
         assert!(!PowerMode::UltraLow.cover_traffic_enabled());
     }
+
+    #[test]
+    fn test_read_battery_sysfs() {
+        let pm = PowerManager::new();
+        // This may return None on systems without a battery (CI, desktop)
+        // Just ensure it doesn't panic
+        let result = pm.read_battery_sysfs();
+        // Either Some((level, on_ac)) or None is acceptable
+        if let Some((level, _on_ac)) = result {
+            assert!(level <= 100);
+        }
+    }
 }
