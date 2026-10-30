@@ -80,6 +80,7 @@ export interface MessageV2 {
   encryption_status?: string;
   delivery_status?: string;
   read?: boolean;
+  sealed_sender?: boolean;
 }
 
 export interface SecurityDashboardV2 {
