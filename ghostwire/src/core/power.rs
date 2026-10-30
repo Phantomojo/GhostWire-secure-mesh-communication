@@ -102,6 +102,34 @@ impl PowerManager {
         self.battery_level.load(Ordering::Relaxed)
     }
 
+    /// Read battery level from Linux sysfs (/sys/class/power_supply/).
+    /// Returns (level, on_ac_power). Returns None if no battery found.
+    pub fn read_battery_sysfs(&self) -> Option<(u8, bool)> {
+        // Try common battery paths
+        for bat_name in &["BAT0", "BAT1", "battery"] {
+            let cap_path = format!("/sys/class/power_supply/{}/capacity", bat_name);
+            let status_path = format!("/sys/class/power_supply/{}/status", bat_name);
+            if let Ok(cap_str) = std::fs::read_to_string(&cap_path) {
+                if let Ok(level) = cap_str.trim().parse::<u8>() {
+                    // Check if on AC power
+                    let on_ac = std::fs::read_to_string("/sys/class/power_supply/AC/online")
+                        .or_else(|_| std::fs::read_to_string("/sys/class/power_supply/ACAD/online"))
+                        .map(|s| s.trim() == "1")
+                        .unwrap_or(false);
+                    return Some((level, on_ac));
+                }
+            }
+        }
+        None
+    }
+
+    /// Update battery from sysfs (call periodically).
+    pub fn refresh_battery(&self) {
+        if let Some((level, on_ac)) = self.read_battery_sysfs() {
+            self.update_battery(level, on_ac);
+        }
+    }
+
     pub fn on_ac_power(&self) -> bool {
         self.on_ac_power.load(Ordering::Relaxed)
     }
