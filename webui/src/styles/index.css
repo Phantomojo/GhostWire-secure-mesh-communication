@@ -2,37 +2,44 @@
 /* Aesthetic: CIA/NSA operations terminal. Real instrument panels.             */
 /* Fonts use local/system fallbacks; no remote font fetches are required. */
 :root {
-  /* ── Core palette ─────────────────────────────────────────── */
-  --void:        #070a0e;
-  --surface:     #0d1117;
-  --raised:      #131c26;
-  --panel:       #1a2535;
-  --border:      rgba(0, 220, 154, 0.14);
-  --border-hi:   rgba(0, 220, 154, 0.25);
+  /* ── Core palette: Deep Slate + Amber Signal ──────────────── */
+  /* Aesthetic: maritime mesh, naval signal lamps, warm amber on dark slate */
+  /* Replaces: phosphor green on near-black (default AI look) */
+  --void:        #0c1220;
+  --surface:     #141e30;
+  --raised:      #1a2744;
+  --panel:       #1e2d4a;
+  --border:      rgba(245, 158, 11, 0.12);
+  --border-hi:   rgba(245, 158, 11, 0.22);
 
-  /* ── Phosphor green (primary signal colour) ──────────────── */
-  --sig:         #00dc9a;
-  --sig-dim:     #00a876;
-  --sig-ghost:   rgba(0, 220, 154, 0.06);
-  --sig-glow:    0 0 12px rgba(0, 220, 154, 0.25);
+  /* ── Amber (primary signal colour) ───────────────────────── */
+  --sig:         #f59e0b;
+  --sig-dim:     #b45309;
+  --sig-ghost:   rgba(245, 158, 11, 0.08);
+  --sig-glow:    0 0 12px rgba(245, 158, 11, 0.3);
 
-  /* ── Amber (warning / standby) ───────────────────────────── */
-  --warn:        #f59e0b;
-  --warn-dim:    #92610a;
+  /* ── Warn (amber-orange for warnings) ────────────────────── */
+  --warn:        #f97316;
+  --warn-dim:    #c2410c;
+
+  /* ── Teal (secondary / trust) ────────────────────────────── */
+  --trust:       #14b8a6;
+  --trust-dim:   #0d9488;
+  --trust-ghost: rgba(20, 184, 166, 0.08);
 
   /* ── Red (critical / threat) ─────────────────────────────── */
-  --crit:        #f97316;
-  --crit-dim:    #7c3a0c;
+  --crit:        #ef4444;
+  --crit-dim:    #b91c1c;
 
-  /* ── Blue-grey (info / secondary) ───────────────────────── */
+  /* ── Blue (info / secondary) ─────────────────────────────── */
   --info:        #38bdf8;
-  --info-dim:    #1e6a9e;
+  --info-dim:    #0284c7;
 
   /* ── Text hierarchy ──────────────────────────────────────── */
-  --t1:  #f0ede6;
-  --t2:  rgba(240, 237, 230, 0.7);
-  --t3:  rgba(240, 237, 230, 0.4);
-  --t4:  rgba(240, 237, 230, 0.2);
+  --t1:  #e2e8f0;
+  --t2:  rgba(226, 232, 240, 0.75);
+  --t3:  rgba(226, 232, 240, 0.45);
+  --t4:  rgba(226, 232, 240, 0.2);
 
   /* ── Typography ──────────────────────────────────────────── */
   --mono: 'IBM Plex Mono', 'Fira Code', monospace;
