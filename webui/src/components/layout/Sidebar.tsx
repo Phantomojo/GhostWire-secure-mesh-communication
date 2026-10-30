@@ -61,10 +61,10 @@ export default function Sidebar() {
     <aside className="gw-sidebar" aria-label="GhostWire primary navigation">
       <div className="gw-brand-block">
         <button className="gw-brand" type="button" onClick={() => dispatch({ type: 'SET_PANEL', payload: 'dashboard' })} aria-label="Open GhostWire command center">
-          <span className="gw-brand-mark" aria-hidden="true">GW</span>
+          <span className="gw-brand-mark" aria-hidden="true"><img src="/logo192.png" alt="GhostWire" className="gw-logo-img" /></span>
           <span>
             <strong>GhostWire</strong>
-            <small>resilient mesh / local-first</small>
+            <small>secure mesh / local-first</small>
           </span>
         </button>
         <div className={`gw-link-state ${status.tone}`}>
