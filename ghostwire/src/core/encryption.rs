@@ -1144,6 +1144,19 @@ impl EncryptionManager {
         self.peer_keys.lock().unwrap().contains_key(peer_id)
     }
 
+    /// Get the recipient's X25519 public key (offset 32..64 of composite key).
+    /// Returns None if the peer is unknown or the key is too short.
+    pub fn recipient_x25519_pub(&self, peer_id: &str) -> Option<[u8; 32]> {
+        let peer_keys = self.peer_keys.lock().unwrap();
+        let peer_key = peer_keys.get(peer_id)?;
+        if peer_key.public_key.len() < 64 {
+            return None;
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&peer_key.public_key[32..64]);
+        Some(key)
+    }
+
     pub fn encrypt_message(
         &self,
         message: &str,

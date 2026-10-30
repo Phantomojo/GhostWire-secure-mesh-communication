@@ -1645,9 +1645,43 @@ impl Core {
         ))
     }
 
+    /// Seal a message's content to a recipient using the sealed sender module.
+    /// Returns the sealed envelope serialized as JSON, or an error.
+    /// The caller should set `message.sealed_sender = true` and store the
+    /// serialized envelope in `message.content`.
+    pub fn seal_message_content(
+        &self,
+        content: &str,
+        recipient_id: &str,
+    ) -> Result<String, anyhow::Error> {
+        let x25519_pub = self
+            .encryption_manager
+            .recipient_x25519_pub(recipient_id)
+            .ok_or_else(|| anyhow::anyhow!("recipient X25519 key not found"))?;
+        let envelope = crate::core::sealed_sender::seal_message(content, &x25519_pub)
+            .map_err(|e| anyhow::anyhow!("seal failed: {}", e))?;
+        serde_json::to_string(&envelope)
+            .map_err(|e| anyhow::anyhow!("serialization failed: {}", e))
+    }
+
+    /// Unseal a sealed message's content using the recipient's X25519 secret.
+    /// Returns the plaintext content, or an error.
+    pub fn unseal_message_content(
+        &self,
+        sealed_json: &str,
+    ) -> Result<String, anyhow::Error> {
+        let envelope: crate::core::sealed_sender::SealedEnvelope =
+            serde_json::from_str(sealed_json)
+                .map_err(|e| anyhow::anyhow!("deserialization failed: {}", e))?;
+        let secret = self
+            .encryption_manager
+            .x25519_secret()
+            .ok_or_else(|| anyhow::anyhow!("x25519 secret not available (locked?)"))?;
+        crate::core::sealed_sender::unseal_message(&envelope, &secret)
+            .map_err(|e| anyhow::anyhow!("unseal failed: {}", e))
+    }
+
     pub async fn send_direct_message(&self, recipient: String, message: &Message) -> Result<()> {
-        // Enforce Lockdown
-        if self.security_manager.is_lockdown().await {
             tracing::warn!(
                 "BLOCKED: Attempted to send direct message during LOCKDOWN: {}",
                 message.id
