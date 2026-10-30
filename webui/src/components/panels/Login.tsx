@@ -18,6 +18,7 @@ export default function Login() {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [daemonLocked, setDaemonLocked] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -251,7 +252,10 @@ export default function Login() {
           <form onSubmit={handleUnlock}>
             <div style={{ marginBottom: 12 }}>
               <div className="ops-label" style={{ marginBottom: 6 }}>Passphrase</div>
-              <input className="ops-input" type="password" placeholder="Enter passphrase (12+ bytes)..." minLength={MIN_PASSPHRASE_BYTES} value={password} onChange={e => setPassword(e.target.value)} autoFocus autoComplete="current-password" />
+              <input className="ops-input" type={showPassword ? "text" : "password"} placeholder="Enter passphrase (12+ bytes)..." minLength={MIN_PASSPHRASE_BYTES} value={password} onChange={e => setPassword(e.target.value)} autoFocus autoComplete="current-password" />
+          <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ marginLeft: 8, padding: '4px 8px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--muted-foreground)' }}>
+            {showPassword ? 'Hide' : 'Show'}
+          </button>
             </div>
             {renderError}
             <button className="btn-ops btn-ops-primary" type="submit" disabled={loading || passphraseBytes(password) < MIN_PASSPHRASE_BYTES} style={{ width: '100%', justifyContent: 'center', padding: '8px' }}>
