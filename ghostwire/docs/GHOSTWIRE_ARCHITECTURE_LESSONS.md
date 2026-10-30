@@ -121,3 +121,21 @@ No feature is "done" without a node-to-node integration test that:
 - Fails if the feature is removed
 
 No exceptions.
+## Additional Insights (2026-10-29)
+
+### 36+ Dimensional Weight Function
+The transport selector should incorporate 36+ dimensions beyond speed/resilience: privacy cost, power cost, bandwidth, detectability, storage, complexity, social cost, cognitive load, trust, deniability, forward secrecy, post-compromise security, group dynamics, time sensitivity, economic cost, physical safety, interoperability, auditability, graceful degradation, network effects, incentive compatibility, Sybil resistance, Eclipse resistance, temporal patterns, geographic context, adversary model, consent, legal/regulatory. Pairwise interactions exist. The weight function is a 36×36 interaction matrix. Thompson Sampling must learn it per-user, per-device, per-environment, per-message.
+
+### Three Buckets
+- **Bucket 1 (Foundational)**: Trust model, forward secrecy, metadata minimization, graceful degradation direction, plausible deniability. Focus now.
+- **Bucket 2 (Emergent)**: Network effects, incentives, Sybil/Eclipse, geographic, temporal, fairness.
+- **Bucket 3 (External)**: Legal, economic, physical safety, adversary model. Acknowledge but don't optimize.
+
+### Five Lenses (refined from four)
+Original four (Security, Privacy, Anonymity, Anti-censorship) overlap — Privacy and Anonymity are not orthogonal. Two gaps: Resilience/Availability (mission-critical, no lens) and Verifiability/Truth (differentiator, doctrine-only). Recommendation: add Resilience as lens #5, promote Verifiability to overarching gate. See docs/PRINCIPLES_AUDIT.md.
+
+### Genesis as Constitution
+Genesis is currently static (hardcoded constants). Needs to become versioned, signed, evolvable document. Governance: dictator for critical (genesis), community for day-to-day (code). Plausible deniability through commit-reveal + AI-assisted generation. See docs/GENESIS_CEREMONY_DESIGN.md and docs/GOVERNANCE_MODEL.md.
+
+### Anti-Censorship as Feasibility Gate
+In the transport selector, anti-censorship should be a hard feasibility gate (removing infeasible/fingerprintable actions) that runs BEFORE the speed term, not a weight. Speed optimizations ARE metadata leaks. See docs/RESILIENCE_SPEED_AUDIT.md.
