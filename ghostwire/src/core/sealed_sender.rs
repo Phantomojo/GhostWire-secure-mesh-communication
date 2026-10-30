@@ -6,7 +6,15 @@
 
 use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::Mutex;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
+
+/// Global replay protection: track seen delivery tokens.
+static SEEN_TOKENS: Mutex<Option<HashSet<[u8; 12]>>> = Mutex::new(None);
+
+/// Maximum age for a sealed envelope (5 minutes).
+pub const MAX_ENVELOPE_AGE_SECS: u64 = 300;
 
 /// Version byte for sealed sender v1.
 pub const SEALED_SENDER_VERSION: u8 = 0x01;
@@ -80,11 +88,23 @@ impl SealedEnvelope {
             .encrypt(nonce, plaintext)
             .map_err(|_| SealedError::EncryptionFailed)?;
 
+        // Generate delivery token for replay protection.
+        let mut delivery_token = [0u8; 12];
+        ring::rand::SystemRandom::new()
+            .fill(&mut delivery_token[..])
+            .map_err(|_| SealedError::EncryptionFailed)?;
+
         // Recipient hint = BLAKE3(recipient pubkey).
         let recipient_hint = *blake3::hash(recipient_x25519_pub).as_bytes();
 
-        // MAC = BLAKE3-keyed over ciphertext.
-        let mac = *blake3::keyed_hash(&key, &ciphertext).as_bytes();
+        // MAC = BLAKE3-keyed over (recipient_hint || ciphertext || delivery_token).
+        // AAD binding: recipient hint is included so the MAC covers the
+        // intended recipient, preventing substitution attacks.
+        let mut mac_input = Vec::with_capacity(32 + ciphertext.len() + 12);
+        mac_input.extend_from_slice(&recipient_hint);
+        mac_input.extend_from_slice(&ciphertext);
+        mac_input.extend_from_slice(&delivery_token);
+        let mac = *blake3::keyed_hash(&key, &mac_input).as_bytes();
 
         Ok(Self {
             version: SEALED_SENDER_VERSION,
@@ -94,7 +114,7 @@ impl SealedEnvelope {
             nonce: nonce_bytes,
             ciphertext,
             mac,
-            delivery_token: None,
+            delivery_token: Some(delivery_token),
         })
     }
 
@@ -123,10 +143,29 @@ impl SealedEnvelope {
         let mut key = [0u8; 32];
         okm.fill(&mut key).map_err(|_| SealedError::DecryptionFailed)?;
 
-        // Verify MAC.
-        let expected_mac = *blake3::keyed_hash(&key, &self.ciphertext).as_bytes();
+        // Verify MAC (with AAD binding: recipient hint || ciphertext || delivery_token).
+        let mac_input = {
+            let mut v = Vec::with_capacity(32 + self.ciphertext.len() + 12);
+            v.extend_from_slice(&self.recipient_hint);
+            v.extend_from_slice(&self.ciphertext);
+            if let Some(token) = self.delivery_token {
+                v.extend_from_slice(&token);
+            }
+            v
+        };
+        let expected_mac = *blake3::keyed_hash(&key, &mac_input).as_bytes();
         if expected_mac != self.mac {
             return Err(SealedError::DecryptionFailed);
+        }
+
+        // Replay protection: check delivery token.
+        if let Some(token) = self.delivery_token {
+            let mut seen = SEEN_TOKENS.lock().unwrap();
+            let set = seen.get_or_insert_with(HashSet::new);
+            if set.contains(&token) {
+                return Err(SealedError::DecryptionFailed); // replay detected
+            }
+            set.insert(token);
         }
 
         let cipher = XChaCha20Poly1305::new(&key.into());

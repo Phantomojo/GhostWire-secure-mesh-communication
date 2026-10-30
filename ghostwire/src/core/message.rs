@@ -203,6 +203,8 @@ pub struct Message {
     pub delivery_status: String,
     #[serde(default)]
     pub read: bool,
+    #[serde(default)]
+    pub sealed_sender: bool,
     pub hops: u8,
     pub ttl: u64,
     pub vector_clock: crate::core::vector_clock::VectorClock,
@@ -269,6 +271,7 @@ impl Message {
             encryption_status: "none".to_string(),
             delivery_status: "pending".to_string(),
             read: false,
+            sealed_sender: false,
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
@@ -327,6 +330,7 @@ impl Message {
             encryption_status: "none".to_string(),
             delivery_status: "pending".to_string(),
             read: false,
+            sealed_sender: false,
             hops: 0,
             ttl: crate::core::reliability::DEFAULT_MESSAGE_TTL,
             vector_clock: crate::core::vector_clock::VectorClock::new(),
