@@ -480,7 +480,8 @@ impl ContactCard {
         let bytes = bs58::decode(stripped)
             .into_vec()
             .map_err(|e| anyhow::anyhow!("Decode failed: {}", e))?;
-        bincode::deserialize(&bytes).map_err(|e| anyhow::anyhow!("Parse failed: {}", e))
+        crate::core::wire_protocol::decode_bounded(&bytes)
+            .map_err(|e| anyhow::anyhow!("Parse failed: {}", e))
     }
 }
 

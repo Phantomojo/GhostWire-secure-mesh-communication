@@ -31,7 +31,12 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 use libp2p_webrtc as webrtc;
-use rand_core::OsRng;
+// libp2p-webrtc 0.10 needs rand_core 0.10's CryptoRng with an Infallible
+// error; rand 0.9's OsRng and rand_core 0.6's OsRng both fail that bound.
+// Seed StdRng directly from OS entropy (getrandom 0.4) instead — StdRng is
+// a CSPRNG with the required Infallible error.
+use rand_010::rngs::StdRng;
+use rand_010::SeedableRng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -393,9 +398,12 @@ impl MeshTransport {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         let webrtc_boxed = if webrtc_enabled {
+            let mut seed = [0u8; 32];
+            getrandom_04::fill(&mut seed)?;
+            let mut cert_rng = StdRng::from_seed(seed);
             let webrtc_transport = webrtc::tokio::Transport::new(
                 local_key.clone(),
-                webrtc::tokio::Certificate::generate(&mut OsRng)?,
+                webrtc::tokio::Certificate::generate(&mut cert_rng)?,
             );
             tracing::warn!(
                 "WebRTC enabled by operator, but it is still INCOMPLETE: no listener is \

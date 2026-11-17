@@ -670,7 +670,7 @@ pub fn create_surb(
 /// FIXED: the reply_payload is now encrypted with the SURB's reply_key
 /// so only the original sender (who holds reply_key) can read it.
 pub fn use_surb(surb: &Surb, reply_payload: &[u8], rng: &SystemRandom) -> Result<SphinxPacket> {
-    let mut packet: SphinxPacket = bincode::deserialize(&surb.header)
+    let mut packet: SphinxPacket = deserialize_packet_bounded(&surb.header)
         .map_err(|e| anyhow::anyhow!("SURB deserialize failed: {}", e))?;
 
     // Encrypt reply payload to reply_key (FIXED — was missing entirely)

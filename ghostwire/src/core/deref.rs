@@ -106,13 +106,30 @@ pub fn public_key_from_did(_did: &str) -> Option<libp2p::identity::PublicKey> {
 /// A PeerId whose bytes are not a decodable public key (RSA, secp256k1, or
 /// simply malformed) cannot match, and returns false rather than panicking.
 pub fn peer_id_matches_did(peer_id: &PeerId, did: &str) -> bool {
-    let bytes = peer_id.to_bytes();
-    let public = match libp2p::identity::PublicKey::try_decode_protobuf(bytes.as_ref()) {
-        Ok(pk) => pk,
-        // Not an ed25519-protobuf key: cannot be one of our DIDs.
-        Err(_) => return false,
+    let public = match public_key_from_peer_id(peer_id) {
+        Some(pk) => pk,
+        None => return false,
     };
     did_from_public_key(&public) == did
+}
+
+/// Recover the public key from an inline (identity-multihash) PeerId.
+///
+/// A PeerId's bytes are `[code=0x00, len, digest...]`; the digest is the
+/// protobuf-encoded public key. Older libp2p-identity (quick_protobuf)
+/// tolerated the two prefix bytes being handed to the protobuf decoder;
+/// 0.3.x (prost) rejects them. Hashed (SHA-256) PeerIds are not reversible
+/// and return `None`.
+pub fn public_key_from_peer_id(peer_id: &PeerId) -> Option<libp2p::identity::PublicKey> {
+    let bytes = peer_id.to_bytes();
+    if bytes.len() < 2 || bytes[0] != 0x00 {
+        return None;
+    }
+    let digest_len = bytes[1] as usize;
+    if digest_len > 42 || bytes.len() != 2 + digest_len {
+        return None;
+    }
+    libp2p::identity::PublicKey::try_decode_protobuf(&bytes[2..]).ok()
 }
 
 /// True if `text` looks like a DID this project issues.

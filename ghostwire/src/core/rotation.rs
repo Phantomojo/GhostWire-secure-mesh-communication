@@ -131,8 +131,8 @@ impl Revocation {
         if !crate::core::deref::peer_id_matches_did(&peer, &self.did) {
             return Err(PairingError::IdentityMismatch);
         }
-        let public = libp2p::identity::PublicKey::try_decode_protobuf(peer.to_bytes().as_ref())
-            .map_err(|_| PairingError::Malformed("peer_id is not a decodable public key".into()))?;
+        let public = crate::core::deref::public_key_from_peer_id(&peer)
+            .ok_or_else(|| PairingError::Malformed("peer_id is not a decodable public key".into()))?;
         if !public.verify(&self.signing_bytes(), &self.signature) {
             return Err(PairingError::BadSignature);
         }

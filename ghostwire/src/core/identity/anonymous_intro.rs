@@ -80,7 +80,8 @@ impl AnonymousInvite {
         let bytes = bs58::decode(stripped)
             .into_vec()
             .map_err(|e| anyhow::anyhow!("Base58 decode: {}", e))?;
-        bincode::deserialize(&bytes).map_err(|e| anyhow::anyhow!("Invite deserialise: {}", e))
+        crate::core::wire_protocol::decode_bounded(&bytes)
+            .map_err(|e| anyhow::anyhow!("Invite deserialise: {}", e))
     }
 
     /// Whether this invite has expired (48-hour window)
@@ -181,7 +182,7 @@ pub fn send_introduction(
         );
     }
 
-    let surb: Surb = bincode::deserialize(&invite.surb_bytes)
+    let surb: Surb = crate::core::wire_protocol::decode_bounded(&invite.surb_bytes)
         .map_err(|e| anyhow::anyhow!("SURB deserialise: {}", e))?;
 
     let mut nonce = [0u8; 16];
@@ -236,11 +237,12 @@ pub fn receive_introduction(
 ) -> Result<IntroductionPayload> {
     // Decrypt the ECIES sealed payload
     let sealed: EciesSealedPayload =
-        bincode::deserialize(payload).map_err(|e| anyhow::anyhow!("Sealed deserialise: {}", e))?;
+        crate::core::wire_protocol::decode_bounded(payload)
+            .map_err(|e| anyhow::anyhow!("Sealed deserialise: {}", e))?;
 
     let intro_bytes = ecies_unseal(&sealed, our_x25519_secret)?;
 
-    let intro: IntroductionPayload = bincode::deserialize(&intro_bytes)
+    let intro: IntroductionPayload = crate::core::wire_protocol::decode_bounded(&intro_bytes)
         .map_err(|e| anyhow::anyhow!("Intro deserialise: {}", e))?;
 
     // Basic replay protection: reject introductions older than 24 hours
@@ -764,5 +766,17 @@ mod tests {
         let result = verify_confirmation(&invite, &intro, &alice_secret, &wrong_confirm);
         assert!(result.is_err(), "Wrong confirmation must be rejected");
         assert!(result.unwrap_err().to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn hostile_invite_length_prefix_is_rejected() {
+        // bincode fixint encodes Vec length as a u64 prefix. A tiny frame
+        // claiming u64::MAX bytes must fail the bounded decoder WITHOUT
+        // allocating it — the old bare `bincode::deserialize` here was a
+        // process-kill under `panic = "abort"`.
+        let mut hostile = vec![0u8; 64]; // ed25519_pub + x25519_pub fixed arrays
+        hostile.extend_from_slice(&u64::MAX.to_le_bytes()); // surb_bytes claim
+        let s = format!("{}{}", ANON_INVITE_PREFIX, bs58::encode(&hostile).into_string());
+        assert!(AnonymousInvite::from_invite_string(&s).is_err());
     }
 }

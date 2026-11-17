@@ -415,7 +415,8 @@ impl ContactCard {
         let bytes = bs58::decode(stripped)
             .into_vec()
             .map_err(|e| anyhow::anyhow!("Decode failed: {}", e))?;
-        bincode::deserialize(&bytes).map_err(|e| anyhow::anyhow!("Parse failed: {}", e))
+        crate::core::wire_protocol::decode_bounded(&bytes)
+            .map_err(|e| anyhow::anyhow!("Parse failed: {}", e))
     }
 }
 
@@ -474,5 +475,16 @@ mod tests {
         let recovered = ContactCard::from_qr_string(&qr).unwrap();
         assert_eq!(recovered.node_id, "abc123");
         assert_eq!(recovered.nickname, "Michael");
+    }
+
+    #[test]
+    fn hostile_contact_card_length_prefix_is_rejected() {
+        // First field is a String; its u64 length prefix alone is all an
+        // attacker needs. Must error, not allocate — the old bare
+        // `bincode::deserialize` here was a process-kill under
+        // `panic = "abort"`.
+        let hostile = u64::MAX.to_le_bytes().to_vec();
+        let s = format!("gw2:{}", bs58::encode(&hostile).into_string());
+        assert!(ContactCard::from_qr_string(&s).is_err());
     }
 }

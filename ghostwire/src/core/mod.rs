@@ -1655,7 +1655,7 @@ impl Core {
         recipient_id: &str,
     ) -> Result<String, anyhow::Error> {
         let x25519_pub = self
-            .encryption_manager
+            .encryption
             .recipient_x25519_pub(recipient_id)
             .ok_or_else(|| anyhow::anyhow!("recipient X25519 key not found"))?;
         let envelope = crate::core::sealed_sender::seal_message(content, &x25519_pub)
@@ -1674,7 +1674,7 @@ impl Core {
             serde_json::from_str(sealed_json)
                 .map_err(|e| anyhow::anyhow!("deserialization failed: {}", e))?;
         let secret = self
-            .encryption_manager
+            .encryption
             .x25519_secret()
             .ok_or_else(|| anyhow::anyhow!("x25519 secret not available (locked?)"))?;
         crate::core::sealed_sender::unseal_message(&envelope, &secret)
@@ -1682,6 +1682,8 @@ impl Core {
     }
 
     pub async fn send_direct_message(&self, recipient: String, message: &Message) -> Result<()> {
+        // Enforce Lockdown
+        if self.security_manager.is_lockdown().await {
             tracing::warn!(
                 "BLOCKED: Attempted to send direct message during LOCKDOWN: {}",
                 message.id
