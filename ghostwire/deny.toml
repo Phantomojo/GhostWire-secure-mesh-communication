@@ -22,7 +22,6 @@ ignore = [
     { id = "RUSTSEC-2026-0097", reason = "Transitive dep, no fix available" },
     { id = "RUSTSEC-2026-0098", reason = "Transitive dep, no fix available" },
     { id = "RUSTSEC-2026-0099", reason = "Transitive dep, no fix available" },
-    { id = "RUSTSEC-2026-0104", reason = "Transitive dep, no fix available" },
     { id = "RUSTSEC-2026-0105", reason = "Transitive dep, no fix available" },
     { id = "RUSTSEC-2026-0118", reason = "Transitive dep, no fix available" },
     { id = "RUSTSEC-2026-0119", reason = "Transitive dep, no fix available" },
