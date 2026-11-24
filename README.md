@@ -332,7 +332,11 @@ Milestone reference: First verified cross-machine mesh communication — April 5
 
 | Name | Role |
 |------|------|
-| **Michael Irungu Muriithi** | Protocol architecture, cryptography, implementation |
+| **Michael Irungu Muriithi** (`M.I. Muriithi`, `Phantomojo`) | Protocol architecture, cryptography, implementation |
+
+**Author profiles:** [github.com/Phantomojo](https://github.com/Phantomojo) · [codeberg.org/PHANTOMOJO](https://codeberg.org/PHANTOMOJO)
+
+**Related project:** [CERBERUS — bio-adaptive IoT honeynet](https://github.com/Phantomojo/cerberus-honeypot) (C/Python/nginx/Docker: morphing engine, quorum-sensing correlation, canary tokens).
 
 ---
 
