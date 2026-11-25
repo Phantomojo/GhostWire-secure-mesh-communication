@@ -21,7 +21,7 @@
     "@vitest/ui": "^4.0.18",
     "autoprefixer": "^10.6.1",
     "jsdom": "^28.1.0",
-    "playwright-core": "^1.64.0",
+    "playwright-core": "^1.64.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
