@@ -24,4 +24,4 @@ pyarrow>=26.0.0  # For parquet files
 
 # Optional but useful
 jupyter>=1.1.1  # For notebooks
-ipywidgets>=8.1.8  # For interactive widgets
+ipywidgets>=8.1.9  # For interactive widgets
